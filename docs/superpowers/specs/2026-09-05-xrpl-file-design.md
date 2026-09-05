@@ -101,6 +101,13 @@ The index lives in `MemoType`, not in front of the data, for two reasons: the Me
 then exactly the bytes in `MemoData`, and chunks can be submitted in parallel through tickets
 without the account's sequence numbers carrying the order.
 
+The framing model above is checked against two measured points: 1019 bytes with no `MemoType`
+is accepted (war-and-peace) and 1019 with an 11-byte `MemoType` is refused. With the longest
+marker the serialized array is exactly 1024 bytes, which rippled accepts (`> 1024` refuses).
+The video platform settled on 999 by measurement — it tried 1011 and 999, never anything
+between — so the first integration test of the writer submits a 1000-byte chunk under the
+12-digit marker `xf/c/999999999999` to a standalone node and keeps that as a regression test.
+
 ### Manifest
 
 ```json
@@ -340,6 +347,46 @@ finished artefacts.
 2. The CLI; the first real publication on testnet, then mainnet — the demo starts from it.
 3. The demo page and the `<xrpl-file>` element.
 4. The gateway.
+
+## Relationship to the XRPL video platform
+
+The platform's `Platform.Ledger` already implements the storage half of this design, and this
+design deliberately copies it where it can, so the two stay byte-compatible in what matters:
+
+| | Video platform | xrpl-file | Compatible |
+|---|---|---|---|
+| Merkle tree | `0x00`/`0x01` prefixes, promote unpaired, blocks of 1024 | identical | yes |
+| Block list payload | JSON `[{"i","h","l"}]`, greedy packing | identical | yes |
+| Chunk marker | `vp/c/<i>` | `xf/c/<i>` | no |
+| Block list marker | `vp/t/<j>` | `xf/b/<j>` | no |
+| Chunk payload | 999 bytes | 1000 bytes | no |
+| Identity and location | root inside a signed `vp/claim` to the platform account; chunk range known from the claim and report | `xf/m` manifest on the writer's account, addressed by its transaction hash | no |
+| Chunk rule | successful transaction from the uploader with no `Destination`, carrying `MemoData`; a missing marker means a legacy upload | successful transaction from the writer within the manifest's ledger range with an `xf/c/<i>` marker | no |
+
+A video published by the platform today therefore has no `xrpl-file://` link, and a file
+published by xrpl-file is not a video the platform's verifier recognises.
+
+The platform should adopt xrpl-file for storage, not the other way round. The reasons: the
+platform has no release and no published video on the new tree format, so there is nothing to
+migrate; a video that is also an `xrpl-file://` link can be embedded anywhere with the
+`<xrpl-file>` element and served by the gateway; and making the xrpl-file reader accept `vp/*`
+markers would tie a general format to one application's conventions.
+
+What changes on the platform side, all in `Platform.Ledger` and the browser uploader:
+
+- markers `vp/c/` → `xf/c/`, `vp/t/` → `xf/b/`; chunk size 999 → 1000 (after the boundary test
+  above passes on a real node);
+- the uploader writes an `xf/m` manifest after the read-back, and the `vp/report` carries the
+  manifest's transaction hash so the catalogue can print the link;
+- the verifier and the player apply the xrpl-file chunk rule. Legacy uploads without a marker
+  — the mainnet demo clip — stay readable only through the old path, and the platform decides
+  whether to keep that path or re-publish the clip;
+- `vp/claim`, `vp/report`, comments, tips and the rest are platform events, not storage, and
+  are untouched. The claim keeps signing the root; the root is the same number in both formats.
+
+Once step 1 of the build order ships, `Platform.Ledger` can take `XrplFile.Core` as a package
+and delete its own `MerkleTree`, `VideoTree` and marker code. Until then the platform can
+switch markers and chunk size on its own; the tree and list code need no change.
 
 ## Rejected alternatives
 
