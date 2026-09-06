@@ -30,4 +30,41 @@ public static class Vectors
     }
 
     public static VectorFile File(long size) => Load().Files.Single(file => file.Size == size);
+
+    public const string Writer = "rVectorWriter";
+
+    public static string Hash(string label) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(label)));
+
+    public static string ManifestHash => Hash("manifest");
+
+    /// <summary>The vector's transactions laid out in the synthetic ledger the vector file describes.</summary>
+    public static List<LedgerTransaction> Ledger(VectorFile vector)
+    {
+        byte[] bytes = VectorStream.Bytes(vector.Seed, vector.Size);
+        IReadOnlyList<byte[]> chunks = FileTree.Split(bytes, vector.Chunk);
+        List<LedgerTransaction> ledger = [];
+
+        for (int i = 0; i < chunks.Count; i++)
+        {
+            ledger.Add(new LedgerTransaction(
+                Hash($"chunk:{i}"), vector.Ledger.First + i / 100, Writer, Succeeded: true, Validated: true,
+                MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex(chunks[i]), MemoFormatHex: null));
+        }
+
+        for (int j = 0; j < vector.Lists.Count; j++)
+        {
+            ledger.Add(new LedgerTransaction(
+                Hash($"list:{j}"), vector.Ledger.ListLedger!.Value, Writer, Succeeded: true, Validated: true,
+                MemoLayout.ListMarkerHex(j), MemoLayout.Utf8Hex(vector.Lists[j]), MemoLayout.JsonFormatHex));
+        }
+
+        ledger.Add(new LedgerTransaction(
+            ManifestHash, vector.Ledger.ManifestLedger, Writer, Succeeded: true, Validated: true,
+            MemoLayout.ManifestMarkerHex, MemoLayout.Utf8Hex(vector.Manifest), MemoLayout.JsonFormatHex));
+
+        return ledger;
+    }
+
+    public static XrplFileLink Link => new("testnet", ManifestHash);
 }
