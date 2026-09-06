@@ -157,7 +157,11 @@ Given a link:
    - If the node does not know it: ask for the node's earliest ledger. If that is unknown or
      later than the network's first ledger (32570 on mainnet), the node does not have full
      history and the correct error is `NodeLacksHistory`; otherwise the transaction genuinely
-     does not exist and the error is `ManifestNotFound`.
+     does not exist and the error is `ManifestNotFound`. A version 1 reader applies the mainnet
+     value on every network — it does not know each network's own first ledger — so this split
+     is only accurate on mainnet. Elsewhere a full-history node whose ledgers start above 32570
+     is reported as lacking history, which is the safe way round: it names a doubt rather than
+     asserting a transaction does not exist.
    - If it is not validated, or its result is not `tesSUCCESS`, or its first memo does not
      decode to `xf/m` with `MemoData` present: `ManifestNotFound`.
    - The *writer* is the transaction's `Account`.
@@ -215,6 +219,12 @@ manifest, in that order, and MUST NOT write the manifest until every earlier tra
 validated. It MUST NOT resubmit an index with different bytes. It SHOULD read the file back by
 section 6 before writing the manifest.
 
+The reference writer sets no `LastLedgerSequence` on any of its transactions. It numbers them
+with consecutive `Sequence` values, and one expired transaction in such a run strands every
+later one as `terPRE_SEQ` — a whole upload lost to a single ledger's delay, where without an
+expiry the delayed transaction simply lands late. A writer that does set one MUST be prepared to
+resubmit the gap it leaves.
+
 A writer SHOULD NOT place more than a few hundred of its own transactions into a single open
 ledger. Measured against `xrpld` 3.3.0 in standalone mode, a node starts refusing a writer's
 account's transactions with `telCAN_NOT_QUEUE_FULL` somewhere past about 1010 outstanding,
@@ -239,7 +249,7 @@ caller depends on being able to switch on it.
 |---|---|
 | `InvalidLink` | A link fails to parse: wrong scheme, an unrecognized network, or a transaction hash that is not 64 hex characters (section 1). A writer raises it for a network it was asked to publish to that no link could name — before it submits anything, because the link the caller is owed is built from that name at the end. |
 | `ManifestNotFound` | The named transaction does not exist (on a node that has full history), is not a validated `tesSUCCESS` transaction, or does not carry an `xf/m` memo (section 6). |
-| `NodeLacksHistory` | The connected node's earliest ledger is later than the network's first ledger while the manifest transaction is missing, or later than the manifest's `first` while resolving chunks (section 6). |
+| `NodeLacksHistory` | The connected node's earliest ledger is later than the network's first ledger while the manifest transaction is missing, or later than the manifest's `first` while resolving chunks (section 6). A version 1 reader uses the mainnet first ledger (32570) on every network, so this error and `ManifestNotFound` are told apart accurately only on mainnet. |
 | `CorruptManifest` | The manifest transaction's `MemoData` does not parse as a manifest, fails its internal consistency checks, or names a ledger range that does not end before the manifest's own ledger (section 4). |
 | `ListMismatch` | The block list is missing an index, is unreadable, is not indexed `0..blocks-1`, or its root does not match the manifest's `root` (section 5). |
 | `BlockMismatch` | A block's assembled chunks (or, for a single block, the file itself) hash to something other than the entry the block list — or the manifest — promises, or assemble to a length the manifest does not imply (section 6). |

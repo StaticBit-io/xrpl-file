@@ -70,6 +70,10 @@ foreach (long size in sizes)
 JsonSerializerOptions options = new()
 {
     WriteIndented = true,
+    // WriteIndented breaks lines with Environment.NewLine, so a regeneration on Windows would
+    // rewrite the whole file with CRLF and CI's `diff` against the committed vectors would only
+    // survive on .gitattributes normalising it back. The vectors are LF wherever they are made.
+    NewLine = "\n",
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.Never,
 };
