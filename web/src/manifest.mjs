@@ -28,7 +28,14 @@ export function encodeManifest(m) {
   }
 }
 
-const isInt = (v) => Number.isInteger(v);
+// The .NET reader decodes size and the ledger pair as Int64 and chunk, blocks and lists as Int32;
+// a number wider than that is "not one this manifest may carry" there and must be here too. The
+// Int32 bound is what keeps a manifest from naming a billion block lists and having the reader
+// size an index array for them before ever asking the node whether they exist.
+const INT32_MIN = -2147483648;
+const INT32_MAX = 2147483647;
+const isInt = (v) => Number.isSafeInteger(v);
+const isInt32 = (v) => Number.isSafeInteger(v) && v >= INT32_MIN && v <= INT32_MAX;
 
 export function decodeManifest(json) {
   let m;
@@ -38,10 +45,10 @@ export function decodeManifest(json) {
   if (m.v !== MANIFEST_VERSION) throw new Error(`manifest version ${m.v} is not one this library reads`);
   if (typeof m.type !== 'string') throw new Error('the manifest has no type');
   if (!isInt(m.size)) throw new Error('the manifest has no size');
-  if (!isInt(m.chunk)) throw new Error('the manifest has no chunk size');
+  if (!isInt32(m.chunk)) throw new Error('the manifest has no chunk size');
   if (typeof m.root !== 'string' || !/^[0-9a-fA-F]{64}$/.test(m.root)) throw new Error('the manifest root is not 64 hex characters');
-  if (!isInt(m.blocks)) throw new Error('the manifest has no block count');
-  if (!isInt(m.lists)) throw new Error('the manifest has no list count');
+  if (!isInt32(m.blocks)) throw new Error('the manifest has no block count');
+  if (!isInt32(m.lists)) throw new Error('the manifest has no list count');
   if (!Array.isArray(m.ledgers) || m.ledgers.length !== 2) throw new Error('the manifest ledgers are not a pair');
   const [firstLedger, lastLedger] = m.ledgers;
   if (!isInt(firstLedger) || !isInt(lastLedger) || firstLedger <= 0 || lastLedger < firstLedger) throw new Error('the manifest ledger range is not ascending');
@@ -55,6 +62,10 @@ export function decodeManifest(json) {
 export function inconsistency(m) {
   if (m.size < 0) return `the size ${m.size} is negative`;
   if (m.chunk <= 0 || m.chunk > CHUNK_BYTES) return `a chunk of ${m.chunk} bytes is outside 1..${CHUNK_BYTES}`;
+  // Beyond this the file has more chunks than a chunk index can name. The .NET reader refuses the
+  // same number for the same reason, where its chunk-count arithmetic would also overflow.
+  const addressable = m.chunk * INT32_MAX;
+  if (m.size > addressable) return `the size ${m.size} is past the ${addressable} bytes ${m.chunk}-byte chunks can address`;
   if (m.lists < 0) return `the list count ${m.lists} is negative`;
   const chunks = chunkCount(m.size, m.chunk);
   const expectedBlocks = blockCount(chunks);

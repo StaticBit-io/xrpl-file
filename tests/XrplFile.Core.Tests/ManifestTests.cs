@@ -78,6 +78,11 @@ public class ManifestTests
     [InlineData("{\"v\":1,\"type\":\"image/png\",\"size\":1,\"chunk\":1000,\"root\":\"" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" + "\",\"ledgers\":[2,1],\"blocks\":1,\"lists\":0}")]
     [InlineData("{\"v\":1,\"type\":\"image/png\",\"size\":1,\"chunk\":1000,\"root\":\"" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" + "\",\"ledgers\":[1],\"blocks\":1,\"lists\":0}")]
     [InlineData("{\"v\":1,\"type\":\"image/png\",\"size\":\"1\",\"chunk\":1000,\"root\":\"" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" + "\",\"ledgers\":[1,2],\"blocks\":1,\"lists\":0}")]
+    // A ledger pair that is not numbers: TryGetInt64 throws InvalidOperationException on an
+    // element of the wrong kind, and the reader catches FormatException and ArgumentException
+    // only, so this used to leave ManifestAsync as a framework exception, not CorruptManifest.
+    [InlineData("{\"v\":1,\"type\":\"image/png\",\"size\":1,\"chunk\":1000,\"root\":\"" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" + "\",\"ledgers\":[\"a\",\"b\"],\"blocks\":1,\"lists\":0}")]
+    [InlineData("{\"v\":1,\"type\":\"image/png\",\"size\":1,\"chunk\":1000,\"root\":\"" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" + "\",\"ledgers\":[1,null],\"blocks\":1,\"lists\":0}")]
     public void A_manifest_that_is_not_one_is_refused(string json)
     {
         Assert.Throws<FormatException>(() => Manifest.Decode(json));
@@ -97,10 +102,31 @@ public class ManifestTests
     [InlineData(734512, 1001, 1, 0)]       // a chunk larger than the budget
     [InlineData(734512, 0, 1, 0)]
     [InlineData(-1, 1000, 1, 0)]
+    // A size past chunk * int.MaxValue: ChunkCount's own arithmetic overflows to a negative count,
+    // which used to make BlockCount answer 0 and let "blocks":0 with a nonzero "lists" through
+    // every check here -- and the reader then tried to allocate long.MaxValue bytes.
+    [InlineData(long.MaxValue, 1000, 0, 1)]
+    // A size whose block count overflows Int32 on the way out of BlockCount: the cast wraps to
+    // int.MinValue, and a manifest naming that number agreed with itself.
+    [InlineData(2199023255552000, 1000, -2147483648, 1)]
+    // One chunk past what a chunk index can name, with a block count that does agree with it --
+    // consistent by every other rule here, and refused by the bound alone. The browser reader
+    // refuses the same manifest for the same reason.
+    [InlineData(2147483648000, 1000, 2097152, 1)]
     public void Counts_that_disagree_are_named(long size, int chunk, int blocks, int lists)
     {
         Manifest manifest = Sample() with { Size = size, Chunk = chunk, Blocks = blocks, Lists = lists };
 
         Assert.NotNull(manifest.Inconsistency());
+    }
+
+    [Fact]
+    public void The_largest_addressable_size_is_still_consistent()
+    {
+        long addressable = 1000L * int.MaxValue;
+
+        Manifest manifest = Sample() with { Size = addressable, Chunk = 1000, Blocks = 2097152, Lists = 1 };
+
+        Assert.Null(manifest.Inconsistency());
     }
 }

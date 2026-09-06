@@ -87,7 +87,10 @@ public sealed record Manifest(
                 throw new FormatException("the manifest ledgers are not a pair");
             }
 
-            if (!ledgers[0].TryGetInt64(out long first) || !ledgers[1].TryGetInt64(out long last) || first <= 0 || last < first)
+            // TryGetInt64 throws on an element that is not a number at all, so the kind is checked
+            // first: a "ledgers":["a","b"] has to leave here as the FormatException the reader
+            // turns into CorruptManifest, never as an InvalidOperationException nothing catches.
+            if (Number(ledgers[0]) is not { } first || Number(ledgers[1]) is not { } last || first <= 0 || last < first)
             {
                 throw new FormatException("the manifest ledger range is not ascending");
             }
@@ -105,6 +108,13 @@ public sealed record Manifest(
     {
         if (Size < 0) return $"the size {Size} is negative";
         if (Chunk <= 0 || Chunk > MemoLayout.ChunkBytes) return $"a chunk of {Chunk} bytes is outside 1..{MemoLayout.ChunkBytes}";
+
+        // Beyond this the file has more chunks than a chunk index can name, and ChunkCount's own
+        // arithmetic overflows on the way to saying so -- which is how a size near long.MaxValue
+        // used to pass every count check below and reach the reader as a negative chunk count.
+        long addressable = (long)Chunk * int.MaxValue;
+        if (Size > addressable) return $"the size {Size} is past the {addressable} bytes {Chunk}-byte chunks can address";
+
         if (Lists < 0) return $"the list count {Lists} is negative";
 
         int expectedBlocks = FileTree.BlockCount(ChunkCount);
@@ -156,7 +166,8 @@ public sealed record Manifest(
             : null;
 
     private static long? Long(JsonElement element, string name) =>
-        element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out long number)
-            ? number
-            : null;
+        element.TryGetProperty(name, out JsonElement value) ? Number(value) : null;
+
+    private static long? Number(JsonElement value) =>
+        value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out long number) ? number : null;
 }

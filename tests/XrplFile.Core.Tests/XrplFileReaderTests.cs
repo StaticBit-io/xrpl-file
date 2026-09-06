@@ -189,6 +189,37 @@ public class XrplFileReaderTests
     }
 
     [Fact]
+    public async Task A_null_entry_in_a_list_memo_is_a_list_mismatch()
+    {
+        // "[null]" deserializes to an array holding a null, and reading a member off it used to
+        // reach a caller as NullReferenceException instead of the browser reader's ListMismatch.
+        FakeLedgerSource source = SourceFor(2500500)
+            .Replace(tx => MemoLayout.ListIndexOf(tx.MemoTypeHex) == 0, tx => tx with { MemoDataHex = MemoLayout.Utf8Hex("[null]") });
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => new XrplFileReader(source).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.ListMismatch, error.Error);
+    }
+
+    [Fact]
+    public async Task An_entry_with_no_ledger_is_a_list_mismatch_not_a_block_read_from_ledger_zero()
+    {
+        // The list keeps its real indices and its real hashes, so the root still matches; only
+        // block 1's "l" is gone. A non-nullable field read that as 0 and the reader went on to
+        // page block 1 from ledger 0 -- on a real node, a scan of the writer's whole history.
+        // The browser reader has always refused this list; now this one does too.
+        FakeLedgerSource source = SourceFor(2500500)
+            .Replace(tx => MemoLayout.ListIndexOf(tx.MemoTypeHex) == 0,
+                tx => tx with { MemoDataHex = MemoLayout.Utf8Hex(MemoLayout.FromHexUtf8(tx.MemoDataHex!).Replace(",\"l\":1010", string.Empty, StringComparison.Ordinal)) });
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => new XrplFileReader(source).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.ListMismatch, error.Error);
+    }
+
+    [Fact]
     public async Task A_duplicate_list_index_keeps_the_last_copy_in_canonical_order()
     {
         // The 2500500-byte vector's single list memo (xf/b/0) sits at ledger 1026, after every

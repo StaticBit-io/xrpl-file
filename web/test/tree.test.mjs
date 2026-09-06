@@ -66,8 +66,17 @@ test('entries encode compactly, fit the budget and decode back', async () => {
 });
 
 test('a broken list is refused, a lower-case hash is upper-cased', () => {
-  for (const bad of ['not json', '[]', '[{"i":1,"h":"AA","l":1}]', `[{"i":1,"h":"${'0'.repeat(64)}","l":1}]`]) {
-    assert.throws(() => decodeEntries([bad]));
+  for (const bad of [
+    'not json', '[]', '[{"i":1,"h":"AA","l":1}]', `[{"i":1,"h":"${'0'.repeat(64)}","l":1}]`,
+    // A null entry: reading a member off it used to raise a bare TypeError, where the .NET
+    // decoder raises its own refusal. An entry with no index or no ledger is refused too.
+    '[null]', '[1]',
+    `[{"h":"${'0'.repeat(64)}","l":1}]`,
+    `[{"i":0,"h":"${'0'.repeat(64)}"}]`,
+  ]) {
+    // Only an Error the decoder itself raised counts -- a TypeError would pass a bare
+    // assert.throws while telling a caller nothing about the list.
+    assert.throws(() => decodeEntries([bad]), (e) => e.constructor === Error);
   }
   assert.throws(() => decodeEntries([`[{"i":0,"h":"${'B'.repeat(64)}","l":1},{"i":0,"h":"${'B'.repeat(64)}","l":2}]`]));
   assert.equal(decodeEntries([`[{"i":0,"h":"${'c'.repeat(64)}","l":1}]`])[0].h, 'C'.repeat(64));

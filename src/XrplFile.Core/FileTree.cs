@@ -91,14 +91,25 @@ public static class FileTree
                 throw new FormatException("a block-list memo is not a JSON array of entries", e);
             }
 
-            foreach (Wire wire in wires ?? [])
+            foreach (Wire? wire in wires ?? [])
             {
+                // "[null]" deserializes to an array holding a null, which used to be dereferenced
+                // a line below; a member the writer left out arrives as null rather than as the
+                // zero a non-nullable field would have quietly invented. Both are the same
+                // failure: this is not the list the root was computed over.
+                if (wire is null) throw new FormatException("a block-list memo carries an entry that is not an object");
+
                 if (wire.h is null || wire.h.Length != MerkleTree.HashBytes * 2 || !wire.h.All(Uri.IsHexDigit))
                 {
-                    throw new FormatException($"block {wire.i} carries a hash that is not 32 bytes of hex");
+                    throw new FormatException($"block {Named(wire.i)} carries a hash that is not 32 bytes of hex");
                 }
 
-                entries.Add(new BlockEntry(wire.i, wire.h.ToUpperInvariant(), wire.l));
+                if (wire.i is null || wire.l is null)
+                {
+                    throw new FormatException($"block {Named(wire.i)} has no index or no ledger");
+                }
+
+                entries.Add(new BlockEntry(wire.i.Value, wire.h.ToUpperInvariant(), wire.l.Value));
             }
         }
 
@@ -120,8 +131,13 @@ public static class FileTree
 
     private static string Serialize(List<Wire> wires) => JsonSerializer.Serialize(wires);
 
-    /// <summary>The shape on the wire. Single letters because every byte here is a memo byte.</summary>
+    private static string Named(int? index) => index?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?";
+
+    /// <summary>
+    /// The shape on the wire. Single letters because every byte here is a memo byte; every member
+    /// nullable because a decoder must be able to tell an absent member from a zero one wrote.
+    /// </summary>
 #pragma warning disable IDE1006 // lower-case names are the JSON member names, not a naming mistake
-    private sealed record Wire(int i, string h, long l);
+    private sealed record Wire(int? i, string? h, long? l);
 #pragma warning restore IDE1006
 }

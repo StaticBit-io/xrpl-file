@@ -91,8 +91,11 @@ export function decodeEntries(payloads) {
     try { wires = JSON.parse(payload); } catch (e) { throw new Error('a block-list memo is not a JSON array of entries', { cause: e }); }
     if (!Array.isArray(wires)) throw new Error('a block-list memo is not a JSON array of entries');
     for (const wire of wires) {
-      if (typeof wire.h !== 'string' || !/^[0-9a-fA-F]{64}$/.test(wire.h)) throw new Error(`block ${wire.i} carries a hash that is not 32 bytes of hex`);
-      if (!Number.isInteger(wire.i) || !Number.isInteger(wire.l)) throw new Error(`block ${wire.i} has a non-integer index or ledger`);
+      // "[null]" arrives as an array holding a null; dereferencing it would raise a TypeError
+      // where the .NET decoder raises its own refusal. Both must say the same thing.
+      if (wire === null || typeof wire !== 'object' || Array.isArray(wire)) throw new Error('a block-list memo carries an entry that is not an object');
+      if (typeof wire.h !== 'string' || !/^[0-9a-fA-F]{64}$/.test(wire.h)) throw new Error(`block ${wire.i ?? '?'} carries a hash that is not 32 bytes of hex`);
+      if (!Number.isInteger(wire.i) || !Number.isInteger(wire.l)) throw new Error(`block ${wire.i ?? '?'} has no index or no ledger`);
       entries.push({ i: wire.i, h: wire.h.toUpperCase(), l: wire.l });
     }
   }

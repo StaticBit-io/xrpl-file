@@ -95,15 +95,31 @@ export class XrplFileReader {
     // called -- payloads.get(i) below must never come back undefined. Relying on decodeEntries
     // (or hexUtf8) to fail on a missing entry would route a plain "index X is missing" outcome
     // through the generic catch below, indistinguishable from an actual corrupt payload.
+    //
+    // Both walks below stop at what the node actually answered rather than at what the manifest
+    // claims: `lists` is a number a stranger wrote, and materialising an index array for it would
+    // let a manifest saying `"lists":1000000000` allocate gigabytes in the viewer's tab -- or
+    // overflow Array() outright past 2^32 -- before the mismatch below was ever reported.
     if (payloads.size !== manifest.lists) {
-      const missing = [...Array(manifest.lists).keys()].filter((i) => !payloads.has(i));
+      const missing = [];
+      let more = false;
+      for (let i = 0; i < manifest.lists; i++) {
+        if (payloads.has(i)) continue;
+        if (missing.length === 8) { more = true; break; }
+        missing.push(i);
+      }
       throw new XrplFileError('ListMismatch',
-        `the manifest promises ${manifest.lists} block-list memos and ${payloads.size} were found -- missing index ${missing.join(', ')}`);
+        `the manifest promises ${manifest.lists} block-list memos and ${payloads.size} were found -- missing index ${missing.join(', ')}${more ? ', ...' : ''}`);
     }
 
     let entries;
     try {
-      entries = decodeEntries([...Array(manifest.lists).keys()].map((i) => hexUtf8(payloads.get(i))));
+      // Past the guard above there are exactly `lists` payloads in hand, so this array is bounded
+      // by what the node answered rather than by the manifest's number. hexUtf8 stays inside the
+      // try: a memo whose data is not hex is an unreadable list, not a raw error.
+      const ordered = [];
+      for (let i = 0; i < manifest.lists; i++) ordered.push(hexUtf8(payloads.get(i)));
+      entries = decodeEntries(ordered);
     } catch (e) {
       throw new XrplFileError('ListMismatch', `the block list is unreadable: ${e.message}`, { cause: e });
     }

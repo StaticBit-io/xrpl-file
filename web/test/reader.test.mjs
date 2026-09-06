@@ -185,6 +185,36 @@ test('a manifest whose counts disagree is corrupt, and a non-manifest is not fou
   await rejectsWith(new XrplFileReader(other).manifest(link), 'ManifestNotFound');
 });
 
+test('a manifest promising a billion block lists is a mismatch, not a billion-element array', async () => {
+  // The manifest's counts are numbers a stranger wrote. With `lists` unbounded, blockList()
+  // materialised [...Array(manifest.lists).keys()] to name the missing indices -- eight gigabytes
+  // in the viewer's tab for this manifest -- before it could report the mismatch. The walk now
+  // stops at the first few missing indices, so this test finishes in milliseconds; without the
+  // fix it exhausts memory instead of failing an assertion.
+  const source = await sourceFor(2500500);
+  source.transactions = source.transactions.map((tx) => (isManifest(tx.memoTypeHex)
+    ? { ...tx, memoDataHex: utf8Hex(hexUtf8(tx.memoDataHex).replace('"lists":1', '"lists":1000000000')) }
+    : tx));
+
+  const started = Date.now();
+  await assert.rejects(
+    new XrplFileReader(source).read(link),
+    (e) => e.code === 'ListMismatch' && /missing index 1, 2, 3, 4, 5, 6, 7, 8, \.\.\./.test(e.message),
+  );
+  assert.ok(Date.now() - started < 5000, 'the refusal must not walk a billion indices');
+});
+
+test('a list memo whose entries are not entries is a list mismatch', async () => {
+  // A null entry used to raise a TypeError inside decodeEntries, and an entry with no index or no
+  // ledger used to be accepted with whatever the .NET decoder defaulted them to. Both are
+  // ListMismatch on both sides now.
+  for (const payload of ['[null]', `[{"i":0,"h":"${'0'.repeat(64)}"}]`, `[{"h":"${'0'.repeat(64)}","l":1000}]`]) {
+    const source = await sourceFor(2500500);
+    source.transactions = source.transactions.map((tx) => (listIndexOf(tx.memoTypeHex) === 0 ? { ...tx, memoDataHex: utf8Hex(payload) } : tx));
+    await rejectsWith(new XrplFileReader(source).read(link), 'ListMismatch');
+  }
+});
+
 test('a file above the ceiling is refused before any chunk is read', async () => {
   const source = await sourceFor(2500500);
   await rejectsWith(new XrplFileReader(source, { maxBytes: 2_000_000 }).read(link), 'TooLarge');

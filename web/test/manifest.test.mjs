@@ -49,7 +49,29 @@ test('inconsistent counts are named', () => {
     { ...sample(), chunk: 1001 },
     { ...sample(), chunk: 0 },
     { ...sample(), size: -1 },
+    // A size past chunk * 2147483647 has more chunks than a chunk index can name. The .NET
+    // reader refuses the same number, where its chunk arithmetic would overflow as well.
+    { ...sample(), size: 1000 * 2147483647 + 1000, blocks: 2097152, lists: 1 },
   ]) {
     assert.equal(typeof inconsistency(m), 'string');
   }
+  assert.equal(inconsistency({ ...sample(), size: 1000 * 2147483647, blocks: 2097152, lists: 1 }), null);
+});
+
+test('a count wider than the type the .NET reader gives it is not a count', () => {
+  const base = { v: 1, type: 'a/b', size: 1, chunk: 1000, root: ROOT, ledgers: [1, 2], blocks: 1, lists: 0 };
+  const json = (fields) => JSON.stringify({ ...base, ...fields });
+  // blocks, lists and chunk are Int32 there and size an Int64; a number outside those is not one
+  // this manifest may carry. Unbounded, "lists":1000000000 had the reader size an index array for
+  // a billion memos -- eight gigabytes in the viewer's tab -- before reporting the mismatch.
+  for (const bad of [
+    json({ lists: 2147483648 }),
+    json({ blocks: 4294967296 }),
+    json({ chunk: 2147483648 }),
+    json({ size: 9007199254740993 }),
+    json({ lists: 1.5 }),
+  ]) {
+    assert.throws(() => decodeManifest(bad), bad);
+  }
+  assert.equal(decodeManifest(json({ blocks: 2, lists: 2147483647 })).lists, 2147483647);
 });

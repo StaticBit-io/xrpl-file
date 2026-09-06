@@ -97,6 +97,14 @@ public class FileTreeTests
     [InlineData("[{\"i\":1,\"h\":\"" + "AA" + "\",\"l\":1}]")]
     [InlineData("[{\"i\":1,\"h\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"l\":1}]")]
     [InlineData("[]")]
+    // A null entry: Deserialize<Wire[]> yields an array holding a null, and reading a member off
+    // it used to raise NullReferenceException past the reader's catch instead of ListMismatch.
+    [InlineData("[null]")]
+    // An entry with no index or no ledger: non-nullable members would read both as 0, and the
+    // reader would then page block 0 from ledger 0 as though the writer had said so.
+    [InlineData("[{\"h\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"l\":1}]")]
+    [InlineData("[{\"i\":0,\"h\":\"0000000000000000000000000000000000000000000000000000000000000000\"}]")]
+    [InlineData("[{\"i\":null,\"h\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"l\":null}]")]
     public void A_broken_list_is_refused_not_repaired(string payload)
     {
         Assert.Throws<FormatException>(() => FileTree.DecodeEntries([payload]));

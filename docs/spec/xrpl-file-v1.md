@@ -81,7 +81,7 @@ to its block hash.
 |---|---|---|
 | `v` | yes | format version, `1` |
 | `type` | yes | MIME type of the file |
-| `size` | yes | file length in bytes, ≥ 0 |
+| `size` | yes | file length in bytes, ≥ 1 (a zero-length file has no chunks and no root, so `blocks` = 0 would force a `lists` ≠ 0 whose list is empty, and an empty list is refused) |
 | `chunk` | yes | chunk payload size the writer used, 1..1000 |
 | `root` | yes | the file root, 64 hex characters |
 | `ledgers` | yes | `[first, last]`: the range of validated ledgers holding every chunk and every block list, `0 < first ≤ last` |
@@ -102,6 +102,7 @@ A reader MUST reject a manifest:
 - whose `root` is not exactly 64 hexadecimal characters;
 - whose `ledgers` is not a two-element array of numbers with `first > 0` and `last ≥ first`;
 - whose `chunk` is not in `1..1000`;
+- whose `size` is past `chunk` × 2147483647, the most bytes a chunk index can name;
 - whose `blocks` does not equal `ceil(ceil(size / chunk) / 1024)`;
 - whose `lists` is negative, or is zero exactly when `blocks` ≠ 1 (equivalently: nonzero exactly
   when `blocks` = 1);
@@ -127,6 +128,10 @@ or above, must not be mistaken for the missing entry, and must not surface as an
 
 Having collected the `lists` payloads, a reader MUST reject the decoded list:
 
+- if any entry is not a JSON object carrying all three of an integer `i`, a 64-hex-character `h`
+  and an integer `l`. A member that is absent, null or of another type makes the list unreadable;
+  it is never read as a zero. An entry read as `{i: 0, l: 0}` would send a reader paging block 0
+  from the first ledger the network ever had;
 - if it is not indexed exactly `0, 1, ..., N-1` for the `N` entries it contains (a gap, a
   duplicate index, or a hash that is not 64 hex characters make it unreadable);
 - if `N` does not equal the manifest's `blocks`;
