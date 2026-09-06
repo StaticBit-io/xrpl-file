@@ -1,0 +1,151 @@
+// A minimal XRPL WebSocket client: tx, account_tx and server_info, nothing else. No SDK, no
+// dependencies, so anyone can see exactly what the page asks the network for.
+import { XrplFileError } from './link.mjs';
+
+export const MAINNET_FIRST_LEDGER = 32570;
+
+export const ENDPOINTS = {
+  mainnet: ['wss://xrplcluster.com', 'wss://s2.ripple.com'],
+  testnet: ['wss://s.altnet.rippletest.net:51233'],
+  devnet: ['wss://s.devnet.rippletest.net:51233'],
+};
+
+const REQUEST_TIMEOUT_MS = 20000;
+
+const text = (o, k) => (o && typeof o === 'object' && typeof o[k] === 'string' ? o[k] : null);
+const number = (o, k) => (o && typeof o === 'object' && Number.isInteger(o[k]) ? o[k] : null);
+
+/** One transaction as a node describes it — an account_tx record or a tx answer; api_version 1 and 2 shapes. */
+export function parseRecord(record) {
+  const tx = record.tx_json ?? record.tx ?? record;
+  const memo = Array.isArray(tx.Memos) && tx.Memos.length > 0 ? tx.Memos[0].Memo ?? {} : {};
+  return {
+    hash: (text(record, 'hash') ?? text(tx, 'hash') ?? '').toUpperCase(),
+    ledgerIndex: number(record, 'ledger_index') ?? number(tx, 'ledger_index') ?? 0,
+    account: text(tx, 'Account') ?? '',
+    succeeded: text(record.meta, 'TransactionResult') === 'tesSUCCESS',
+    validated: record.validated === true,
+    memoTypeHex: text(memo, 'MemoType'),
+    memoDataHex: text(memo, 'MemoData'),
+    memoFormatHex: text(memo, 'MemoFormat'),
+  };
+}
+
+/** The low bound of the first range in complete_ledgers, or null. "empty" parses to null — zero would read as "has everything". */
+export function earliestAvailableLedger(result) {
+  const ranges = text(result?.info, 'complete_ledgers');
+  if (!ranges) return null;
+  const first = ranges.split(',')[0];
+  const dash = first.indexOf('-');
+  const lowest = Number.parseInt(dash > 0 ? first.slice(0, dash) : first, 10);
+  return Number.isInteger(lowest) ? lowest : null;
+}
+
+export class LedgerClient {
+  /** @param {string[]} endpoints tried in order; each operation moves on when a node fails */
+  constructor(endpoints, { pageSize = 400 } = {}) {
+    if (!endpoints?.length) throw new Error('at least one endpoint is required');
+    this.endpoints = endpoints;
+    this.pageSize = pageSize;
+    this.index = 0;
+    this.socket = null;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.closed = false;
+  }
+
+  get endpoint() { return this.endpoints[this.index]; }
+
+  close() {
+    this.closed = true;
+    this.disconnect();
+  }
+
+  disconnect() {
+    if (this.socket) {
+      this.socket.onclose = null;
+      this.socket.onmessage = null;
+      try { this.socket.close(); } catch { /* already closed */ }
+      this.socket = null;
+    }
+    for (const { reject, timer } of this.pending.values()) {
+      clearTimeout(timer);
+      reject(new XrplFileError('NodeUnreachable', `connection to ${this.endpoint} closed while a request was in flight`));
+    }
+    this.pending.clear();
+  }
+
+  async connect() {
+    if (this.closed) throw new XrplFileError('NodeUnreachable', 'this client has been closed');
+    if (this.socket?.readyState === WebSocket.OPEN) return;
+    await new Promise((resolve, reject) => {
+      const socket = new WebSocket(this.endpoint);
+      socket.onopen = () => { this.socket = socket; resolve(); };
+      socket.onerror = () => reject(new XrplFileError('NodeUnreachable', `cannot reach ${this.endpoint}`));
+      socket.onclose = () => { if (this.socket === socket) this.disconnect(); };
+      socket.onmessage = (event) => this.receive(JSON.parse(event.data));
+    });
+  }
+
+  receive(message) {
+    const waiting = this.pending.get(message.id);
+    if (!waiting) return;
+    this.pending.delete(message.id);
+    clearTimeout(waiting.timer);
+    if (message.status === 'error') waiting.resolve({ error: message.error, ...message });
+    else waiting.resolve(message.result);
+  }
+
+  /** One request, tried on each endpoint in turn; the answer is the node's result object. */
+  async request(command, params) {
+    let lastError = null;
+    for (let attempt = 0; attempt < this.endpoints.length; attempt++) {
+      try {
+        await this.connect();
+        return await this.send(command, params);
+      } catch (e) {
+        if (this.closed || e.code !== 'NodeUnreachable') throw e;
+        lastError = e;
+        this.disconnect();
+        this.index = (this.index + 1) % this.endpoints.length;
+      }
+    }
+    throw lastError;
+  }
+
+  send(command, params) {
+    return new Promise((resolve, reject) => {
+      const id = this.nextId++;
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new XrplFileError('NodeUnreachable', `${this.endpoint} did not answer ${command} in ${REQUEST_TIMEOUT_MS} ms`));
+      }, REQUEST_TIMEOUT_MS);
+      this.pending.set(id, { resolve, reject, timer });
+      this.socket.send(JSON.stringify({ id, command, api_version: 2, ...params }));
+    });
+  }
+
+  async transaction(hash) {
+    const answer = await this.request('tx', { transaction: hash });
+    if (answer.error === 'txnNotFound') return null;
+    if (answer.error) throw new XrplFileError('NodeUnreachable', `${this.endpoint} answered ${answer.error} to tx`);
+    return parseRecord(answer);
+  }
+
+  async *accountTransactions(account, fromLedger, toLedger, forward) {
+    let marker;
+    for (;;) {
+      const answer = await this.request('account_tx', {
+        account, ledger_index_min: fromLedger, ledger_index_max: toLedger, forward, limit: this.pageSize, ...(marker ? { marker } : {}),
+      });
+      if (answer.error) throw new XrplFileError('NodeUnreachable', `${this.endpoint} answered ${answer.error} to account_tx`);
+      for (const record of answer.transactions ?? []) yield parseRecord(record);
+      marker = answer.marker;
+      if (!marker) return;
+    }
+  }
+
+  async earliestLedger() {
+    return earliestAvailableLedger(await this.request('server_info', {}));
+  }
+}

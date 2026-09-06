@@ -1,0 +1,12 @@
+{
+  "name": "xrpl-file",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Read and verify files stored in XRP Ledger memos, addressed by xrpl-file:// links.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": { "node": ">=22" }
+}
