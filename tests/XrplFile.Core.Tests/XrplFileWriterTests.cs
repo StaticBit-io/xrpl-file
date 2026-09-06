@@ -183,6 +183,93 @@ public class XrplFileWriterTests
     }
 
     [Fact]
+    public async Task An_unknown_network_is_refused_before_anything_is_submitted()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+
+        // The link is built from the network at the very end of a publication. Refusing it there
+        // meant a thousand paid transactions and a manifest already in the ledger, and the
+        // exception carried no manifest hash -- the file was published and its link lost.
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "main-net", null, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.InvalidLink, error.Error);
+        Assert.Empty(sink.Submitted);
+        Assert.Empty(sink.Events);
+    }
+
+    [Fact]
+    public async Task A_network_named_in_another_case_is_published_under_its_canonical_name()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+
+        PublishResult result = await new XrplFileWriter(sink, ledger).PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "TestNet", null, TestContext.Current.CancellationToken);
+
+        Assert.Equal("testnet", result.Link.Network);
+    }
+
+    [Fact]
+    public async Task A_node_that_answers_with_its_own_error_is_a_refusal_naming_it_not_an_unreachable_node()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        // What an unfunded wallet gets: the node answered, and precisely.
+        sink.Throws[0] = new Xrpl.Client.Exceptions.RippledException(
+            "Account not found.", new Xrpl.Models.Subscriptions.ErrorResponse { Error = "actNotFound" });
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.SubmitRefused, error.Error);
+        Assert.Contains("actNotFound", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("did not answer", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("disconnected")]
+    [InlineData("not connected")]
+    [InlineData("connection")]
+    [InlineData("timeout")]
+    public async Task A_node_that_does_not_answer_is_still_an_unreachable_node(string failure)
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.Throws[0] = failure switch
+        {
+            "disconnected" => new Xrpl.Client.Exceptions.DisconnectedException("the socket went away"),
+            "not connected" => new Xrpl.Client.Exceptions.NotConnectedException("never connected"),
+            "connection" => new Xrpl.Client.Exceptions.ConnectionException("the handshake failed"),
+            _ => new Xrpl.Client.Exceptions.TimeoutException("the node took too long"),
+        };
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+    }
+
+    [Fact]
+    public async Task A_transaction_validated_with_a_failure_stops_the_run_as_a_refusal()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        // Accepted on submission and validated as failed: the tec* a transaction only reaches once
+        // the ledger closes, which no engine result announced. The writer meets it where it asks
+        // the first chunk which ledger it landed in.
+        sink.FailsAs.Add(0);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.SubmitRefused, error.Error);
+        Assert.Contains("did not succeed", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(sink.Submitted, tx => MemoLayout.IsManifest(FirstMemoType(tx)));
+    }
+
+    [Fact]
     public async Task An_empty_file_is_refused()
     {
         FakeLedgerSource ledger = new();

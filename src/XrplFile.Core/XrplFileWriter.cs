@@ -1,3 +1,4 @@
+using Xrpl.Client.Exceptions;
 using Xrpl.Wallet;
 
 namespace XrplFile;
@@ -49,18 +50,50 @@ public sealed class XrplFileWriter(ILedgerSink sink, ILedgerSource source, Write
         if (file.IsEmpty) throw new ArgumentException("an empty file has no chunks and no root", nameof(file));
         if (string.IsNullOrWhiteSpace(type)) throw new ArgumentException("a manifest needs a MIME type", nameof(type));
 
+        // Before anything is submitted. The link is built from this at the very end, so a network
+        // the link refuses used to be discovered after a thousand paid transactions and a manifest
+        // in the ledger -- with the manifest's hash nowhere in the exception, so the file was
+        // published and its link lost.
+        string canonical = XrplFileLink.RequireNetwork(network);
+
         try
         {
-            return await PublishCoreAsync(file, type, name, wallet, network, progress, cancellationToken).ConfigureAwait(false);
+            return await PublishCoreAsync(file, type, name, wallet, canonical, progress, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception e) when (e is Xrpl.Client.Exceptions.XrplException or System.TimeoutException)
+        catch (Exception e) when (IsTransportFailure(e))
         {
-            // Anything the sink or the source could not recover from on its own — a connection
-            // drop, a request that never got an answer — surfaces here as one error the caller can
-            // switch on, carrying the original exception rather than losing it.
+            // Only a node that did not answer is unreachable: a connection never made or lost, and
+            // a request that timed out. The original exception rides along rather than being lost.
             throw new XrplFileException(XrplFileError.NodeUnreachable, $"the node did not answer: {e.Message}", inner: e);
         }
+        catch (Xrpl.Client.Exceptions.RippledException e)
+        {
+            // The node answered, and precisely: actNotFound for an unfunded wallet, invalidParams
+            // for a request it would not take. Calling that "the node did not answer" is false and
+            // throws away the one thing worth knowing. It is a refusal, and it is named.
+            throw new XrplFileException(XrplFileError.SubmitRefused,
+                $"the node refused the publication with {e.Classify().RawError}: {e.Message}", inner: e);
+        }
+        catch (Xrpl.Client.Exceptions.XrplException e)
+        {
+            // Everything else the SDK raises -- an answer it could not read, a request it would not
+            // build. The node is not silent, so not NodeUnreachable; still one error to switch on.
+            throw new XrplFileException(XrplFileError.SubmitRefused,
+                $"the publication could not be carried out: {e.Message}", inner: e);
+        }
     }
+
+    /// <summary>
+    /// A node that did not answer: never connected, hung up, or took longer than the request
+    /// timeout. Each of these is an <see cref="Xrpl.Client.Exceptions.XrplException"/> in the SDK,
+    /// the same base the node's own answers derive from, which is why they are named one by one.
+    /// </summary>
+    private static bool IsTransportFailure(Exception e) =>
+        e is Xrpl.Client.Exceptions.NotConnectedException
+            or Xrpl.Client.Exceptions.DisconnectedException
+            or Xrpl.Client.Exceptions.ConnectionException
+            or Xrpl.Client.Exceptions.TimeoutException
+            or System.TimeoutException;
 
     private async Task<PublishResult> PublishCoreAsync(
         ReadOnlyMemory<byte> file, string type, string? name, XrplWallet wallet, string network,

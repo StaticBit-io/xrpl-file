@@ -2,10 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { XrplFileReader } from '../src/reader.mjs';
 import { parseLink } from '../src/link.mjs';
-import { vectorFile, vectorLedger, FakeSource, LINK, WRITER, labelHash } from './vectors.mjs';
+import { vectorFile, vectorLedger, FakeSource, LINK, WRITER, labelHash, MANIFEST_HASH } from './vectors.mjs';
 import { vectorBytes } from '../src/vector-stream.mjs';
-import { chunkIndexOf, listIndexOf, isManifest, listMarkerHex } from '../src/tree.mjs';
-import { utf8Hex, hexUtf8 } from '../src/hex.mjs';
+import {
+  chunkIndexOf, listIndexOf, isManifest, listMarkerHex, chunkMarkerHex, split, blockHash,
+  MANIFEST_MARKER_HEX, JSON_FORMAT_HEX,
+} from '../src/tree.mjs';
+import { encodeManifest } from '../src/manifest.mjs';
+import { hex, utf8Hex, hexUtf8 } from '../src/hex.mjs';
 import { MAINNET_FIRST_LEDGER, LedgerClient } from '../src/ledger.mjs';
 
 const link = parseLink(LINK);
@@ -183,6 +187,34 @@ test('a manifest whose counts disagree is corrupt, and a non-manifest is not fou
   const other = await sourceFor(1001);
   other.transactions = other.transactions.map((tx) => (isManifest(tx.memoTypeHex) ? { ...tx, memoTypeHex: utf8Hex('xf/c/5') } : tx));
   await rejectsWith(new XrplFileReader(other).manifest(link), 'ManifestNotFound');
+});
+
+test('chunks shorter than the manifest implies are a block mismatch, not zero padding', async () => {
+  // The chunk rule accepts a MemoData shorter than `chunk`, so a writer can cut a 2500-byte file
+  // into five 500-byte chunks, hash them honestly and claim size 5000: the block hash matches, the
+  // root matches, every count agrees. Reading that used to return 5000 bytes of which 2500 were
+  // zeros no hash covered -- the only path on which unverified bytes reached a caller. The .NET
+  // reader is held to the same rule.
+  const real = await vectorBytes('short', 2500);
+  const chunks = split(real, 500);
+  const manifest = {
+    type: 'application/octet-stream', size: 5000, chunk: 1000, root: hex(await blockHash(chunks)),
+    firstLedger: 1000, lastLedger: 1000, blocks: 1, lists: 0, name: null,
+  };
+
+  const ledger = chunks.map((chunk, i) => ({
+    hash: labelHash(`short:${i}`), ledgerIndex: 1000, account: WRITER, succeeded: true, validated: true,
+    memoTypeHex: chunkMarkerHex(i), memoDataHex: hex(chunk), memoFormatHex: null,
+  }));
+  ledger.push({
+    hash: MANIFEST_HASH, ledgerIndex: 1001, account: WRITER, succeeded: true, validated: true,
+    memoTypeHex: MANIFEST_MARKER_HEX, memoDataHex: utf8Hex(encodeManifest(manifest)), memoFormatHex: JSON_FORMAT_HEX,
+  });
+
+  await assert.rejects(
+    new XrplFileReader(new FakeSource(ledger)).read(link),
+    (e) => e.code === 'BlockMismatch' && e.block === 0 && /2500 bytes and the manifest implies 5000/.test(e.message),
+  );
 });
 
 test('a manifest promising a billion block lists is a mismatch, not a billion-element array', async () => {

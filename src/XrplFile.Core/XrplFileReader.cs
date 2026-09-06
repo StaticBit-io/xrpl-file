@@ -41,9 +41,16 @@ public sealed class XrplFileReader(ILedgerSource source, ReaderOptions? options 
         foreach (BlockEntry block in blocks)
         {
             byte[] content = await BlockAsync(record, block, cancellationToken).ConfigureAwait(false);
-            int take = (int)Math.Min(content.Length, manifest.Size - at);
-            Array.Copy(content, 0, bytes, at, take);
-            at += take;
+            Array.Copy(content, 0, bytes, at, content.Length);
+            at += content.Length;
+        }
+
+        // BlockAsync holds every block to the length the manifest implies for it, so the sum can
+        // only come out short if the block list was, and that is checked before any block is read.
+        if (at != manifest.Size)
+        {
+            throw new XrplFileException(XrplFileError.BlockMismatch,
+                $"the blocks assemble to {at} bytes and the manifest says {manifest.Size}", blocks[^1].Index);
         }
 
         return new ReadResult(manifest, record.Writer, blocks, bytes);
@@ -214,6 +221,22 @@ public sealed class XrplFileReader(ILedgerSource source, ReaderOptions? options 
                 $"chunk {firstChunk + missing} of block {block.Index} is not in ledgers {block.FirstLedger}..{manifest.LastLedger}", block.Index);
         }
 
+        // The chunk rule accepts a MemoData shorter than the manifest's chunk size, because the
+        // file's last chunk is short. That makes a block's length the manifest's business, not the
+        // memos': every chunk but the file's last is exactly `chunk` bytes. A writer that cut its
+        // file into short chunks and hashed them honestly produces a block whose hash is right and
+        // whose bytes are fewer than promised -- and the zeros a caller's buffer would keep in
+        // their place are covered by no hash at all. The length is checked before the hash because
+        // it is the check the honest-hash case fails.
+        long total = chunks.Sum(chunk => (long)chunk!.Length);
+        long expected = Math.Min(manifest.Size - firstChunk * manifest.Chunk, (long)count * manifest.Chunk);
+
+        if (total != expected)
+        {
+            throw new XrplFileException(XrplFileError.BlockMismatch,
+                $"block {block.Index} assembles to {total} bytes and the manifest implies {expected}", block.Index);
+        }
+
         string hash = Convert.ToHexString(FileTree.BlockHash(chunks!));
         if (!string.Equals(hash, block.HashHex, StringComparison.Ordinal))
         {
@@ -221,8 +244,7 @@ public sealed class XrplFileReader(ILedgerSource source, ReaderOptions? options 
                 $"block {block.Index} hashes to {hash}, the list says {block.HashHex}", block.Index);
         }
 
-        int total = chunks.Sum(chunk => chunk!.Length);
-        byte[] bytes = new byte[total];
+        byte[] bytes = new byte[(int)total];
         int at = 0;
 
         foreach (byte[]? chunk in chunks)

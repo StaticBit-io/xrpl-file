@@ -21,8 +21,7 @@ public sealed record XrplFileLink
 
     public XrplFileLink(string network, string txHash)
     {
-        Network = NormalizeNetwork(network)
-            ?? throw new XrplFileException(XrplFileError.InvalidLink, $"'{network}' is neither a network name nor a NetworkID");
+        Network = RequireNetwork(network);
         TxHash = NormalizeHash(txHash)
             ?? throw new XrplFileException(XrplFileError.InvalidLink, "the transaction hash is not 64 hexadecimal characters");
     }
@@ -60,6 +59,15 @@ public sealed record XrplFileLink
     }
 
     public override string ToString() => Prefix + Network + "/" + TxHash;
+
+    /// <summary>
+    /// The network in canonical form, or InvalidLink. The one place the rule lives: a writer
+    /// checks its caller's network through this before it submits anything, so a name this
+    /// constructor would refuse cannot be discovered after a thousand paid transactions.
+    /// </summary>
+    internal static string RequireNetwork(string network) =>
+        NormalizeNetwork(network)
+        ?? throw new XrplFileException(XrplFileError.InvalidLink, $"'{network}' is neither a network name nor a NetworkID");
 
     private static string? NormalizeNetwork(string network)
     {

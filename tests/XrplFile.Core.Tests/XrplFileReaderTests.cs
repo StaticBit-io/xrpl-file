@@ -189,6 +189,41 @@ public class XrplFileReaderTests
     }
 
     [Fact]
+    public async Task Chunks_shorter_than_the_manifest_implies_are_a_block_mismatch_not_zero_padding()
+    {
+        // The chunk rule accepts a MemoData shorter than `chunk`, so a writer can cut a 2500-byte
+        // file into five 500-byte chunks, hash them honestly, and claim size 5000: the block hash
+        // matches, the root matches, every count agrees. Reading that used to return 5000 bytes of
+        // which 2500 were zeros no hash covered -- the only path on which unverified bytes reached
+        // a caller. The browser reader is held to the same rule.
+        byte[] real = VectorStream.Bytes("short", 2500);
+        IReadOnlyList<byte[]> chunks = FileTree.Split(real, 500);
+        Manifest manifest = new(
+            "application/octet-stream", 5000, 1000, Convert.ToHexString(FileTree.BlockHash(chunks)), 1000, 1000, 1, 0, null);
+        Assert.Null(manifest.Inconsistency());
+
+        FakeLedgerSource source = new();
+        for (int i = 0; i < chunks.Count; i++)
+        {
+            source.Add(new LedgerTransaction(
+                Vectors.Hash($"short:{i}"), 1000, Vectors.Writer, Succeeded: true, Validated: true,
+                MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex(chunks[i]), MemoFormatHex: null));
+        }
+
+        source.Add(new LedgerTransaction(
+            Vectors.ManifestHash, 1001, Vectors.Writer, Succeeded: true, Validated: true,
+            MemoLayout.ManifestMarkerHex, MemoLayout.Utf8Hex(manifest.Encode()), MemoLayout.JsonFormatHex));
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => new XrplFileReader(source).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.BlockMismatch, error.Error);
+        Assert.Equal(0, error.Block);
+        Assert.Contains("2500", error.Message, StringComparison.Ordinal);
+        Assert.Contains("5000", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_null_entry_in_a_list_memo_is_a_list_mismatch()
     {
         // "[null]" deserializes to an array holding a null, and reading a member off it used to

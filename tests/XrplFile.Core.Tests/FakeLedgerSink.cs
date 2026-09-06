@@ -24,6 +24,15 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     public Dictionary<int, Func<string, string>> StoredAs { get; } = [];
 
     /// <summary>
+    /// Which submissions (by position) the node accepts and then validates as failed: the tec*
+    /// a transaction only reaches once the ledger closes, which no engine result announced.
+    /// </summary>
+    public HashSet<int> FailsAs { get; } = [];
+
+    /// <summary>Thrown instead of submitting, at this position — a node failing the way the SDK reports it.</summary>
+    public Dictionary<int, Exception> Throws { get; } = [];
+
+    /// <summary>
     /// Every call this sink saw, in order: "query" for a validated-sequence call (SequenceAsync
     /// with validated: true), and "chunk" / "list" / "manifest" / "submit" for a submission,
     /// tagged by what its memo marker says it is. Lets a test see whether the writer interleaves
@@ -59,6 +68,9 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     public Task<SubmitOutcome> SubmitAsync(Dictionary<string, object> transaction, XrplWallet wallet, CancellationToken cancellationToken)
     {
         int position = _submitted.Count;
+
+        if (Throws.TryGetValue(position, out Exception? failure)) throw failure;
+
         _submitted.Add(transaction);
 
         string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"fake:{position}")));
@@ -89,7 +101,8 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
             : "submit");
 
         ledger.Add(new LedgerTransaction(
-            hash, firstLedger + position / 100 + _ledgersClosed, (string)transaction["Account"], Succeeded: true, Validated: true,
+            hash, firstLedger + position / 100 + _ledgersClosed, (string)transaction["Account"],
+            Succeeded: !FailsAs.Contains(position), Validated: true,
             memoType, memoData, memoFormat));
 
         return Task.FromResult(new SubmitOutcome("tesSUCCESS", hash));

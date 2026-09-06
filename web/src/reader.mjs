@@ -33,9 +33,15 @@ export class XrplFileReader {
 
     for (const block of blocks) {
       const content = await this.block(record, block, () => onProgress({ chunksDone: ++chunksDone, chunksTotal }));
-      const take = Math.min(content.length, manifest.size - at);
-      bytes.set(content.subarray(0, take), at);
-      at += take;
+      bytes.set(content, at);
+      at += content.length;
+    }
+
+    // block() holds every block to the length the manifest implies for it, so the sum can only
+    // come out short if the block list was, and that is checked before any block is read.
+    if (at !== manifest.size) {
+      throw new XrplFileError('BlockMismatch',
+        `the blocks assemble to ${at} bytes and the manifest says ${manifest.size}`, { block: blocks.at(-1).i });
     }
 
     return { manifest, writer: record.writer, blocks, bytes };
@@ -163,10 +169,22 @@ export class XrplFileReader {
       throw new XrplFileError('ChunkMissing', `chunk ${firstChunk + missing} of block ${entry.i} is not in ledgers ${entry.l}..${manifest.lastLedger}`, { block: entry.i });
     }
 
+    // The chunk rule accepts a MemoData shorter than the manifest's chunk size, because the file's
+    // last chunk is short. That makes a block's length the manifest's business, not the memos':
+    // every chunk but the file's last is exactly `chunk` bytes. A writer that cut its file into
+    // short chunks and hashed them honestly produces a block whose hash is right and whose bytes
+    // are fewer than promised -- and the zeros a caller's buffer would keep in their place are
+    // covered by no hash at all. Checked before the hash, because it is the check that case fails.
+    const total = chunks.reduce((sum, c) => sum + c.length, 0);
+    const expected = Math.min(manifest.size - firstChunk * manifest.chunk, count * manifest.chunk);
+    if (total !== expected) {
+      throw new XrplFileError('BlockMismatch',
+        `block ${entry.i} assembles to ${total} bytes and the manifest implies ${expected}`, { block: entry.i });
+    }
+
     const h = hex(await blockHash(chunks));
     if (h !== entry.h) throw new XrplFileError('BlockMismatch', `block ${entry.i} hashes to ${h}, the list says ${entry.h}`, { block: entry.i });
 
-    const total = chunks.reduce((sum, c) => sum + c.length, 0);
     const bytes = new Uint8Array(total);
     let at = 0;
     for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.length; }

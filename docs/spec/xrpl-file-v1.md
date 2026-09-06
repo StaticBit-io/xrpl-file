@@ -172,7 +172,16 @@ Given a link:
 5. Obtain the block list (section 5).
 6. For each block, read the writer's transactions from the block's `l` up to `last` and collect
    its chunks by the chunk rule below. Hash the block and compare with its entry.
-7. Concatenate the blocks and cut to `size`.
+7. Concatenate the blocks. The assembled length MUST equal `size` exactly.
+
+**Length rule.** The chunk rule below accepts a `MemoData` *shorter* than `chunk`, because the
+file's last chunk is short. Every other chunk is exactly `chunk` bytes, so a block's assembled
+length is fixed by the manifest alone: `min(size − 1024·b·chunk, 1024·chunk)` for block `b`. A
+block that assembles to any other length is `BlockMismatch`, reported with the block index, and
+a reader MUST NOT deliver it — even when its hash matches its entry. It can: a writer that cut
+its file into short chunks and hashed them honestly produces a block whose hash is right and
+whose bytes are fewer than the manifest promises, and padding that block out to `size` would
+hand a caller bytes no hash covers. A conforming writer always produces the exact length.
 
 **Chunk rule.** A transaction is chunk `i` when all of the following hold: its `Account` is
 the writer; it is validated with result `tesSUCCESS`; its ledger is within `[first, last]`;
@@ -228,17 +237,17 @@ caller depends on being able to switch on it.
 
 | Error | Raised when |
 |---|---|
-| `InvalidLink` | A link fails to parse: wrong scheme, an unrecognized network, or a transaction hash that is not 64 hex characters (section 1). |
+| `InvalidLink` | A link fails to parse: wrong scheme, an unrecognized network, or a transaction hash that is not 64 hex characters (section 1). A writer raises it for a network it was asked to publish to that no link could name — before it submits anything, because the link the caller is owed is built from that name at the end. |
 | `ManifestNotFound` | The named transaction does not exist (on a node that has full history), is not a validated `tesSUCCESS` transaction, or does not carry an `xf/m` memo (section 6). |
 | `NodeLacksHistory` | The connected node's earliest ledger is later than the network's first ledger while the manifest transaction is missing, or later than the manifest's `first` while resolving chunks (section 6). |
 | `CorruptManifest` | The manifest transaction's `MemoData` does not parse as a manifest, fails its internal consistency checks, or names a ledger range that does not end before the manifest's own ledger (section 4). |
 | `ListMismatch` | The block list is missing an index, is unreadable, is not indexed `0..blocks-1`, or its root does not match the manifest's `root` (section 5). |
-| `BlockMismatch` | A block's assembled chunks (or, for a single block, the file itself) hash to something other than the entry the block list — or the manifest — promises. |
+| `BlockMismatch` | A block's assembled chunks (or, for a single block, the file itself) hash to something other than the entry the block list — or the manifest — promises, or assemble to a length the manifest does not imply (section 6). |
 | `ChunkMissing` | A block's ledger range was exhausted before every one of its chunks was found. |
 | `TooLarge` | The manifest's `size` exceeds the reader's configured limit. |
-| `SubmitRefused` | A node answered a writer's transaction with an engine result other than `tesSUCCESS` or `terQUEUED`, immediately on submission; or a transaction accepted as `terQUEUED` was later found validated with a non-`tesSUCCESS` result — a `tec*` code reached only after the ledger closes (section 7). |
+| `SubmitRefused` | A node answered a writer's transaction with an engine result other than `tesSUCCESS` or `terQUEUED`, immediately on submission; or a transaction accepted as `terQUEUED` was later found validated with a non-`tesSUCCESS` result — a `tec*` code reached only after the ledger closes (section 7). It also carries a node's own error answer to any other request a publication makes — `actNotFound` for an unfunded wallet, say: the node answered, so the failure is a refusal that names what it said, never `NodeUnreachable`. |
 | `ValidationTimeout` | The account's validated sequence did not reach the value expected after a batch of submissions within the configured timeout; or, right after that wait succeeds, the specific transaction the writer then looks up for its ledger comes back missing or unvalidated — which surfaces at once, not after a timeout of its own (section 7). |
-| `NodeUnreachable` | The node did not answer at all — a connection failure or an unrecoverable request timeout. |
+| `NodeUnreachable` | The node did not answer usably: a connection that was never made or was lost, a request that timed out, or — while **reading** — an error answer to `tx`, `account_tx` or `server_info`, whose code the message names. `txnNotFound` is not one of these; it is the node saying the transaction is not there (section 6). While **writing**, a node's own error is `SubmitRefused` instead: something answered, and said no. |
 
 ## 9. Limits
 
