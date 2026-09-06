@@ -13,6 +13,7 @@ public enum XrplFileError
     TooLarge,
     SubmitRefused,
     ValidationTimeout,
+    NodeUnreachable,
 }
 
 public sealed class XrplFileException : Exception

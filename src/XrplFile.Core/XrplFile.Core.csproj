@@ -7,4 +7,8 @@
   <ItemGroup>
     <PackageReference Include="Xrpl" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- XrplClientLedgerSink's request delegate, so a scripted node can drive submit and tx. -->
+    <InternalsVisibleTo Include="XrplFile.Core.Tests" />
+  </ItemGroup>
 </Project>
