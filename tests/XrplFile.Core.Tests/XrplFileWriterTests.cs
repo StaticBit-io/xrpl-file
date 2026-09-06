@@ -252,6 +252,23 @@ public class XrplFileWriterTests
     }
 
     [Fact]
+    public async Task An_sdk_failure_that_is_not_the_node_speaking_is_an_unreachable_node()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        // The SDK raises the bare base type on its connect path - "Websocket connection never
+        // cleaned up", "Connect: created null websocket". The node never spoke, so this is the
+        // same answer the reading side gives, not a refusal.
+        sink.Throws[0] = new Xrpl.Client.Exceptions.XrplException("Connect: created null websocket");
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+        Assert.Contains("null websocket", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_transaction_validated_with_a_failure_stops_the_run_as_a_refusal()
     {
         FakeLedgerSource ledger = new();

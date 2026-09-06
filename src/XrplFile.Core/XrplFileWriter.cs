@@ -76,10 +76,15 @@ public sealed class XrplFileWriter(ILedgerSink sink, ILedgerSource source, Write
         }
         catch (Xrpl.Client.Exceptions.XrplException e)
         {
-            // Everything else the SDK raises -- an answer it could not read, a request it would not
-            // build. The node is not silent, so not NodeUnreachable; still one error to switch on.
-            throw new XrplFileException(XrplFileError.SubmitRefused,
-                $"the publication could not be carried out: {e.Message}", inner: e);
+            // Everything else the SDK raises. A RippledException above is the only shape in which
+            // the node itself speaks; the rest are ways of not getting an answer -- a socket the
+            // SDK could not clean up, a connection it created as null, a response it could not
+            // read -- and calling those a refusal blames the node for saying no when it said
+            // nothing at all. This is the rule the reading side already applies in
+            // XrplClientLedgerSource.IsNodeFailure, so both halves of the library now give the
+            // same SDK exception the same name.
+            throw new XrplFileException(XrplFileError.NodeUnreachable,
+                $"the node did not answer usably: {e.Message}", inner: e);
         }
     }
 
