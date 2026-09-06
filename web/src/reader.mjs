@@ -91,8 +91,14 @@ export class XrplFileReader {
       if (payloads.size === manifest.lists) break;
     }
 
+    // The collection's completeness is verified here, by index, before decodeEntries is ever
+    // called -- payloads.get(i) below must never come back undefined. Relying on decodeEntries
+    // (or hexUtf8) to fail on a missing entry would route a plain "index X is missing" outcome
+    // through the generic catch below, indistinguishable from an actual corrupt payload.
     if (payloads.size !== manifest.lists) {
-      throw new XrplFileError('ListMismatch', `the manifest promises ${manifest.lists} block-list memos and ${payloads.size} were found`);
+      const missing = [...Array(manifest.lists).keys()].filter((i) => !payloads.has(i));
+      throw new XrplFileError('ListMismatch',
+        `the manifest promises ${manifest.lists} block-list memos and ${payloads.size} were found -- missing index ${missing.join(', ')}`);
     }
 
     let entries;

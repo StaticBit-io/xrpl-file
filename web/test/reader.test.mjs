@@ -6,7 +6,7 @@ import { vectorFile, vectorLedger, FakeSource, LINK, WRITER, labelHash } from '.
 import { vectorBytes } from '../src/vector-stream.mjs';
 import { chunkIndexOf, listIndexOf, isManifest, listMarkerHex } from '../src/tree.mjs';
 import { utf8Hex, hexUtf8 } from '../src/hex.mjs';
-import { MAINNET_FIRST_LEDGER } from '../src/ledger.mjs';
+import { MAINNET_FIRST_LEDGER, LedgerClient } from '../src/ledger.mjs';
 
 const link = parseLink(LINK);
 const sourceFor = async (size) => new FakeSource(await vectorLedger(await vectorFile(size)));
@@ -46,6 +46,20 @@ test('a duplicate index keeps the earlier copy', async () => {
   assert.deepEqual((await new XrplFileReader(source).read(link)).bytes, await vectorBytes(vector.seed, vector.size));
 });
 
+test('a wrong copy earlier in canonical order than the real one wins and breaks the hash', async () => {
+  // Proves the rule really is "first wins", not "the right one wins": if the wrong copy sits
+  // earlier in canonical order than the real one, the reader must keep the wrong bytes and fail
+  // the block hash -- not silently prefer the correct copy because it happens to exist.
+  const vector = await vectorFile(1024001);
+  const ledger = await vectorLedger(vector);
+  const real = ledger.find((tx) => chunkIndexOf(tx.memoTypeHex) === 500);
+  // The real copy of chunk 500 is at ledger 1005; the wrong copy is at ledger 1002, earlier in
+  // canonical order, still strictly inside block 0's range (1000..1010).
+  const wrongButEarlier = { ...real, hash: labelHash('wrong-but-earlier'), ledgerIndex: 1002, memoDataHex: 'F'.repeat(real.memoDataHex.length) };
+  const source = new FakeSource([...ledger, wrongButEarlier]);
+  await rejectsWith(new XrplFileReader(source).read(link), 'BlockMismatch', 0);
+});
+
 test('a corrupt chunk is reported with its block', async () => {
   const source = await sourceFor(2500500);
   source.transactions = source.transactions.map((tx) => (chunkIndexOf(tx.memoTypeHex) === 1500 ? { ...tx, memoDataHex: 'F'.repeat(2000) } : tx));
@@ -68,6 +82,12 @@ test('an oversized chunk is skipped so a later real copy still wins', async () =
   // The good copy, later in canonical order, still inside block 0's range (1000..1010).
   const source = new FakeSource([...withOversizedFirstCopy, { ...real, hash: labelHash('good-later'), ledgerIndex: 1005 }]);
   assert.deepEqual((await new XrplFileReader(source).read(link)).bytes, await vectorBytes(vector.seed, vector.size));
+});
+
+test('an oversized chunk with no other copy is reported as missing', async () => {
+  const source = await sourceFor(2500500);
+  source.transactions = source.transactions.map((tx) => (chunkIndexOf(tx.memoTypeHex) === 0 ? { ...tx, memoDataHex: 'A'.repeat(4000) } : tx));
+  await rejectsWith(new XrplFileReader(source).read(link), 'ChunkMissing', 0);
 });
 
 test('a failed, foreign or unmarked transaction is not a chunk', async () => {
@@ -93,14 +113,20 @@ test('a list that does not match the root is refused before any chunk', async ()
   await rejectsWith(new XrplFileReader(source).read(link), 'ListMismatch');
 });
 
-test('a stray out-of-range list memo is a list mismatch, not a crash', async () => {
+test('a stray out-of-range list memo is a list mismatch naming the missing index, not a crash', async () => {
   // The manifest promises a fixed number of list memos indexed 0..lists-1. Re-marking the single
   // list memo xf/b/7 leaves the account with a stray out-of-range index and none of the indices
-  // the manifest actually promises -- without the range filter this reaches decodeEntries as
-  // undefined and blows up instead of failing cleanly as ListMismatch.
+  // the manifest actually promises. The message is checked, not just the code: without the
+  // `index >= manifest.lists` range filter in blockList(), this same scenario reaches
+  // decodeEntries with `payloads.get(0)` undefined, and the untyped catch there turns that crash
+  // into a ListMismatch too -- with a generic "unreadable" message, not one naming index 0. Only
+  // a message assertion tells the two apart; see the fix-round report for the before/after runs.
   const source = await sourceFor(2500500);
   source.transactions = source.transactions.map((tx) => (listIndexOf(tx.memoTypeHex) === 0 ? { ...tx, memoTypeHex: listMarkerHex(7) } : tx));
-  await rejectsWith(new XrplFileReader(source).read(link), 'ListMismatch');
+  await assert.rejects(
+    new XrplFileReader(source).read(link),
+    (e) => e.code === 'ListMismatch' && /\bmissing index 0\b/.test(e.message),
+  );
 });
 
 test('an unknown manifest is not found on a full-history node and a history problem on a partial one', async () => {
@@ -135,4 +161,65 @@ test('progress counts chunks as they land', async () => {
   await new XrplFileReader(await sourceFor(2500500)).read(link, (p) => seen.push(p));
   assert.equal(seen.at(-1).chunksDone, 2501);
   assert.equal(seen.at(-1).chunksTotal, 2501);
+});
+
+test("a block is read from its own ledger, not the file's first", async () => {
+  const vector = await vectorFile(2500500);
+  const source = await sourceFor(2500500);
+  const reader = new XrplFileReader(source);
+  const record = await reader.manifest(link);
+  const blocks = await reader.blockList(record);
+
+  const block = await reader.block(record, blocks[2]);
+
+  assert.deepEqual(block, (await vectorBytes(vector.seed, vector.size)).subarray(2048 * 1000));
+  // The discriminating check: block() must page from the block's own first ledger, not the
+  // file's -- breaking chunks by index alone would prove nothing, since block() filters chunks
+  // by index regardless of where the scan starts.
+  const forwardCalls = source.calls.filter((call) => call.forward);
+  assert.equal(forwardCalls.length, 1);
+  assert.equal(forwardCalls[0].fromLedger, blocks[2].l);
+});
+
+test('close() during a pending handshake leaves no socket behind and rejects the request', async () => {
+  // A minimal stub WebSocket whose handshake never completes on its own: the point is to prove
+  // that close() -- not a server answer -- is what settles a connection stuck mid-handshake.
+  const created = [];
+  class NeverOpens {
+    constructor(url) {
+      this.url = url;
+      this.readyState = 0; // CONNECTING
+      this.closeCalls = 0;
+      created.push(this);
+    }
+
+    close() {
+      this.closeCalls++;
+      this.readyState = 3; // CLOSED
+    }
+
+    send() {}
+  }
+  NeverOpens.OPEN = 1;
+
+  const original = globalThis.WebSocket;
+  globalThis.WebSocket = NeverOpens;
+  try {
+    const client = new LedgerClient(['wss://example.invalid']);
+    const pending = client.request('server_info', {});
+
+    // The socket is created synchronously inside connect()'s Promise executor, so by the time
+    // client.request() returns control here, the handshake is already in flight and closing now
+    // exercises the exact race the fix targets.
+    client.close();
+
+    await assert.rejects(pending, (e) => e.code === 'NodeUnreachable');
+    assert.equal(client.socket, null);
+    assert.equal(client.pendingSocket, null);
+    assert.equal(client.pending.size, 0);
+    assert.equal(created.length, 1);
+    assert.equal(created[0].closeCalls, 1);
+  } finally {
+    globalThis.WebSocket = original;
+  }
 });

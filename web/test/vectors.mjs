@@ -72,7 +72,11 @@ export class FakeSource {
   constructor(transactions = [], earliest = 1) {
     this.transactions = [...transactions];
     this.earliest = earliest;
-    this.accountTransactionsCalls = 0;
+    this.calls = [];
+  }
+
+  get accountTransactionsCalls() {
+    return this.calls.length;
   }
 
   async transaction(hash) {
@@ -80,7 +84,7 @@ export class FakeSource {
   }
 
   async *accountTransactions(account, fromLedger, toLedger, forward) {
-    this.accountTransactionsCalls++;
+    this.calls.push({ account, fromLedger, toLedger, forward });
     const matching = this.transactions
       .map((tx, position) => ({ tx, position }))
       .filter(({ tx }) => tx.account === account && tx.ledgerIndex >= fromLedger && tx.ledgerIndex <= toLedger)

@@ -49,6 +49,8 @@ export class LedgerClient {
     this.pageSize = pageSize;
     this.index = 0;
     this.socket = null;
+    this.pendingSocket = null;
+    this.pendingReject = null;
     this.nextId = 1;
     this.pending = new Map();
     this.closed = false;
@@ -68,6 +70,30 @@ export class LedgerClient {
       try { this.socket.close(); } catch { /* already closed */ }
       this.socket = null;
     }
+
+    // A socket still shaking hands is not in this.socket yet, so closing only that one would
+    // leave it to finish opening and revive a client that was told to close (the original bug:
+    // onopen unconditionally assigned this.socket and resolved, even after close()). onopen is
+    // nulled here so a late handshake cannot fire it at all, and it also checks this.closed
+    // itself as a second line of defense against a handshake that was already queued to open.
+    if (this.pendingSocket) {
+      const pending = this.pendingSocket;
+      this.pendingSocket = null;
+      pending.onopen = null;
+      pending.onerror = null;
+      pending.onclose = null;
+      pending.onmessage = null;
+      try { pending.close(); } catch { /* it may not be open yet */ }
+    }
+
+    // connect()'s promise would otherwise hang forever: its socket's handlers were just nulled
+    // above, so nothing else will ever settle it.
+    if (this.pendingReject) {
+      const reject = this.pendingReject;
+      this.pendingReject = null;
+      reject(new XrplFileError('NodeUnreachable', `connection to ${this.endpoint} closed while it was still connecting`));
+    }
+
     for (const { reject, timer } of this.pending.values()) {
       clearTimeout(timer);
       reject(new XrplFileError('NodeUnreachable', `connection to ${this.endpoint} closed while a request was in flight`));
@@ -80,9 +106,29 @@ export class LedgerClient {
     if (this.socket?.readyState === WebSocket.OPEN) return;
     await new Promise((resolve, reject) => {
       const socket = new WebSocket(this.endpoint);
-      socket.onopen = () => { this.socket = socket; resolve(); };
-      socket.onerror = () => reject(new XrplFileError('NodeUnreachable', `cannot reach ${this.endpoint}`));
-      socket.onclose = () => { if (this.socket === socket) this.disconnect(); };
+      this.pendingSocket = socket;
+      this.pendingReject = reject;
+      const settle = (fn, value) => {
+        if (this.pendingSocket === socket) this.pendingSocket = null;
+        if (this.pendingReject === reject) this.pendingReject = null;
+        fn(value);
+      };
+      socket.onopen = () => {
+        // The client may have been closed while this socket was still shaking hands; a late
+        // handshake must not revive it by assigning this.socket and resolving.
+        if (this.closed) {
+          try { socket.close(); } catch { /* already closing */ }
+          settle(reject, new XrplFileError('NodeUnreachable', 'this client has been closed'));
+          return;
+        }
+        this.socket = socket;
+        settle(resolve);
+      };
+      socket.onerror = () => settle(reject, new XrplFileError('NodeUnreachable', `cannot reach ${this.endpoint}`));
+      socket.onclose = () => {
+        if (this.socket === socket) this.disconnect();
+        settle(reject, new XrplFileError('NodeUnreachable', `${this.endpoint} closed the connection`));
+      };
       socket.onmessage = (event) => this.receive(JSON.parse(event.data));
     });
   }
