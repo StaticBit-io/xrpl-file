@@ -13,6 +13,12 @@ public sealed class WriterOptions
 
     /// <summary>Read everything back through the reader before writing the manifest. On by default; the format does not require it.</summary>
     public bool ReadBack { get; init; } = true;
+
+    /// <summary>
+    /// After this many submissions the writer waits for validation before continuing, so an open
+    /// ledger never holds more than a batch of this account's transactions.
+    /// </summary>
+    public int BatchSize { get; init; } = 200;
 }
 
 public sealed record PublishProgress(string Stage, long Done, long Total);
@@ -49,12 +55,20 @@ public sealed class XrplFileWriter(ILedgerSink sink, ILedgerSource source, Write
 
         uint sequence = await _sink.SequenceAsync(writer, validated: false, cancellationToken).ConfigureAwait(false);
 
-        // Chunks.
+        // Chunks. A batch of transactions waits for validation before the next batch starts, so an
+        // open ledger never holds more than a batch of this account's queued transactions.
         List<string> chunkHashes = new(chunks.Count);
+        int chunksSinceValidation = 0;
         for (int i = 0; i < chunks.Count; i++)
         {
             chunkHashes.Add(await SubmitMemoAsync(wallet, sequence++, MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex(chunks[i]), null, cancellationToken).ConfigureAwait(false));
             progress?.Report(new PublishProgress("chunks", i + 1, chunks.Count));
+
+            if (++chunksSinceValidation >= _options.BatchSize)
+            {
+                await WaitForValidationAsync(writer, sequence, cancellationToken).ConfigureAwait(false);
+                chunksSinceValidation = 0;
+            }
         }
 
         await WaitForValidationAsync(writer, sequence, cancellationToken).ConfigureAwait(false);
@@ -79,10 +93,17 @@ public sealed class XrplFileWriter(ILedgerSink sink, ILedgerSource source, Write
         if (blocks > 1)
         {
             IReadOnlyList<string> payloads = FileTree.EncodeEntries(entries);
+            int listsSinceValidation = 0;
             for (int j = 0; j < payloads.Count; j++)
             {
                 listHashes.Add(await SubmitMemoAsync(wallet, sequence++, MemoLayout.ListMarkerHex(j), MemoLayout.Utf8Hex(payloads[j]), MemoLayout.JsonFormatHex, cancellationToken).ConfigureAwait(false));
                 progress?.Report(new PublishProgress("lists", j + 1, payloads.Count));
+
+                if (++listsSinceValidation >= _options.BatchSize)
+                {
+                    await WaitForValidationAsync(writer, sequence, cancellationToken).ConfigureAwait(false);
+                    listsSinceValidation = 0;
+                }
             }
 
             await WaitForValidationAsync(writer, sequence, cancellationToken).ConfigureAwait(false);

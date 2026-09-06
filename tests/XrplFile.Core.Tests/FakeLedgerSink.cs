@@ -23,11 +23,23 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     /// <summary>Applied to the stored MemoData of the given submission — corrupts the ledger copy without touching what was signed.</summary>
     public Dictionary<int, Func<string, string>> StoredAs { get; } = [];
 
+    /// <summary>
+    /// Every call this sink saw, in order: "query" for a validated-sequence call (SequenceAsync
+    /// with validated: true), and "chunk" / "list" / "manifest" / "submit" for a submission,
+    /// tagged by what its memo marker says it is. Lets a test see whether the writer interleaves
+    /// batch validation waits with submissions, rather than only waiting once at the end.
+    /// </summary>
+    public List<string> Events { get; } = [];
+
     public Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken)
     {
         // A wait for validation is where a real ledger closes; the fake closes one per query, so
         // the manifest lands in a later ledger than the chunks and lists it describes.
-        if (validated) _ledgersClosed++;
+        if (validated)
+        {
+            _ledgersClosed++;
+            Events.Add("query");
+        }
 
         return Task.FromResult(_nextSequence);
     }
@@ -41,6 +53,7 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
 
         if (Refusals.TryGetValue(position, out string? refusal))
         {
+            Events.Add("submit");
             return Task.FromResult(new SubmitOutcome(refusal, hash));
         }
 
@@ -56,6 +69,12 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
         }
 
         if (memoData is not null && StoredAs.TryGetValue(position, out Func<string, string>? corrupt)) memoData = corrupt(memoData);
+
+        Events.Add(
+            MemoLayout.ChunkIndexOf(memoType) is not null ? "chunk"
+            : MemoLayout.ListIndexOf(memoType) is not null ? "list"
+            : MemoLayout.IsManifest(memoType) ? "manifest"
+            : "submit");
 
         ledger.Add(new LedgerTransaction(
             hash, firstLedger + position / 100 + _ledgersClosed, (string)transaction["Account"], Succeeded: true, Validated: true,

@@ -27,13 +27,55 @@ public class XrplFileWriterTests
         Assert.Equal(vector.Root, result.Manifest.Root);
         Assert.Equal(2, result.Manifest.Blocks);
         Assert.Equal(1, result.Manifest.Lists);
-        // Chunks fill ledgers 5000..5010; the fake closes a ledger on each wait, so the list lands in 5011 and the manifest in 5012.
+        // Chunks fill ledgers 5000..5015; the default BatchSize (200) makes the fake close a ledger
+        // five times inside the 1025-chunk loop (after chunks 200, 400, 600, 800, 1000) plus once
+        // more at the stage end, so the list lands in 5016 and the manifest in 5017.
         Assert.Equal(5000, result.Manifest.FirstLedger);
-        Assert.Equal(5011, result.Manifest.LastLedger);
+        Assert.Equal(5016, result.Manifest.LastLedger);
 
         ReadResult read = await new XrplFileReader(ledger).ReadAsync(result.Link, TestContext.Current.CancellationToken);
         Assert.Equal(file, read.Bytes);
-        Assert.Equal(5010, read.Blocks[1].FirstLedger);
+        Assert.Equal(5015, read.Blocks[1].FirstLedger);
+    }
+
+    [Fact]
+    public async Task A_batch_of_submissions_waits_for_validation_before_the_next_batch()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        WriterOptions options = new() { BatchSize = 100 };
+        byte[] file = VectorStream.Bytes("batch", 2_500_000);
+
+        PublishResult result = await new XrplFileWriter(sink, ledger, options).PublishAsync(
+            file, "application/octet-stream", "batch.bin", Wallet, "testnet", null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2500, result.ChunkHashes.Count);
+
+        int lastChunkPosition = sink.Events.LastIndexOf("chunk");
+        int queriesBeforeLastChunk = sink.Events.Take(lastChunkPosition).Count(kind => kind == "query");
+
+        // 2 500 chunks in batches of 100 make 25 validation waits over the course of the chunk
+        // loop; since 2 500 is itself an exact multiple of the batch size, the 25th wait falls
+        // immediately after the last chunk rather than before it, so 24 land strictly earlier.
+        Assert.True(queriesBeforeLastChunk >= 24, $"expected at least 24 queries before the last chunk, saw {queriesBeforeLastChunk}");
+        Assert.True(sink.Events.Count(kind => kind == "query") >= 25, "expected at least 25 validation queries over the whole run");
+    }
+
+    [Fact]
+    public async Task The_default_batch_size_does_not_interrupt_a_small_file()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+
+        await new XrplFileWriter(sink, ledger).PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken);
+
+        int firstChunk = sink.Events.IndexOf("chunk");
+        int lastChunk = sink.Events.LastIndexOf("chunk");
+
+        // Three chunks, well under the default BatchSize of 200: no validated-sequence query is
+        // interleaved between them, only the stage wait that follows the whole batch.
+        Assert.DoesNotContain("query", sink.Events.GetRange(firstChunk, lastChunk - firstChunk + 1));
     }
 
     [Fact]
