@@ -12,7 +12,11 @@ namespace XrplFile.Tests;
 [Trait("Category", "Integration")]
 public class StandaloneTests
 {
-    private const string Endpoint = "ws://localhost:6006";
+    private static readonly string Endpoint =
+        string.IsNullOrEmpty(Environment.GetEnvironmentVariable("XRPL_FILE_NODE_URL"))
+            ? "ws://localhost:6006"
+            : Environment.GetEnvironmentVariable("XRPL_FILE_NODE_URL")!;
+
     private const string GenesisSeed = "snoPBrXtMeMyMHUVTgbuqAfg1SUTb";
 
     [Theory]

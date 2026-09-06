@@ -1,0 +1,10 @@
+# Override for a host whose default ports (5005/5006/6006/6007) are already held by
+# another stand's rippled container. Layer this on top of docker-compose.ci.yml to run
+# this repo's own stand on 15005/15006/16006/16007 instead, without touching the other one.
+services:
+  xrpld:
+    ports: !override
+      - "127.0.0.1:15005:5005"
+      - "127.0.0.1:15006:5006"
+      - "127.0.0.1:16006:6006"
+      - "127.0.0.1:16007:6007"
