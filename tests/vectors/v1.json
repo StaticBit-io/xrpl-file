@@ -1,1 +1,186 @@
-{}
+{
+  "version": 1,
+  "merkle": {
+    "leafRoots": {
+      "1": "305DF59F9590C3C9AC63D2B2743C388E3792449078CEBF7FB3DBE6471643B2B7",
+      "3": "CF763A041C81CEEF1578A6083F75C61BEF2E0014F2A3E683A97FCFCA5BE7F19A",
+      "5": "00D21829A5503145348ABCF712513EACF2A274211AD83E970202BB5B6D80B286",
+      "1025": "59564AA4292CEA48C658B67D5D4E0E04694BF5517C6D41122963399C66F97B5A"
+    },
+    "blockHashOfFiveChunks": "EED1B8043341A7F523DFF401B394D9C43B073226091649CD4F4C8BA018D5BFBD",
+    "rootOverThreeEntries": "3B6CCCD7E3E023FF393006F030315EE7AD9EB111B022B41FBA7E5B7A3973F688"
+  },
+  "files": [
+    {
+      "seed": "xrpl-file/v1/1",
+      "size": 1,
+      "sha256": "AAA8E61E7FAF37DD77CC5F907B38146741994B27D5B1978679AF68B43F55E7C5",
+      "chunk": 1000,
+      "chunks": 1,
+      "blocks": 1,
+      "blockHashes": [
+        "905240728323DEA0E4E49776D3483A2E7E8479F60ACF23A6E6002EC87886CBE8"
+      ],
+      "root": "905240728323DEA0E4E49776D3483A2E7E8479F60ACF23A6E6002EC87886CBE8",
+      "ledger": {
+        "first": 1000,
+        "last": 1000,
+        "blockLedgers": [
+          1000
+        ],
+        "listLedger": null,
+        "manifestLedger": 1001
+      },
+      "lists": [],
+      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1,\u0022chunk\u0022:1000,\u0022root\u0022:\u0022905240728323DEA0E4E49776D3483A2E7E8479F60ACF23A6E6002EC87886CBE8\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1.bin\u0022}"
+    },
+    {
+      "seed": "xrpl-file/v1/999",
+      "size": 999,
+      "sha256": "A132C898746FA50140109572594A1758665BAF547B5293E990DD45B1055AA72E",
+      "chunk": 1000,
+      "chunks": 1,
+      "blocks": 1,
+      "blockHashes": [
+        "17E8837E234DEC26FD4B95953AE30AF3CE6DF8AE9E0589DC8E25F9B825C0EA7D"
+      ],
+      "root": "17E8837E234DEC26FD4B95953AE30AF3CE6DF8AE9E0589DC8E25F9B825C0EA7D",
+      "ledger": {
+        "first": 1000,
+        "last": 1000,
+        "blockLedgers": [
+          1000
+        ],
+        "listLedger": null,
+        "manifestLedger": 1001
+      },
+      "lists": [],
+      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:999,\u0022chunk\u0022:1000,\u0022root\u0022:\u002217E8837E234DEC26FD4B95953AE30AF3CE6DF8AE9E0589DC8E25F9B825C0EA7D\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-999.bin\u0022}"
+    },
+    {
+      "seed": "xrpl-file/v1/1000",
+      "size": 1000,
+      "sha256": "913D34FFF4AD08D5C92FD6DAC1931D56BB78A59E0D5421644579B6E7C36F94C7",
+      "chunk": 1000,
+      "chunks": 1,
+      "blocks": 1,
+      "blockHashes": [
+        "F43C86808435B85C269C0B5B8478F03331D0EE66F231012AAFEB1F0A664FE8DD"
+      ],
+      "root": "F43C86808435B85C269C0B5B8478F03331D0EE66F231012AAFEB1F0A664FE8DD",
+      "ledger": {
+        "first": 1000,
+        "last": 1000,
+        "blockLedgers": [
+          1000
+        ],
+        "listLedger": null,
+        "manifestLedger": 1001
+      },
+      "lists": [],
+      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1000,\u0022chunk\u0022:1000,\u0022root\u0022:\u0022F43C86808435B85C269C0B5B8478F03331D0EE66F231012AAFEB1F0A664FE8DD\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1000.bin\u0022}"
+    },
+    {
+      "seed": "xrpl-file/v1/1001",
+      "size": 1001,
+      "sha256": "AD7946764F60547567FEE034EFEE7ADBA02867F0ABF738E66237C116A57C3B65",
+      "chunk": 1000,
+      "chunks": 2,
+      "blocks": 1,
+      "blockHashes": [
+        "53FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727"
+      ],
+      "root": "53FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727",
+      "ledger": {
+        "first": 1000,
+        "last": 1000,
+        "blockLedgers": [
+          1000
+        ],
+        "listLedger": null,
+        "manifestLedger": 1001
+      },
+      "lists": [],
+      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1001,\u0022chunk\u0022:1000,\u0022root\u0022:\u002253FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1001.bin\u0022}"
+    },
+    {
+      "seed": "xrpl-file/v1/1024000",
+      "size": 1024000,
+      "sha256": "296643DC52B7DF0BAC91CCAD58008D30FEF39D2E0FB3FD87EA5555F10D06CD86",
+      "chunk": 1000,
+      "chunks": 1024,
+      "blocks": 1,
+      "blockHashes": [
+        "A8A13640CF174D659F75919886A6B4A6F1BA37694DBF33780D8CE8684246B60B"
+      ],
+      "root": "A8A13640CF174D659F75919886A6B4A6F1BA37694DBF33780D8CE8684246B60B",
+      "ledger": {
+        "first": 1000,
+        "last": 1010,
+        "blockLedgers": [
+          1000
+        ],
+        "listLedger": null,
+        "manifestLedger": 1011
+      },
+      "lists": [],
+      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1024000,\u0022chunk\u0022:1000,\u0022root\u0022:\u0022A8A13640CF174D659F75919886A6B4A6F1BA37694DBF33780D8CE8684246B60B\u0022,\u0022ledgers\u0022:[1000,1010],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1024000.bin\u0022}"
+    },
+    {
+      "seed": "xrpl-file/v1/1024001",
+      "size": 1024001,
+      "sha256": "8BE7450B3CE96473082EE277E0420C8BEDE1465F09F8235F7F9A8A5BD62D61F6",
+      "chunk": 1000,
+      "chunks": 1025,
+      "blocks": 2,
+      "blockHashes": [
+        "57ED8C63E3B0CDEC9F8207B1163F06AAF0205CDEA95CB31C728D36193CE6BA1F",
+        "FEE1814D14723B1DF8BDF4FD9F01717F842289BB76BF75645B81448D483CBE2C"
+      ],
+      "root": "6808AD2DACDB735FE913EECB42DE7C06D51BE6AE15E64113CF9AEE6549F4C385",
+      "ledger": {
+        "first": 1000,
+        "last": 1011,
+        "blockLedgers": [
+          1000,
+          1010
+        ],
+        "listLedger": 1011,
+        "manifestLedger": 1012
+      },
+      "lists": [
+        "[{\u0022i\u0022:0,\u0022h\u0022:\u002257ED8C63E3B0CDEC9F8207B1163F06AAF0205CDEA95CB31C728D36193CE6BA1F\u0022,\u0022l\u0022:1000},{\u0022i\u0022:1,\u0022h\u0022:\u0022FEE1814D14723B1DF8BDF4FD9F01717F842289BB76BF75645B81448D483CBE2C\u0022,\u0022l\u0022:1010}]"
+      ],
+      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1024001,\u0022chunk\u0022:1000,\u0022root\u0022:\u00226808AD2DACDB735FE913EECB42DE7C06D51BE6AE15E64113CF9AEE6549F4C385\u0022,\u0022ledgers\u0022:[1000,1011],\u0022blocks\u0022:2,\u0022lists\u0022:1,\u0022name\u0022:\u0022vector-1024001.bin\u0022}"
+    },
+    {
+      "seed": "xrpl-file/v1/2500500",
+      "size": 2500500,
+      "sha256": "2CED6F3FB71017E34BB61691F640D32C3857B05C1EBABE59460C3259EBA50897",
+      "chunk": 1000,
+      "chunks": 2501,
+      "blocks": 3,
+      "blockHashes": [
+        "73F40634EC0772ED56730C6F3619242B7D927113EBF8EC4E4345856401BA8DBE",
+        "9E030438487E9EF29F8A7314EAEF4CFB9B504C8FBA052EF9CEE2DE3544EDD21D",
+        "4CEFFD9B096211AF42B59BE71C4798ECA43349D0DFB039FFB518A0204C28BBC3"
+      ],
+      "root": "8632B1373C4CAE98C643C495F93B04D84035613FBBD82895B53EF47F07025347",
+      "ledger": {
+        "first": 1000,
+        "last": 1026,
+        "blockLedgers": [
+          1000,
+          1010,
+          1020
+        ],
+        "listLedger": 1026,
+        "manifestLedger": 1027
+      },
+      "lists": [
+        "[{\u0022i\u0022:0,\u0022h\u0022:\u002273F40634EC0772ED56730C6F3619242B7D927113EBF8EC4E4345856401BA8DBE\u0022,\u0022l\u0022:1000},{\u0022i\u0022:1,\u0022h\u0022:\u00229E030438487E9EF29F8A7314EAEF4CFB9B504C8FBA052EF9CEE2DE3544EDD21D\u0022,\u0022l\u0022:1010},{\u0022i\u0022:2,\u0022h\u0022:\u00224CEFFD9B096211AF42B59BE71C4798ECA43349D0DFB039FFB518A0204C28BBC3\u0022,\u0022l\u0022:1020}]"
+      ],
+      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:2500500,\u0022chunk\u0022:1000,\u0022root\u0022:\u00228632B1373C4CAE98C643C495F93B04D84035613FBBD82895B53EF47F07025347\u0022,\u0022ledgers\u0022:[1000,1026],\u0022blocks\u0022:3,\u0022lists\u0022:1,\u0022name\u0022:\u0022vector-2500500.bin\u0022}"
+    }
+  ]
+}
