@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>XrplFile.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\XrplFile.Core\XrplFile.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\vectors\v1.json" Link="vectors\v1.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

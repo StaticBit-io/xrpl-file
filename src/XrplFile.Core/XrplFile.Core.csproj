@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>XrplFile</RootNamespace>
+    <PackageId>XrplFile.Core</PackageId>
+    <Description>Read, verify and write files stored in XRP Ledger memos, addressed by xrpl-file:// links.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Xrpl" />
+  </ItemGroup>
+</Project>
