@@ -31,12 +31,24 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     /// </summary>
     public List<string> Events { get; } = [];
 
+    /// <summary>
+    /// How many of the next validated-sequence queries throw a timeout before answering
+    /// normally, so a test can prove the writer's validation wait tolerates one.
+    /// </summary>
+    public int ValidatedQueryTimeouts { get; set; }
+
     public Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken)
     {
-        // A wait for validation is where a real ledger closes; the fake closes one per query, so
-        // the manifest lands in a later ledger than the chunks and lists it describes.
         if (validated)
         {
+            if (ValidatedQueryTimeouts > 0)
+            {
+                ValidatedQueryTimeouts--;
+                throw new Xrpl.Client.Exceptions.TimeoutException("fake: the validated-sequence query timed out");
+            }
+
+            // A wait for validation is where a real ledger closes; the fake closes one per query,
+            // so the manifest lands in a later ledger than the chunks and lists it describes.
             _ledgersClosed++;
             Events.Add("query");
         }

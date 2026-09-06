@@ -16,7 +16,7 @@ public class XrplFileWriterTests
         FakeLedgerSink sink = new(ledger);
         List<PublishProgress> progress = [];
 
-        PublishResult result = await new XrplFileWriter(sink, ledger).PublishAsync(
+        PublishResult result = await new XrplFileWriter(sink, ledger, new WriterOptions { BatchSize = 200 }).PublishAsync(
             file, "application/octet-stream", "vector.bin", Wallet, "testnet",
             new Progress<PublishProgress>(progress.Add), TestContext.Current.CancellationToken);
 
@@ -56,8 +56,11 @@ public class XrplFileWriterTests
 
         // 2 500 chunks in batches of 100 make 25 validation waits over the course of the chunk
         // loop; since 2 500 is itself an exact multiple of the batch size, the 25th wait falls
-        // immediately after the last chunk rather than before it, so 24 land strictly earlier.
-        Assert.True(queriesBeforeLastChunk >= 24, $"expected at least 24 queries before the last chunk, saw {queriesBeforeLastChunk}");
+        // immediately after the last chunk rather than before it, so exactly 24 land strictly
+        // earlier. The remaining queries (the chunk stage's own end-of-stage wait, plus the list
+        // and manifest stages that follow) push the whole-run total well past 25, so that count
+        // is only bounded, not pinned to an exact value.
+        Assert.Equal(24, queriesBeforeLastChunk);
         Assert.True(sink.Events.Count(kind => kind == "query") >= 25, "expected at least 25 validation queries over the whole run");
     }
 
@@ -148,6 +151,35 @@ public class XrplFileWriterTests
 
         Assert.Equal(XrplFileError.BlockMismatch, error.Error);
         Assert.Equal(3, sink.Submitted.Count);
+    }
+
+    [Fact]
+    public async Task A_single_validation_timeout_does_not_stop_the_publish()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger) { ValidatedQueryTimeouts = 1 };
+
+        PublishResult result = await new XrplFileWriter(sink, ledger).PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(result.ManifestHash, result.Link.TxHash);
+        Assert.Equal(0, sink.ValidatedQueryTimeouts);
+    }
+
+    [Fact]
+    public async Task A_read_back_longer_than_the_file_is_a_block_mismatch()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        // Three chunks of 1000, 1000, 500 bytes; corrupt the last (position 2) to decode to a
+        // full 1000-byte chunk instead of its real 500 -- a length-changing corruption, unlike
+        // the same-length one above, which the existing test cannot produce.
+        sink.StoredAs[2] = _ => new string('a', 2000);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.BlockMismatch, error.Error);
     }
 
     [Fact]

@@ -49,6 +49,23 @@ public sealed class XrplFileWriter(ILedgerSink sink, ILedgerSource source, Write
         if (file.IsEmpty) throw new ArgumentException("an empty file has no chunks and no root", nameof(file));
         if (string.IsNullOrWhiteSpace(type)) throw new ArgumentException("a manifest needs a MIME type", nameof(type));
 
+        try
+        {
+            return await PublishCoreAsync(file, type, name, wallet, network, progress, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is Xrpl.Client.Exceptions.XrplException or System.TimeoutException)
+        {
+            // Anything the sink or the source could not recover from on its own — a connection
+            // drop, a request that never got an answer — surfaces here as one error the caller can
+            // switch on, carrying the original exception rather than losing it.
+            throw new XrplFileException(XrplFileError.NodeUnreachable, $"the node did not answer: {e.Message}", inner: e);
+        }
+    }
+
+    private async Task<PublishResult> PublishCoreAsync(
+        ReadOnlyMemory<byte> file, string type, string? name, XrplWallet wallet, string network,
+        IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
+    {
         string writer = wallet.ClassicAddress;
         IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
         int blocks = FileTree.BlockCount(chunks.Count);
@@ -124,6 +141,13 @@ public sealed class XrplFileWriter(ILedgerSink sink, ILedgerSource source, Write
             {
                 byte[] content = await reader.BlockAsync(unpublished, published[block], cancellationToken).ConfigureAwait(false);
 
+                long remaining = file.Length - at;
+                if (content.Length > remaining)
+                {
+                    throw new XrplFileException(XrplFileError.BlockMismatch,
+                        $"block {block} read back {content.Length} bytes but only {remaining} remain in the file", block);
+                }
+
                 if (!content.AsSpan().SequenceEqual(file.Span.Slice((int)at, content.Length)))
                 {
                     throw new XrplFileException(XrplFileError.BlockMismatch, $"block {block} read back differs from the file", block);
@@ -172,11 +196,20 @@ public sealed class XrplFileWriter(ILedgerSink sink, ILedgerSource source, Write
     private async Task WaitForValidationAsync(string account, uint nextSequence, CancellationToken cancellationToken)
     {
         DateTimeOffset deadline = DateTimeOffset.UtcNow + _options.ValidationTimeout;
+        uint validated = 0;
 
         while (true)
         {
-            uint validated = await _sink.SequenceAsync(account, validated: true, cancellationToken).ConfigureAwait(false);
-            if (validated >= nextSequence) return;
+            try
+            {
+                validated = await _sink.SequenceAsync(account, validated: true, cancellationToken).ConfigureAwait(false);
+                if (validated >= nextSequence) return;
+            }
+            catch (Xrpl.Client.Exceptions.TimeoutException)
+            {
+                // A single poll the node did not answer in time means "not yet", not "stop" — the
+                // deadline below is what actually ends the wait.
+            }
 
             if (DateTimeOffset.UtcNow >= deadline)
             {
@@ -195,6 +228,11 @@ public sealed class XrplFileWriter(ILedgerSink sink, ILedgerSource source, Write
         if (tx is null || !tx.Validated)
         {
             throw new XrplFileException(XrplFileError.ValidationTimeout, $"transaction {hash} was accepted but is not in a validated ledger");
+        }
+
+        if (!tx.Succeeded)
+        {
+            throw new XrplFileException(XrplFileError.SubmitRefused, $"transaction {hash} was validated but did not succeed");
         }
 
         return tx.LedgerIndex;
