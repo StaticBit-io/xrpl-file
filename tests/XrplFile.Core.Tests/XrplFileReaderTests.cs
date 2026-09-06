@@ -189,6 +189,45 @@ public class XrplFileReaderTests
     }
 
     [Fact]
+    public async Task A_duplicate_list_index_keeps_the_last_copy_in_canonical_order()
+    {
+        // The 2500500-byte vector's single list memo (xf/b/0) sits at ledger 1026, after every
+        // chunk. A wrong-but-valid copy planted earlier in canonical order must lose to it: the
+        // block-list rule keeps the LAST copy, the opposite of the chunk rule (section 5 vs 6).
+        VectorFile vector = Vectors.File(2500500);
+        List<LedgerTransaction> ledger = Vectors.Ledger(vector);
+        LedgerTransaction real = ledger.Single(tx => MemoLayout.ListIndexOf(tx.MemoTypeHex) == 0);
+        string wrongPayload = MemoLayout.FromHexUtf8(real.MemoDataHex!).Replace('A', 'B');
+        // Ledger 1010 is inside block 1's range and strictly earlier than the real copy's 1026, so
+        // this loses under "last wins" without the backward walk ever needing to reach it.
+        LedgerTransaction wrongButEarlier = real with { Hash = Vectors.Hash("list-wrong-but-earlier"), LedgerIndex = 1010, MemoDataHex = MemoLayout.Utf8Hex(wrongPayload) };
+        FakeLedgerSource source = new FakeLedgerSource().AddRange(ledger).Add(wrongButEarlier);
+
+        ReadResult result = await new XrplFileReader(source).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken);
+
+        Assert.Equal(VectorStream.Bytes(vector.Seed, vector.Size), result.Bytes);
+    }
+
+    [Fact]
+    public async Task A_wrong_copy_later_in_canonical_order_than_the_real_list_memo_wins_and_breaks_the_root()
+    {
+        // Proves the rule really is "last wins", not "the right one wins": a wrong-but-valid copy
+        // planted after the real one, at the same ledger, must be the one used -- producing
+        // ListMismatch, not silently preferring the correct copy because it happens to exist.
+        VectorFile vector = Vectors.File(2500500);
+        List<LedgerTransaction> ledger = Vectors.Ledger(vector);
+        LedgerTransaction real = ledger.Single(tx => MemoLayout.ListIndexOf(tx.MemoTypeHex) == 0);
+        string wrongPayload = MemoLayout.FromHexUtf8(real.MemoDataHex!).Replace('A', 'B');
+        LedgerTransaction wrongButLater = real with { Hash = Vectors.Hash("list-wrong-but-later"), MemoDataHex = MemoLayout.Utf8Hex(wrongPayload) };
+        FakeLedgerSource source = new FakeLedgerSource().AddRange(ledger).Add(wrongButLater);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => new XrplFileReader(source).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.ListMismatch, error.Error);
+    }
+
+    [Fact]
     public async Task A_manifest_the_node_does_not_know_is_not_found_on_a_full_history_node()
     {
         FakeLedgerSource source = new() { EarliestLedger = Endpoints.MainnetFirstLedger };

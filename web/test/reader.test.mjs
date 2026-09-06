@@ -129,6 +129,41 @@ test('a stray out-of-range list memo is a list mismatch naming the missing index
   );
 });
 
+test('a duplicate list index keeps the later copy in canonical order', async () => {
+  // The 2500500-byte vector's single list memo (xf/b/0) sits at ledger 1026, after every chunk.
+  // A wrong-but-valid copy planted earlier in canonical order must lose to it: the block-list
+  // rule keeps the LAST copy, the opposite of the chunk rule tested above.
+  const vector = await vectorFile(2500500);
+  const ledger = await vectorLedger(vector);
+  const real = ledger.find((tx) => listIndexOf(tx.memoTypeHex) === 0);
+  // Ledger 1010 is inside block 1's range and strictly earlier than the real copy's 1026, so this
+  // loses under "last wins" without the backward walk ever needing to reach it.
+  const wrongButEarlier = {
+    ...real,
+    hash: labelHash('list-wrong-but-earlier'),
+    ledgerIndex: 1010,
+    memoDataHex: utf8Hex(hexUtf8(real.memoDataHex).replaceAll('A', 'B')),
+  };
+  const source = new FakeSource([...ledger, wrongButEarlier]);
+  assert.deepEqual((await new XrplFileReader(source).read(link)).bytes, await vectorBytes(vector.seed, vector.size));
+});
+
+test('a wrong copy later in canonical order than the real list memo wins and breaks the root', async () => {
+  // Proves the rule really is "last wins", not "the right one wins": a wrong-but-valid copy
+  // planted after the real one, at the same ledger, must be the one used -- producing
+  // ListMismatch, not silently preferring the correct copy because it happens to exist.
+  const vector = await vectorFile(2500500);
+  const ledger = await vectorLedger(vector);
+  const real = ledger.find((tx) => listIndexOf(tx.memoTypeHex) === 0);
+  const wrongButLater = {
+    ...real,
+    hash: labelHash('list-wrong-but-later'),
+    memoDataHex: utf8Hex(hexUtf8(real.memoDataHex).replaceAll('A', 'B')),
+  };
+  const source = new FakeSource([...ledger, wrongButLater]);
+  await rejectsWith(new XrplFileReader(source).read(link), 'ListMismatch');
+});
+
 test('an unknown manifest is not found on a full-history node and a history problem on a partial one', async () => {
   await rejectsWith(new XrplFileReader(new FakeSource([], MAINNET_FIRST_LEDGER)).manifest(link), 'ManifestNotFound');
   await rejectsWith(new XrplFileReader(new FakeSource([], 100_000_000)).manifest(link), 'NodeLacksHistory');

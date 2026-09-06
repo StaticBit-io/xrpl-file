@@ -209,10 +209,17 @@ earlier transaction to validate after each batch of 200 submissions before conti
 
 ## 8. Errors
 
-Both reference implementations raise the same eleven named errors — the .NET library as an
-`XrplFileError` enum value on an `XrplFileException`, the browser library as the same names in
-string form on an `XrplFileError`. The error is part of the format's contract: a caller
-depends on being able to switch on it.
+The two reference implementations raise eleven named errors between them — the .NET library as
+an `XrplFileError` enum value on an `XrplFileException`, the browser library as the same names in
+string form on an `XrplFileError`. Nine of the eleven — every one but `SubmitRefused` and
+`ValidationTimeout` — are raised while **reading**: resolving a link, decoding a manifest, and
+verifying a file's blocks against it. `SubmitRefused` and `ValidationTimeout` are raised only
+while **writing**, inside `XrplFileWriter`'s submission and validation-waiting loop (section 7).
+The browser library has no writer: `web/xrpl-file.js` exports only the reading side
+(`XrplFileReader` and its supporting modules), never a writer, so it can never raise those two.
+An implementation that only reads, as the browser library does, therefore raises the nine
+reading errors and never the two writing ones. The error is part of the format's contract: a
+caller depends on being able to switch on it.
 
 | Error | Raised when |
 |---|---|
@@ -224,8 +231,8 @@ depends on being able to switch on it.
 | `BlockMismatch` | A block's assembled chunks (or, for a single block, the file itself) hash to something other than the entry the block list — or the manifest — promises. |
 | `ChunkMissing` | A block's ledger range was exhausted before every one of its chunks was found. |
 | `TooLarge` | The manifest's `size` exceeds the reader's configured limit. |
-| `SubmitRefused` | A node answered a writer's transaction with an engine result other than `tesSUCCESS` or `terQUEUED`. |
-| `ValidationTimeout` | A writer's transaction did not reach a validated ledger within the configured timeout. |
+| `SubmitRefused` | A node answered a writer's transaction with an engine result other than `tesSUCCESS` or `terQUEUED`, immediately on submission; or a transaction accepted as `terQUEUED` was later found validated with a non-`tesSUCCESS` result — a `tec*` code reached only after the ledger closes (section 7). |
+| `ValidationTimeout` | The account's validated sequence did not reach the value expected after a batch of submissions within the configured timeout; or, right after that wait succeeds, the specific transaction the writer then looks up for its ledger comes back missing or unvalidated — which surfaces at once, not after a timeout of its own (section 7). |
 | `NodeUnreachable` | The node did not answer at all — a connection failure or an unrecoverable request timeout. |
 
 ## 9. Limits
