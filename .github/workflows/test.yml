@@ -1,0 +1,44 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: dotnet build XrplFile.sln --configuration Release
+      - run: dotnet run --project tests/XrplFile.Core.Tests --configuration Release --no-build -- -trait- "Category=Integration"
+      - run: node --test test/*.test.mjs
+        working-directory: web
+      - name: the committed vectors are what the code produces
+        run: |
+          dotnet run --project tools/XrplFile.Vectors --configuration Release --no-build -- /tmp/v1.json
+          diff /tmp/v1.json tests/vectors/v1.json
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet build XrplFile.sln --configuration Release
+      # A clean runner has ports 5005/5006/6006/6007 free, so the stand runs on the Compose
+      # file's default ports and XRPL_FILE_NODE_URL keeps its ws://localhost:6006 default; the
+      # docker-compose.local-ports.yml override is only needed on a host that already has
+      # another rippled stand parked on those ports.
+      - run: docker compose -p xrpl-file-ci -f .ci-config/docker-compose.ci.yml up -d
+      - run: sleep 15
+      - run: dotnet run --project tests/XrplFile.Core.Tests --configuration Release --no-build -- -trait "Category=Integration"
+      - if: always()
+        run: docker compose -p xrpl-file-ci -f .ci-config/docker-compose.ci.yml down
