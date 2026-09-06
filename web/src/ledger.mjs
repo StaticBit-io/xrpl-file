@@ -129,7 +129,13 @@ export class LedgerClient {
         if (this.socket === socket) this.disconnect();
         settle(reject, new XrplFileError('NodeUnreachable', `${this.endpoint} closed the connection`));
       };
-      socket.onmessage = (event) => this.receive(JSON.parse(event.data));
+      socket.onmessage = (event) => {
+        // A frame that does not parse is ignored, not thrown out of the socket handler where
+        // nothing catches it and the request it belonged to hangs until its own timeout.
+        let message;
+        try { message = JSON.parse(event.data); } catch { return; }
+        this.receive(message);
+      };
     });
   }
 
@@ -166,8 +172,27 @@ export class LedgerClient {
         this.pending.delete(id);
         reject(new XrplFileError('NodeUnreachable', `${this.endpoint} did not answer ${command} in ${REQUEST_TIMEOUT_MS} ms`));
       }, REQUEST_TIMEOUT_MS);
+      const fail = (message) => {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        reject(new XrplFileError('NodeUnreachable', message));
+      };
+
       this.pending.set(id, { resolve, reject, timer });
-      this.socket.send(JSON.stringify({ id, command, api_version: 2, ...params }));
+
+      // connect() resolved, but the socket can be gone or closing by the time this runs -- a node
+      // that hung up in between, or a close() from the page. Rejecting here is what lets
+      // request() move on to the next endpoint instead of raising whatever send() throws.
+      if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+        fail(`the connection to ${this.endpoint} was gone before ${command} could be sent`);
+        return;
+      }
+
+      try {
+        this.socket.send(JSON.stringify({ id, command, api_version: 2, ...params }));
+      } catch (e) {
+        fail(`${this.endpoint} refused ${command}: ${e.message}`);
+      }
     });
   }
 
@@ -192,6 +217,10 @@ export class LedgerClient {
   }
 
   async earliestLedger() {
-    return earliestAvailableLedger(await this.request('server_info', {}));
+    const answer = await this.request('server_info', {});
+    // A node that answered an error said nothing about its history; reading that as "does not
+    // say" would turn an unreachable node into a history verdict. The .NET source agrees.
+    if (answer.error) throw new XrplFileError('NodeUnreachable', `${this.endpoint} answered ${answer.error} to server_info`);
+    return earliestAvailableLedger(answer);
   }
 }

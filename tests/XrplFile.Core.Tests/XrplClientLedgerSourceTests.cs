@@ -91,4 +91,131 @@ public class XrplClientLedgerSourceTests
         Assert.Equal(new[] { "wss://s.altnet.rippletest.net:51233" }, Endpoints.For("testnet"));
         Assert.Empty(Endpoints.For("21338"));
     }
+
+    // The three ILedgerSource methods over a scripted node. The document promises NodeUnreachable
+    // for a node that did not answer, and the browser mirror raises it in all three; this source
+    // used to let the SDK's own exception -- DisconnectedException, RippledException -- out to a
+    // caller who cannot switch on it.
+
+    public static TheoryData<string, Func<XrplClientLedgerSource, CancellationToken, Task>> EveryCall => new()
+    {
+        { "tx", (source, token) => source.TransactionAsync(new string('A', 64), token) },
+        { "account_tx", (source, token) => Drain(source, token) },
+        { "server_info", (source, token) => source.EarliestLedgerAsync(token) },
+    };
+
+    [Theory]
+    [MemberData(nameof(EveryCall))]
+    public async Task A_dropped_connection_is_reported_as_an_unreachable_node(string command, Func<XrplClientLedgerSource, CancellationToken, Task> call)
+    {
+        ScriptedNode node = new();
+        node.Throw(new Xrpl.Client.Exceptions.DisconnectedException("the socket went away mid-request"));
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => call(new XrplClientLedgerSource(node.HandleAsync), TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+        Assert.Contains(command, error.Message, StringComparison.Ordinal);
+        Assert.IsType<Xrpl.Client.Exceptions.DisconnectedException>(error.InnerException);
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryCall))]
+    public async Task A_request_that_timed_out_is_reported_as_an_unreachable_node(string command, Func<XrplClientLedgerSource, CancellationToken, Task> call)
+    {
+        ScriptedNode node = new();
+        node.Throw(new Xrpl.Client.Exceptions.TimeoutException("the node did not answer in time"));
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => call(new XrplClientLedgerSource(node.HandleAsync), TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+        Assert.Contains(command, error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryCall))]
+    public async Task A_node_error_other_than_txn_not_found_is_reported_as_an_unreachable_node(string command, Func<XrplClientLedgerSource, CancellationToken, Task> call)
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"error":"invalidParams","error_message":"Missing field 'account'."}""");
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => call(new XrplClientLedgerSource(node.HandleAsync), TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+        Assert.Contains("invalidParams", error.Message, StringComparison.Ordinal);
+        Assert.Contains(command, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_transaction_the_node_does_not_have_is_null_not_an_error()
+    {
+        ScriptedNode answered = new();
+        answered.Answer("""{"error":"txnNotFound"}""");
+        ScriptedNode threw = new();
+        threw.Throw(new Xrpl.Client.Exceptions.RippledException(
+            "txnNotFound", new Xrpl.Models.Subscriptions.ErrorResponse { Error = "txnNotFound" }));
+
+        Assert.Null(await new XrplClientLedgerSource(answered.HandleAsync).TransactionAsync(new string('A', 64), TestContext.Current.CancellationToken));
+        Assert.Null(await new XrplClientLedgerSource(threw.HandleAsync).TransactionAsync(new string('A', 64), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task A_cancellation_stays_a_cancellation()
+    {
+        ScriptedNode node = new();
+        node.Throw(new OperationCanceledException());
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => new XrplClientLedgerSource(node.HandleAsync).EarliestLedgerAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task An_answered_page_still_yields_its_transactions()
+    {
+        ScriptedNode node = new();
+        node.Answer("""
+            {"account":"r","transactions":[
+              {"hash":"a","ledger_index":1,"validated":true,"meta":{"TransactionResult":"tesSUCCESS"},"tx_json":{"Account":"r"}}]}
+            """);
+
+        List<LedgerTransaction> read = [];
+        await foreach (LedgerTransaction tx in new XrplClientLedgerSource(node.HandleAsync)
+            .AccountTransactionsAsync("r", 1, 2, forward: true, TestContext.Current.CancellationToken))
+        {
+            read.Add(tx);
+        }
+
+        Assert.Equal(["A"], read.Select(tx => tx.Hash).ToArray());
+        Assert.Equal("account_tx", node.Commands[0]);
+    }
+
+    private static async Task Drain(XrplClientLedgerSource source, CancellationToken cancellationToken)
+    {
+        await foreach (LedgerTransaction _ in source.AccountTransactionsAsync("rWriter", 1, 2, forward: true, cancellationToken))
+        {
+        }
+    }
+
+    /// <summary>A node whose answers are scripted, in call order.</summary>
+    private sealed class ScriptedNode
+    {
+        private readonly Queue<Func<JsonElement>> _answers = new();
+
+        public List<string> Commands { get; } = [];
+
+        public void Answer(string json) => _answers.Enqueue(() => JsonDocument.Parse(json).RootElement);
+
+        public void Throw(Exception exception) => _answers.Enqueue(() => throw exception);
+
+        public Task<JsonElement> HandleAsync(Xrpl.Models.Methods.BaseRequest request, CancellationToken cancellationToken)
+        {
+            Commands.Add(request.Command);
+
+            if (_answers.Count == 0) throw new InvalidOperationException("the script ran out of answers");
+
+            return Task.FromResult(_answers.Dequeue()());
+        }
+    }
 }
