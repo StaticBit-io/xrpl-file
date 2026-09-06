@@ -11,6 +11,8 @@ public enum XrplFileError
     BlockMismatch,
     ChunkMissing,
     TooLarge,
+    SubmitRefused,
+    ValidationTimeout,
 }
 
 public sealed class XrplFileException : Exception
