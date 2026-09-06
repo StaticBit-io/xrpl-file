@@ -2,6 +2,9 @@ using System.Runtime.CompilerServices;
 
 namespace XrplFile.Tests;
 
+/// <summary>One recorded call to <see cref="ILedgerSource.AccountTransactionsAsync"/>, in call order.</summary>
+public sealed record AccountTransactionsCall(string Account, long FromLedger, long ToLedger, bool Forward);
+
 /// <summary>An in-memory ledger: insertion order is canonical order within a ledger.</summary>
 public sealed class FakeLedgerSource : ILedgerSource
 {
@@ -9,7 +12,9 @@ public sealed class FakeLedgerSource : ILedgerSource
 
     public long? EarliestLedger { get; set; } = 1;
 
-    public int AccountTransactionsCalls { get; private set; }
+    public List<AccountTransactionsCall> Calls { get; } = [];
+
+    public int AccountTransactionsCalls => Calls.Count;
 
     public FakeLedgerSource Add(LedgerTransaction tx)
     {
@@ -45,7 +50,7 @@ public sealed class FakeLedgerSource : ILedgerSource
     public async IAsyncEnumerable<LedgerTransaction> AccountTransactionsAsync(
         string account, long fromLedger, long toLedger, bool forward, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        AccountTransactionsCalls++;
+        Calls.Add(new AccountTransactionsCall(account, fromLedger, toLedger, forward));
 
         IEnumerable<(LedgerTransaction Tx, int Position)> matching = _transactions
             .Select((tx, position) => (Tx: tx, Position: position))

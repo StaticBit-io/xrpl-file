@@ -41,18 +41,44 @@ public class XrplFileReaderTests
     }
 
     [Fact]
-    public async Task A_duplicate_index_keeps_the_earlier_copy()
+    public async Task A_duplicate_index_keeps_the_first_copy_in_canonical_order()
     {
-        VectorFile vector = Vectors.File(1001);
+        // 1024001 bytes: block 0 spans ledgers 1000..1010, wide enough that the reader must walk
+        // through the middle of the block before it finishes, rather than completing on the first
+        // handful of chunks the way the 1001-byte vector's 2-chunk file does.
+        VectorFile vector = Vectors.File(1024001);
         List<LedgerTransaction> ledger = Vectors.Ledger(vector);
-        LedgerTransaction first = ledger.Single(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 0);
-        // Same ledger, added after the real one: later in canonical order, so it must lose.
-        LedgerTransaction later = first with { Hash = Vectors.Hash("retry"), MemoDataHex = new string('0', 2000) };
-        FakeLedgerSource source = new FakeLedgerSource().AddRange(ledger).Add(later);
+        LedgerTransaction real = ledger.Single(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 0);
+        // The real copy of chunk 0 is at ledger 1000, first in canonical order. The duplicate sits
+        // at ledger 1005, strictly inside the block's range, so the reader must pass it mid-block
+        // instead of never reaching it.
+        LedgerTransaction duplicate = real with { Hash = Vectors.Hash("retry"), LedgerIndex = 1005, MemoDataHex = new string('F', real.MemoDataHex!.Length) };
+        FakeLedgerSource source = new FakeLedgerSource().AddRange(ledger).Add(duplicate);
 
         ReadResult result = await new XrplFileReader(source).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken);
 
         Assert.Equal(VectorStream.Bytes(vector.Seed, vector.Size), result.Bytes);
+    }
+
+    [Fact]
+    public async Task A_wrong_copy_earlier_in_canonical_order_than_the_real_one_wins_and_breaks_the_hash()
+    {
+        // Proves the rule really is "first wins", not "the right one wins": if the wrong copy sits
+        // earlier in canonical order than the real one, the reader must keep the wrong bytes and
+        // fail the block hash -- not silently prefer the correct copy because it happens to exist.
+        VectorFile vector = Vectors.File(1024001);
+        List<LedgerTransaction> ledger = Vectors.Ledger(vector);
+        LedgerTransaction real = ledger.Single(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 500);
+        // The real copy of chunk 500 is at ledger 1005; the wrong copy is at ledger 1002, earlier
+        // in canonical order, still strictly inside block 0's range (1000..1010).
+        LedgerTransaction wrongButEarlier = real with { Hash = Vectors.Hash("wrong-but-earlier"), LedgerIndex = 1002, MemoDataHex = new string('F', real.MemoDataHex!.Length) };
+        FakeLedgerSource source = new FakeLedgerSource().AddRange(ledger).Add(wrongButEarlier);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => new XrplFileReader(source).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.BlockMismatch, error.Error);
+        Assert.Equal(0, error.Block);
     }
 
     [Fact]
@@ -82,12 +108,49 @@ public class XrplFileReaderTests
     }
 
     [Fact]
+    public async Task An_oversized_chunk_is_skipped_so_a_later_real_copy_still_wins()
+    {
+        // manifest.Chunk is 1000 for this vector; a memo decoding to 2000 bytes is well over that
+        // and must be treated like a non-hex memo -- skipped, not accepted into the slot.
+        VectorFile vector = Vectors.File(1024001);
+        List<LedgerTransaction> ledger = Vectors.Ledger(vector);
+        LedgerTransaction real = ledger.Single(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 0);
+        List<LedgerTransaction> withOversizedFirstCopy = ledger
+            .Select(tx => ReferenceEquals(tx, real) ? tx with { MemoDataHex = new string('A', 4000) } : tx)
+            .ToList();
+        FakeLedgerSource source = new FakeLedgerSource().AddRange(withOversizedFirstCopy)
+            // The good copy, later in canonical order, still inside block 0's range (1000..1010).
+            .Add(real with { Hash = Vectors.Hash("good-later"), LedgerIndex = 1005 });
+
+        ReadResult result = await new XrplFileReader(source).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken);
+
+        Assert.Equal(VectorStream.Bytes(vector.Seed, vector.Size), result.Bytes);
+    }
+
+    [Fact]
+    public async Task An_oversized_chunk_with_no_other_copy_is_reported_as_missing()
+    {
+        FakeLedgerSource source = SourceFor(2500500)
+            .Replace(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 0, tx => tx with { MemoDataHex = new string('A', 4000) });
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => new XrplFileReader(source).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.ChunkMissing, error.Error);
+        Assert.Equal(0, error.Block);
+    }
+
+    [Fact]
     public async Task A_failed_or_foreign_transaction_is_not_a_chunk()
     {
-        VectorFile vector = Vectors.File(1001);
-        FakeLedgerSource source = new FakeLedgerSource().AddRange(Vectors.Ledger(vector));
-        LedgerTransaction real = Vectors.Ledger(vector).Single(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 1);
-        // A failed copy of chunk 1 earlier in the ledger, a stranger's chunk 1, and an unmarked memo.
+        // 1024001 bytes so block 0 spans ledgers 1000..1010 and the injected transactions, placed
+        // at ledger 1005 (chunk 500's own ledger, strictly inside the block), are met mid-block
+        // instead of after the reader has already finished on the file's first couple of chunks.
+        VectorFile vector = Vectors.File(1024001);
+        List<LedgerTransaction> ledger = Vectors.Ledger(vector);
+        FakeLedgerSource source = new FakeLedgerSource().AddRange(ledger);
+        LedgerTransaction real = ledger.Single(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 500);
+        // A failed copy of chunk 500, a stranger's chunk 500, and an unmarked memo, all at ledger 1005.
         source.Add(real with { Hash = Vectors.Hash("failed"), Succeeded = false, MemoDataHex = "00" });
         source.Add(real with { Hash = Vectors.Hash("stranger"), Account = "rSomebodyElse", MemoDataHex = "00" });
         source.Add(real with { Hash = Vectors.Hash("unmarked"), MemoTypeHex = null, MemoDataHex = "00" });
@@ -103,6 +166,21 @@ public class XrplFileReaderTests
         FakeLedgerSource source = SourceFor(2500500)
             .Replace(tx => MemoLayout.ListIndexOf(tx.MemoTypeHex) == 0,
                 tx => tx with { MemoDataHex = MemoLayout.Utf8Hex(MemoLayout.FromHexUtf8(tx.MemoDataHex!).Replace("\"l\":1000", "\"l\":1001", StringComparison.Ordinal).Replace('A', 'B')) });
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => new XrplFileReader(source).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.ListMismatch, error.Error);
+    }
+
+    [Fact]
+    public async Task A_stray_out_of_range_list_memo_is_a_list_mismatch_not_a_framework_exception()
+    {
+        // The manifest promises 1 list memo (xf/b/0). Re-marking it xf/b/7 leaves the account with
+        // a stray out-of-range index and no xf/b/0 at all -- without the index-range filter this
+        // used to slip past the count guard and blow up as KeyNotFoundException while decoding.
+        FakeLedgerSource source = SourceFor(2500500)
+            .Replace(tx => MemoLayout.ListIndexOf(tx.MemoTypeHex) == 0, tx => tx with { MemoTypeHex = MemoLayout.ListMarkerHex(7) });
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
             () => new XrplFileReader(source).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken));
@@ -192,11 +270,15 @@ public class XrplFileReaderTests
         XrplFileReader reader = new(source);
         ManifestRecord manifest = await reader.ManifestAsync(Vectors.Link, TestContext.Current.CancellationToken);
         IReadOnlyList<BlockEntry> blocks = await reader.BlockListAsync(manifest, TestContext.Current.CancellationToken);
-        // Break every chunk before block 2 — a reader that starts at the file's first ledger would trip on them.
-        source.Replace(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) is { } i && i < 2048 && tx.LedgerIndex < vector.Ledger.BlockLedgers[2], tx => tx with { Succeeded = false });
 
         byte[] block = await reader.BlockAsync(manifest, blocks[2], TestContext.Current.CancellationToken);
 
         Assert.Equal(VectorStream.Bytes(vector.Seed, vector.Size).Skip(2048 * 1000).ToArray(), block);
+        // The discriminating check: BlockAsync must page from the block's own first ledger, not the
+        // file's -- breaking chunks by index (as a prior version of this test did) proves nothing,
+        // since BlockAsync filters chunks by index regardless of where the scan starts.
+        AccountTransactionsCall blockCall = Assert.Single(source.Calls, call => call.Forward);
+        Assert.Equal(blocks[2].FirstLedger, blockCall.FromLedger);
+        Assert.True(blockCall.Forward);
     }
 }

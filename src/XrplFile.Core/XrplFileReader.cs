@@ -111,8 +111,12 @@ public sealed class XrplFileReader(ILedgerSource source, ReaderOptions? options 
             return [new BlockEntry(0, manifest.Root, manifest.FirstLedger)];
         }
 
-        // Backwards from the end of the range: the lists were written after the chunks, so they
-        // are the first thing a backward read meets.
+        // Backwards from the end of the range, stopping as soon as every index has a value: walking
+        // a large file's chunks in reverse just to reach the lists would be far too expensive.
+        // That early stop means the rule for block-list memos is "the last copy in canonical
+        // (forward) order wins" -- the opposite of chunks, where the first copy wins. This is safe
+        // because a conforming writer never resubmits a list index with different bytes, and a
+        // non-conforming one is still caught below: DecodeEntries or the root check fails either way.
         Dictionary<long, string> payloads = [];
 
         await foreach (LedgerTransaction tx in _source.AccountTransactionsAsync(record.Writer, manifest.FirstLedger, manifest.LastLedger, forward: false, cancellationToken).ConfigureAwait(false))
@@ -120,15 +124,19 @@ public sealed class XrplFileReader(ILedgerSource source, ReaderOptions? options 
             if (!IsMine(tx, record.Writer, manifest)) continue;
 
             long? index = MemoLayout.ListIndexOf(tx.MemoTypeHex);
-            if (index is null || tx.MemoDataHex is null) continue;
+            if (index is null || index.Value >= manifest.Lists || tx.MemoDataHex is null) continue;
 
-            // Earlier in ledger order wins, and a backward read meets the later copy first.
-            payloads[index.Value] = tx.MemoDataHex;
+            // The first copy this backward walk meets for an index is the last one in canonical
+            // order, and that is the one kept -- ignore any earlier (canonical) copy seen after.
+            if (!payloads.ContainsKey(index.Value))
+            {
+                payloads[index.Value] = tx.MemoDataHex;
+            }
 
-            if (payloads.Count == manifest.Lists && Enumerable.Range(0, manifest.Lists).All(i => payloads.ContainsKey(i))) break;
+            if (payloads.Count == manifest.Lists) break;
         }
 
-        if (payloads.Count != manifest.Lists)
+        if (payloads.Count != manifest.Lists || !Enumerable.Range(0, manifest.Lists).All(i => payloads.ContainsKey(i)))
         {
             throw new XrplFileException(XrplFileError.ListMismatch, $"the manifest promises {manifest.Lists} block-list memos and {payloads.Count} were found");
         }
@@ -178,14 +186,23 @@ public sealed class XrplFileReader(ILedgerSource source, ReaderOptions? options 
             int slot = (int)(index.Value - firstChunk);
             if (chunks[slot] is not null) continue;
 
+            byte[] decoded;
+
             try
             {
-                chunks[slot] = MemoLayout.Bytes(tx.MemoDataHex);
+                decoded = MemoLayout.Bytes(tx.MemoDataHex);
             }
             catch (FormatException)
             {
                 continue;
             }
+
+            // A memo decoding to more bytes than the manifest's chunk size is not a chunk, the same
+            // as one that fails to decode -- accepting it here would let the sum below overflow
+            // before the block-hash check ever gets a chance to catch the corruption.
+            if (decoded.Length > manifest.Chunk) continue;
+
+            chunks[slot] = decoded;
 
             if (++found == count) break;
         }
