@@ -101,12 +101,19 @@ The index lives in `MemoType`, not in front of the data, for two reasons: the Me
 then exactly the bytes in `MemoData`, and chunks can be submitted in parallel through tickets
 without the account's sequence numbers carrying the order.
 
-The framing model above is checked against two measured points: 1019 bytes with no `MemoType`
-is accepted (war-and-peace) and 1019 with an 11-byte `MemoType` is refused. With the longest
+The framing model above is checked against measured points: 1019 bytes with no `MemoType` is
+accepted (war-and-peace) and 1019 with an 11-byte `MemoType` is refused. With the longest
 marker the serialized array is exactly 1024 bytes, which rippled accepts (`> 1024` refuses).
-The video platform settled on 999 by measurement — it tried 1011 and 999, never anything
-between — so the first integration test of the writer submits a 1000-byte chunk under the
-12-digit marker `xf/c/999999999999` to a standalone node and keeps that as a regression test.
+The video platform confirmed the whole model on a standalone node on 2026-09-06 (its
+`StandaloneLedgerTests`): each memo kind is accepted at its budget and refused one byte over.
+
+| Memo | MemoType | MemoFormat | Data budget |
+|---|---|---|---|
+| chunk | `xf/c/<i>`, up to 12 digits — 17 bytes | none | 1019 − 2 − 17 = **1000** |
+| block list | `xf/b/<j>`, up to 12 digits — 17 bytes | `application/json` — 16 bytes | 1019 − 2 − 17 − 2 − 16 = **982** |
+| manifest | `xf/m` — 4 bytes | `application/json` | 1019 − 2 − 4 − 2 − 16 = **995** |
+
+The xrpl-file writer keeps the same three boundary cases as an integration test of its own.
 
 ### Manifest
 
@@ -136,8 +143,9 @@ between — so the first integration test of the writer submits a 1000-byte chun
 | `lists` | number of `xf/b/*` transactions. 0 when `blocks` is 1 |
 | `name` | optional file name, used by the gateway for `Content-Disposition` |
 
-The manifest is one memo and must fit in 1019 bytes including its `MemoType`/`MemoFormat`
-framing; the writer refuses a `name` that would push it over.
+The manifest is one memo with a data budget of 995 bytes (table above). Every field but
+`name` is fixed in size; a `name` that does not fit is cut to the longest UTF-8 prefix that
+does, and dropped when not even one character fits. A file is never refused over its name.
 
 ### Block list
 
@@ -241,6 +249,10 @@ The writer does exactly what the reader will later verify, in that order.
    validated chunk), then **read everything back** through the same reader and compare with
    `root`, then the **manifest**. The manifest is written only after a successful read-back:
    an upload that broke half-way leaves junk in an account's history, never a dead link.
+   The read-back is what this writer does, not what the format demands: a reader verifies
+   every byte against the root regardless, so a writer that skips it (the video platform
+   does, relying on its indexer's sampling and its player) produces links that are exactly as
+   verifiable — only its own failure shows up later, as a dead link instead of a failed run.
 5. **Report.** The link, and a run dataset (transaction hashes, ledgers, fees, timings) in the
    shape war-and-peace produces.
 
@@ -315,9 +327,9 @@ without history is a 503 with `Retry-After`, distinct from a 404 for a hash no n
 | | |
 |---|---|
 | chunk payload | 1000 bytes |
-| manifest | one memo, ≤ 1019 bytes with framing |
+| manifest | one memo, 995 bytes of JSON |
 | block | 1024 chunks |
-| block list transaction | about ten entries |
+| block list transaction | 982 bytes of JSON, about ten entries |
 | file size | unbounded by the format (12-digit index); v1 reader default ceiling 20 MB, configurable |
 | link | 84 bytes canonical, 168 hex in an NFT `URI` |
 | cost | 10–12 drops per transaction regardless of size: about 0.012 XRP per MB |
@@ -372,21 +384,22 @@ migrate; a video that is also an `xrpl-file://` link can be embedded anywhere wi
 `<xrpl-file>` element and served by the gateway; and making the xrpl-file reader accept `vp/*`
 markers would tie a general format to one application's conventions.
 
-What changes on the platform side, all in `Platform.Ledger` and the browser uploader:
+The platform made that switch on 2026-09-06 (its design
+`2026-09-06-xrpl-file-storage-design.md`): markers `xf/c/` and `xf/b/`, 1000-byte chunks, an
+`xf/m` manifest written last by the uploader, a `vp/report` of version 3 carrying the
+manifest's transaction hash, the xrpl-file chunk rule in the verifier and the player, and the
+link printed on the video page. Its `VideoManifest` encodes and decodes exactly the JSON in
+section 2. Two platform-specific choices, both compatible: its verifier insists on
+`chunk` = 1000 where the xrpl-file reader accepts any value ≤ 1000, and its uploader skips the
+read-back before the manifest. Legacy uploads without a marker — the mainnet demo clip — stay
+readable only in the player behind a catalogue flag nothing sets.
 
-- markers `vp/c/` → `xf/c/`, `vp/t/` → `xf/b/`; chunk size 999 → 1000 (after the boundary test
-  above passes on a real node);
-- the uploader writes an `xf/m` manifest after the read-back, and the `vp/report` carries the
-  manifest's transaction hash so the catalogue can print the link;
-- the verifier and the player apply the xrpl-file chunk rule. Legacy uploads without a marker
-  — the mainnet demo clip — stay readable only through the old path, and the platform decides
-  whether to keep that path or re-publish the clip;
-- `vp/claim`, `vp/report`, comments, tips and the rest are platform events, not storage, and
-  are untouched. The claim keeps signing the root; the root is the same number in both formats.
-
-Once step 1 of the build order ships, `Platform.Ledger` can take `XrplFile.Core` as a package
-and delete its own `MerkleTree`, `VideoTree` and marker code. Until then the platform can
-switch markers and chunk size on its own; the tree and list code need no change.
+`vp/claim`, `vp/report`, comments, tips and the rest are platform events, not storage, and are
+untouched; the claim keeps signing the root, which is the same number in both formats. Once
+step 1 of the build order ships, `Platform.Ledger` can take `XrplFile.Core` as a package and
+delete its own `MerkleTree`, `VideoTree`, `VideoManifest` and marker code. Until then the two
+implementations are kept in step by the shared test vectors, which step 1 must produce from
+the same fixtures the platform's `MerkleVectorTests` use.
 
 ## Rejected alternatives
 
