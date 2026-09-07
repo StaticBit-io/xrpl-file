@@ -69,4 +69,18 @@ public sealed class FakeLedgerSource : ILedgerSource
     }
 
     public Task<long?> EarliestLedgerAsync(CancellationToken cancellationToken) => Task.FromResult(EarliestLedger);
+
+    /// <summary>What this fake node charges and reserves. Ten drops, one XRP, a fifth of an XRP.</summary>
+    public NetworkFees Fees { get; set; } = new(10, 1_000_000, 200_000);
+
+    public Dictionary<string, long> Balances { get; } = [];
+
+    public long CurrentLedger { get; set; } = 1;
+
+    public Task<NetworkFees> FeesAsync(CancellationToken cancellationToken) => Task.FromResult(Fees);
+
+    public Task<long> BalanceDropsAsync(string account, CancellationToken cancellationToken) =>
+        Task.FromResult(Balances.TryGetValue(account, out long drops) ? drops : 0);
+
+    public Task<long> CurrentLedgerAsync(CancellationToken cancellationToken) => Task.FromResult(CurrentLedger);
 }

@@ -3,7 +3,9 @@ using System.Text.Json;
 using Xrpl.Client;
 using Xrpl.Client.Exceptions;
 using Xrpl.Client.Json;
+using Xrpl.Models.Common;
 using Xrpl.Models.Methods;
+using LedgerIndexType = Xrpl.Models.Ledger.LedgerIndexType;
 
 namespace XrplFile;
 
@@ -103,6 +105,69 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
     public async Task<long?> EarliestLedgerAsync(CancellationToken cancellationToken) =>
         EarliestAvailableLedger(await AskAsync(new ServerInfoRequest(), "server_info", cancellationToken).ConfigureAwait(false));
+
+    public async Task<NetworkFees> FeesAsync(CancellationToken cancellationToken)
+    {
+        JsonElement answer = await AskAsync(new ServerStateRequest(), "server_state", cancellationToken).ConfigureAwait(false);
+
+        if (!answer.TryGetProperty("state", out JsonElement state)
+            || !state.TryGetProperty("validated_ledger", out JsonElement ledger))
+        {
+            throw new XrplFileException(XrplFileError.NodeUnreachable, "the node answered server_state without a validated ledger");
+        }
+
+        long baseFee = Number(ledger, "base_fee") ?? throw new XrplFileException(XrplFileError.NodeUnreachable, "the node did not say what it charges");
+        long baseReserve = Number(ledger, "reserve_base") ?? throw new XrplFileException(XrplFileError.NodeUnreachable, "the node did not say its base reserve");
+        long ownerReserve = Number(ledger, "reserve_inc") ?? throw new XrplFileException(XrplFileError.NodeUnreachable, "the node did not say its owner reserve");
+
+        // A busy node multiplies its base fee by load_factor over load_base. Ignoring that is how
+        // an estimate comes out right on a quiet network and short on a busy one.
+        long loadFactor = Number(answer, "load_factor") ?? Number(state, "load_factor") ?? 256;
+        long loadBase = Number(answer, "load_base") ?? Number(state, "load_base") ?? 256;
+        if (loadBase <= 0) loadBase = 256;
+
+        // Integer division, matching rippled's own scaling: it truncates, not rounds up.
+        long fee = baseFee * loadFactor / loadBase;
+
+        return new NetworkFees(Math.Max(fee, baseFee), baseReserve, ownerReserve);
+    }
+
+    public async Task<long> BalanceDropsAsync(string account, CancellationToken cancellationToken)
+    {
+        JsonElement answer;
+
+        try
+        {
+            answer = await AskAsync(new AccountInfoRequest(account), "account_info", cancellationToken).ConfigureAwait(false);
+        }
+        catch (XrplFileException e) when (e.Message.Contains("actNotFound", StringComparison.Ordinal))
+        {
+            // An account nobody funded is not a failure to answer: it is an answer, and it is zero.
+            return 0;
+        }
+
+        return answer.TryGetProperty("account_data", out JsonElement data) && Text(data, "Balance") is { } balance
+            && long.TryParse(balance, out long drops)
+                ? drops
+                : 0;
+    }
+
+    public async Task<long> CurrentLedgerAsync(CancellationToken cancellationToken)
+    {
+        JsonElement answer = await AskAsync(
+            new LedgerRequest { LedgerIndex = new LedgerIndex(LedgerIndexType.Validated) }, "ledger", cancellationToken).ConfigureAwait(false);
+
+        // The index sits at the top of the answer, and inside the ledger object as a string.
+        if (Number(answer, "ledger_index") is { } top) return top;
+
+        if (answer.TryGetProperty("ledger", out JsonElement ledger) && Text(ledger, "ledger_index") is { } text
+            && long.TryParse(text, out long parsed))
+        {
+            return parsed;
+        }
+
+        throw new XrplFileException(XrplFileError.NodeUnreachable, "the node answered ledger without an index");
+    }
 
     public static IReadOnlyList<LedgerTransaction> ParseTransactions(JsonElement answer)
     {
@@ -207,7 +272,10 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             TxRequest tx => _client!.GRequest<object, TxRequest>(tx, cancellationToken),
             AccountTransactionsRequest transactions => _client!.GRequest<object, AccountTransactionsRequest>(transactions, cancellationToken),
             ServerInfoRequest info => _client!.GRequest<object, ServerInfoRequest>(info, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Command, "this source sends tx, account_tx and server_info, nothing else"),
+            ServerStateRequest state => _client!.GRequest<object, ServerStateRequest>(state, cancellationToken),
+            AccountInfoRequest accountInfo => _client!.GRequest<object, AccountInfoRequest>(accountInfo, cancellationToken),
+            LedgerRequest ledger => _client!.GRequest<object, LedgerRequest>(ledger, cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Command, "this source sends tx, account_tx, server_info, server_state, account_info and ledger, nothing else"),
         };
 
         XrplResponse<object> response = await pending.ConfigureAwait(false);

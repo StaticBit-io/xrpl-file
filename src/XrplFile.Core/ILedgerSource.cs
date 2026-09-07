@@ -14,4 +14,13 @@ public interface ILedgerSource
 
     /// <summary>The oldest ledger the node still holds, or null when it does not say.</summary>
     Task<long?> EarliestLedgerAsync(CancellationToken cancellationToken);
+
+    /// <summary>What the network charges and reserves right now.</summary>
+    Task<NetworkFees> FeesAsync(CancellationToken cancellationToken);
+
+    /// <summary>What the account holds, in drops. An account the node does not know holds nothing.</summary>
+    Task<long> BalanceDropsAsync(string account, CancellationToken cancellationToken);
+
+    /// <summary>The index of the latest validated ledger.</summary>
+    Task<long> CurrentLedgerAsync(CancellationToken cancellationToken);
 }

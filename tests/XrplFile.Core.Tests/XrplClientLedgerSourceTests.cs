@@ -191,6 +191,84 @@ public class XrplClientLedgerSourceTests
         Assert.Equal("account_tx", node.Commands[0]);
     }
 
+    [Fact]
+    public async Task The_fees_and_reserves_come_from_server_state()
+    {
+        ScriptedNode node = new();
+        node.Answer("""
+            {"state":{"validated_ledger":{"base_fee":10,"reserve_base":1000000,"reserve_inc":200000,"seq":106497159}}}
+            """);
+
+        NetworkFees fees = await new XrplClientLedgerSource(node.HandleAsync).FeesAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(10, fees.OpenLedgerFeeDrops);
+        Assert.Equal(1_000_000, fees.BaseReserveDrops);
+        Assert.Equal(200_000, fees.OwnerReserveDrops);
+    }
+
+    [Fact]
+    public async Task A_load_factor_raises_the_fee_the_estimate_uses()
+    {
+        ScriptedNode node = new();
+        // The node scales the base fee by load_factor / load_base when it is busy. An estimate
+        // built on the base fee alone would be wrong exactly when it matters.
+        node.Answer("""
+            {"state":{"validated_ledger":{"base_fee":10,"reserve_base":1000000,"reserve_inc":200000},"load_factor":2000,"load_base":256}}
+            """);
+
+        NetworkFees fees = await new XrplClientLedgerSource(node.HandleAsync).FeesAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(78, fees.OpenLedgerFeeDrops);
+    }
+
+    [Fact]
+    public async Task An_account_balance_comes_from_account_info()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"account_data":{"Account":"rWriter","Balance":"25000000","Sequence":7}}""");
+
+        long drops = await new XrplClientLedgerSource(node.HandleAsync)
+            .BalanceDropsAsync("rWriter", TestContext.Current.CancellationToken);
+
+        Assert.Equal(25_000_000, drops);
+    }
+
+    [Fact]
+    public async Task An_account_the_node_does_not_know_holds_nothing()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"error":"actNotFound"}""");
+
+        long drops = await new XrplClientLedgerSource(node.HandleAsync)
+            .BalanceDropsAsync("rNobody", TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, drops);
+    }
+
+    [Fact]
+    public async Task The_current_ledger_is_the_validated_index()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"ledger_index":106497159,"validated":true,"ledger":{"ledger_index":"106497159"}}""");
+
+        long ledger = await new XrplClientLedgerSource(node.HandleAsync)
+            .CurrentLedgerAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(106497159, ledger);
+    }
+
+    [Fact]
+    public async Task A_node_that_will_not_say_what_it_charges_is_unreachable()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"error":"noNetwork"}""");
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => new XrplClientLedgerSource(node.HandleAsync).FeesAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+    }
+
     private static async Task Drain(XrplClientLedgerSource source, CancellationToken cancellationToken)
     {
         await foreach (LedgerTransaction _ in source.AccountTransactionsAsync("rWriter", 1, 2, forward: true, cancellationToken))
