@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Xrpl.Client;
 using Xrpl.Client.Json;
+using Xrpl.Models;
 using Xrpl.Models.Methods;
 using Xrpl.Wallet;
 using Xunit;
@@ -16,6 +17,7 @@ namespace XrplFile.Tests;
 /// throwaway account's base reserve can ever come back, so none of them is taken on trust.
 /// </summary>
 [Trait("Category", "Integration")]
+[Collection("Standalone")]
 public class AccountDeleteThresholdTests
 {
     private const string GenesisSeed = "snoPBrXtMeMyMHUVTgbuqAfg1SUTb";
@@ -54,19 +56,46 @@ public class AccountDeleteThresholdTests
 
             Assert.Equal(beforeMint + mint + 1, afterMint);
 
+            // The mint is proven by the tickets it left behind, not by the sequence delta alone:
+            // a node that advanced the sequence by mint + 1 for an unrelated reason would also
+            // pass the assertion above. Confirm the N Ticket objects actually exist, at exactly
+            // the sequence numbers TicketCreate is supposed to reserve.
+            await AssertTicketsExistAsync(client, throwaway.ClassicAddress, beforeMint + 1, mint, token);
+
             // Too soon: the threshold sits at Sequence + 255, well past the current index.
             long now = await CurrentLedgerAsync(client, token);
             Assert.True(afterMint + SeqDelta > now, $"the test needs the threshold ahead of ledger {now}");
 
+            // Pin the boundary from both sides: one ledger short of the threshold must still
+            // refuse, and reaching the threshold must succeed. AccountDelete's own check runs
+            // against the ledger currently being built, whose index is one past the last
+            // validated ledger that CurrentLedgerAsync reads — so the Sequence + 255 rule,
+            // measured against a validated-ledger read, actually lands at Sequence + 254.
+            // Probed directly against a live node before writing this: Sequence + 253 refuses,
+            // Sequence + 254 succeeds.
+            //
+            // A refused AccountDelete is still a tec* result, which the ledger applies — it
+            // claims the fee and consumes the account's sequence number like any other
+            // transaction. That moves the threshold implied by the account's own sequence, so
+            // it is recomputed from the account after the refusal rather than trusted from the
+            // value captured before it.
+            uint sequenceBeforeBoundary = await sink.SequenceAsync(throwaway.ClassicAddress, validated: false, token);
+            long boundary = sequenceBeforeBoundary + SeqDelta - 1;
+            await CloseLedgersUntilAsync(client, boundary - 1, token);
+
+            long tooSoonLedger = await CurrentLedgerAsync(client, token);
             string tooSoon = await AttemptDeleteAsync(client, sink, throwaway, funder.ClassicAddress, token);
             Assert.Equal("tecTOO_SOON", tooSoon);
 
-            // Nothing but closed ledgers moves it. Drive them until the threshold is met exactly.
-            long threshold = afterMint + SeqDelta;
-            await CloseLedgersUntilAsync(client, threshold, token);
+            uint sequenceAfterRefusal = await sink.SequenceAsync(throwaway.ClassicAddress, validated: false, token);
+            long recomputedBoundary = sequenceAfterRefusal + SeqDelta - 1;
+            await CloseLedgersUntilAsync(client, recomputedBoundary, token);
 
+            long acceptedLedger = await CurrentLedgerAsync(client, token);
             string accepted = await AttemptDeleteAsync(client, sink, throwaway, funder.ClassicAddress, token);
-            Assert.True(accepted is "tesSUCCESS" or "terQUEUED", $"at ledger {threshold} the node answered {accepted}");
+            Assert.True(
+                accepted is "tesSUCCESS" or "terQUEUED",
+                $"refused at ledger {tooSoonLedger} with {tooSoon}, then at ledger {acceptedLedger} the node answered {accepted}");
         }
         finally
         {
@@ -92,6 +121,8 @@ public class AccountDeleteThresholdTests
             await FundAsync(client, sink, funder, account.ClassicAddress, 50_000_000, token);
 
             uint before = await sink.SequenceAsync(account.ClassicAddress, validated: true, token);
+            long ledgerBefore = await CurrentLedgerAsync(client, token);
+            long gapBefore = before + SeqDelta - ledgerBefore;
 
             // An AccountSet with no fields: the cheapest transaction there is.
             uint sequence = await sink.SequenceAsync(account.ClassicAddress, validated: false, token);
@@ -108,10 +139,15 @@ public class AccountDeleteThresholdTests
             await WaitForSequenceAsync(sink, account.ClassicAddress, sequence + 1, token);
 
             uint after = await sink.SequenceAsync(account.ClassicAddress, validated: true, token);
+            long ledgerAfter = await CurrentLedgerAsync(client, token);
+            long gapAfter = after + SeqDelta - ledgerAfter;
 
             // Every transaction raises the sequence, and so raises the threshold with it. Sending
-            // transactions can therefore never close the gap; only ledgers closing can.
+            // transactions can therefore never close the gap; only ledgers closing can. This is
+            // the claim the test is named for: prove it by reading the gap itself, not only the
+            // sequence delta a world that closed the gap some other way could still produce.
             Assert.Equal(before + 1, after);
+            Assert.True(gapAfter >= gapBefore, $"the gap shrank from {gapBefore} to {gapAfter}");
         }
         finally
         {
@@ -163,6 +199,37 @@ public class AccountDeleteThresholdTests
         Assert.True(outcome.EngineResult is "tesSUCCESS" or "terQUEUED", outcome.EngineResult);
 
         await WaitForSequenceAsync(sink, wallet.ClassicAddress, sequence + count + 1, token);
+    }
+
+    /// <summary>
+    /// Reads the account's ledger objects and asserts that exactly <paramref name="count"/>
+    /// Ticket entries exist, carrying the <c>TicketSequence</c> values TicketCreate is supposed
+    /// to reserve: <paramref name="firstTicket"/> through <paramref name="firstTicket"/> + count - 1.
+    /// Reads the raw JSON rather than the typed <c>account_objects</c> model, the way the rest of
+    /// this file confirms what the node actually said.
+    /// </summary>
+    private static async Task AssertTicketsExistAsync(
+        IXrplClient client, string account, uint firstTicket, uint count, CancellationToken token)
+    {
+        XrplResponse<object> response = await client.GRequest<object, AccountObjectsRequest>(
+            new AccountObjectsRequest(account)
+            {
+                Type = LedgerEntryType.Ticket,
+                LedgerIndex = new Xrpl.Models.Common.LedgerIndex(Xrpl.Models.Ledger.LedgerIndexType.Validated),
+            }, token);
+
+        JsonElement objects = response.Raw.ToJsonElement().GetProperty("account_objects");
+
+        HashSet<uint> found = new();
+        foreach (JsonElement entry in objects.EnumerateArray())
+        {
+            found.Add(entry.GetProperty("TicketSequence").GetUInt32());
+        }
+
+        HashSet<uint> expected = new();
+        for (uint i = 0; i < count; i++) expected.Add(firstTicket + i);
+
+        Assert.Equal(expected, found);
     }
 
     /// <summary>Submits an AccountDelete and returns what the node said, without asserting on it.</summary>

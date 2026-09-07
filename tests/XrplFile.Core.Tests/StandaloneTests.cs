@@ -10,6 +10,7 @@ namespace XrplFile.Tests;
 /// Without it these fail on connection — the right outcome: skipping the check silently is worse.
 /// </summary>
 [Trait("Category", "Integration")]
+[Collection("Standalone")]
 public class StandaloneTests
 {
     private static readonly string Endpoint =
