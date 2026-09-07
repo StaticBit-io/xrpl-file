@@ -63,7 +63,7 @@ public class SequenceStrategyTests
         List<int> seen = [];
         await using SequenceStrategy strategy = new(sink, Wallet);
 
-        await strategy.SubmitAllAsync(Memos(4), new Progress<int>(seen.Add), TestContext.Current.CancellationToken);
+        await strategy.SubmitAllAsync(Memos(4), new SynchronousProgress<int>(seen.Add), TestContext.Current.CancellationToken);
 
         Assert.Equal([1, 2, 3, 4], seen.Order().ToArray());
     }

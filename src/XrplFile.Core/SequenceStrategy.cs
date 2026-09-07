@@ -4,6 +4,10 @@ namespace XrplFile;
 
 public sealed class SequenceStrategyOptions
 {
+    /// <summary>
+    /// The fee on every transaction. A caller that has asked the network for its open-ledger fee
+    /// sets this from it.
+    /// </summary>
     public int FeeDrops { get; init; } = 12;
 
     /// <summary>
@@ -21,7 +25,9 @@ public sealed class SequenceStrategyOptions
 /// <summary>
 /// One transaction at a time on the account's sequence: about three a second, and no reserve
 /// beyond the account's own. What the library did before tickets, moved behind the interface
-/// without a change in behaviour.
+/// without a change in behaviour. One difference is visible off the ledger: each phase (chunks,
+/// lists, manifest) now re-reads the account's unvalidated sequence at its own start, where the
+/// old writer read it once for the whole publication.
 /// </summary>
 public sealed class SequenceStrategy(ILedgerSink sink, XrplWallet wallet, SequenceStrategyOptions? options = null) : ISubmissionStrategy
 {
@@ -83,6 +89,9 @@ public sealed class SequenceStrategy(ILedgerSink sink, XrplWallet wallet, Sequen
         return outcome.TxHash;
     }
 
+    /// <summary>
+    /// Waits until the account's validated sequence reaches the one after the last submission.
+    /// </summary>
     private async Task WaitForValidationAsync(string account, uint nextSequence, CancellationToken cancellationToken)
     {
         DateTimeOffset deadline = DateTimeOffset.UtcNow + _options.ValidationTimeout;
