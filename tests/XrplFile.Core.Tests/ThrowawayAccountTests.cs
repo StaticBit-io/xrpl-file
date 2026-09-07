@@ -1,0 +1,194 @@
+using Xrpl.Wallet;
+using Xunit;
+
+namespace XrplFile.Tests;
+
+public class ThrowawayAccountTests
+{
+    private static readonly XrplWallet Throwaway = XrplWallet.Generate();
+
+    private static PublicationEstimate Estimate(long required) =>
+        new(Chunks: 3, Blocks: 1, Lists: 0, Mints: 1, Transactions: 5,
+            FeeDropsPerTransaction: 10, FeeDropsTotal: 50, MaxAttempts: 3, FeeDropsWorstCase: 150,
+            PeakReserveDrops: 800_000, BaseReserveDrops: 1_000_000, RequiredDrops: required, BalanceDrops: 0);
+
+    private static FakeLedgerSource Node(long balance = 0, long current = 5000)
+    {
+        FakeLedgerSource source = new() { Fees = new NetworkFees(10, 1_000_000, 200_000), CurrentLedger = current };
+        source.Balances[Throwaway.ClassicAddress] = balance;
+        return source;
+    }
+
+    [Fact]
+    public async Task The_funding_request_names_the_address_and_what_it_needs()
+    {
+        FakeLedgerSource ledger = Node();
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+
+        FundingRequest request = await account.FundingAsync(Estimate(2_500_000), TestContext.Current.CancellationToken);
+
+        Assert.Equal(Throwaway.ClassicAddress, request.Address);
+        Assert.Equal(2_500_000, request.RequiredDrops);
+        Assert.Equal(0, request.BalanceDrops);
+        Assert.False(request.Covered);
+        Assert.Equal(2_500_000, request.MissingDrops);
+    }
+
+    [Fact]
+    public void The_thing_a_wallet_scans_is_the_address_itself()
+    {
+        FakeLedgerSource ledger = Node();
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+
+        Assert.Equal(Throwaway.ClassicAddress, account.Address);
+        Assert.Equal(
+            Throwaway.ClassicAddress,
+            new FundingRequest(Throwaway.ClassicAddress, 1, 0).QrPayload);
+    }
+
+    [Fact]
+    public async Task Money_that_arrived_covers_the_request()
+    {
+        FakeLedgerSource ledger = Node(balance: 3_000_000);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+
+        FundingRequest request = await account.FundingAsync(Estimate(2_500_000), TestContext.Current.CancellationToken);
+
+        Assert.True(request.Covered);
+        Assert.Equal(0, request.MissingDrops);
+    }
+
+    [Fact]
+    public async Task Waiting_returns_as_soon_as_the_money_is_there()
+    {
+        FakeLedgerSource ledger = Node();
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+
+        Task<FundingRequest> waiting = account.AwaitFundingAsync(
+            Estimate(2_500_000), TimeSpan.FromMilliseconds(5), TestContext.Current.CancellationToken);
+
+        await Task.Delay(20, TestContext.Current.CancellationToken);
+        ledger.Balances[Throwaway.ClassicAddress] = 2_500_000;
+
+        FundingRequest request = await waiting;
+
+        Assert.True(request.Covered);
+    }
+
+    [Fact]
+    public async Task Waiting_stops_when_the_caller_cancels()
+    {
+        FakeLedgerSource ledger = Node();
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+        using CancellationTokenSource giveUp = new(TimeSpan.FromMilliseconds(50));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => account.AwaitFundingAsync(Estimate(2_500_000), TimeSpan.FromMilliseconds(5), giveUp.Token));
+    }
+
+    [Fact]
+    public async Task The_funder_is_read_from_the_payment_that_arrived()
+    {
+        FakeLedgerSource ledger = Node(balance: 3_000_000);
+        // The payment was sent by somebody else and lands in this account's account_tx because it
+        // is the destination — which is what the funder is read out of.
+        ledger.AddAffecting(
+            new LedgerTransaction(
+                "AAAA", 5001, "rWhoeverPaid", Succeeded: true, Validated: true, Result: "tesSUCCESS",
+                MemoTypeHex: null, MemoDataHex: null, MemoFormatHex: null),
+            Throwaway.ClassicAddress);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+
+        string? funder = await account.FunderAsync(5000, TestContext.Current.CancellationToken);
+
+        Assert.Equal("rWhoeverPaid", funder);
+    }
+
+    [Fact]
+    public async Task Nobody_paid_means_nobody_is_proposed()
+    {
+        FakeLedgerSource ledger = Node();
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+
+        Assert.Null(await account.FunderAsync(5000, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task The_account_itself_is_never_proposed_as_its_own_funder()
+    {
+        FakeLedgerSource ledger = Node(balance: 3_000_000);
+        ledger.Add(new LedgerTransaction(
+            "AAAA", 5001, Throwaway.ClassicAddress, Succeeded: true, Validated: true, Result: "tesSUCCESS",
+            MemoTypeHex: null, MemoDataHex: null, MemoFormatHex: null));
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+
+        Assert.Null(await account.FunderAsync(5000, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task The_refund_sends_everything_above_the_reserve_and_the_fee()
+    {
+        FakeLedgerSource ledger = Node(balance: 3_000_000);
+        FakeLedgerSink sink = new(ledger);
+        ThrowawayAccount account = new(sink, ledger, Throwaway);
+
+        RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
+
+        // Three XRP held, one XRP of base reserve stays, ten drops pay for the payment.
+        Assert.Equal(3_000_000 - 1_000_000 - 10, refund.SentDrops);
+        Assert.Equal(1_000_000, refund.LeftBehindDrops);
+        Assert.Equal("rBack", refund.Destination);
+        Assert.Equal("rBack", sink.Submitted[0]["Destination"]);
+    }
+
+    [Fact]
+    public async Task A_balance_that_is_only_the_reserve_has_nothing_to_send_back()
+    {
+        FakeLedgerSource ledger = Node(balance: 1_000_000);
+        FakeLedgerSink sink = new(ledger);
+        ThrowawayAccount account = new(sink, ledger, Throwaway);
+
+        RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, refund.SentDrops);
+        Assert.Empty(sink.Submitted);
+    }
+
+    [Fact]
+    public async Task A_refund_without_a_destination_is_refused()
+    {
+        FakeLedgerSource ledger = Node(balance: 3_000_000);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => account.RefundAsync("   ", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task A_refund_the_node_refuses_is_not_reported_as_money_that_went_home()
+    {
+        FakeLedgerSource ledger = Node(balance: 3_000_000);
+        FakeLedgerSink sink = new(ledger);
+        sink.Refusals[0] = "tecUNFUNDED_PAYMENT";
+        ThrowawayAccount account = new(sink, ledger, Throwaway);
+
+        XrplFileException refused = await Assert.ThrowsAsync<XrplFileException>(
+            () => account.RefundAsync("rBack", TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.SubmitRefused, refused.Error);
+    }
+
+    [Fact]
+    public async Task Deletion_becomes_possible_two_hundred_and_fifty_four_ledgers_past_the_sequence()
+    {
+        FakeLedgerSource ledger = Node(balance: 1_000_000, current: 5000);
+        FakeLedgerSink sink = new(ledger);
+        ThrowawayAccount account = new(sink, ledger, Throwaway);
+
+        // The fake sink hands out sequence 10 for this account.
+        long from = await account.DeletableFromLedgerAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(10 + 254, from);
+        Assert.Equal(254, ThrowawayAccount.DeletionSequenceDelta);
+    }
+}

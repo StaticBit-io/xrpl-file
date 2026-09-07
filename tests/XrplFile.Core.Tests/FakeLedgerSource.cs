@@ -24,6 +24,16 @@ public sealed class FakeLedgerSource : ILedgerSource
     /// </summary>
     private readonly List<(int RemainingSweeps, LedgerTransaction Tx)> _delayed = [];
 
+    /// <summary>
+    /// Accounts a transaction touches besides the one that signed it, by transaction hash.
+    ///
+    /// A node's account_tx answers with every transaction that affects the account, not only the
+    /// ones it sent: an incoming Payment is in that answer with the sender in its Account field.
+    /// Without this the fake could hold no payment made *to* an account, which is the only kind a
+    /// throwaway account ever receives before it has published anything.
+    /// </summary>
+    private readonly Dictionary<string, HashSet<string>> _alsoAffects = new(StringComparer.OrdinalIgnoreCase);
+
     private long _currentLedger = 1;
 
     public long? EarliestLedger { get; set; } = 1;
@@ -44,6 +54,26 @@ public sealed class FakeLedgerSource : ILedgerSource
         }
 
         return this;
+    }
+
+    /// <summary>
+    /// Adds a transaction that a second account is also a party to — a Payment's destination,
+    /// say — so that account_tx for that account answers with it the way a node's would.
+    /// </summary>
+    public FakeLedgerSource AddAffecting(LedgerTransaction tx, params string[] accounts)
+    {
+        lock (_gate)
+        {
+            if (!_alsoAffects.TryGetValue(tx.Hash, out HashSet<string>? touched))
+            {
+                touched = new HashSet<string>(StringComparer.Ordinal);
+                _alsoAffects[tx.Hash] = touched;
+            }
+
+            foreach (string account in accounts) touched.Add(account);
+        }
+
+        return Add(tx);
     }
 
     /// <summary>
@@ -119,7 +149,7 @@ public sealed class FakeLedgerSource : ILedgerSource
 
             IEnumerable<(LedgerTransaction Tx, int Position)> matching = _transactions
                 .Select((tx, position) => (Tx: tx, Position: position))
-                .Where(pair => string.Equals(pair.Tx.Account, account, StringComparison.Ordinal)
+                .Where(pair => Touches(pair.Tx, account)
                     && pair.Tx.LedgerIndex >= fromLedger && pair.Tx.LedgerIndex <= toLedger);
 
             ordered = forward
@@ -133,6 +163,11 @@ public sealed class FakeLedgerSource : ILedgerSource
             yield return tx;
         }
     }
+
+    /// <summary>Whether account_tx for this account would answer with this transaction. Call under the gate.</summary>
+    private bool Touches(LedgerTransaction tx, string account) =>
+        string.Equals(tx.Account, account, StringComparison.Ordinal)
+        || (_alsoAffects.TryGetValue(tx.Hash, out HashSet<string>? touched) && touched.Contains(account));
 
     public Task<long?> EarliestLedgerAsync(CancellationToken cancellationToken) => Task.FromResult(EarliestLedger);
 
