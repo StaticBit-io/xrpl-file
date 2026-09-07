@@ -398,6 +398,63 @@ public class TicketStrategyTests
     }
 
     [Fact]
+    public async Task A_mint_leaves_room_for_the_tickets_the_account_already_holds()
+    {
+        // Two cancelled runs at the default batch of a hundred leave 200 tickets live on the
+        // account: nothing on the XRPL cancels a ticket, and DisposeAsync only drops the queue. A
+        // fresh instance knows nothing of them, and a mint of a hundred asked against its own
+        // bookkeeping takes the account past the protocol's 250 ceiling — tecDIR_FULL, on a run
+        // that has 50 tickets of real headroom to work with.
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeakTickets(Wallet.ClassicAddress, 200);
+
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 100);
+
+        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(100), null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(100, landed.Count);
+        Assert.Equal([.. Enumerable.Range(0, 100)], landed.Select(memo => memo.Index).Order().ToArray());
+
+        // Every mint asked for what the account had room for and no more, so none of them failed.
+        uint[] minted =
+        [
+            .. sink.Submitted
+                .Where(tx => (string)tx["TransactionType"] == "TicketCreate")
+                .Select(tx => Convert.ToUInt32(tx["TicketCount"])),
+        ];
+
+        Assert.NotEmpty(minted);
+        Assert.All(minted, count => Assert.InRange(count, 1u, 50u));
+
+        // The leaked 200 are still there — this run neither spent them nor added to them.
+        Assert.Equal(200, ledger.TicketCounts[Wallet.ClassicAddress]);
+    }
+
+    [Fact]
+    public async Task An_account_already_at_the_ceiling_is_refused_by_name()
+    {
+        // 250 live tickets and no room at all. There is nothing to do but say so: the mint cannot
+        // succeed, and blaming an owner reserve — which is what a failed mint is read as — sends a
+        // person looking for money that would not help.
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeakTickets(Wallet.ClassicAddress, TicketStrategy.MaxLiveTickets);
+
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 100);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => strategy.SubmitAllAsync(Memos(10), null, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.SubmitRefused, error.Error);
+        Assert.Contains("250", error.Message, StringComparison.Ordinal);
+        Assert.Contains("live tickets", error.Message, StringComparison.Ordinal);
+
+        // Not one mint was attempted: the ledger already said there was no room.
+        Assert.DoesNotContain("mint", sink.Events);
+    }
+
+    [Fact]
     public async Task Progress_counts_memos_that_landed_not_memos_that_were_sent()
     {
         FakeLedgerSource ledger = new();

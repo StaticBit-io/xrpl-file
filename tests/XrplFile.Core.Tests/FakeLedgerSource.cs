@@ -197,6 +197,13 @@ public sealed class FakeLedgerSource : ILedgerSource
     /// </summary>
     public Dictionary<string, int> OwnerCounts { get; } = [];
 
+    /// <summary>
+    /// Live tickets each account holds, as AccountRoot's own TicketCount field reports them.
+    /// <see cref="FakeLedgerSink"/> keeps this in step with the tickets it mints and spends, so a
+    /// strategy asking the ledger how much room is left gets the answer a node would give.
+    /// </summary>
+    public Dictionary<string, int> TicketCounts { get; } = [];
+
     public long CurrentLedger
     {
         get { lock (_gate) return _currentLedger; }
@@ -208,10 +215,16 @@ public sealed class FakeLedgerSource : ILedgerSource
     public Task<long> BalanceDropsAsync(string account, CancellationToken cancellationToken) =>
         Task.FromResult(Balances.TryGetValue(account, out long drops) ? drops : 0);
 
-    public Task<AccountState> AccountStateAsync(string account, CancellationToken cancellationToken) =>
-        Task.FromResult(new AccountState(
-            Balances.TryGetValue(account, out long drops) ? drops : 0,
-            OwnerCounts.TryGetValue(account, out int owned) ? owned : 0));
+    public Task<AccountState> AccountStateAsync(string account, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(new AccountState(
+                Balances.TryGetValue(account, out long drops) ? drops : 0,
+                OwnerCounts.TryGetValue(account, out int owned) ? owned : 0,
+                TicketCounts.TryGetValue(account, out int tickets) ? tickets : 0));
+        }
+    }
 
     public Task<long> CurrentLedgerAsync(CancellationToken cancellationToken) => Task.FromResult(CurrentLedger);
 }

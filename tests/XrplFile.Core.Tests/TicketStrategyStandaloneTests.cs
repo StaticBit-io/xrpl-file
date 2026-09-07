@@ -55,6 +55,59 @@ public class TicketStrategyStandaloneTests
     }
 
     [Fact]
+    public async Task A_run_mints_around_the_tickets_an_earlier_one_left_on_the_account()
+    {
+        using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(10));
+        CancellationToken token = timeout.Token;
+
+        IXrplClient client = new XrplClient(Endpoint);
+        await client.Connect(token);
+
+        try
+        {
+            XrplClientLedgerSink sink = new(client);
+            XrplClientLedgerSource source = new(client);
+            XrplWallet writer = await StandaloneFixture.FundedAccountAsync(client, sink, 500_000_000, token);
+            NetworkFees fees = await source.FeesAsync(token);
+
+            // What two cancelled runs leave behind. Minted straight onto the account, so no
+            // strategy instance has ever heard of them.
+            const int Leaked = 200;
+            await StandaloneFixture.MintTicketsAsync(sink, source, writer, Leaked, fees.OpenLedgerFeeDrops, token);
+
+            AccountState carrying = await source.AccountStateAsync(writer.ClassicAddress, token);
+
+            // The field the mint's headroom is now computed from, read back off a real AccountRoot.
+            Assert.Equal(Leaked, carrying.TicketCount);
+            Assert.Equal(Leaked, carrying.OwnerCount);
+
+            IReadOnlyList<MemoSubmission> memos =
+                [.. Enumerable.Range(0, 60).Select(i => new MemoSubmission(MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex([(byte)i]), null))];
+
+            await using TicketStrategy strategy = new(sink, source, writer, new TicketStrategyOptions
+            {
+                TicketsPerBatch = 100,
+                FeeDrops = (int)fees.OpenLedgerFeeDrops,
+            });
+
+            // 200 live and a batch of a hundred: asking for a hundred would be tecDIR_FULL. The
+            // run has 50 tickets of headroom and has to make do with them.
+            IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(memos, null, token);
+
+            Assert.Equal(60, landed.Count);
+
+            AccountState after = await source.AccountStateAsync(writer.ClassicAddress, token);
+
+            // The leftovers are untouched — this run spent only what it minted for itself.
+            Assert.Equal(Leaked, after.TicketCount);
+        }
+        finally
+        {
+            await client.Disconnect();
+        }
+    }
+
+    [Fact]
     public async Task A_ticket_spent_before_its_mint_validated_is_refused_by_the_node()
     {
         using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(5));

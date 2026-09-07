@@ -134,7 +134,9 @@ public sealed class TicketStrategy(
             {
                 throw new XrplFileException(XrplFileError.SubmitRefused,
                     $"no ticket is left for the {pending.Count} memos still waiting: the account already holds "
-                    + $"the {MaxLiveTickets} live tickets the protocol allows and none of them came back");
+                    + $"the {MaxLiveTickets} live tickets the protocol allows. They are either this run's own, "
+                    + "dispatched and never seen in a ledger, or an interrupted run's leftovers — nothing "
+                    + "cancels a ticket, so they have to be spent before this file can go on");
             }
 
             Dictionary<string, int> wanted = new(batch.Count, StringComparer.Ordinal);
@@ -252,15 +254,24 @@ public sealed class TicketStrategy(
     private async Task<long?> EnsureTicketsAsync(int need, CancellationToken cancellationToken)
     {
         long? firstMintLedger = null;
+        string account = _wallet.ClassicAddress;
 
         while (TicketsInHand < need)
         {
-            int room = Math.Min(MaxLiveTickets - LiveTicketCount, MaxTicketsPerMint);
+            // Headroom belongs to the account, not to this instance. A cancelled run leaks its
+            // live tickets (see DisposeAsync), and a strategy counting only what it minted itself
+            // asks for tickets the account has no room for: the mint is answered tecDIR_FULL, and
+            // so is every retry. AccountRoot's TicketCount is the ledger's own number; the
+            // instance's own count is the guard against a node whose validated view has not yet
+            // caught up with a mint this loop has just made.
+            AccountState state = await _source.AccountStateAsync(account, cancellationToken).ConfigureAwait(false);
+            int live = Math.Max(state.TicketCount, LiveTicketCount);
+
+            int room = Math.Min(MaxLiveTickets - live, MaxTicketsPerMint);
             int mint = Math.Min(need - TicketsInHand, room);
 
             if (mint <= 0) return firstMintLedger;
 
-            string account = _wallet.ClassicAddress;
             uint sequence = await _sink.SequenceAsync(account, validated: false, cancellationToken).ConfigureAwait(false);
 
             Dictionary<string, object> transaction = new()

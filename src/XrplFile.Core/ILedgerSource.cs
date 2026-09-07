@@ -10,10 +10,16 @@ namespace XrplFile;
 /// are among them, which is what makes this number matter to anything paying money back off an
 /// account a publication has used.
 /// </param>
-public sealed record AccountState(long BalanceDrops, int OwnerCount)
+/// <param name="TicketCount">
+/// How many of those objects are live tickets — <c>AccountRoot</c>'s own field, absent when there
+/// are none. The protocol caps it at <see cref="TicketStrategy.MaxLiveTickets"/>, and a strategy
+/// that minted against its own bookkeeping instead of this number asked for tickets an account
+/// carrying an earlier run's leftovers had no room for.
+/// </param>
+public sealed record AccountState(long BalanceDrops, int OwnerCount, int TicketCount)
 {
     /// <summary>An account the node has never heard of: it holds nothing and owns nothing.</summary>
-    public static AccountState Absent { get; } = new(0, 0);
+    public static AccountState Absent { get; } = new(0, 0, 0);
 }
 
 /// <summary>The questions a reader asks a node. Everything else in the library is pure.</summary>

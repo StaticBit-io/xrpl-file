@@ -46,6 +46,22 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     /// <summary>Tickets this fake account holds, minted by TicketCreate and spent by use.</summary>
     public HashSet<uint> LiveTickets { get; } = [];
 
+    /// <summary>
+    /// Puts tickets on the account that no strategy instance knows about — what an interrupted run
+    /// leaves behind, since nothing on the XRPL cancels a ticket and DisposeAsync only drops the
+    /// queue. Numbered well above anything a mint here will issue, so they cannot be mistaken for
+    /// one of this run's own.
+    /// </summary>
+    public void LeakTickets(string account, int count)
+    {
+        lock (_gate)
+        {
+            for (uint ticket = 1_000_000; ticket < 1_000_000 + (uint)count; ticket++) LiveTickets.Add(ticket);
+
+            ledger.TicketCounts[account] = LiveTickets.Count;
+        }
+    }
+
     /// <summary>Which submissions (by position) answer terQUEUED and land only on a later sweep.</summary>
     public Dictionary<int, int> QueuedUntilSweep { get; } = [];
 
@@ -170,7 +186,12 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
             {
                 uint at = Convert.ToUInt32(transaction["Sequence"]);
                 uint count = Convert.ToUInt32(transaction["TicketCount"]);
-                bool mintFailed = FailsAs.Contains(position);
+
+                // rippled's kMaxTicketThreshold: a TicketCreate that would take the account past
+                // the ceiling is charged against a ledger and fails there, minting nothing. A fake
+                // that always mints is a fake in which the ceiling does not exist.
+                bool tooMany = LiveTickets.Count + count > TicketStrategy.MaxLiveTickets;
+                bool mintFailed = tooMany || FailsAs.Contains(position);
 
                 // Exactly what rippled does: tickets at+1..at+count, and the sequence lands at
                 // at+1+count. A mint that validates and fails — tecINSUFFICIENT_RESERVE — mints
@@ -182,6 +203,7 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
                 }
 
                 _nextSequence = mintFailed ? at + 1 : at + count + 1;
+                ledger.TicketCounts[(string)transaction["Account"]] = LiveTickets.Count;
 
                 Events.Add("mint");
 
@@ -189,7 +211,10 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
                 ledger.Add(new LedgerTransaction(
                     hash, firstLedger + position / 100 + _ledgersClosed, (string)transaction["Account"],
                     Succeeded: !unvalidated && !mintFailed, Validated: !unvalidated,
-                    Result: unvalidated ? null : mintFailed ? "tecINSUFFICIENT_RESERVE" : "tesSUCCESS",
+                    Result: unvalidated ? null
+                        : tooMany ? "tecDIR_FULL"
+                        : mintFailed ? "tecINSUFFICIENT_RESERVE"
+                        : "tesSUCCESS",
                     MemoTypeHex: null, MemoDataHex: null, MemoFormatHex: null));
 
                 return new SubmitOutcome("tesSUCCESS", hash);
@@ -201,6 +226,8 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
 
                 // A node refuses a ticket it does not hold, which is what terPRE_TICKET says.
                 if (!LiveTickets.Remove(ticket)) return new SubmitOutcome("terPRE_TICKET", hash);
+
+                ledger.TicketCounts[(string)transaction["Account"]] = LiveTickets.Count;
             }
             else
             {

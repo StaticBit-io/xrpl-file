@@ -186,13 +186,17 @@ public class XrplClientLedgerSourceTests
     public async Task An_account_state_says_what_the_account_owns_as_well_as_what_it_holds()
     {
         ScriptedNode node = new();
-        node.Answer("""{"account_data":{"Account":"rWriter","Balance":"25000000","Sequence":7,"OwnerCount":42}}""");
+        node.Answer("""{"account_data":{"Account":"rWriter","Balance":"25000000","Sequence":7,"OwnerCount":42,"TicketCount":9}}""");
 
         AccountState state = await new XrplClientLedgerSource(node.HandleAsync)
             .AccountStateAsync("rWriter", TestContext.Current.CancellationToken);
 
         Assert.Equal(25_000_000, state.BalanceDrops);
         Assert.Equal(42, state.OwnerCount);
+
+        // Tickets are owner objects like any other, but a mint has to know how many of the 250 the
+        // protocol allows are already gone, and OwnerCount cannot say.
+        Assert.Equal(9, state.TicketCount);
     }
 
     [Fact]
@@ -205,6 +209,9 @@ public class XrplClientLedgerSourceTests
             .AccountStateAsync("rWriter", TestContext.Current.CancellationToken);
 
         Assert.Equal(0, state.OwnerCount);
+
+        // AccountRoot omits TicketCount entirely when the account holds none; absent is zero.
+        Assert.Equal(0, state.TicketCount);
     }
 
     [Fact]
@@ -218,6 +225,7 @@ public class XrplClientLedgerSourceTests
 
         Assert.Equal(0, state.BalanceDrops);
         Assert.Equal(0, state.OwnerCount);
+        Assert.Equal(0, state.TicketCount);
     }
 
     [Fact]

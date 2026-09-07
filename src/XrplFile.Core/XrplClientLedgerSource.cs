@@ -134,8 +134,10 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
         long drops = Text(data, "Balance") is { } balance && long.TryParse(balance, out long parsed) ? parsed : 0;
 
-        // An account owning nothing may omit OwnerCount entirely; absent and zero mean the same.
-        return new AccountState(drops, (int)(Number(data, "OwnerCount") ?? 0));
+        // An account owning nothing may omit OwnerCount entirely, and one holding no tickets omits
+        // TicketCount the same way; absent and zero mean the same for both.
+        return new AccountState(
+            drops, (int)(Number(data, "OwnerCount") ?? 0), (int)(Number(data, "TicketCount") ?? 0));
     }
 
     public async Task<long> CurrentLedgerAsync(CancellationToken cancellationToken)
