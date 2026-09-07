@@ -14,6 +14,8 @@ public enum XrplFileError
     SubmitRefused,
     ValidationTimeout,
     NodeUnreachable,
+    InsufficientBalance,
+    BudgetExceeded,
 }
 
 public sealed class XrplFileException : Exception
