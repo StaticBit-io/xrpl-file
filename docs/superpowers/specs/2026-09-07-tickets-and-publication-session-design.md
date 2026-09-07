@@ -170,7 +170,7 @@ person is shown it before they spend money.
 | Quantity | Where it comes from |
 |---|---|
 | Transactions in total | chunks, plus block-list memos, plus the manifest, plus one mint per batch |
-| Fee per transaction | the node's open-ledger fee, worst-cased across every attempt a memo may need |
+| Fee per transaction | the node's open-ledger fee, as read; the worst-casing over retries lives in the balance below |
 | Peak reserve | the run's memo count, capped at the protocol's live-ticket ceiling of 250, times the incremental reserve from `server_state` |
 | Balance required | the worst-case fees, plus the peak reserve, plus the account's base reserve |
 
@@ -294,7 +294,7 @@ a second of wall-clock ledger-closing.
 |---|---|
 | Does `tecTOO_SOON` appear where predicted, short of the boundary | Yes — `AccountDelete` at `Sequence + 253` (a validated-ledger read) answered `tecTOO_SOON` |
 | Where does the boundary actually sit, against a validated-ledger read | `Sequence + 254` — the first attempt at that index answered `tesSUCCESS` |
-| Does an ordinary (sequence-consuming) transaction close the gap | No — a dedicated test measured the gap (`sequence + 254 − current ledger`) before and after a no-op `AccountSet`: the transaction advanced the sequence by one and the ledger index by one, so the gap held exactly steady rather than closing |
+| Does an ordinary (sequence-consuming) transaction close the gap | No — a dedicated test measured the gap in rippled's own terms (`sequence + 255 − current ledger`) before and after a no-op `AccountSet`: the transaction advanced the sequence by one and the ledger index by one, so the gap held exactly steady rather than closing |
 | Does minting tickets push the boundary away, as claimed | Yes — minting tickets for a throwaway account moved its sequence forward by the ticket count plus one, and so moved its deletable-from ledger forward by the same amount |
 | How fast the boundary can be crossed on a stand | About 260 forced ledger closes, from just after a mint to the boundary, took 0.694 seconds |
 
