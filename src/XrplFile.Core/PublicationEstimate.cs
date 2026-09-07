@@ -9,7 +9,7 @@ namespace XrplFile;
 /// <param name="Chunks">Memos carrying file bytes.</param>
 /// <param name="Blocks">Merkle blocks the chunks group into.</param>
 /// <param name="Lists">Memos carrying the block list; zero when there is one block.</param>
-/// <param name="Mints">TicketCreate transactions the batches will need, with nothing retried.</param>
+/// <param name="Mints">TicketCreate transactions the batches will need, with nothing retried. The writer batches three times over — the chunks, the block list, the manifest — and each pass mints from an empty queue, because minting is exact and a pass never inherits a ticket from the one before it.</param>
 /// <param name="Transactions">Everything above plus the manifest. The run as it goes when nothing is retried — what a person is shown, because inflating the transaction count on screen would mislead the other way.</param>
 /// <param name="FeeDropsPerTransaction">The node's price at the moment of the estimate.</param>
 /// <param name="FeeDropsTotal">That price across <see cref="Transactions"/>: the run as it goes, nothing retried.</param>
@@ -67,7 +67,12 @@ public static class PublicationEstimator
 
         long memos = chunks + lists + 1;
         int batch = Math.Min(ticketsPerBatch, TicketStrategy.MaxTicketsPerMint);
-        int mints = (int)((memos + batch - 1) / batch);
+
+        // Three batching passes, not one: XrplFileWriter calls SubmitAllAsync for the chunks, then
+        // for the block list when there is one, then for the manifest. Minting is exact, so every
+        // pass starts with an empty queue and mints for itself — counting one pass over all the
+        // memos reports fewer mints and fewer transactions than the run actually makes.
+        int mints = Batches(chunks, batch) + Batches(lists, batch) + Batches(1, batch);
         long transactions = memos + mints;
 
         NetworkFees fees = await source.FeesAsync(cancellationToken).ConfigureAwait(false);
@@ -107,6 +112,12 @@ public static class PublicationEstimator
                 $"the run needs {estimate.RequiredDrops} drops and the account holds {estimate.BalanceDrops}");
         }
     }
+
+    /// <summary>
+    /// How many mints one batching pass over this many memos needs. A pass with no memos at all —
+    /// a single-block file's absent block list — mints nothing.
+    /// </summary>
+    private static int Batches(long memos, int batch) => (int)((memos + batch - 1) / batch);
 
     /// <summary>
     /// How many memos the block list takes. Counted by packing real entries rather than by

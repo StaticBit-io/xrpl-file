@@ -20,9 +20,10 @@ public class PublicationEstimateTests
         Assert.Equal(3, estimate.Chunks);
         Assert.Equal(1, estimate.Blocks);
         Assert.Equal(0, estimate.Lists);
-        // Three chunks, no list, one manifest, and one mint to carry the four.
-        Assert.Equal(1, estimate.Mints);
-        Assert.Equal(5, estimate.Transactions);
+        // Three chunks and one manifest, each batching pass minting for itself: one mint for the
+        // chunks and one for the manifest.
+        Assert.Equal(2, estimate.Mints);
+        Assert.Equal(6, estimate.Transactions);
     }
 
     [Fact]
@@ -35,9 +36,10 @@ public class PublicationEstimateTests
         Assert.Equal(1025, estimate.Chunks);
         Assert.Equal(2, estimate.Blocks);
         Assert.Equal(1, estimate.Lists);
-        // 1027 memos over batches of a hundred is eleven mints.
-        Assert.Equal(11, estimate.Mints);
-        Assert.Equal(1038, estimate.Transactions);
+        // Eleven mints for 1025 chunks over batches of a hundred, one for the list, one for the
+        // manifest.
+        Assert.Equal(13, estimate.Mints);
+        Assert.Equal(1040, estimate.Transactions);
     }
 
     [Fact]
@@ -47,7 +49,8 @@ public class PublicationEstimateTests
             Node(100_000_000, fee: 15), "rWriter", fileBytes: 2500, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
 
         Assert.Equal(15, estimate.FeeDropsPerTransaction);
-        Assert.Equal(75, estimate.FeeDropsTotal);
+        // Six transactions: three chunks, the manifest, and a mint for each of the two passes.
+        Assert.Equal(90, estimate.FeeDropsTotal);
     }
 
     [Fact]
@@ -59,10 +62,10 @@ public class PublicationEstimateTests
         // Four memos, so four tickets are ever live at once, well under the protocol's 250 cap.
         Assert.Equal(4 * 200_000, estimate.PeakReserveDrops);
         Assert.Equal(1_000_000, estimate.BaseReserveDrops);
-        // A computed literal, not the sum of the instance's own fields: 5 transactions * 3
-        // default max attempts * 10 drops fee = 150 worst-case fee, plus the 800,000-drop peak
+        // A computed literal, not the sum of the instance's own fields: 6 transactions * 3
+        // default max attempts * 10 drops fee = 180 worst-case fee, plus the 800,000-drop peak
         // reserve and the 1,000,000-drop base reserve.
-        Assert.Equal(1_800_150, estimate.RequiredDrops);
+        Assert.Equal(1_800_180, estimate.RequiredDrops);
     }
 
     [Fact]
@@ -83,12 +86,13 @@ public class PublicationEstimateTests
     {
         // ticketsPerBatch of 1000 exceeds TicketStrategy.MaxTicketsPerMint (250): the mint count
         // must use the clamped batch size, not the caller's number, or it undercounts mints.
-        // 1027 memos over batches of 250 is five mints (250*4 = 1000, 27 left over).
+        // 1025 chunks over batches of 250 is five mints (250*4 = 1000, 25 left over), plus one
+        // for the list pass and one for the manifest pass.
         PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
             Node(500_000_000), "rWriter", fileBytes: 1_024_001, ticketsPerBatch: 1000, TestContext.Current.CancellationToken);
 
-        Assert.Equal(5, estimate.Mints);
-        Assert.Equal(1032, estimate.Transactions);
+        Assert.Equal(7, estimate.Mints);
+        Assert.Equal(1034, estimate.Transactions);
     }
 
     [Fact]
@@ -98,11 +102,11 @@ public class PublicationEstimateTests
             Node(100_000_000, fee: 15), "rWriter", fileBytes: 2500, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, estimate.MaxAttempts);
-        // 5 transactions * 3 max attempts * 15 drops fee.
-        Assert.Equal(225, estimate.FeeDropsWorstCase);
+        // 6 transactions * 3 max attempts * 15 drops fee.
+        Assert.Equal(270, estimate.FeeDropsWorstCase);
         Assert.Equal(estimate.Transactions * estimate.MaxAttempts * estimate.FeeDropsPerTransaction, estimate.FeeDropsWorstCase);
         // FeeDropsTotal keeps its present meaning: the run as it goes, nothing retried.
-        Assert.Equal(75, estimate.FeeDropsTotal);
+        Assert.Equal(90, estimate.FeeDropsTotal);
     }
 
     [Fact]
@@ -112,10 +116,10 @@ public class PublicationEstimateTests
             Node(100_000_000), "rWriter", fileBytes: 2500, ticketsPerBatch: 100, TestContext.Current.CancellationToken, maxAttempts: 5);
 
         Assert.Equal(5, estimate.MaxAttempts);
-        // 5 transactions * 5 max attempts * 10 drops fee.
-        Assert.Equal(250, estimate.FeeDropsWorstCase);
+        // 6 transactions * 5 max attempts * 10 drops fee.
+        Assert.Equal(300, estimate.FeeDropsWorstCase);
         // What is shown to a person does not move just because the worst case grew.
-        Assert.Equal(50, estimate.FeeDropsTotal);
+        Assert.Equal(60, estimate.FeeDropsTotal);
     }
 
     [Fact]
@@ -146,7 +150,7 @@ public class PublicationEstimateTests
     [Fact]
     public async Task A_run_above_the_callers_ceiling_is_refused_before_the_balance_is_blamed()
     {
-        // The balance here is also short of RequiredDrops (1,800,150 at these defaults), so a
+        // The balance here is also short of RequiredDrops (1,800,180 at these defaults), so a
         // Require that checked the balance first would throw InsufficientBalance instead. This
         // only passes when the ceiling really is checked before the balance.
         PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
@@ -157,6 +161,36 @@ public class PublicationEstimateTests
         XrplFileException error = Assert.Throws<XrplFileException>(() => PublicationEstimator.Require(estimate, budgetDrops: 100));
 
         Assert.Equal(XrplFileError.BudgetExceeded, error.Error);
+    }
+
+    [Fact]
+    public async Task Every_batching_pass_mints_for_itself()
+    {
+        // 50 chunks, one block, no list. The writer calls SubmitAllAsync once for the chunks and
+        // once for the manifest, and each call mints from an empty queue — minting is exact, so a
+        // call never inherits a ticket from the one before it. Counting one batching pass over all
+        // the memos describes a run nobody makes.
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            Node(100_000_000), "rWriter", fileBytes: 50_000, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
+
+        Assert.Equal(50, estimate.Chunks);
+        Assert.Equal(1, estimate.Blocks);
+        Assert.Equal(0, estimate.Lists);
+        Assert.Equal(2, estimate.Mints);
+        Assert.Equal(53, estimate.Transactions);
+    }
+
+    [Fact]
+    public async Task A_block_list_is_a_batching_pass_of_its_own()
+    {
+        // 1025 chunks over batches of a hundred is eleven mints for the chunks; the single list
+        // memo is a second SubmitAllAsync call and mints once for itself, and the manifest a third.
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            Node(500_000_000), "rWriter", fileBytes: 1_024_001, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, estimate.Lists);
+        Assert.Equal(13, estimate.Mints);
+        Assert.Equal(1040, estimate.Transactions);
     }
 
     [Fact]

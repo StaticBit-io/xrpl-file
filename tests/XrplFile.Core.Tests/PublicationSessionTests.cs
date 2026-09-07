@@ -54,9 +54,10 @@ public class PublicationSessionTests : IDisposable
         Assert.Equal(3, report.ChunkHashes.Count);
         Assert.Empty(report.ListHashes);
 
-        // Four memos and the one mint the approved estimate priced.
-        Assert.Equal(5, report.Transactions);
-        Assert.Equal(5 * NodeFeeDrops, report.FeeDropsEstimated);
+        // Four memos and the two mints the approved estimate priced — one batching pass for the
+        // chunks and one for the manifest.
+        Assert.Equal(6, report.Transactions);
+        Assert.Equal(6 * NodeFeeDrops, report.FeeDropsEstimated);
         Assert.Null(report.StateSaveFailure);
         Assert.True(report.FinishedAt >= report.StartedAt);
     }
@@ -192,7 +193,7 @@ public class PublicationSessionTests : IDisposable
 
         // The estimate the run was approved against counts the mints a ticketed strategy pays for,
         // not only the memos. A report that counts fewer states less than the account was debited.
-        Assert.Equal(1, estimate.Mints);
+        Assert.Equal(2, estimate.Mints);
         Assert.Equal(estimate.Transactions, report.Transactions);
     }
 
