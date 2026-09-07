@@ -53,18 +53,96 @@ const { manifest, bytes } = await reader.read(link, ({ chunksDone, chunksTotal }
 
 ## Publishing a file (.NET)
 
+Publishing is a session, not a single call: it prices the run before spending anything, writes a
+state file as it goes, and hands back a report once the manifest is in the ledger. Underneath,
+the file still moves one `AccountSet` per 1000 bytes, then a block list, then a read-back against
+the whole file's Merkle root, and only then the manifest — a run that breaks before the manifest
+lands leaves no link behind, whichever strategy is carrying the chunks.
+
 ```csharp
 XrplWallet wallet = XrplWallet.FromSeed(Environment.GetEnvironmentVariable("XRPL_SEED")!);
-XrplFileWriter writer = new(new XrplClientLedgerSink(client), new XrplClientLedgerSource(client));
+XrplClientLedgerSource source = new(client);
+XrplClientLedgerSink sink = new(client);
+SessionOptions options = new() { StateDirectory = "runs", BudgetDrops = 5_000_000 };
 
-PublishResult published = await writer.PublishAsync(
-    File.ReadAllBytes("cover.png"), "image/png", "cover.png", wallet, "mainnet", progress: null, CancellationToken.None);
+// What it will cost, before any of it is spent.
+PublicationEstimate estimate = await PublicationSession.EstimateAsync(
+    source, wallet.ClassicAddress, new FileInfo("cover.png").Length, options, CancellationToken.None);
 
-Console.WriteLine(published.Link);
+Console.WriteLine($"{estimate.Transactions} transactions, {estimate.RequiredDrops} drops needed, {estimate.BalanceDrops} held");
+
+await using TicketStrategy strategy = new(sink, source, wallet);
+PublicationSession session = await PublicationSession.StartAsync(
+    strategy, source, File.ReadAllBytes("cover.png"), "image/png", "cover.png",
+    wallet.ClassicAddress, keyReference: "my-key", "mainnet", options, CancellationToken.None);
+
+PublicationReport report = await session.RunAsync(
+    new Progress<PublishProgress>(p => Console.WriteLine($"{p.Stage} {p.Done}/{p.Total}")), CancellationToken.None);
+
+Console.WriteLine(report.Link);
 ```
 
-The writer sends one `AccountSet` per 1000 bytes, then the block list, reads everything back,
-and only then writes the manifest. A run that breaks half-way leaves no link behind.
+`TicketStrategy` mints tickets and rides them, so chunks go to the ledger in parallel rather than
+one after another — on a standalone stand, 200 chunk memos landed in about 22 seconds on tickets
+against 50-plus seconds projected for one at a time. `SequenceStrategy` is the slower alternative,
+one `AccountSet` at a time on the account's own sequence; it needs no reserve beyond what the
+account already holds, which is what to reach for when the account cannot carry a batch of
+tickets.
+
+The session writes a state file before the first transaction. If the process dies mid-run,
+`PublicationSession.ResumeAsync` picks it back up from that file — but the file is where to look,
+not what to believe: a resume reconciles against the ledger itself (the same `account_tx` sweep a
+strategy uses) rather than trusting what the file last recorded, because a crash can fall between
+a submission and its record. The state file never holds a seed; it holds a `keyReference` string
+the caller chose, meaningful only to whatever key store the caller uses to resolve it back to a
+signer.
+
+### Publishing without a funded account
+
+An application can publish on behalf of somebody who never hands it a seed. A key is generated
+for this one run, its address is shown for the person to fund from a wallet they already trust,
+and the library never asks for, holds, or moves the account the money came from — the whole
+surface is *show this address, watch this address, spend from this key*.
+
+```csharp
+XrplWallet throwaway = XrplWallet.Generate();
+ThrowawayAccount account = new(sink, source, throwaway);
+long startedIn = await source.CurrentLedgerAsync(CancellationToken.None);
+
+PublicationEstimate estimate = await PublicationSession.EstimateAsync(
+    source, throwaway.ClassicAddress, new FileInfo("cover.png").Length, options, CancellationToken.None);
+
+// account.Address (== request.QrPayload) goes on screen next to estimate.RequiredDrops, as text
+// to copy and as a QR code to scan. The money may arrive from a phone a minute from now or an
+// hour from now, so the wait has no deadline of its own.
+FundingRequest request = await account.AwaitFundingAsync(estimate, TimeSpan.FromSeconds(5), CancellationToken.None);
+
+await using TicketStrategy strategy = new(sink, source, throwaway);
+PublicationSession session = await PublicationSession.StartAsync(
+    strategy, source, File.ReadAllBytes("cover.png"), "image/png", "cover.png",
+    throwaway.ClassicAddress, keyReference: "throwaway", "mainnet", options, CancellationToken.None);
+
+PublicationReport report = await session.RunAsync(null, CancellationToken.None);
+
+// A proposal, read from whoever's payment funded the account — never assumed, and RefundAsync
+// takes only what the caller actually passes, so a person confirms it or types another address.
+string funder = await account.FunderAsync(startedIn, CancellationToken.None)
+    ?? throw new InvalidOperationException("nobody has paid this account yet");
+
+RefundResult refund = await account.RefundAsync(funder, CancellationToken.None);
+```
+
+`RefundAsync` sends back everything the account may actually spend — the balance less the fee
+and less every reserve the account is still under. The base reserve always stays behind: getting
+it back needs `AccountDelete`, and that refuses with `tecTOO_SOON` until the account's sequence
+plus 254 ledgers has passed, counted against the last *validated* ledger index (rippled's own
+rule reads `+ 255` against the ledger it is still building, one ahead of what a client can read —
+see the design document for the one-ledger difference and how it was measured). A ticketed
+transaction — everything this library sends once tickets are minted — never moves the account's
+sequence at all, so a publication that ran entirely on tickets leaves the boundary exactly where
+its last mint left it: nothing a caller submits afterwards brings it closer, only ledgers closing
+does. `ThrowawayAccount.DeletableFromLedgerAsync` reports the ledger index at which deletion (not
+implemented by this library) would stop refusing.
 
 ## Building and testing
 

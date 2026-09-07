@@ -149,9 +149,16 @@ mechanism. The batch size stays an option, defaulting well under both.
 ### Reserve figures come from the node
 
 Reserves have changed and will change again. The strategy and the estimate read
-`reserve_base_xrp` and `reserve_inc_xrp` from `server_state` rather than carrying a constant.
-The peak reserve of a run is the batch size multiplied by the incremental reserve, plus the
-account's base reserve.
+`reserve_base` and `reserve_inc` off `server_state`'s `validated_ledger` rather than carrying a
+constant.
+
+The peak reserve of a run is not the batch size multiplied by the incremental reserve. A ticket
+dispatched to the node but never confirmed on a ledger stays counted as live for as long as the
+strategy instance lives — nothing about the batch loop bounds how many of those can accumulate
+across retries — so the batch size understates the true worst case. The estimate instead prices
+the peak at the protocol's own live-ticket ceiling (`TicketStrategy.MaxLiveTickets`, 250),
+capped by the run's own memo count when the file is smaller than that: `min(memos, 250)` tickets'
+worth of owner reserve, plus the account's base reserve.
 
 ## 3. The publication session
 
@@ -163,9 +170,9 @@ person is shown it before they spend money.
 | Quantity | Where it comes from |
 |---|---|
 | Transactions in total | chunks, plus block-list memos, plus the manifest, plus one mint per batch |
-| Fee per transaction | the node's open-ledger fee, capped by an option |
-| Peak reserve | the batch size multiplied by the incremental reserve from `server_state` |
-| Balance required | the fees, plus the peak reserve, plus the account's base reserve |
+| Fee per transaction | the node's open-ledger fee, worst-cased across every attempt a memo may need |
+| Peak reserve | the run's memo count, capped at the protocol's live-ticket ceiling of 250, times the incremental reserve from `server_state` |
+| Balance required | the worst-case fees, plus the peak reserve, plus the account's base reserve |
 
 The session refuses to start when the balance does not survive the worst case, or when the worst
 case exceeds the caller's budget ceiling. The ceiling is the same rail the war-and-peace
@@ -174,9 +181,11 @@ uploader carried as `--budget-xrp`.
 ### State
 
 State survives the process dying. It holds the file's identity (root, size, chunk size, MIME
-type, name), the network and the writer's address, the strategy and its options, the phase
+type, name), the network and the writer's address, a reference to the signing key, the phase
 reached, the ledger the run started in, and the map from index to transaction hash for what has
-landed.
+landed. It does not hold the strategy or its options: a resume is handed a fresh strategy built
+however the caller likes, and `ResumeAsync` checks only that it signs as the writer the state
+names and prices a transaction the same way the estimate does.
 
 The hash map is not what resumption trusts — the next section says why — but it is not
 redundant either. It carries the run's report through an interruption, and the starting ledger
@@ -204,8 +213,9 @@ can enumerate the unfinished ones. Part C turns that into a screen.
 The run dataset in the shape war-and-peace produced: transaction hashes, ledgers, fees, timings,
 per-ledger counts. It is what an application shows after a success and offers to save.
 
-Progress grows to what an interface needs: the phase, how much is done, the total, the current
-rate and an estimate of what remains.
+Progress reports the phase, how much is done and the total (`PublishProgress`); a rate and an
+estimate of what remains are for an interface to derive from the timestamps between reports,
+not fields this library computes and hands over.
 
 ## 4. The throwaway account
 
@@ -234,18 +244,33 @@ entered and confirmed.
 `AccountDelete` would return the base reserve too, and it is unavailable here for a long time.
 
 Its precondition in `AccountDelete.cpp` is that the account's sequence plus 255 must not exceed
-the current ledger index, or the answer is `tecTOO_SOON`. A newly created account's sequence is
-the index of the ledger that created it. Every `TicketCreate` then moves that sequence forward
-by the number of tickets plus one, while the ledger index advances once every four seconds or
-so.
+the ledger rippled is currently *building* — `Sequence + 255 > view.seq()` refuses with
+`tecTOO_SOON`. That is not quite the number a client can act on. A client never reads the ledger
+being built; it reads the last *validated* ledger, whose index is one behind it. Task 0 measured
+the two readings against a live standalone node rather than trusting the arithmetic by itself:
+against a validated-ledger read, `Sequence + 253` still answered `tecTOO_SOON` and
+`Sequence + 254` — one short of the source rule, not equal to it — answered `tesSUCCESS`. That
+single ledger is the whole gap between "the index rippled's own rule is written against" and
+"the index a client can actually see", and it is why this library's constant
+(`ThrowawayAccount.DeletionSequenceDelta`) is **254**, not 255. Both numbers are correct
+descriptions of the same boundary; they describe it from different sides of a one-ledger lag, and
+a caller who reads a validated ledger index — as every ordinary XRPL client does — needs the
+254 one.
+
+A newly created account's sequence is the index of the ledger that created it. Every
+`TicketCreate` then moves that sequence forward by the number of tickets plus one, while the
+ledger index advances once every four seconds or so on its own. Nothing else moves it faster: a
+ticketed transaction — every `AccountSet` this library sends once tickets are minted — carries a
+`TicketSequence` instead of a `Sequence` and does not touch the sequence at all, so a publication
+that runs entirely on tickets leaves the account's sequence exactly where its last mint left it.
+Submitting more of them, ticketed or not, cannot shorten the wait: an ordinary (non-ticketed)
+transaction would move the sequence *up*, which is the wrong direction, and a ticketed one
+does not move it at all. Only ledgers closing brings the boundary closer.
 
 | File | Mints | Sequence moves ahead by about | Wait before deletion |
 |---|---|---|---|
 | 1 MB | 4 | 1000 | an hour and a half |
 | 20 MB | 80 | 20000 | a day |
-
-Making further transactions cannot help: they move the sequence up, which is the wrong
-direction. Only the ledger index catching up makes deletion possible.
 
 The remainder is therefore returned by payment, and the base reserve stays on a dead account.
 That is the honest price of this mode and the estimate states it before the run starts, rather
@@ -259,14 +284,35 @@ when the moment arrives.
 Tickets do not stand in the way. `ltTICKET` maps to `removeTicketFromLedger` in `AccountDelete`'s
 deleter table, so unspent tickets are cleaned up by the deletion itself.
 
-### One thing to measure before it is believed
+### What the stand measured
 
-Everything in this section about deletion timing is read from rippled's source, not measured.
-The first task of the plan settles it on the standalone stand, where ledgers close on command:
-create an account, mint tickets, attempt the deletion, receive `tecTOO_SOON`, drive
-`ledger_accept` to the predicted threshold, and confirm the deletion succeeds exactly there. The
-same test confirms the opposite direction, that submitting more transactions only pushes the
-threshold further away. The formula reaches the application only after the stand agrees with it.
+Task 0 of the plan settled this section's claims on the standalone stand, where `ledger_accept`
+closes ledgers on command rather than on a clock, so the whole boundary could be walked in under
+a second of wall-clock ledger-closing.
+
+| Question | Answer |
+|---|---|
+| Does `tecTOO_SOON` appear where predicted, short of the boundary | Yes — `AccountDelete` at `Sequence + 253` (a validated-ledger read) answered `tecTOO_SOON` |
+| Where does the boundary actually sit, against a validated-ledger read | `Sequence + 254` — the first attempt at that index answered `tesSUCCESS` |
+| Does an ordinary (sequence-consuming) transaction close the gap | No — a dedicated test measured the gap (`sequence + 254 − current ledger`) before and after a no-op `AccountSet`: the transaction advanced the sequence by one and the ledger index by one, so the gap held exactly steady rather than closing |
+| Does minting tickets push the boundary away, as claimed | Yes — minting tickets for a throwaway account moved its sequence forward by the ticket count plus one, and so moved its deletable-from ledger forward by the same amount |
+| How fast the boundary can be crossed on a stand | About 260 forced ledger closes, from just after a mint to the boundary, took 0.694 seconds |
+
+The naive `Sequence + 255` reading was the first thing tried, and it did not surface the
+off-by-one: a threshold set one ledger past the real boundary still answers `tesSUCCESS`, so a
+single probe from only one side cannot tell a correct rule from one that is off by one in the
+safe direction. It took probing the boundary from both sides — one ledger short and exactly at
+it — to find that the real one sits at `+254`, not `+255`; see the class doc on
+`ThrowawayAccount.DeletionSequenceDelta` for the constant this measurement produced.
+
+The ticketed path's own speed was measured twice more, once the strategy existed to measure it
+against. Two hundred chunk memos, minting included, landed in 21.8 seconds against the same
+stand (Task 3) — well under the 50-plus seconds the same 200 transactions would take one at a
+time on `SequenceStrategy`'s roughly 250 ms ledger-close cadence, and worse again on a real
+network's queue and fee escalation. A publication interrupted after its chunks and finished by a
+second session — killed mid-run, rebuilt from the state file, run to completion, read back byte
+for byte — took about 112 seconds end to end on the same stand (Task 6), tickets, interruption
+and resumption all included.
 
 ## 5. Testing
 
@@ -300,7 +346,7 @@ need changing, the sequential path has changed behaviour, which this work does n
 | `WriterOptions.BatchSize` | moves to the sequential strategy's options |
 | `ILedgerSink` | unchanged. Its `SubmitAsync` already returns on the node's answer without waiting for validation, and calling it concurrently is what parallel submission needs. A ticketed transaction differs only in the dictionary the caller builds |
 | `ILedgerSource` | gains what the estimate reads: the open-ledger fee, the reserves from `server_state`, and an account's balance |
-| `XrplFileError` | gains `InsufficientBalance` (the account cannot carry the run the estimate describes), `BudgetExceeded` (the worst case is above the caller's ceiling) and `ResumeMismatch` (the state names a different file or a different writer) |
+| `XrplFileError` | gains `InsufficientBalance` (the account cannot carry the run the estimate describes), `BudgetExceeded` (the worst case is above the caller's ceiling), `FeeMismatch` (the strategy prices a transaction differently from the estimate it was approved against), `SessionAlreadyRun` (a session that has run, or is running, was asked to run again) and `ResumeMismatch` (the state names a different file, a different writer, or a run that already finished) |
 | Tests | writer tests move onto the sequential strategy unchanged |
 
 ## Rejected alternatives
