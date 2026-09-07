@@ -16,8 +16,11 @@ public class XrplFileWriterTests
         FakeLedgerSink sink = new(ledger);
         List<PublishProgress> progress = [];
 
-        PublishResult result = await new XrplFileWriter(sink, ledger, new WriterOptions { BatchSize = 200 }).PublishAsync(
-            file, "application/octet-stream", "vector.bin", Wallet, "testnet",
+        await using SequenceStrategy strategy = new(sink, Wallet, new SequenceStrategyOptions { BatchSize = 200 });
+        XrplFileWriter writer = new(strategy, ledger);
+
+        PublishResult result = await writer.PublishAsync(
+            file, "application/octet-stream", "vector.bin", Wallet.ClassicAddress, "testnet",
             new Progress<PublishProgress>(progress.Add), TestContext.Current.CancellationToken);
 
         Assert.Equal(1025, result.ChunkHashes.Count);
@@ -43,11 +46,14 @@ public class XrplFileWriterTests
     {
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
-        WriterOptions options = new() { BatchSize = 100 };
+        SequenceStrategyOptions options = new() { BatchSize = 100 };
         byte[] file = VectorStream.Bytes("batch", 2_500_000);
 
-        PublishResult result = await new XrplFileWriter(sink, ledger, options).PublishAsync(
-            file, "application/octet-stream", "batch.bin", Wallet, "testnet", null, TestContext.Current.CancellationToken);
+        await using SequenceStrategy strategy = new(sink, Wallet, options);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        PublishResult result = await writer.PublishAsync(
+            file, "application/octet-stream", "batch.bin", Wallet.ClassicAddress, "testnet", null, TestContext.Current.CancellationToken);
 
         Assert.Equal(2500, result.ChunkHashes.Count);
 
@@ -70,8 +76,11 @@ public class XrplFileWriterTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
 
-        await new XrplFileWriter(sink, ledger).PublishAsync(
-            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken);
+        await using SequenceStrategy strategy = new(sink, Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        await writer.PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "testnet", null, TestContext.Current.CancellationToken);
 
         int firstChunk = sink.Events.IndexOf("chunk");
         int lastChunk = sink.Events.LastIndexOf("chunk");
@@ -87,8 +96,11 @@ public class XrplFileWriterTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
 
-        await new XrplFileWriter(sink, ledger).PublishAsync(
-            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken);
+        await using SequenceStrategy strategy = new(sink, Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        await writer.PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "testnet", null, TestContext.Current.CancellationToken);
 
         Assert.Equal(4, sink.Submitted.Count);   // three chunks and the manifest; one block, no list
         Assert.All(sink.Submitted, tx =>
@@ -108,8 +120,11 @@ public class XrplFileWriterTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
 
-        PublishResult result = await new XrplFileWriter(sink, ledger).PublishAsync(
-            VectorStream.Bytes("s", 1500), "text/plain", "s.txt", Wallet, "mainnet", null, TestContext.Current.CancellationToken);
+        await using SequenceStrategy strategy = new(sink, Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        PublishResult result = await writer.PublishAsync(
+            VectorStream.Bytes("s", 1500), "text/plain", "s.txt", Wallet.ClassicAddress, "mainnet", null, TestContext.Current.CancellationToken);
 
         LedgerTransaction chunk1 = (await ledger.TransactionAsync(result.ChunkHashes[1], TestContext.Current.CancellationToken))!;
         Assert.Equal(1, MemoLayout.ChunkIndexOf(chunk1.MemoTypeHex));
@@ -130,8 +145,11 @@ public class XrplFileWriterTests
         FakeLedgerSink sink = new(ledger);
         sink.Refusals[1] = "tecINSUFFICIENT_RESERVE";
 
-        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
-            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken));
+        await using SequenceStrategy strategy = new(sink, Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "testnet", null, TestContext.Current.CancellationToken));
 
         Assert.Equal(XrplFileError.SubmitRefused, error.Error);
         Assert.Contains("tecINSUFFICIENT_RESERVE", error.Message, StringComparison.Ordinal);
@@ -146,8 +164,11 @@ public class XrplFileWriterTests
         FakeLedgerSink sink = new(ledger);
         sink.StoredAs[2] = _ => new string('0', 1000);
 
-        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
-            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken));
+        await using SequenceStrategy strategy = new(sink, Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "testnet", null, TestContext.Current.CancellationToken));
 
         Assert.Equal(XrplFileError.BlockMismatch, error.Error);
         Assert.Equal(3, sink.Submitted.Count);
@@ -159,8 +180,11 @@ public class XrplFileWriterTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger) { ValidatedQueryTimeouts = 1 };
 
-        PublishResult result = await new XrplFileWriter(sink, ledger).PublishAsync(
-            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken);
+        await using SequenceStrategy strategy = new(sink, Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        PublishResult result = await writer.PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "testnet", null, TestContext.Current.CancellationToken);
 
         Assert.Equal(result.ManifestHash, result.Link.TxHash);
         Assert.Equal(0, sink.ValidatedQueryTimeouts);
@@ -176,8 +200,11 @@ public class XrplFileWriterTests
         // the same-length one above, which the existing test cannot produce.
         sink.StoredAs[2] = _ => new string('a', 2000);
 
-        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
-            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken));
+        await using SequenceStrategy strategy = new(sink, Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "testnet", null, TestContext.Current.CancellationToken));
 
         Assert.Equal(XrplFileError.BlockMismatch, error.Error);
     }
@@ -188,11 +215,14 @@ public class XrplFileWriterTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
 
+        await using SequenceStrategy strategy = new(sink, Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
         // The link is built from the network at the very end of a publication. Refusing it there
         // meant a thousand paid transactions and a manifest already in the ledger, and the
         // exception carried no manifest hash -- the file was published and its link lost.
-        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
-            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "main-net", null, TestContext.Current.CancellationToken));
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "main-net", null, TestContext.Current.CancellationToken));
 
         Assert.Equal(XrplFileError.InvalidLink, error.Error);
         Assert.Empty(sink.Submitted);
@@ -205,8 +235,11 @@ public class XrplFileWriterTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
 
-        PublishResult result = await new XrplFileWriter(sink, ledger).PublishAsync(
-            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "TestNet", null, TestContext.Current.CancellationToken);
+        await using SequenceStrategy strategy = new(sink, Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        PublishResult result = await writer.PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "TestNet", null, TestContext.Current.CancellationToken);
 
         Assert.Equal("testnet", result.Link.Network);
     }
@@ -220,8 +253,11 @@ public class XrplFileWriterTests
         sink.Throws[0] = new Xrpl.Client.Exceptions.RippledException(
             "Account not found.", new Xrpl.Models.Subscriptions.ErrorResponse { Error = "actNotFound" });
 
-        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
-            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken));
+        await using SequenceStrategy strategy = new(sink, Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "testnet", null, TestContext.Current.CancellationToken));
 
         Assert.Equal(XrplFileError.SubmitRefused, error.Error);
         Assert.Contains("actNotFound", error.Message, StringComparison.Ordinal);
@@ -245,8 +281,11 @@ public class XrplFileWriterTests
             _ => new Xrpl.Client.Exceptions.TimeoutException("the node took too long"),
         };
 
-        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
-            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken));
+        await using SequenceStrategy strategy = new(sink, Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "testnet", null, TestContext.Current.CancellationToken));
 
         Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
     }
@@ -261,8 +300,11 @@ public class XrplFileWriterTests
         // same answer the reading side gives, not a refusal.
         sink.Throws[0] = new Xrpl.Client.Exceptions.XrplException("Connect: created null websocket");
 
-        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
-            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken));
+        await using SequenceStrategy strategy = new(sink, Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "testnet", null, TestContext.Current.CancellationToken));
 
         Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
         Assert.Contains("null websocket", error.Message, StringComparison.Ordinal);
@@ -278,8 +320,11 @@ public class XrplFileWriterTests
         // the first chunk which ledger it landed in.
         sink.FailsAs.Add(0);
 
-        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(sink, ledger).PublishAsync(
-            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken));
+        await using SequenceStrategy strategy = new(sink, Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "testnet", null, TestContext.Current.CancellationToken));
 
         Assert.Equal(XrplFileError.SubmitRefused, error.Error);
         Assert.Contains("did not succeed", error.Message, StringComparison.Ordinal);
@@ -291,8 +336,11 @@ public class XrplFileWriterTests
     {
         FakeLedgerSource ledger = new();
 
-        await Assert.ThrowsAsync<ArgumentException>(() => new XrplFileWriter(new FakeLedgerSink(ledger), ledger).PublishAsync(
-            ReadOnlyMemory<byte>.Empty, "text/plain", null, Wallet, "testnet", null, TestContext.Current.CancellationToken));
+        await using SequenceStrategy strategy = new(new FakeLedgerSink(ledger), Wallet);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => writer.PublishAsync(
+            ReadOnlyMemory<byte>.Empty, "text/plain", null, Wallet.ClassicAddress, "testnet", null, TestContext.Current.CancellationToken));
     }
 
     private static string? FirstMemoType(Dictionary<string, object> tx)

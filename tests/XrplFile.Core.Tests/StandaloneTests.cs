@@ -100,8 +100,9 @@ public class StandaloneTests
             XrplClientLedgerSource source = new(client);
             XrplWallet writer = await FundedAccountAsync(client, sink, timeout.Token);
 
-            PublishResult published = await new XrplFileWriter(sink, source).PublishAsync(
-                file, "application/octet-stream", $"vector-{size}.bin", writer, "1", null, timeout.Token);
+            await using SequenceStrategy strategy = new(sink, writer);
+            PublishResult published = await new XrplFileWriter(strategy, source).PublishAsync(
+                file, "application/octet-stream", $"vector-{size}.bin", writer.ClassicAddress, "1", null, timeout.Token);
 
             Assert.Equal(vector.Root, published.Manifest.Root);
             Assert.Equal(vector.Blocks, published.Manifest.Blocks);
