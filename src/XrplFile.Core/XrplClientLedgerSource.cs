@@ -45,32 +45,12 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
     public async Task<LedgerTransaction?> TransactionAsync(string hash, CancellationToken cancellationToken)
     {
-        JsonElement answer;
+        // A transaction the node does not have is the one node error that is an answer rather than
+        // a failure; anything else it says about a tx request is a failure to read.
+        JsonElement? answer = await AskOrAbsentAsync(
+            new TxRequest(hash), "tx", XrplErrorCodes.TxnNotFound, cancellationToken).ConfigureAwait(false);
 
-        try
-        {
-            answer = await _request(new TxRequest(hash), cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception e) when (e is not OperationCanceledException
-            && string.Equals(e.Classify().RawError, XrplErrorCodes.TxnNotFound, StringComparison.Ordinal))
-        {
-            return null;
-        }
-        catch (Exception e) when (IsNodeFailure(e))
-        {
-            throw Unreachable("tx", e);
-        }
-
-        if (answer.TryGetProperty("error", out JsonElement error))
-        {
-            // A transaction the node does not have is the one node error that is an answer rather
-            // than a failure; anything else it says about a tx request is a failure to read.
-            return string.Equals(error.GetString(), XrplErrorCodes.TxnNotFound, StringComparison.Ordinal)
-                ? null
-                : throw Answered("tx", error);
-        }
-
-        return ParseRecord(answer);
+        return answer is { } found ? ParseRecord(found) : null;
     }
 
     public async IAsyncEnumerable<LedgerTransaction> AccountTransactionsAsync(
@@ -135,27 +115,14 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
     public async Task<long> BalanceDropsAsync(string account, CancellationToken cancellationToken)
     {
-        JsonElement answer;
+        // An account nobody funded is not a failure to answer: it is an answer, and it is zero.
+        // Anything else the node says about an account_info request is a failure to read.
+        JsonElement? answer = await AskOrAbsentAsync(
+            new AccountInfoRequest(account), "account_info", XrplErrorCodes.ActNotFound, cancellationToken).ConfigureAwait(false);
 
-        try
-        {
-            answer = await _request(new AccountInfoRequest(account), cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception e) when (IsNodeFailure(e))
-        {
-            throw Unreachable("account_info", e);
-        }
+        if (answer is not { } found) return 0;
 
-        if (answer.TryGetProperty("error", out JsonElement error))
-        {
-            // An account nobody funded is not a failure to answer: it is an answer, and it is zero.
-            // Anything else the node says about an account_info request is a failure to read.
-            if (string.Equals(error.GetString(), XrplErrorCodes.ActNotFound, StringComparison.Ordinal)) return 0;
-
-            throw Answered("account_info", error);
-        }
-
-        return answer.TryGetProperty("account_data", out JsonElement data) && Text(data, "Balance") is { } balance
+        return found.TryGetProperty("account_data", out JsonElement data) && Text(data, "Balance") is { } balance
             && long.TryParse(balance, out long drops)
                 ? drops
                 : 0;
@@ -256,6 +223,44 @@ public sealed class XrplClientLedgerSource : ILedgerSource
         }
 
         return answer.TryGetProperty("error", out JsonElement error) ? throw Answered(command, error) : answer;
+    }
+
+    /// <summary>
+    /// One request where a single node error code is itself an answer -- "nothing here" -- rather
+    /// than a failure to read, in whichever of the two shapes it can arrive: thrown by
+    /// <see cref="RequestManager"/> before this class ever sees a JSON answer, or embedded as the
+    /// <c>error</c> member of one it does see. Both branches must agree on <paramref name="absentCode"/>
+    /// or a caller polling for "does this exist yet" (a fresh account, a not-yet-validated tx) can
+    /// see the live-node shape turn into NodeUnreachable instead of the null/zero the test-only
+    /// shape returns -- which is exactly the regression this helper exists to make impossible to
+    /// reintroduce by editing only one of the two.
+    /// </summary>
+    private async Task<JsonElement?> AskOrAbsentAsync(BaseRequest request, string command, string absentCode, CancellationToken cancellationToken)
+    {
+        JsonElement answer;
+
+        try
+        {
+            answer = await _request(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is not OperationCanceledException
+            && string.Equals(e.Classify().RawError, absentCode, StringComparison.Ordinal))
+        {
+            return null;
+        }
+        catch (Exception e) when (IsNodeFailure(e))
+        {
+            throw Unreachable(command, e);
+        }
+
+        if (answer.TryGetProperty("error", out JsonElement error))
+        {
+            return string.Equals(error.GetString(), absentCode, StringComparison.Ordinal)
+                ? null
+                : throw Answered(command, error);
+        }
+
+        return answer;
     }
 
     /// <summary>
