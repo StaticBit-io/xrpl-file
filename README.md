@@ -69,9 +69,13 @@ SessionOptions options = new() { StateDirectory = "runs", BudgetDrops = 5_000_00
 PublicationEstimate estimate = await PublicationSession.EstimateAsync(
     source, wallet.ClassicAddress, new FileInfo("cover.png").Length, options, CancellationToken.None);
 
-Console.WriteLine($"{estimate.Transactions} transactions, {estimate.RequiredDrops} drops needed, {estimate.BalanceDrops} held");
+Console.WriteLine($"{estimate.Transactions} transactions, {estimate.RequiredDrops} drops needed, {estimate.SpendableDrops} spendable");
 
-await using TicketStrategy strategy = new(sink, source, wallet);
+// The strategy's fee and the estimate's must be the same number, or the run is approved at a
+// price nobody submits. StartAsync refuses the pair rather than letting that through, so the
+// estimate's fee goes into the strategy that will do the submitting.
+await using TicketStrategy strategy = new(sink, source, wallet,
+    new TicketStrategyOptions { FeeDrops = (int)estimate.FeeDropsPerTransaction });
 PublicationSession session = await PublicationSession.StartAsync(
     strategy, source, File.ReadAllBytes("cover.png"), "image/png", "cover.png",
     wallet.ClassicAddress, keyReference: "my-key", "mainnet", options, CancellationToken.None);
@@ -81,6 +85,12 @@ PublicationReport report = await session.RunAsync(
 
 Console.WriteLine(report.Link);
 ```
+
+The estimate judges the account by what it may actually spend rather than by its balance: one
+whose trust lines, offers or leftover tickets already lock an owner reserve is refused before the
+run starts, instead of after the chunks are paid for and the first `TicketCreate` comes back
+`tecINSUFFICIENT_RESERVE`. `RequiredDrops` is still what the run needs; `SpendableDrops` is what
+the account has to meet it with.
 
 `TicketStrategy` mints tickets and rides them, so chunks go to the ledger in parallel rather than
 one after another — on a standalone stand, 200 chunk memos landed in about 22 seconds on tickets
@@ -117,7 +127,8 @@ PublicationEstimate estimate = await PublicationSession.EstimateAsync(
 // hour from now, so the wait has no deadline of its own.
 FundingRequest request = await account.AwaitFundingAsync(estimate, TimeSpan.FromSeconds(5), CancellationToken.None);
 
-await using TicketStrategy strategy = new(sink, source, throwaway);
+await using TicketStrategy strategy = new(sink, source, throwaway,
+    new TicketStrategyOptions { FeeDrops = (int)estimate.FeeDropsPerTransaction });
 PublicationSession session = await PublicationSession.StartAsync(
     strategy, source, File.ReadAllBytes("cover.png"), "image/png", "cover.png",
     throwaway.ClassicAddress, keyReference: "throwaway", "mainnet", options, CancellationToken.None);

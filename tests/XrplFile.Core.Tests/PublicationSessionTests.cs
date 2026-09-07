@@ -354,6 +354,54 @@ public class PublicationSessionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_strategy_left_on_its_default_fee_never_starts_the_run()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+
+        // TicketStrategyOptions.FeeDrops defaults to a hardcoded 12 and the node here charges 10,
+        // as mainnet, testnet and the CI stand all do. A caller who builds the strategy without
+        // saying what it costs is the caller the documented flow used to describe.
+        await using TicketStrategy defaulted = new(sink, ledger, Wallet);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.StartAsync(
+            defaulted, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.FeeMismatch, error.Error);
+    }
+
+    [Fact]
+    public async Task The_documented_order_builds_a_strategy_the_session_accepts()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+
+        // Exactly the order the README publishes in: estimate, then a strategy priced from that
+        // estimate, then StartAsync. What the examples do is what this proves.
+        PublicationEstimate estimate = await PublicationSession.EstimateAsync(
+            ledger, Wallet.ClassicAddress, fileBytes: 2500, Options(), TestContext.Current.CancellationToken);
+
+        await using TicketStrategy strategy = new(sink, ledger, Wallet,
+            new TicketStrategyOptions
+            {
+                FeeDrops = (int)estimate.FeeDropsPerTransaction,
+                SweepPoll = TimeSpan.FromMilliseconds(1),
+                BatchTimeout = TimeSpan.FromSeconds(30),
+                ValidationPoll = TimeSpan.FromMilliseconds(1),
+            });
+
+        PublicationSession session = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
+
+        PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, report.ChunkHashes.Count);
+        Assert.Equal("testnet", report.Link.Network);
+    }
+
+    [Fact]
     public async Task A_writer_that_could_name_a_path_never_becomes_a_file_name()
     {
         FakeLedgerSource ledger = Node();
