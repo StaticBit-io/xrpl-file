@@ -83,9 +83,10 @@ export class XrplFileReader {
     // Backwards from the end of the range, stopping as soon as every index has a value: walking a
     // large file's chunks in reverse just to reach the lists would be far too expensive. That early
     // stop means the rule for block-list memos is "the last copy in canonical (forward) order wins"
-    // -- the opposite of chunks, where the first copy wins. This is safe because a conforming writer
-    // never resubmits a list index with different bytes, and a non-conforming one is still caught
-    // below: decodeEntries or the root check fails either way.
+    // -- the opposite of chunks, where the first copy wins. It is not only safe but required: a
+    // resumed publication lands chunks in new ledgers, so it rewrites the list entries that name
+    // them, and the last copy is the one describing the file as it now stands. A stray or malformed
+    // copy is still caught below either way: decodeEntries or the root check fails.
     const payloads = new Map();
     for await (const tx of this.source.accountTransactions(record.writer, manifest.firstLedger, manifest.lastLedger, false)) {
       if (!isMine(tx, record.writer, manifest)) continue;

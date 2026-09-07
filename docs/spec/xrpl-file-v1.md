@@ -114,10 +114,18 @@ Any of these is `CorruptManifest` (section 8).
 ## 5. Block list
 
 When `blocks` > 1 the writer MUST publish the block list: entries
-`{"i":<block>,"h":"<block hash, 64 hex>","l":<ledger of the block's first chunk>}` packed
-greedily into JSON arrays of at most 982 bytes, one array per `xf/b/<j>` transaction, entries
-in block order across the transactions. When `blocks` = 1 there is no list and a reader uses
-the single entry `{i: 0, h: root, l: first}`.
+`{"i":<block>,"h":"<block hash, 64 hex>","l":<earliest ledger holding any of the block's chunks>}`
+packed greedily into JSON arrays of at most 982 bytes, one array per `xf/b/<j>` transaction,
+entries in block order across the transactions. When `blocks` = 1 there is no list and a reader
+uses the single entry `{i: 0, h: root, l: first}`.
+
+`l` is the **earliest** of the block's chunks' ledgers, not the ledger of its lowest-numbered
+chunk. The two agree only when one run sent every chunk in order. A writer resuming an
+interrupted publication re-sends the chunks that are missing, so a low index can land after the
+ones around it; a reader pages a block forward from `l` (section 6), so `l` taken from the first
+chunk would leave that block's earliest chunk below the range the reader searches, and the file
+would not read back. The manifest's `first` follows the same rule for the same reason: it is the
+earliest ledger any chunk is in.
 
 A block-list transaction whose marker index `j` is not below `lists` is not part of the list —
 the same way a chunk marker outside its range is not a chunk. A reader MUST refuse
@@ -144,10 +152,16 @@ chunks (section 6), which uses the first. A reader reaches this by walking the w
 transactions backwards from `last` and stopping as soon as every index `0..lists-1` has a
 value, which is far cheaper than walking a large file's chunks in reverse just to reach the
 lists at the end of the range; the first copy such a backward walk meets for an index is the
-last one in canonical order. The asymmetry is safe: a conforming writer never resubmits an
-index (chunk or list) with different bytes, so which copy a reader picks never matters for a
-well-formed file, and a non-conforming writer's stray resubmission is still caught — by
-`DecodeEntries` or by the root check — regardless of which copy was picked.
+last one in canonical order.
+
+The asymmetry is what makes a resumed publication readable. A conforming writer never resubmits
+a *chunk* index with different bytes — a chunk's bytes are fixed by the file — so for chunks it
+does not matter which copy a reader picks. A block list is different: its entries carry the
+per-block ledgers, and a resume that lands chunks in new ledgers MUST rewrite them, so the same
+`j` is legitimately resubmitted with different bytes (section 7). Taking the last copy is what
+makes the rewrite the one a reader sees; taking the first would hand it the interrupted run's
+window. A stray or malformed resubmission is still caught either way — by `DecodeEntries` or by
+the root check — because the entries a reader accepts must hash to the manifest's `root`.
 
 ## 6. Reading
 
@@ -216,8 +230,13 @@ its chunks live in.
 
 A writer MUST submit chunks with their markers, then block lists (when `blocks` > 1), then the
 manifest, in that order, and MUST NOT write the manifest until every earlier transaction is
-validated. It MUST NOT resubmit an index with different bytes. It SHOULD read the file back by
-section 6 before writing the manifest.
+validated. It MUST NOT resubmit a chunk index with different bytes. It SHOULD read the file back
+by section 6 before writing the manifest.
+
+A block-list index is not under that rule: a writer resuming an interrupted publication MUST
+rewrite any `xf/b/<j>` whose entries' ledgers have changed, because those ledgers are what a
+reader pages each block from. The resubmission is safe because a reader takes the last copy of a
+list index in canonical order (section 5), so the rewritten payload is the one it reads.
 
 The reference writer sets no `LastLedgerSequence` on any of its transactions. It numbers them
 with consecutive `Sequence` values, and one expired transaction in such a run strands every
