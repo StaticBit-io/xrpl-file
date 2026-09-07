@@ -189,6 +189,31 @@ public class PublicationEstimateTests
     }
 
     [Fact]
+    public async Task What_is_spendable_is_the_figure_that_meets_what_is_required()
+    {
+        // The two numbers a caller prints side by side have to be comparable. RequiredDrops
+        // already carries this run's base reserve, so SpendableDrops must not subtract it a
+        // second time: an account that covers the run would otherwise be reported as holding
+        // less than the run needs. FundingRequest.SpendableDrops defines the same name the
+        // same way, and the two must not drift apart.
+        FakeLedgerSource node = Node(10_700_000);
+        node.OwnerCounts["rWriter"] = 0;
+
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            node, "rWriter", fileBytes: 2500, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
+
+        Assert.Equal(estimate.BalanceDrops - estimate.LockedReserveDrops, estimate.SpendableDrops);
+        Assert.Equal(estimate.SpendableDrops >= estimate.RequiredDrops, estimate.BalanceCovers);
+        Assert.True(estimate.BalanceCovers);
+        Assert.True(estimate.SpendableDrops >= estimate.RequiredDrops, "a covered run cannot report less than it needs");
+
+        FundingRequest funding = new("rWriter", estimate.RequiredDrops, estimate.BalanceDrops, estimate.LockedReserveDrops);
+
+        Assert.Equal(estimate.SpendableDrops, funding.SpendableDrops);
+        Assert.Equal(estimate.BalanceCovers, funding.Covered);
+    }
+
+    [Fact]
     public async Task An_account_owning_nothing_is_judged_on_its_whole_balance()
     {
         PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(

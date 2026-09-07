@@ -42,11 +42,13 @@ public sealed record PublicationEstimate(
     public long LockedReserveDrops => OwnerCount * OwnerReserveDrops;
 
     /// <summary>
-    /// What the balance would leave for this run: the balance less what the account's existing
-    /// objects lock and less the reserve it must hold to exist. Shown rather than only used,
+    /// What the account has to meet <see cref="RequiredDrops"/> with: the balance less what its
+    /// existing objects lock. The run's own base reserve is not subtracted here because
+    /// <see cref="RequiredDrops"/> already carries it, and subtracting it twice would print a
+    /// figure no caller could compare against the one beside it. Shown rather than only used,
     /// because "you hold 21.5 XRP and 1 of it is locked" is what explains the refusal below.
     /// </summary>
-    public long SpendableDrops => BalanceDrops - LockedReserveDrops - BaseReserveDrops;
+    public long SpendableDrops => BalanceDrops - LockedReserveDrops;
 
     /// <summary>
     /// Whether the account can carry the run, judged against what it may actually spend rather
@@ -55,7 +57,7 @@ public sealed record PublicationEstimate(
     /// under before the run started, and a balance gate that ignores that passes an account whose
     /// first TicketCreate is answered <c>tecINSUFFICIENT_RESERVE</c> with chunks already paid for.
     /// </summary>
-    public bool BalanceCovers => BalanceDrops - LockedReserveDrops >= RequiredDrops;
+    public bool BalanceCovers => SpendableDrops >= RequiredDrops;
 }
 
 public static class PublicationEstimator
