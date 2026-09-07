@@ -118,9 +118,12 @@ public sealed class TicketStrategy(
             int take = Math.Min(pending.Count, _options.TicketsPerBatch);
             long? mintedAt = await EnsureTicketsAsync(take, cancellationToken).ConfigureAwait(false);
 
-            // Nothing this batch sends can land before the mint that paid for it, and with no mint
-            // nothing can land before the ledger that is open right now.
-            long batchFrom = mintedAt ?? await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+            // Nothing this batch sends can land before the mint that paid for it. With no mint,
+            // nothing this batch sends can land at or before the ledger that is already open —
+            // everything it submits lands strictly later — so the floor is one past it. Anchoring
+            // at the open ledger itself would let a retried publication reusing the same chunk
+            // markers match an earlier attempt's transaction inside that one-ledger window.
+            long batchFrom = mintedAt ?? await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false) + 1;
             sweepFrom ??= batchFrom;
 
             List<int> batch = [.. pending.Take(Math.Min(take, TicketsInHand))];
@@ -289,25 +292,31 @@ public sealed class TicketStrategy(
 
             LedgerTransaction? minted = await _source.TransactionAsync(outcome.TxHash, cancellationToken).ConfigureAwait(false);
 
-            if (minted is null)
+            if (minted is not { Validated: true })
             {
-                // The node cannot show the mint yet, but its arithmetic says the same thing: only
-                // a TicketCreate that succeeded moves the sequence by the ticket count and one
-                // more.
+                // The node cannot yet show the mint as validated — either it does not have the
+                // transaction at all, or it is holding it unvalidated, in which case meta (and so
+                // Succeeded) is absent and must not be read as a failure. Its arithmetic says the
+                // same thing either way: only a TicketCreate that succeeded moves the sequence by
+                // the ticket count and one more.
                 await WaitForSequenceAsync(account, sequence + (uint)mint + 1, cancellationToken).ConfigureAwait(false);
             }
             else if (!minted.Succeeded)
             {
                 throw new XrplFileException(XrplFileError.SubmitRefused,
-                    $"the mint {outcome.TxHash} for {mint} tickets validated in ledger {minted.LedgerIndex} and failed; "
-                    + "the tec code is on that transaction, and an owner reserve too small for the tickets is the usual cause");
+                    $"the mint {outcome.TxHash} for {mint} tickets validated in ledger {minted.LedgerIndex} and failed with "
+                    + $"{minted.Result ?? "an unnamed result"}; an owner reserve too small for the tickets is the usual cause");
             }
 
             // Exactly rippled's arithmetic: a TicketCreate at S with count N mints S+1 through S+N.
             AddTickets(sequence + 1, sequence + (uint)mint);
 
-            firstMintLedger ??= minted?.LedgerIndex
-                ?? await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+            // minted.LedgerIndex is only trustworthy once the node calls the mint validated: an
+            // unvalidated tx answer can carry no ledger index at all (it reads back as the default,
+            // 0), and anchoring the sweep there would open the window from the start of the chain.
+            firstMintLedger ??= minted is { Validated: true } validatedMint
+                ? validatedMint.LedgerIndex
+                : await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
         }
 
         return firstMintLedger;

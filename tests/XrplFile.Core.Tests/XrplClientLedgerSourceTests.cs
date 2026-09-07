@@ -22,6 +22,7 @@ public class XrplClientLedgerSourceTests
         Assert.Equal("rWriter", tx.Account);
         Assert.True(tx.Succeeded);
         Assert.True(tx.Validated);
+        Assert.Equal("tesSUCCESS", tx.Result);
         Assert.Equal("78662F632F30", tx.MemoTypeHex);
         Assert.Equal("CAFE", tx.MemoDataHex);
         Assert.Equal("6170706C69636174696F6E2F6A736F6E", tx.MemoFormatHex);
@@ -40,6 +41,7 @@ public class XrplClientLedgerSourceTests
         Assert.Equal("ABC2", tx.Hash);
         Assert.Equal(5, tx.LedgerIndex);
         Assert.False(tx.Succeeded);
+        Assert.Equal("tecUNFUNDED", tx.Result);
         Assert.Null(tx.MemoTypeHex);
         Assert.Equal("00", tx.MemoDataHex);
     }
@@ -53,6 +55,7 @@ public class XrplClientLedgerSourceTests
 
         Assert.False(tx.Succeeded);
         Assert.False(tx.Validated);
+        Assert.Null(tx.Result);
         Assert.Null(tx.MemoDataHex);
     }
 

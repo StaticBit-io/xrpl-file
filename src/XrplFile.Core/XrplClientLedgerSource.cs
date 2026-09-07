@@ -175,7 +175,7 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             memoFormat = Text(memo, "MemoFormat");
         }
 
-        string outcome = record.TryGetProperty("meta", out JsonElement meta) ? Text(meta, "TransactionResult") ?? string.Empty : string.Empty;
+        string? outcome = record.TryGetProperty("meta", out JsonElement meta) ? Text(meta, "TransactionResult") : null;
         bool validated = record.TryGetProperty("validated", out JsonElement flag) && flag.ValueKind == JsonValueKind.True;
 
         return new LedgerTransaction(
@@ -184,6 +184,7 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             Account: Text(tx, "Account") ?? string.Empty,
             Succeeded: string.Equals(outcome, "tesSUCCESS", StringComparison.Ordinal),
             Validated: validated,
+            Result: outcome,
             MemoTypeHex: memoType,
             MemoDataHex: memoData,
             MemoFormatHex: memoFormat);

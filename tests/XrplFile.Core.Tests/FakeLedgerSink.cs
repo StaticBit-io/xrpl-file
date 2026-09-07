@@ -52,6 +52,14 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     /// <summary>Markers whose every submission validates as failed, however often it is retried.</summary>
     public HashSet<string> FailMarkers { get; } = [];
 
+    /// <summary>
+    /// Which submissions (by position) the node holds but has not yet validated when its record is
+    /// looked up by hash: recorded with Validated: false and no meta at all — the shape a tx
+    /// lookup gets for something still in flight, where Succeeded reads as false only because
+    /// meta is absent, not because anything failed.
+    /// </summary>
+    public HashSet<int> UnvalidatedAt { get; } = [];
+
     /// <summary>Names a marker that always fails; the type exists so a test reads as a sentence.</summary>
     public sealed record FailEvery(string Marker);
 
@@ -176,9 +184,13 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
                 _nextSequence = mintFailed ? at + 1 : at + count + 1;
 
                 Events.Add("mint");
+
+                bool unvalidated = UnvalidatedAt.Contains(position);
                 ledger.Add(new LedgerTransaction(
                     hash, firstLedger + position / 100 + _ledgersClosed, (string)transaction["Account"],
-                    Succeeded: !mintFailed, Validated: true, MemoTypeHex: null, MemoDataHex: null, MemoFormatHex: null));
+                    Succeeded: !unvalidated && !mintFailed, Validated: !unvalidated,
+                    Result: unvalidated ? null : mintFailed ? "tecINSUFFICIENT_RESERVE" : "tesSUCCESS",
+                    MemoTypeHex: null, MemoDataHex: null, MemoFormatHex: null));
 
                 return new SubmitOutcome("tesSUCCESS", hash);
             }
@@ -220,6 +232,7 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
             LedgerTransaction stored = new(
                 hash, firstLedger + position / 100 + _ledgersClosed, (string)transaction["Account"],
                 Succeeded: !failed, Validated: true,
+                Result: failed ? "tecFAKE_FAILURE" : "tesSUCCESS",
                 memoType, memoData, memoFormat);
 
             if (QueuedUntilSweep.TryGetValue(position, out int sweepsUntilVisible))

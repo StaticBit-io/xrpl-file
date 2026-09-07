@@ -206,12 +206,12 @@ public class XrplFileReaderTests
         for (int i = 0; i < chunks.Count; i++)
         {
             source.Add(new LedgerTransaction(
-                Vectors.Hash($"short:{i}"), 1000, Vectors.Writer, Succeeded: true, Validated: true,
+                Vectors.Hash($"short:{i}"), 1000, Vectors.Writer, Succeeded: true, Validated: true, Result: "tesSUCCESS",
                 MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex(chunks[i]), MemoFormatHex: null));
         }
 
         source.Add(new LedgerTransaction(
-            Vectors.ManifestHash, 1001, Vectors.Writer, Succeeded: true, Validated: true,
+            Vectors.ManifestHash, 1001, Vectors.Writer, Succeeded: true, Validated: true, Result: "tesSUCCESS",
             MemoLayout.ManifestMarkerHex, MemoLayout.Utf8Hex(manifest.Encode()), MemoLayout.JsonFormatHex));
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(

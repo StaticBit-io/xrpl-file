@@ -12,8 +12,10 @@ public sealed record SubmittedMemo(int Index, string TxHash);
 /// The contract is deliberately strong: when the call returns, every memo is in a validated
 /// ledger and its transaction hash is known. How that was achieved — one at a time on the
 /// account's sequence, or many at once on tickets — is the implementation's business and
-/// nobody else's. A strategy holds state between calls, which is why it is disposable: a
-/// ticketed one keeps unspent tickets so a later phase does not mint its own.
+/// nobody else's. A strategy is disposable because a ticketed one may hold tickets that were
+/// minted and never spent — a submission handed back its ticket, or the call was cut short — and
+/// disposing does not reclaim them: they stay live on the account, each locking an owner reserve,
+/// until something spends them or the account is deleted.
 /// </summary>
 public interface ISubmissionStrategy : IAsyncDisposable
 {

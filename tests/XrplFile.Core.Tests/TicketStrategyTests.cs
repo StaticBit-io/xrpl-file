@@ -157,6 +157,63 @@ public class TicketStrategyTests
 
         Assert.Equal(XrplFileError.SubmitRefused, error.Error);
         Assert.Empty(sink.LiveTickets);
+        // 250 tickets is fifty XRP of owner reserve at the current increment — an operator needs
+        // to see which code the node actually gave, not just that something was refused.
+        Assert.Contains("tecINSUFFICIENT_RESERVE", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_unvalidated_mint_answer_is_not_reported_as_a_refusal()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        // Position 0 is the mint. The node holds it but has not validated it yet when the mint is
+        // looked up by hash — meta, and so Succeeded, is absent in that shape. Reading an absent
+        // Succeeded as a failure used to abandon a perfectly good mint, along with every ticket it
+        // made, and report "validated in ledger 0 and failed" for a transaction that was never
+        // actually validated at all.
+        sink.UnvalidatedAt.Add(0);
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 3);
+
+        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, landed.Count);
+    }
+
+    [Fact]
+    public async Task A_call_that_mints_nothing_does_not_match_the_ledger_that_was_already_open()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        // Position 0 is the mint and 1..3 the three memos: the last is a node call that fails
+        // after its ticket left the queue and before any ledger could have seen the submission —
+        // exactly A_submission_that_throws_hands_its_ticket_back_rather_than_stranding_it's setup,
+        // which is what leaves one ticket sitting in the queue for the call below to find without
+        // minting. Marker 0 (the first call's first memo) already landed cleanly before the throw.
+        sink.Throws[3] = new InvalidOperationException("fake: the socket died mid-submission");
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 3);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken));
+        sink.Throws.Clear();
+
+        // A ledger closes between two publications, as one always does. This second call reuses
+        // the same first marker — a retried publication — and has a ticket already in hand, so it
+        // mints nothing.
+        long ledgerAlreadyOpenWhenTheCallStarted = ledger.CurrentLedger;
+        sink.CloseLedger();
+
+        IReadOnlyList<SubmittedMemo> second = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+
+        Assert.Single(second);
+
+        LedgerTransaction? landedTx = await ledger.TransactionAsync(second[0].TxHash, TestContext.Current.CancellationToken);
+        Assert.NotNull(landedTx);
+        // The floor is one past the ledger that was already open when this no-mint call started:
+        // nothing it submits can itself land at or before that ledger. Anchoring at that ledger
+        // instead of one past it is exactly what let this call's sweep match marker 0's earlier,
+        // unrelated landing from the first call instead of its own.
+        Assert.True(landedTx!.LedgerIndex > ledgerAlreadyOpenWhenTheCallStarted);
     }
 
     [Theory]
@@ -195,6 +252,11 @@ public class TicketStrategyTests
             () => strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken));
 
         sink.Throws.Clear();
+
+        // A ledger closes between two publications, as one always does — and a no-mint call's
+        // sweep anchors one past whatever ledger was already open when it started, so its own
+        // submission must land after that, not inside it.
+        sink.CloseLedger();
 
         // The publication that follows finds that ticket in the queue rather than minting for a
         // reserve the account is already paying.

@@ -48,19 +48,19 @@ public static class Vectors
         for (int i = 0; i < chunks.Count; i++)
         {
             ledger.Add(new LedgerTransaction(
-                Hash($"chunk:{i}"), vector.Ledger.First + i / 100, Writer, Succeeded: true, Validated: true,
+                Hash($"chunk:{i}"), vector.Ledger.First + i / 100, Writer, Succeeded: true, Validated: true, Result: "tesSUCCESS",
                 MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex(chunks[i]), MemoFormatHex: null));
         }
 
         for (int j = 0; j < vector.Lists.Count; j++)
         {
             ledger.Add(new LedgerTransaction(
-                Hash($"list:{j}"), vector.Ledger.ListLedger!.Value, Writer, Succeeded: true, Validated: true,
+                Hash($"list:{j}"), vector.Ledger.ListLedger!.Value, Writer, Succeeded: true, Validated: true, Result: "tesSUCCESS",
                 MemoLayout.ListMarkerHex(j), MemoLayout.Utf8Hex(vector.Lists[j]), MemoLayout.JsonFormatHex));
         }
 
         ledger.Add(new LedgerTransaction(
-            ManifestHash, vector.Ledger.ManifestLedger, Writer, Succeeded: true, Validated: true,
+            ManifestHash, vector.Ledger.ManifestLedger, Writer, Succeeded: true, Validated: true, Result: "tesSUCCESS",
             MemoLayout.ManifestMarkerHex, MemoLayout.Utf8Hex(vector.Manifest), MemoLayout.JsonFormatHex));
 
         return ledger;
