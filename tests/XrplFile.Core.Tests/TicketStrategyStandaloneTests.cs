@@ -67,8 +67,13 @@ public class TicketStrategyStandaloneTests
         {
             XrplClientLedgerSink sink = new(client);
             XrplClientLedgerSource source = new(client);
-            XrplWallet writer = await StandaloneFixture.FundedAccountAsync(client, sink, 500_000_000, token);
             NetworkFees fees = await source.FeesAsync(token);
+
+            // 250 tickets is the protocol's ceiling and every one of them locks an owner reserve --
+            // 500 XRP of it on the stand's 2 XRP increment. An account funded for the memos alone
+            // would fail this on money and say nothing about headroom.
+            long funding = fees.BaseReserveDrops + (TicketStrategy.MaxLiveTickets * fees.OwnerReserveDrops) + 100_000_000;
+            XrplWallet writer = await StandaloneFixture.FundedAccountAsync(client, sink, funding, token);
 
             // What two cancelled runs leave behind. Minted straight onto the account, so no
             // strategy instance has ever heard of them.
