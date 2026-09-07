@@ -165,6 +165,62 @@ public class XrplClientLedgerSourceTests
     }
 
     [Fact]
+    public async Task An_account_the_node_does_not_know_has_no_transactions_rather_than_a_failure()
+    {
+        // The state a throwaway account's funder lookup starts in: nobody has paid the reserve in,
+        // so there is no account for the node to list and it says actNotFound. That is an answer
+        // -- nothing has happened yet -- and reading it as a failure to read is what made
+        // FunderAsync throw where it was asked to propose nobody. Both shapes the code can meet:
+        // embedded in a returned answer, and thrown by RequestManager before any JSON arrives.
+        ScriptedNode answered = new();
+        answered.Answer("""{"error":"actNotFound"}""");
+        ScriptedNode threw = new();
+        threw.Throw(new Xrpl.Client.Exceptions.RippledException(
+            "actNotFound", new Xrpl.Models.Subscriptions.ErrorResponse { Error = "actNotFound" }));
+
+        Assert.Empty(await Read(new XrplClientLedgerSource(answered.HandleAsync), TestContext.Current.CancellationToken));
+        Assert.Empty(await Read(new XrplClientLedgerSource(threw.HandleAsync), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task An_account_state_says_what_the_account_owns_as_well_as_what_it_holds()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"account_data":{"Account":"rWriter","Balance":"25000000","Sequence":7,"OwnerCount":42}}""");
+
+        AccountState state = await new XrplClientLedgerSource(node.HandleAsync)
+            .AccountStateAsync("rWriter", TestContext.Current.CancellationToken);
+
+        Assert.Equal(25_000_000, state.BalanceDrops);
+        Assert.Equal(42, state.OwnerCount);
+    }
+
+    [Fact]
+    public async Task An_account_data_without_an_owner_count_owns_nothing()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"account_data":{"Account":"rWriter","Balance":"25000000"}}""");
+
+        AccountState state = await new XrplClientLedgerSource(node.HandleAsync)
+            .AccountStateAsync("rWriter", TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, state.OwnerCount);
+    }
+
+    [Fact]
+    public async Task An_account_the_node_does_not_know_holds_nothing_and_owns_nothing()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"error":"actNotFound"}""");
+
+        AccountState state = await new XrplClientLedgerSource(node.HandleAsync)
+            .AccountStateAsync("rNobody", TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, state.BalanceDrops);
+        Assert.Equal(0, state.OwnerCount);
+    }
+
+    [Fact]
     public async Task A_cancellation_stays_a_cancellation()
     {
         ScriptedNode node = new();
@@ -314,6 +370,18 @@ public class XrplClientLedgerSourceTests
         await foreach (LedgerTransaction _ in source.AccountTransactionsAsync("rWriter", 1, 2, forward: true, cancellationToken))
         {
         }
+    }
+
+    private static async Task<List<LedgerTransaction>> Read(XrplClientLedgerSource source, CancellationToken cancellationToken)
+    {
+        List<LedgerTransaction> transactions = [];
+
+        await foreach (LedgerTransaction tx in source.AccountTransactionsAsync("rWriter", 1, 2, forward: true, cancellationToken))
+        {
+            transactions.Add(tx);
+        }
+
+        return transactions;
     }
 
     /// <summary>A node whose answers are scripted, in call order.</summary>

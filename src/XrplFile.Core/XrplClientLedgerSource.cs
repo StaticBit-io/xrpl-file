@@ -14,7 +14,7 @@ namespace XrplFile;
 /// SDK's typed models, so both api_version shapes parse and a field the models lack is not lost.
 /// Every failure leaves here as an <see cref="XrplFileException"/> or a cancellation: a dropped
 /// connection, a request the node never answered and a node error other than <c>txnNotFound</c>
-/// (for a tx lookup) or <c>actNotFound</c> (for a balance lookup) are all
+/// (for a tx lookup) or <c>actNotFound</c> (for anything asked about an account) are all
 /// <see cref="XrplFileError.NodeUnreachable"/>, carrying what the node said. The browser mirror
 /// raises the same error in the same places.
 /// </summary>
@@ -60,7 +60,11 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
         while (true)
         {
-            JsonElement answer = await AskAsync(
+            // An account the node has never heard of has no transactions, which is an answer and
+            // not a failure to read -- the same rule the balance lookup below follows. It is the
+            // state a throwaway account is in until somebody funds it, and it is precisely then
+            // that a caller asks who paid.
+            JsonElement? page = await AskOrAbsentAsync(
                 new AccountTransactionsRequest(account)
                 {
                     LedgerIndexMin = (int)fromLedger,
@@ -70,7 +74,10 @@ public sealed class XrplClientLedgerSource : ILedgerSource
                     Marker = marker,
                 },
                 "account_tx",
+                XrplErrorCodes.ActNotFound,
                 cancellationToken).ConfigureAwait(false);
+
+            if (page is not { } answer) yield break;
 
             foreach (LedgerTransaction tx in ParseTransactions(answer))
             {
@@ -113,19 +120,22 @@ public sealed class XrplClientLedgerSource : ILedgerSource
         return new NetworkFees(Math.Max(fee, baseFee), baseReserve, ownerReserve);
     }
 
-    public async Task<long> BalanceDropsAsync(string account, CancellationToken cancellationToken)
+    public async Task<long> BalanceDropsAsync(string account, CancellationToken cancellationToken) =>
+        (await AccountStateAsync(account, cancellationToken).ConfigureAwait(false)).BalanceDrops;
+
+    public async Task<AccountState> AccountStateAsync(string account, CancellationToken cancellationToken)
     {
-        // An account nobody funded is not a failure to answer: it is an answer, and it is zero.
+        // An account nobody funded is not a failure to answer: it is an answer, and it is empty.
         // Anything else the node says about an account_info request is a failure to read.
         JsonElement? answer = await AskOrAbsentAsync(
             new AccountInfoRequest(account), "account_info", XrplErrorCodes.ActNotFound, cancellationToken).ConfigureAwait(false);
 
-        if (answer is not { } found) return 0;
+        if (answer is not { } found || !found.TryGetProperty("account_data", out JsonElement data)) return AccountState.Absent;
 
-        return found.TryGetProperty("account_data", out JsonElement data) && Text(data, "Balance") is { } balance
-            && long.TryParse(balance, out long drops)
-                ? drops
-                : 0;
+        long drops = Text(data, "Balance") is { } balance && long.TryParse(balance, out long parsed) ? parsed : 0;
+
+        // An account owning nothing may omit OwnerCount entirely; absent and zero mean the same.
+        return new AccountState(drops, (int)(Number(data, "OwnerCount") ?? 0));
     }
 
     public async Task<long> CurrentLedgerAsync(CancellationToken cancellationToken)

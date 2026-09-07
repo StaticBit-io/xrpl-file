@@ -122,9 +122,24 @@ public sealed class FakeLedgerSource : ILedgerSource
         }
     }
 
+    /// <summary>
+    /// Raised by <see cref="AccountTransactionsAsync"/> instead of answering: a node that could
+    /// not be read at all.
+    ///
+    /// A double that can only succeed leaves every caller's failure path untested, and that is not
+    /// a gap but a defect — a funder lookup that threw where it was asked to propose nobody sat
+    /// behind a green suite precisely because this fake could not produce what a node produces.
+    /// Absence itself is not a failure and is not this: an account the node has never heard of
+    /// answers with no transactions, which is what the real source does with <c>actNotFound</c>
+    /// and what this fake does for an account it holds nothing for.
+    /// </summary>
+    public Exception? AccountTransactionsFailure { get; set; }
+
     public async IAsyncEnumerable<LedgerTransaction> AccountTransactionsAsync(
         string account, long fromLedger, long toLedger, bool forward, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        if (AccountTransactionsFailure is { } failure) throw failure;
+
         List<LedgerTransaction> ordered;
 
         lock (_gate)
@@ -176,6 +191,12 @@ public sealed class FakeLedgerSource : ILedgerSource
 
     public Dictionary<string, long> Balances { get; } = [];
 
+    /// <summary>
+    /// Ledger objects each account owns, and so how many owner reserves are locked out of its
+    /// balance. Tickets an aborted run left live are the case this exists for.
+    /// </summary>
+    public Dictionary<string, int> OwnerCounts { get; } = [];
+
     public long CurrentLedger
     {
         get { lock (_gate) return _currentLedger; }
@@ -186,6 +207,11 @@ public sealed class FakeLedgerSource : ILedgerSource
 
     public Task<long> BalanceDropsAsync(string account, CancellationToken cancellationToken) =>
         Task.FromResult(Balances.TryGetValue(account, out long drops) ? drops : 0);
+
+    public Task<AccountState> AccountStateAsync(string account, CancellationToken cancellationToken) =>
+        Task.FromResult(new AccountState(
+            Balances.TryGetValue(account, out long drops) ? drops : 0,
+            OwnerCounts.TryGetValue(account, out int owned) ? owned : 0));
 
     public Task<long> CurrentLedgerAsync(CancellationToken cancellationToken) => Task.FromResult(CurrentLedger);
 }

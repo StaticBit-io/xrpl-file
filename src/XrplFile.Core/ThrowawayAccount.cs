@@ -24,12 +24,34 @@ public sealed record FundingRequest(string Address, long RequiredDrops, long Bal
     public string QrPayload => Address;
 }
 
+/// <summary>How far a refund's submission actually got, which is not the same as where the money is.</summary>
+public enum RefundOutcome
+{
+    /// <summary>Nothing was sendable: the balance did not clear the reserves and the fee, and no payment was made.</summary>
+    NothingToSend,
+
+    /// <summary>The node applied the payment to its open ledger.</summary>
+    Submitted,
+
+    /// <summary>
+    /// The node only queued it. A queued submission may reach a later ledger or may be dropped
+    /// from the queue instead, and until a ledger takes it every drop is still on the throwaway
+    /// account. Reporting this as money that went home is a lie a person only discovers later.
+    /// </summary>
+    Queued,
+}
+
 /// <summary>What went back, and what could not.</summary>
 /// <param name="Destination">The address the caller named. Nothing here ever chooses one.</param>
-/// <param name="SentDrops">What the payment carried, or zero when there was nothing to send.</param>
-/// <param name="LeftBehindDrops">What stays on the account: the base reserve, which only AccountDelete could recover.</param>
+/// <param name="SentDrops">What the payment carries, or zero when there was nothing to send. It has actually moved only once <paramref name="Outcome"/> is <see cref="RefundOutcome.Submitted"/>.</param>
+/// <param name="LeftBehindDrops">
+/// What stays on the account once the payment reaches a ledger: the base reserve plus one owner
+/// reserve for every object the account still owns, none of which a payment can recover. When
+/// nothing was sendable this is the whole balance, because nothing moved at all.
+/// </param>
 /// <param name="TxHash">The refund payment's hash, or an empty string when no payment was made.</param>
-public sealed record RefundResult(string Destination, long SentDrops, long LeftBehindDrops, string TxHash);
+/// <param name="Outcome">How far the submission got.</param>
+public sealed record RefundResult(string Destination, long SentDrops, long LeftBehindDrops, string TxHash, RefundOutcome Outcome);
 
 /// <summary>
 /// An account made for one publication and abandoned afterwards, so that a person's own account
@@ -127,16 +149,25 @@ public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, Xrp
     }
 
     /// <summary>
-    /// Sends everything above the base reserve and the fee to the destination the caller names.
+    /// Sends everything the account may actually spend to the destination the caller names.
     ///
     /// The destination is never guessed. <see cref="FunderAsync"/> can propose the address the
     /// money came from, but a proposal is for a person to look at; what goes into the transaction
     /// is what the caller passed, and a call with nothing to pass is refused rather than filled in.
     ///
-    /// The base reserve stays behind. Returning it would need AccountDelete, and that refuses
-    /// while the account's sequence plus <see cref="DeletionSequenceDelta"/> exceeds the ledger
-    /// index — which minting tickets pushes hours or days into the future. What is left is a
-    /// payment, and it is honest about what it cannot recover.
+    /// What may be spent is the balance less the fee and less every reserve the account is under:
+    /// the base reserve, and one owner reserve for each object it owns. A run that finished spent
+    /// every ticket it minted and owns nothing, so the base reserve is the whole floor — but a run
+    /// that was called off leaves its unspent tickets live (see <see cref="TicketStrategy"/>'s
+    /// DisposeAsync: dropping the queue does not remove the objects), and pricing the payment
+    /// against the base reserve alone would ask for more than the account may give. The node
+    /// answers <c>tecUNFUNDED_PAYMENT</c>, claims the fee, and answers the same to every retry
+    /// until there is nothing left — which is the state a person most wants their money out of.
+    ///
+    /// The floor stays behind. Returning it would need AccountDelete, and that refuses while the
+    /// account's sequence plus <see cref="DeletionSequenceDelta"/> exceeds the ledger index —
+    /// which minting tickets pushes hours or days into the future. What is left is a payment, and
+    /// it is honest about what it cannot recover.
     /// </summary>
     public async Task<RefundResult> RefundAsync(string destination, CancellationToken cancellationToken)
     {
@@ -146,12 +177,19 @@ public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, Xrp
         }
 
         NetworkFees fees = await _source.FeesAsync(cancellationToken).ConfigureAwait(false);
-        long balance = await _source.BalanceDropsAsync(Address, cancellationToken).ConfigureAwait(false);
-        long sendable = balance - fees.BaseReserveDrops - fees.OpenLedgerFeeDrops;
+
+        // Balance and owner count come from one answer, so the sum below describes one ledger.
+        AccountState state = await _source.AccountStateAsync(Address, cancellationToken).ConfigureAwait(false);
+
+        long unspendable = fees.BaseReserveDrops + (state.OwnerCount * fees.OwnerReserveDrops);
+        long sendable = state.BalanceDrops - unspendable - fees.OpenLedgerFeeDrops;
 
         if (sendable <= 0)
         {
-            return new RefundResult(destination, 0, Math.Min(balance, fees.BaseReserveDrops), string.Empty);
+            // Nothing moves, so what stays behind is the whole balance. Naming the floor here
+            // would under-report an account holding a few drops more than it — real drops, on a
+            // real account, that the report would have quietly forgotten.
+            return new RefundResult(destination, 0, state.BalanceDrops, string.Empty, RefundOutcome.NothingToSend);
         }
 
         uint sequence = await _sink.SequenceAsync(Address, validated: false, cancellationToken).ConfigureAwait(false);
@@ -175,7 +213,12 @@ public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, Xrp
                 $"the node answered {outcome.EngineResult} to the refund of {sendable} drops to {destination}");
         }
 
-        return new RefundResult(destination, sendable, fees.BaseReserveDrops, outcome.TxHash);
+        // terQUEUED is not arrival, and saying so would be a claim the caller cannot check.
+        RefundOutcome reached = string.Equals(outcome.EngineResult, "terQUEUED", StringComparison.Ordinal)
+            ? RefundOutcome.Queued
+            : RefundOutcome.Submitted;
+
+        return new RefundResult(destination, sendable, unspendable, outcome.TxHash, reached);
     }
 
     /// <summary>

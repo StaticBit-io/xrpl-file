@@ -240,6 +240,23 @@ test('account_tx goes out with the ledger range and pages on the marker the node
   });
 });
 
+test('an account the node has never heard of has no transactions, not an unreachable node', async () => {
+  await withStub(async () => {
+    const client = new LedgerClient(['wss://example.invalid']);
+    const read = [];
+    const walk = (async () => {
+      for await (const tx of client.accountTransactions('rNobody', 1, 2, true)) read.push(tx);
+    })();
+
+    await turn();
+    conversation().fail('actNotFound');
+
+    await walk;
+    assert.deepEqual(read, []);
+    client.close();
+  });
+});
+
 test('an error answer to account_tx is an unreachable node', async () => {
   await withStub(async () => {
     const client = new LedgerClient(['wss://example.invalid']);

@@ -54,6 +54,39 @@ internal static class StandaloneFixture
     }
 
     /// <summary>
+    /// Mints tickets on an account and waits for the mint to be validated, so a test can put an
+    /// account into the state an aborted publication leaves behind: ledger objects nothing will
+    /// ever spend, each locking one owner reserve.
+    /// </summary>
+    public static async Task MintTicketsAsync(
+        XrplClientLedgerSink sink, ILedgerSource source, XrplWallet wallet, uint count, long feeDrops, CancellationToken cancellationToken)
+    {
+        uint sequence = await sink.SequenceAsync(wallet.ClassicAddress, validated: false, cancellationToken);
+
+        Dictionary<string, object> mint = new(StringComparer.Ordinal)
+        {
+            ["TransactionType"] = "TicketCreate",
+            ["Account"] = wallet.ClassicAddress,
+            ["Sequence"] = sequence,
+            ["TicketCount"] = count,
+            ["Fee"] = feeDrops.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["SigningPubKey"] = wallet.PublicKey,
+        };
+
+        SubmitOutcome outcome = await sink.SubmitAsync(mint, wallet, cancellationToken);
+        Assert.True(outcome.EngineResult is "tesSUCCESS" or "terQUEUED", outcome.EngineResult);
+
+        // A mint that landed moves the account's sequence past every ticket it created.
+        while (await sink.SequenceAsync(wallet.ClassicAddress, validated: true, cancellationToken) <= sequence)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+        }
+
+        AccountState state = await source.AccountStateAsync(wallet.ClassicAddress, cancellationToken);
+        Assert.Equal((int)count, state.OwnerCount);
+    }
+
+    /// <summary>
     /// Polls until the account holds more than it did, so a test can wait for money sent to
     /// somebody else's account to arrive — where there is no sequence of one's own to watch.
     /// The caller's token is the only deadline.

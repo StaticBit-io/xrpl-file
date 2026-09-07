@@ -209,6 +209,11 @@ export class LedgerClient {
       const answer = await this.request('account_tx', {
         account, ledger_index_min: fromLedger, ledger_index_max: toLedger, forward, limit: this.pageSize, ...(marker ? { marker } : {}),
       });
+      // An account the node has never heard of has no transactions -- that is an answer, not a
+      // failure to read, exactly as txnNotFound is for tx above. The .NET source agrees, and the
+      // two have to: a mirror that turns absence into an unreachable node reports a file as
+      // missing on one side and the network as down on the other.
+      if (answer.error === 'actNotFound') return;
       if (answer.error) throw new XrplFileError('NodeUnreachable', `${this.endpoint} answered ${answer.error} to account_tx`);
       for (const record of answer.transactions ?? []) yield parseRecord(record);
       marker = answer.marker;

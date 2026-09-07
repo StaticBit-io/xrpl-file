@@ -86,16 +86,74 @@ public class ThrowawayAccountStandaloneTests : IDisposable
             await StandaloneFixture.WaitForBalanceAboveAsync(source, funder.ClassicAddress, before, token);
 
             // The base reserve is the price of the mode, and it is still on the dead account —
-            // exactly the reserve, read from the node rather than assumed.
+            // exactly the reserve, read from the node rather than assumed. A run that finished
+            // spent every ticket it minted, so the account owns nothing and the reserve is the
+            // whole floor; the aborted case, where it is not, is the fact below.
             NetworkFees fees = await source.FeesAsync(token);
-            long left = await source.BalanceDropsAsync(throwaway.ClassicAddress, token);
-            Assert.Equal(fees.BaseReserveDrops, left);
+            AccountState left = await source.AccountStateAsync(throwaway.ClassicAddress, token);
+            Assert.Equal(0, left.OwnerCount);
+            Assert.Equal(fees.BaseReserveDrops, left.BalanceDrops);
             Assert.Equal(fees.BaseReserveDrops, refund.LeftBehindDrops);
+            Assert.Equal(RefundOutcome.Submitted, refund.Outcome);
 
             // And deletion is a long way off, because minting moved the sequence far ahead.
             long deletableFrom = await account.DeletableFromLedgerAsync(token);
             long now = await source.CurrentLedgerAsync(token);
             Assert.True(deletableFrom > now, $"deletion should still be out of reach at ledger {now}");
+        }
+        finally
+        {
+            await client.Disconnect();
+        }
+    }
+
+    [Fact]
+    public async Task A_refund_after_an_aborted_run_clears_the_tickets_it_left_live()
+    {
+        using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(5));
+        CancellationToken token = timeout.Token;
+
+        IXrplClient client = new XrplClient(Endpoint);
+        await client.Connect(token);
+
+        try
+        {
+            XrplClientLedgerSink sink = new(client);
+            XrplClientLedgerSource source = new(client);
+
+            XrplWallet funder = await StandaloneFixture.FundedAccountAsync(client, sink, 900_000_000, token);
+            XrplWallet throwaway = XrplWallet.Generate();
+            ThrowawayAccount account = new(sink, source, throwaway);
+
+            NetworkFees fees = await source.FeesAsync(token);
+            await StandaloneFixture.PayAsync(sink, funder, throwaway.ClassicAddress, fees.BaseReserveDrops * 4, token);
+
+            // What a run called off mid-batch leaves: tickets on the ledger that nothing will
+            // ever spend. TicketStrategy's DisposeAsync drops its queue and the objects stay,
+            // one owner reserve each, which is the whole point of this test.
+            const uint Tickets = 5;
+            await StandaloneFixture.MintTicketsAsync(sink, source, throwaway, Tickets, fees.OpenLedgerFeeDrops, token);
+
+            AccountState stranded = await source.AccountStateAsync(throwaway.ClassicAddress, token);
+            Assert.Equal((int)Tickets, stranded.OwnerCount);
+
+            // A refund priced against the base reserve alone is more than the account may spend:
+            // the node answers tecUNFUNDED_PAYMENT, claims the fee, and answers the same to every
+            // retry until the remainder is gone.
+            long before = await source.BalanceDropsAsync(funder.ClassicAddress, token);
+            RefundResult refund = await account.RefundAsync(funder.ClassicAddress, token);
+
+            Assert.Equal(RefundOutcome.Submitted, refund.Outcome);
+            Assert.True(refund.SentDrops > 0, "there should have been something above the reserves to send");
+
+            await StandaloneFixture.WaitForBalanceAboveAsync(source, funder.ClassicAddress, before, token);
+
+            long floor = fees.BaseReserveDrops + (Tickets * fees.OwnerReserveDrops);
+            AccountState after = await source.AccountStateAsync(throwaway.ClassicAddress, token);
+
+            Assert.Equal(floor, refund.LeftBehindDrops);
+            Assert.Equal(floor, after.BalanceDrops);
+            Assert.Equal((int)Tickets, after.OwnerCount);
         }
         finally
         {
