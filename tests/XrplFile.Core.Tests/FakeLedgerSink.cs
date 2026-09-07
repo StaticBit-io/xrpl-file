@@ -8,14 +8,25 @@ namespace XrplFile.Tests;
 /// <summary>
 /// A sink that validates everything on the spot into a FakeLedgerSource, one hundred
 /// transactions per ledger, so the writer's read-back has something to read.
+///
+/// It answers asynchronously on purpose. A real node answers over a socket, so a parallel sender's
+/// submissions genuinely overlap; a fake that completed synchronously would let each task run to
+/// the end before the next one started, and every test of concurrency written against it would be
+/// vacuous. Everything it mutates is guarded, so an overlapping sender corrupts nothing.
 /// </summary>
 public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5000) : ILedgerSink
 {
+    private readonly Lock _gate = new();
     private readonly List<Dictionary<string, object>> _submitted = [];
     private uint _nextSequence = 10;
     private int _ledgersClosed;
+    private int _inFlight;
+    private int _peakInFlight;
 
-    public IReadOnlyList<Dictionary<string, object>> Submitted => _submitted;
+    public IReadOnlyList<Dictionary<string, object>> Submitted
+    {
+        get { lock (_gate) return [.. _submitted]; }
+    }
 
     /// <summary>Which submissions (by position) the node refuses, and with what.</summary>
     public Dictionary<int, string> Refusals { get; } = [];
@@ -58,100 +69,168 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     /// </summary>
     public int ValidatedQueryTimeouts { get; set; }
 
-    public Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken)
+    /// <summary>
+    /// How long each submission takes to answer. Zero still yields, which is enough to interleave
+    /// parallel senders; a non-zero delay holds them overlapped long enough to measure.
+    /// </summary>
+    public TimeSpan SubmitDelay { get; set; } = TimeSpan.Zero;
+
+    /// <summary>The most submissions this sink ever had in flight at once.</summary>
+    public int PeakInFlight
     {
-        if (validated)
-        {
-            if (ValidatedQueryTimeouts > 0)
-            {
-                ValidatedQueryTimeouts--;
-                throw new Xrpl.Client.Exceptions.TimeoutException("fake: the validated-sequence query timed out");
-            }
-
-            // A wait for validation is where a real ledger closes; the fake closes one per query,
-            // so the manifest lands in a later ledger than the chunks and lists it describes.
-            _ledgersClosed++;
-            Events.Add("query");
-        }
-
-        return Task.FromResult(_nextSequence);
+        get { lock (_gate) return _peakInFlight; }
     }
 
-    public Task<SubmitOutcome> SubmitAsync(Dictionary<string, object> transaction, XrplWallet wallet, CancellationToken cancellationToken)
+    /// <summary>
+    /// Closes a ledger without anyone submitting anything — the time that passes between two
+    /// publications. Without it a second publication lands in the same ledger as the first, and no
+    /// sweep anchor can tell one publication's markers from the other's.
+    /// </summary>
+    public void CloseLedger()
     {
-        int position = _submitted.Count;
+        lock (_gate) _ledgersClosed++;
+    }
 
-        if (Throws.TryGetValue(position, out Exception? failure)) throw failure;
-
-        _submitted.Add(transaction);
-
-        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"fake:{position}")));
-
-        if (Refusals.TryGetValue(position, out string? refusal))
+    public Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken)
+    {
+        lock (_gate)
         {
-            Events.Add("submit");
-            return Task.FromResult(new SubmitOutcome(refusal, hash));
+            if (validated)
+            {
+                if (ValidatedQueryTimeouts > 0)
+                {
+                    ValidatedQueryTimeouts--;
+                    throw new Xrpl.Client.Exceptions.TimeoutException("fake: the validated-sequence query timed out");
+                }
+
+                // A wait for validation is where a real ledger closes; the fake closes one per
+                // query, so the manifest lands in a later ledger than the chunks and lists it
+                // describes.
+                _ledgersClosed++;
+                Events.Add("query");
+            }
+
+            return Task.FromResult(_nextSequence);
+        }
+    }
+
+    public async Task<SubmitOutcome> SubmitAsync(Dictionary<string, object> transaction, XrplWallet wallet, CancellationToken cancellationToken)
+    {
+        int position;
+
+        lock (_gate)
+        {
+            position = _submitted.Count;
+
+            if (Throws.TryGetValue(position, out Exception? failure)) throw failure;
+
+            _submitted.Add(transaction);
+
+            _inFlight++;
+            if (_inFlight > _peakInFlight) _peakInFlight = _inFlight;
         }
 
-        _nextSequence = Convert.ToUInt32(transaction["Sequence"]) + 1;
-
-        if (transaction.TryGetValue("TransactionType", out object? kind) && (string)kind == "TicketCreate")
+        try
         {
-            uint at = Convert.ToUInt32(transaction["Sequence"]);
-            uint count = Convert.ToUInt32(transaction["TicketCount"]);
+            // Where the socket would be. Positions are handed out above, synchronously, so they
+            // still follow submission order however the answers interleave after this point.
+            await Task.Yield();
 
-            // Exactly what rippled does: tickets at+1..at+count, and the sequence lands at at+1+count.
-            for (uint ticket = at + 1; ticket <= at + count; ticket++) LiveTickets.Add(ticket);
-            _nextSequence = at + count + 1;
+            if (SubmitDelay > TimeSpan.Zero) await Task.Delay(SubmitDelay, cancellationToken).ConfigureAwait(false);
 
-            Events.Add("mint");
-            ledger.Add(new LedgerTransaction(
+            return Answer(transaction, position);
+        }
+        finally
+        {
+            lock (_gate) _inFlight--;
+        }
+    }
+
+    private SubmitOutcome Answer(Dictionary<string, object> transaction, int position)
+    {
+        lock (_gate)
+        {
+            string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"fake:{position}")));
+
+            if (Refusals.TryGetValue(position, out string? refusal))
+            {
+                Events.Add("submit");
+                return new SubmitOutcome(refusal, hash);
+            }
+
+            if (transaction.TryGetValue("TransactionType", out object? kind) && (string)kind == "TicketCreate")
+            {
+                uint at = Convert.ToUInt32(transaction["Sequence"]);
+                uint count = Convert.ToUInt32(transaction["TicketCount"]);
+                bool mintFailed = FailsAs.Contains(position);
+
+                // Exactly what rippled does: tickets at+1..at+count, and the sequence lands at
+                // at+1+count. A mint that validates and fails — tecINSUFFICIENT_RESERVE — mints
+                // nothing and moves the sequence by one, which is the whole difference a caller
+                // has to notice.
+                if (!mintFailed)
+                {
+                    for (uint ticket = at + 1; ticket <= at + count; ticket++) LiveTickets.Add(ticket);
+                }
+
+                _nextSequence = mintFailed ? at + 1 : at + count + 1;
+
+                Events.Add("mint");
+                ledger.Add(new LedgerTransaction(
+                    hash, firstLedger + position / 100 + _ledgersClosed, (string)transaction["Account"],
+                    Succeeded: !mintFailed, Validated: true, MemoTypeHex: null, MemoDataHex: null, MemoFormatHex: null));
+
+                return new SubmitOutcome("tesSUCCESS", hash);
+            }
+
+            if (transaction.TryGetValue("TicketSequence", out object? ticketField))
+            {
+                uint ticket = Convert.ToUInt32(ticketField);
+
+                // A node refuses a ticket it does not hold, which is what terPRE_TICKET says.
+                if (!LiveTickets.Remove(ticket)) return new SubmitOutcome("terPRE_TICKET", hash);
+            }
+            else
+            {
+                // Only a transaction that rides the account's sequence moves it. A ticketed one
+                // carries Sequence 0, and taking that literally used to collapse this account's
+                // next sequence to 1 and re-issue ticket numbers a later mint had already spent.
+                _nextSequence = Convert.ToUInt32(transaction["Sequence"]) + 1;
+            }
+
+            string? memoType = null, memoData = null, memoFormat = null;
+            if (transaction.TryGetValue("Memos", out object? memos))
+            {
+                JsonElement first = JsonSerializer.SerializeToElement(memos)[0].GetProperty("Memo");
+                memoType = first.TryGetProperty("MemoType", out JsonElement t) ? t.GetString() : null;
+                memoData = first.TryGetProperty("MemoData", out JsonElement d) ? d.GetString() : null;
+                memoFormat = first.TryGetProperty("MemoFormat", out JsonElement f) ? f.GetString() : null;
+            }
+
+            if (memoData is not null && StoredAs.TryGetValue(position, out Func<string, string>? corrupt)) memoData = corrupt(memoData);
+
+            bool failed = FailsAs.Contains(position) || (memoType is not null && FailMarkers.Contains(memoType));
+
+            Events.Add(
+                MemoLayout.ChunkIndexOf(memoType) is not null ? "chunk"
+                : MemoLayout.ListIndexOf(memoType) is not null ? "list"
+                : MemoLayout.IsManifest(memoType) ? "manifest"
+                : "submit");
+
+            LedgerTransaction stored = new(
                 hash, firstLedger + position / 100 + _ledgersClosed, (string)transaction["Account"],
-                Succeeded: true, Validated: true, MemoTypeHex: null, MemoDataHex: null, MemoFormatHex: null));
+                Succeeded: !failed, Validated: true,
+                memoType, memoData, memoFormat);
 
-            return Task.FromResult(new SubmitOutcome("tesSUCCESS", hash));
+            if (QueuedUntilSweep.TryGetValue(position, out int sweepsUntilVisible))
+            {
+                ledger.AddDelayed(stored, sweepsUntilVisible);
+                return new SubmitOutcome("terQUEUED", hash);
+            }
+
+            ledger.Add(stored);
+
+            return new SubmitOutcome("tesSUCCESS", hash);
         }
-
-        if (transaction.TryGetValue("TicketSequence", out object? ticketField))
-        {
-            uint ticket = Convert.ToUInt32(ticketField);
-
-            // A node refuses a ticket it does not hold, which is what terPRE_TICKET says.
-            if (!LiveTickets.Remove(ticket)) return Task.FromResult(new SubmitOutcome("terPRE_TICKET", hash));
-        }
-
-        string? memoType = null, memoData = null, memoFormat = null;
-        if (transaction.TryGetValue("Memos", out object? memos))
-        {
-            JsonElement first = JsonSerializer.SerializeToElement(memos)[0].GetProperty("Memo");
-            memoType = first.TryGetProperty("MemoType", out JsonElement t) ? t.GetString() : null;
-            memoData = first.TryGetProperty("MemoData", out JsonElement d) ? d.GetString() : null;
-            memoFormat = first.TryGetProperty("MemoFormat", out JsonElement f) ? f.GetString() : null;
-        }
-
-        if (memoData is not null && StoredAs.TryGetValue(position, out Func<string, string>? corrupt)) memoData = corrupt(memoData);
-
-        bool failed = FailsAs.Contains(position) || (memoType is not null && FailMarkers.Contains(memoType));
-
-        Events.Add(
-            MemoLayout.ChunkIndexOf(memoType) is not null ? "chunk"
-            : MemoLayout.ListIndexOf(memoType) is not null ? "list"
-            : MemoLayout.IsManifest(memoType) ? "manifest"
-            : "submit");
-
-        LedgerTransaction stored = new(
-            hash, firstLedger + position / 100 + _ledgersClosed, (string)transaction["Account"],
-            Succeeded: !failed, Validated: true,
-            memoType, memoData, memoFormat);
-
-        if (QueuedUntilSweep.TryGetValue(position, out int sweepsUntilVisible))
-        {
-            ledger.AddDelayed(stored, sweepsUntilVisible);
-            return Task.FromResult(new SubmitOutcome("terQUEUED", hash));
-        }
-
-        ledger.Add(stored);
-
-        return Task.FromResult(new SubmitOutcome("tesSUCCESS", hash));
     }
 }

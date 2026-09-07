@@ -3,12 +3,18 @@ using Xunit;
 
 namespace XrplFile.Tests;
 
+/// <summary>
+/// Minting is exact: a batch asks for one ticket per memo it is about to send, because nothing on
+/// the XRPL cancels a ticket and an unspent one locks an owner reserve for as long as the account
+/// lives. So the queue is normally empty between calls and a second call mints again — what a
+/// call carries is where its own sweep starts, not tickets it inherited from the last one.
+/// </summary>
 public class TicketStrategyTests
 {
     private static readonly XrplWallet Wallet = XrplWallet.Generate();
 
-    private static IReadOnlyList<MemoSubmission> Memos(int count) =>
-        [.. Enumerable.Range(0, count).Select(i => new MemoSubmission(MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex([(byte)i]), null))];
+    private static IReadOnlyList<MemoSubmission> Memos(int count, int from = 0) =>
+        [.. Enumerable.Range(from, count).Select(i => new MemoSubmission(MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex([(byte)i]), null))];
 
     private static TicketStrategy Strategy(FakeLedgerSink sink, FakeLedgerSource ledger, int ticketsPerBatch = 100) =>
         new(sink, ledger, Wallet, new TicketStrategyOptions
@@ -134,6 +140,91 @@ public class TicketStrategyTests
     }
 
     [Fact]
+    public async Task A_mint_that_validated_and_failed_is_reported_rather_than_waited_out()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        // Position 0 is the mint. A TicketCreate can validate and still fail —
+        // tecINSUFFICIENT_RESERVE is what 250 tickets ask of an account that cannot cover fifty
+        // XRP of owner reserve — and then it moves the sequence by one instead of by the ticket
+        // count and one. Watching for the larger step spins out the whole validation timeout and
+        // calls a validated failure a timeout.
+        sink.FailsAs.Add(0);
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 3);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.SubmitRefused, error.Error);
+        Assert.Empty(sink.LiveTickets);
+    }
+
+    [Theory]
+    [InlineData("telINSUF_FEE_P")]
+    [InlineData("telCAN_NOT_QUEUE_FULL")]
+    [InlineData("terINSUF_FEE_B")]
+    [InlineData("terRETRY")]
+    public async Task A_refusal_that_never_reached_a_ledger_hands_its_ticket_back(string refusal)
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        // Position 0 is the mint, so position 1 is the first memo. None of these codes reaches a
+        // ledger, so the ticket the submission named is untouched and still the account's — and
+        // nothing on the XRPL cancels a ticket, so one that is not handed back is lost for good.
+        sink.Refusals[1] = refusal;
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 3);
+
+        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, landed.Count);
+        // Three tickets covered three memos and a retry: no second mint was needed.
+        Assert.Equal(1, sink.Events.Count(kind => kind == "mint"));
+    }
+
+    [Fact]
+    public async Task A_submission_that_throws_hands_its_ticket_back_rather_than_stranding_it()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        // Position 0 is the mint and 1..3 the three memos: the last is a node call that fails
+        // after its ticket left the queue and before any ledger could have seen the submission.
+        sink.Throws[3] = new InvalidOperationException("fake: the socket died mid-submission");
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 3);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken));
+
+        sink.Throws.Clear();
+
+        // The publication that follows finds that ticket in the queue rather than minting for a
+        // reserve the account is already paying.
+        await strategy.SubmitAllAsync(Memos(1, from: 3), null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, sink.Events.Count(kind => kind == "mint"));
+    }
+
+    [Fact]
+    public async Task A_second_publication_reports_its_own_hashes_not_the_first_publications()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 4);
+
+        IReadOnlyList<SubmittedMemo> first = await strategy.SubmitAllAsync(Memos(2), null, TestContext.Current.CancellationToken);
+
+        // A ledger closes between two publications, as one always does.
+        sink.CloseLedger();
+
+        IReadOnlyList<SubmittedMemo> second = await strategy.SubmitAllAsync(Memos(2), null, TestContext.Current.CancellationToken);
+
+        // Chunk markers carry no publication scope — xf/c/0 is xf/c/0 for every file this account
+        // ever published — so a sweep anchored before the first publication matches the first
+        // publication's transactions and reports their hashes for memos this call never landed.
+        Assert.Equal(2, second.Count);
+        Assert.Empty(second.Select(memo => memo.TxHash).Intersect(first.Select(memo => memo.TxHash), StringComparer.Ordinal));
+    }
+
+    [Fact]
     public async Task A_queued_transaction_is_waited_for_rather_than_sent_twice()
     {
         FakeLedgerSource ledger = new();
@@ -174,20 +265,47 @@ public class TicketStrategyTests
     }
 
     [Fact]
-    public async Task Unspent_tickets_survive_into_the_next_call()
+    public async Task A_second_call_mints_only_what_it_needs()
     {
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
         await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 10);
 
         await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
-        int mintsAfterFirst = sink.Events.Count(kind => kind == "mint");
+        sink.CloseLedger();
+        await strategy.SubmitAllAsync(Memos(2, from: 3), null, TestContext.Current.CancellationToken);
 
-        // A second phase — the block list, then the manifest — must not mint again while the
-        // first phase's tickets are still live.
-        await strategy.SubmitAllAsync(Memos(2), null, TestContext.Current.CancellationToken);
+        uint[] minted =
+        [
+            .. sink.Submitted
+                .Where(tx => (string)tx["TransactionType"] == "TicketCreate")
+                .Select(tx => Convert.ToUInt32(tx["TicketCount"])),
+        ];
 
-        Assert.Equal(mintsAfterFirst, sink.Events.Count(kind => kind == "mint"));
+        // Three memos, then two: two mints, each for exactly the memos it is about to carry. The
+        // first call leaves nothing behind because it never asked for anything it could not spend.
+        Assert.Equal(new uint[] { 3, 2 }, minted);
+    }
+
+    [Fact]
+    public async Task No_more_submissions_are_in_flight_than_the_option_allows()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger) { SubmitDelay = TimeSpan.FromMilliseconds(5) };
+        await using TicketStrategy strategy = new(sink, ledger, Wallet, new TicketStrategyOptions
+        {
+            TicketsPerBatch = 40,
+            MaxInFlight = 4,
+            SweepPoll = TimeSpan.FromMilliseconds(1),
+            BatchTimeout = TimeSpan.FromSeconds(30),
+            ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
+
+        await strategy.SubmitAllAsync(Memos(40), null, TestContext.Current.CancellationToken);
+
+        // The lower bound matters as much as the upper one: without genuine overlap the gate is
+        // never contended and the assertion above it would hold for a strategy that has no gate.
+        Assert.InRange(sink.PeakInFlight, 2, 4);
     }
 
     [Fact]

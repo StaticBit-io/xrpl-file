@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Xrpl.Wallet;
 
 namespace XrplFile;
@@ -43,6 +44,15 @@ public sealed class TicketStrategyOptions
 /// validation cannot work here: a ticketed transaction does not move the account's sequence, so
 /// there is nothing to watch. The sweep answers the better question anyway — not "has time
 /// passed" but "which of these actually landed".
+///
+/// Minting is exact: a batch asks for one ticket per memo it is about to send, because nothing on
+/// the XRPL cancels a ticket and an unspent one locks an owner reserve for as long as the account
+/// lives. So the queue is normally empty when a call returns, and a second call mints again
+/// rather than inheriting anything.
+///
+/// One instance serves one caller at a time: SubmitAllAsync is not re-entrant, and two concurrent
+/// calls on the same instance would fight over one ticket queue. The queue is guarded all the
+/// same, because within a single call the batch is sent in parallel.
 /// </summary>
 public sealed class TicketStrategy(
     ILedgerSink sink, ILedgerSource source, XrplWallet wallet, TicketStrategyOptions? options = null) : ISubmissionStrategy
@@ -57,40 +67,94 @@ public sealed class TicketStrategy(
     private readonly ILedgerSource _source = source;
     private readonly XrplWallet _wallet = wallet;
     private readonly TicketStrategyOptions _options = options ?? new TicketStrategyOptions();
+
+    /// <summary>Guards both ticket collections. A batch is sent in parallel; the queue is not.</summary>
+    private readonly Lock _ticketLock = new();
+
+    /// <summary>Tickets in hand: minted, or handed back by a submission that never reached a ledger.</summary>
     private readonly Queue<uint> _tickets = new();
 
-    /// <summary>The earliest ledger any of this strategy's transactions could be in.</summary>
-    private long _sweepFrom;
+    /// <summary>
+    /// Tickets that left the queue on a submission and are not yet known to be spent. They are
+    /// alive on the account exactly as much as the ones in hand, and the protocol counts them, so
+    /// the mint has to count them too.
+    /// </summary>
+    private readonly HashSet<uint> _dispatched = [];
+
+    /// <summary>What a sweep learned about one batch: which markers wrote, and which reached a ledger at all.</summary>
+    private sealed record SweepResult(IReadOnlyDictionary<string, string> Landed, IReadOnlySet<string> Seen);
 
     public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
     {
+        HashSet<string> markers = new(memos.Count, StringComparer.Ordinal);
+
+        foreach (MemoSubmission memo in memos)
+        {
+            // A memo is recognised in the ledger by its marker and nothing else, so two memos
+            // wearing the same one cannot be told apart afterwards. Refusing here keeps that
+            // ambiguity off the ledger — and keeps a raw ArgumentException out of the contract.
+            if (!markers.Add(memo.MemoTypeHex))
+            {
+                throw new XrplFileException(XrplFileError.SubmitRefused,
+                    $"two memos carry the marker {memo.MemoTypeHex}, which the sweep could not tell apart");
+            }
+        }
+
         Dictionary<int, string> landed = [];
         Dictionary<int, int> attempts = [];
         List<int> pending = [.. Enumerable.Range(0, memos.Count)];
+
+        // The sweep window belongs to this call and not to the instance. Chunk markers carry no
+        // publication scope — xf/c/0 is xf/c/0 for every file this account ever published — so a
+        // window opened before an earlier publication matches that publication's transactions and
+        // reports their hashes for memos this call never landed.
+        long? sweepFrom = null;
 
         while (pending.Count > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             int take = Math.Min(pending.Count, _options.TicketsPerBatch);
-            await EnsureTicketsAsync(take, cancellationToken).ConfigureAwait(false);
+            long? mintedAt = await EnsureTicketsAsync(take, cancellationToken).ConfigureAwait(false);
 
-            List<int> batch = [.. pending.Take(Math.Min(take, _tickets.Count))];
-            Dictionary<string, int> wanted = batch.ToDictionary(index => memos[index].MemoTypeHex, index => index);
+            // Nothing this batch sends can land before the mint that paid for it, and with no mint
+            // nothing can land before the ledger that is open right now.
+            long batchFrom = mintedAt ?? await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+            sweepFrom ??= batchFrom;
+
+            List<int> batch = [.. pending.Take(Math.Min(take, TicketsInHand))];
+
+            if (batch.Count == 0)
+            {
+                throw new XrplFileException(XrplFileError.SubmitRefused,
+                    $"no ticket is left for the {pending.Count} memos still waiting: the account already holds "
+                    + $"the {MaxLiveTickets} live tickets the protocol allows and none of them came back");
+            }
+
+            Dictionary<string, int> wanted = new(batch.Count, StringComparer.Ordinal);
 
             foreach (int index in batch)
             {
+                wanted[memos[index].MemoTypeHex] = index;
                 attempts[index] = attempts.GetValueOrDefault(index) + 1;
             }
 
-            await SendBatchAsync(memos, batch, cancellationToken).ConfigureAwait(false);
+            IReadOnlyDictionary<int, uint> ridden = await SendBatchAsync(memos, batch, cancellationToken).ConfigureAwait(false);
 
-            IReadOnlyDictionary<string, string> seen = await SweepAsync(wanted.Keys, cancellationToken).ConfigureAwait(false);
+            SweepResult swept = await SweepAsync(wanted.Keys, sweepFrom.Value, batchFrom, cancellationToken).ConfigureAwait(false);
 
-            foreach ((string marker, string hash) in seen)
+            foreach ((string marker, string hash) in swept.Landed)
             {
                 landed[wanted[marker]] = hash;
+            }
+
+            // Reaching a ledger is what spends a ticket, whether the transaction wrote its memo or
+            // died with a tec. A submission the sweep cannot find anywhere may still be in the
+            // node's queue holding its ticket, so that one keeps counting as alive.
+            foreach (string marker in swept.Seen)
+            {
+                if (ridden.TryGetValue(wanted[marker], out uint spent)) ForgetTicket(spent);
             }
 
             submitted?.Report(landed.Count);
@@ -109,22 +173,87 @@ public sealed class TicketStrategy(
 
     public ValueTask DisposeAsync()
     {
-        // Unspent tickets are deliberately left alone. They cost an owner reserve each and there
-        // is no transaction that cancels one, so the only ways out are spending them on the next
-        // publication or deleting the account, which removes them with it.
-        _tickets.Clear();
+        // Dropping the queue is all this can do, and it is worth being plain about what that
+        // means: a ticket still in it stays live on the account afterwards, costing an owner
+        // reserve, because no transaction cancels a ticket and nothing re-adopts one. It is a
+        // corner rather than the rule — minting is exact, so the queue is normally already empty
+        // — and the only ways out are spending it on a transaction of your own, or deleting the
+        // account, which removes its tickets with it.
+        lock (_ticketLock)
+        {
+            _tickets.Clear();
+            _dispatched.Clear();
+        }
+
         return ValueTask.CompletedTask;
     }
 
-    /// <summary>Mints until at least this many tickets are in hand, never past what the protocol allows.</summary>
-    private async Task EnsureTicketsAsync(int need, CancellationToken cancellationToken)
+    /// <summary>Tickets in hand, ready to be spent.</summary>
+    private int TicketsInHand
     {
-        while (_tickets.Count < need)
-        {
-            int room = Math.Min(MaxLiveTickets - _tickets.Count, MaxTicketsPerMint);
-            int mint = Math.Min(need - _tickets.Count, room);
+        get { lock (_ticketLock) return _tickets.Count; }
+    }
 
-            if (mint <= 0) return;
+    /// <summary>
+    /// Tickets alive on the account: the ones in hand plus the ones dispatched and not yet known
+    /// to have reached a ledger. Counting only the ones in hand is how two batches of 250 put 500
+    /// tickets on one account and the next mint comes back tecDIR_FULL.
+    /// </summary>
+    private int LiveTicketCount
+    {
+        get { lock (_ticketLock) return _tickets.Count + _dispatched.Count; }
+    }
+
+    private bool TryTakeTicket(out uint ticket)
+    {
+        lock (_ticketLock)
+        {
+            if (!_tickets.TryDequeue(out ticket)) return false;
+
+            _dispatched.Add(ticket);
+            return true;
+        }
+    }
+
+    /// <summary>Hands a ticket back to the queue: it was never spent, and nothing else can free it.</summary>
+    private void ReturnTicket(uint ticket)
+    {
+        lock (_ticketLock)
+        {
+            _dispatched.Remove(ticket);
+            _tickets.Enqueue(ticket);
+        }
+    }
+
+    /// <summary>Drops a ticket that reached a ledger — spent, and no longer alive on the account.</summary>
+    private void ForgetTicket(uint ticket)
+    {
+        lock (_ticketLock) _dispatched.Remove(ticket);
+    }
+
+    private void AddTickets(uint first, uint last)
+    {
+        lock (_ticketLock)
+        {
+            for (uint ticket = first; ticket <= last; ticket++) _tickets.Enqueue(ticket);
+        }
+    }
+
+    /// <summary>
+    /// Mints until at least this many tickets are in hand, never past what the protocol allows.
+    /// Returns the ledger of the first mint it made — the earliest ledger anything sent afterwards
+    /// can be in — or null when it minted nothing.
+    /// </summary>
+    private async Task<long?> EnsureTicketsAsync(int need, CancellationToken cancellationToken)
+    {
+        long? firstMintLedger = null;
+
+        while (TicketsInHand < need)
+        {
+            int room = Math.Min(MaxLiveTickets - LiveTicketCount, MaxTicketsPerMint);
+            int mint = Math.Min(need - TicketsInHand, room);
+
+            if (mint <= 0) return firstMintLedger;
 
             string account = _wallet.ClassicAddress;
             uint sequence = await _sink.SequenceAsync(account, validated: false, cancellationToken).ConfigureAwait(false);
@@ -150,50 +279,87 @@ public sealed class TicketStrategy(
             // The mint is the only transaction here that moves the sequence, so it is the only one
             // whose validation can be awaited by watching it. Everything after rides a ticket and
             // leaves the sequence alone.
-            await WaitForSequenceAsync(account, sequence + (uint)mint + 1, cancellationToken).ConfigureAwait(false);
+            //
+            // One step is the whole wait, not mint + 1: a TicketCreate takes the sequence whether
+            // it succeeds or fails, and one that lands with a tec — tecINSUFFICIENT_RESERVE is
+            // fifty XRP of owner reserve for 250 tickets — moves it by exactly one and stops
+            // there. Waiting for mint + 1 would spin out the whole validation timeout and report a
+            // validation timeout for something that validated and failed.
+            await WaitForSequenceAsync(account, sequence + 1, cancellationToken).ConfigureAwait(false);
+
+            LedgerTransaction? minted = await _source.TransactionAsync(outcome.TxHash, cancellationToken).ConfigureAwait(false);
+
+            if (minted is null)
+            {
+                // The node cannot show the mint yet, but its arithmetic says the same thing: only
+                // a TicketCreate that succeeded moves the sequence by the ticket count and one
+                // more.
+                await WaitForSequenceAsync(account, sequence + (uint)mint + 1, cancellationToken).ConfigureAwait(false);
+            }
+            else if (!minted.Succeeded)
+            {
+                throw new XrplFileException(XrplFileError.SubmitRefused,
+                    $"the mint {outcome.TxHash} for {mint} tickets validated in ledger {minted.LedgerIndex} and failed; "
+                    + "the tec code is on that transaction, and an owner reserve too small for the tickets is the usual cause");
+            }
 
             // Exactly rippled's arithmetic: a TicketCreate at S with count N mints S+1 through S+N.
-            for (uint ticket = sequence + 1; ticket <= sequence + (uint)mint; ticket++)
-            {
-                _tickets.Enqueue(ticket);
-            }
+            AddTickets(sequence + 1, sequence + (uint)mint);
 
-            if (_sweepFrom == 0)
-            {
-                LedgerTransaction? mintTx = await _source.TransactionAsync(outcome.TxHash, cancellationToken).ConfigureAwait(false);
-                _sweepFrom = mintTx?.LedgerIndex ?? await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
-            }
+            firstMintLedger ??= minted?.LedgerIndex
+                ?? await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
         }
+
+        return firstMintLedger;
     }
 
-    private async Task SendBatchAsync(IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> batch, CancellationToken cancellationToken)
+    /// <summary>Sends one batch in parallel and reports which ticket each memo rode.</summary>
+    private async Task<IReadOnlyDictionary<int, uint>> SendBatchAsync(
+        IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> batch, CancellationToken cancellationToken)
     {
         using SemaphoreSlim gate = new(_options.MaxInFlight, _options.MaxInFlight);
+        ConcurrentDictionary<int, uint> ridden = new();
 
         IEnumerable<Task> sending = batch.Select(async index =>
         {
-            uint ticket;
-            lock (_tickets)
-            {
-                if (!_tickets.TryDequeue(out ticket)) return;
-            }
+            if (!TryTakeTicket(out uint ticket)) return;
 
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            bool spent = false;
+            bool held = false;
 
             try
             {
-                await SendOneAsync(memos[index], ticket, cancellationToken).ConfigureAwait(false);
+                await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                held = true;
+
+                spent = await SendOneAsync(memos[index], ticket, cancellationToken).ConfigureAwait(false);
+
+                if (spent) ridden[index] = ticket;
             }
             finally
             {
-                gate.Release();
+                if (held) gate.Release();
+
+                // Everything between the dequeue and a submission the node actually took is
+                // covered here: a cancellation while waiting for the gate, a throw out of the node
+                // call, a refusal the node made before any ledger saw it. In every one of those
+                // the ticket is intact and alive on the account, and nothing on the XRPL will ever
+                // cancel it, so the queue is the only place it can go.
+                if (!spent) ReturnTicket(ticket);
             }
         });
 
         await Task.WhenAll(sending).ConfigureAwait(false);
+
+        return ridden;
     }
 
-    private async Task SendOneAsync(MemoSubmission memo, uint ticket, CancellationToken cancellationToken)
+    /// <summary>
+    /// Sends one memo on one ticket. True when the node took the submission and the ticket must be
+    /// presumed spent; false when the node refused it before any ledger saw it, which leaves the
+    /// ticket alive and reusable.
+    /// </summary>
+    private async Task<bool> SendOneAsync(MemoSubmission memo, uint ticket, CancellationToken cancellationToken)
     {
         Dictionary<string, object> fields = new() { ["MemoType"] = memo.MemoTypeHex, ["MemoData"] = memo.MemoDataHex };
         if (memo.MemoFormatHex is not null) fields["MemoFormat"] = memo.MemoFormatHex;
@@ -213,37 +379,40 @@ public sealed class TicketStrategy(
 
         // terPRE_TICKET means the ticket is not in a ledger yet, which can only happen if the mint
         // was not awaited. That is a bug here, not a network condition, and it is worth saying so.
+        // The node refused it outright, so the ticket is certainly intact and the caller, which
+        // hands back anything this method did not report as spent, gives it up to the queue again.
         if (string.Equals(outcome.EngineResult, "terPRE_TICKET", StringComparison.Ordinal))
         {
             throw new XrplFileException(XrplFileError.SubmitRefused,
                 $"ticket {ticket} was spent before it was in a validated ledger; the mint was not awaited");
         }
 
-        // A tem or a tef never reached a ledger, so the ticket is untouched and still ours. Giving
-        // it back is the difference between one wasted owner reserve per malformed submission and
-        // none. A tec is the opposite case and the ticket really is gone, but a tec is not visible
-        // here: it arrives when the ledger closes, and only the sweep sees it.
-        if (outcome.EngineResult.StartsWith("tem", StringComparison.Ordinal)
-            || outcome.EngineResult.StartsWith("tef", StringComparison.Ordinal))
-        {
-            lock (_tickets) _tickets.Enqueue(ticket);
-            return;
-        }
-
-        // Everything else is left to the sweep. A tesSUCCESS may still not make it and a terQUEUED
-        // has spent nothing and may yet land, so neither is believed here. The sweep decides, and
-        // a memo it does not find comes round again on a fresh ticket.
+        // Three answers leave the ticket in doubt, and every other answer settles it. A tes may
+        // still not make it, so it is not given back. A tec is charged against a ledger and really
+        // does spend the ticket — it is invisible here, arriving only when the ledger closes, but
+        // the sweep sees it. A terQUEUED is holding the ticket pending and may yet land.
+        //
+        // Everything else — tem, tef, tel, and every ter that is not terQUEUED — never reached a
+        // ledger, so the ticket is untouched and still ours. A telINSUF_FEE_P or a
+        // telCAN_NOT_QUEUE_FULL is exactly what a hundred-wide burst gets from a loaded node, and
+        // treating one as a spent ticket loses an owner reserve per refusal, permanently.
+        return outcome.EngineResult.StartsWith("tes", StringComparison.Ordinal)
+            || outcome.EngineResult.StartsWith("tec", StringComparison.Ordinal)
+            || string.Equals(outcome.EngineResult, "terQUEUED", StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// Reads the account forward from the batch's first possible ledger until every marker has
-    /// been seen or the batch's deadline passes.
+    /// Reads the account forward from this call's first possible ledger until every marker has
+    /// been seen or the batch's deadline passes. <paramref name="batchFrom"/> is the same window
+    /// narrowed to this batch, and it decides only whether a ticket was spent: an earlier
+    /// attempt's tec sits below it and was accounted for when that attempt was swept.
     /// </summary>
-    private async Task<IReadOnlyDictionary<string, string>> SweepAsync(
-        IReadOnlyCollection<string> markers, CancellationToken cancellationToken)
+    private async Task<SweepResult> SweepAsync(
+        IReadOnlyCollection<string> markers, long from, long batchFrom, CancellationToken cancellationToken)
     {
-        Dictionary<string, string> found = [];
-        HashSet<string> wanted = [.. markers];
+        Dictionary<string, string> found = new(StringComparer.Ordinal);
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        HashSet<string> wanted = new(markers, StringComparer.Ordinal);
         DateTimeOffset deadline = DateTimeOffset.UtcNow + _options.BatchTimeout;
 
         while (true)
@@ -251,19 +420,23 @@ public sealed class TicketStrategy(
             long to = await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
 
             await foreach (LedgerTransaction tx in _source
-                .AccountTransactionsAsync(_wallet.ClassicAddress, _sweepFrom, to, forward: true, cancellationToken)
+                .AccountTransactionsAsync(_wallet.ClassicAddress, from, to, forward: true, cancellationToken)
                 .ConfigureAwait(false))
             {
-                if (!tx.Succeeded || !tx.Validated || tx.MemoTypeHex is null) continue;
+                if (!tx.Validated || tx.MemoTypeHex is null) continue;
                 if (!wanted.Contains(tx.MemoTypeHex)) continue;
+
+                if (tx.LedgerIndex >= batchFrom) seen.Add(tx.MemoTypeHex);
+
+                if (!tx.Succeeded) continue;
 
                 // The first copy in canonical order is the one the format's readers will use, so
                 // it is the one whose hash goes in the report.
                 found.TryAdd(tx.MemoTypeHex, tx.Hash);
             }
 
-            if (found.Count == wanted.Count) return found;
-            if (DateTimeOffset.UtcNow >= deadline) return found;
+            if (found.Count == wanted.Count) return new SweepResult(found, seen);
+            if (DateTimeOffset.UtcNow >= deadline) return new SweepResult(found, seen);
 
             await Task.Delay(_options.SweepPoll, cancellationToken).ConfigureAwait(false);
         }
