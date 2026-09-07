@@ -119,11 +119,9 @@ public sealed class TicketStrategy(
             long? mintedAt = await EnsureTicketsAsync(take, cancellationToken).ConfigureAwait(false);
 
             // Nothing this batch sends can land before the mint that paid for it. With no mint,
-            // nothing this batch sends can land at or before the ledger that is already open —
-            // everything it submits lands strictly later — so the floor is one past it. Anchoring
-            // at the open ledger itself would let a retried publication reusing the same chunk
-            // markers match an earlier attempt's transaction inside that one-ledger window.
-            long batchFrom = mintedAt ?? await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false) + 1;
+            // the floor falls back to one past the ledger already open — see
+            // LedgerAfterTheOneAlreadyOpenAsync for why one past it, not the open ledger itself.
+            long batchFrom = mintedAt ?? await LedgerAfterTheOneAlreadyOpenAsync(cancellationToken).ConfigureAwait(false);
             sweepFrom ??= batchFrom;
 
             List<int> batch = [.. pending.Take(Math.Min(take, TicketsInHand))];
@@ -314,9 +312,11 @@ public sealed class TicketStrategy(
             // minted.LedgerIndex is only trustworthy once the node calls the mint validated: an
             // unvalidated tx answer can carry no ledger index at all (it reads back as the default,
             // 0), and anchoring the sweep there would open the window from the start of the chain.
+            // The fallback is the same floor SubmitAllAsync's own no-mint case uses, and for the
+            // same reason — see LedgerAfterTheOneAlreadyOpenAsync.
             firstMintLedger ??= minted is { Validated: true } validatedMint
                 ? validatedMint.LedgerIndex
-                : await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+                : await LedgerAfterTheOneAlreadyOpenAsync(cancellationToken).ConfigureAwait(false);
         }
 
         return firstMintLedger;
@@ -450,6 +450,17 @@ public sealed class TicketStrategy(
             await Task.Delay(_options.SweepPoll, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// One past the ledger already open when read: the floor to anchor a sweep at when there is no
+    /// mint (or no validated mint) to anchor it to instead. Nothing this call submits afterwards
+    /// can land at or before the ledger that was already open — everything it sends lands strictly
+    /// later — so the floor excludes that ledger rather than including it. Anchoring at the open
+    /// ledger itself would let a retried publication reusing the same chunk markers match an
+    /// earlier attempt's transaction sitting in that one-ledger window instead of its own.
+    /// </summary>
+    private async Task<long> LedgerAfterTheOneAlreadyOpenAsync(CancellationToken cancellationToken) =>
+        await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false) + 1;
 
     private async Task WaitForSequenceAsync(string account, uint expected, CancellationToken cancellationToken)
     {

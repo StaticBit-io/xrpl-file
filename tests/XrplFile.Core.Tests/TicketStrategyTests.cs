@@ -181,6 +181,33 @@ public class TicketStrategyTests
     }
 
     [Fact]
+    public async Task A_second_call_whose_mint_is_unvalidated_at_lookup_reports_its_own_hash_not_the_firsts()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 1);
+
+        // A first publication that lands cleanly: position 0 is its mint, position 1 its one memo.
+        IReadOnlyList<SubmittedMemo> first = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+
+        // Position 2 is the second call's mint. The node holds it but has not validated it yet when
+        // it is looked up by hash, so EnsureTicketsAsync's firstMintLedger falls back to "the ledger
+        // already open" exactly as SubmitAllAsync's own no-mint case does, and needs the same +1:
+        // without it, this fallback can name the very ledger the first call's identically-marked
+        // memo already landed at.
+        sink.UnvalidatedAt.Add(2);
+
+        // The same marker as the first call's memo — a retried publication reusing the same chunk
+        // marker, which is the collision this floor exists to prevent. No ledger is closed between
+        // the two calls on purpose: that is what leaves the first memo sitting at the exact ledger
+        // this fallback would anchor at without the +1.
+        IReadOnlyList<SubmittedMemo> second = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+
+        Assert.Single(second);
+        Assert.NotEqual(first[0].TxHash, second[0].TxHash);
+    }
+
+    [Fact]
     public async Task A_call_that_mints_nothing_does_not_match_the_ledger_that_was_already_open()
     {
         FakeLedgerSource ledger = new();
