@@ -9,13 +9,15 @@ namespace XrplFile;
 /// <param name="Chunks">Memos carrying file bytes.</param>
 /// <param name="Blocks">Merkle blocks the chunks group into.</param>
 /// <param name="Lists">Memos carrying the block list; zero when there is one block.</param>
-/// <param name="Mints">TicketCreate transactions the batches will need.</param>
-/// <param name="Transactions">Everything above plus the manifest.</param>
+/// <param name="Mints">TicketCreate transactions the batches will need, with nothing retried.</param>
+/// <param name="Transactions">Everything above plus the manifest. The run as it goes when nothing is retried — what a person is shown, because inflating the transaction count on screen would mislead the other way.</param>
 /// <param name="FeeDropsPerTransaction">The node's price at the moment of the estimate.</param>
-/// <param name="FeeDropsTotal">That price across every transaction.</param>
-/// <param name="PeakReserveDrops">What live tickets lock up at the worst moment.</param>
+/// <param name="FeeDropsTotal">That price across <see cref="Transactions"/>: the run as it goes, nothing retried.</param>
+/// <param name="MaxAttempts">How many times one memo may be attempted before the run is called off. Defaults to <see cref="TicketStrategyOptions.MaxAttemptsPerMemo"/>'s own default; the two are independent knobs, kept in step by convention rather than by a shared constant.</param>
+/// <param name="FeeDropsWorstCase">The fee if every memo needed every one of <see cref="MaxAttempts"/> tries, including a remint each retry cycle: <see cref="Transactions"/> times <see cref="MaxAttempts"/> times <see cref="FeeDropsPerTransaction"/>. What <see cref="RequiredDrops"/> is actually built from.</param>
+/// <param name="PeakReserveDrops">What live tickets lock up at the worst moment: memos, capped at the protocol's own live-ticket ceiling (<see cref="TicketStrategy.MaxLiveTickets"/>), not the caller's batch size. A batch is what is normally live, but a ticket dispatched whose submission never reaches a ledger stays live for the run's lifetime, so the honest worst case is the protocol's cap.</param>
 /// <param name="BaseReserveDrops">What the account must hold to exist at all.</param>
-/// <param name="RequiredDrops">The three above, added.</param>
+/// <param name="RequiredDrops">The worst case: <see cref="FeeDropsWorstCase"/>, <see cref="PeakReserveDrops"/> and <see cref="BaseReserveDrops"/>, added. An optimistic number here would let a run start that cannot finish.</param>
 /// <param name="BalanceDrops">What the account holds now.</param>
 public sealed record PublicationEstimate(
     long Chunks,
@@ -25,6 +27,8 @@ public sealed record PublicationEstimate(
     long Transactions,
     long FeeDropsPerTransaction,
     long FeeDropsTotal,
+    int MaxAttempts,
+    long FeeDropsWorstCase,
     long PeakReserveDrops,
     long BaseReserveDrops,
     long RequiredDrops,
@@ -36,7 +40,11 @@ public sealed record PublicationEstimate(
 public static class PublicationEstimator
 {
     public static async Task<PublicationEstimate> EstimateAsync(
-        ILedgerSource source, string account, long fileBytes, int ticketsPerBatch, CancellationToken cancellationToken)
+        ILedgerSource source, string account, long fileBytes, int ticketsPerBatch, CancellationToken cancellationToken,
+        // Matches TicketStrategyOptions.MaxAttemptsPerMemo's own default. The two are independent
+        // knobs — nothing forces a caller to keep them equal — but they start out equal so the
+        // estimate and the run it describes cannot drift apart by accident.
+        int maxAttempts = 3)
     {
         if (fileBytes <= 0)
         {
@@ -46,6 +54,11 @@ public static class PublicationEstimator
         if (ticketsPerBatch <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(ticketsPerBatch), ticketsPerBatch, "a batch holds at least one ticket");
+        }
+
+        if (maxAttempts <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxAttempts), maxAttempts, "at least one attempt is made per memo");
         }
 
         long chunks = FileTree.ChunkCount(fileBytes, MemoLayout.ChunkBytes);
@@ -61,15 +74,19 @@ public static class PublicationEstimator
         long balance = await source.BalanceDropsAsync(account, cancellationToken).ConfigureAwait(false);
 
         long feeTotal = transactions * fees.OpenLedgerFeeDrops;
+        long feeWorstCase = transactions * maxAttempts * fees.OpenLedgerFeeDrops;
 
-        // Only a batch's worth of tickets is ever live at once, and a file smaller than a batch
-        // never mints a full one. Charging the whole file's worth would refuse runs that fit.
-        long peakReserve = Math.Min(memos, batch) * fees.OwnerReserveDrops;
-        long required = feeTotal + peakReserve + fees.BaseReserveDrops;
+        // TicketStrategy caps live tickets at the protocol's own ceiling (MaxLiveTickets), not at
+        // the batch size: a ticket dispatched whose submission never reaches a ledger stays
+        // counted as live for the strategy instance's lifetime (see TicketStrategy.DisposeAsync).
+        // A batch's worth is what is normally live at once; a ticket that never resolves is what
+        // makes the honest worst case the protocol's cap instead.
+        long peakReserve = Math.Min(memos, TicketStrategy.MaxLiveTickets) * fees.OwnerReserveDrops;
+        long required = feeWorstCase + peakReserve + fees.BaseReserveDrops;
 
         return new PublicationEstimate(
             chunks, blocks, lists, mints, transactions,
-            fees.OpenLedgerFeeDrops, feeTotal, peakReserve, fees.BaseReserveDrops, required, balance);
+            fees.OpenLedgerFeeDrops, feeTotal, maxAttempts, feeWorstCase, peakReserve, fees.BaseReserveDrops, required, balance);
     }
 
     /// <summary>
