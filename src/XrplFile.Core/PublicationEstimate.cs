@@ -17,8 +17,10 @@ namespace XrplFile;
 /// <param name="FeeDropsWorstCase">The fee if every memo needed every one of <see cref="MaxAttempts"/> tries, including a remint each retry cycle: <see cref="Transactions"/> times <see cref="MaxAttempts"/> times <see cref="FeeDropsPerTransaction"/>. What <see cref="RequiredDrops"/> is actually built from.</param>
 /// <param name="PeakReserveDrops">What live tickets lock up at the worst moment: memos, capped at the protocol's own live-ticket ceiling (<see cref="TicketStrategy.MaxLiveTickets"/>), not the caller's batch size. A batch is what is normally live, but a ticket dispatched whose submission never reaches a ledger stays live for the run's lifetime, so the honest worst case is the protocol's cap.</param>
 /// <param name="BaseReserveDrops">What the account must hold to exist at all.</param>
+/// <param name="OwnerReserveDrops">What one owned object locks, as the node reports it now.</param>
 /// <param name="RequiredDrops">The worst case: <see cref="FeeDropsWorstCase"/>, <see cref="PeakReserveDrops"/> and <see cref="BaseReserveDrops"/>, added. An optimistic number here would let a run start that cannot finish.</param>
 /// <param name="BalanceDrops">What the account holds now.</param>
+/// <param name="OwnerCount">Ledger objects the account already owns, each locking one <see cref="OwnerReserveDrops"/> out of that balance. Trust lines, offers — and the live tickets an interrupted run left behind, which is why a resume needs this most.</param>
 public sealed record PublicationEstimate(
     long Chunks,
     int Blocks,
@@ -31,10 +33,29 @@ public sealed record PublicationEstimate(
     long FeeDropsWorstCase,
     long PeakReserveDrops,
     long BaseReserveDrops,
+    long OwnerReserveDrops,
     long RequiredDrops,
-    long BalanceDrops)
+    long BalanceDrops,
+    int OwnerCount)
 {
-    public bool BalanceCovers => BalanceDrops >= RequiredDrops;
+    /// <summary>What the objects the account already owns lock out of its balance.</summary>
+    public long LockedReserveDrops => OwnerCount * OwnerReserveDrops;
+
+    /// <summary>
+    /// What the balance would leave for this run: the balance less what the account's existing
+    /// objects lock and less the reserve it must hold to exist. Shown rather than only used,
+    /// because "you hold 21.5 XRP and 1 of it is locked" is what explains the refusal below.
+    /// </summary>
+    public long SpendableDrops => BalanceDrops - LockedReserveDrops - BaseReserveDrops;
+
+    /// <summary>
+    /// Whether the account can carry the run, judged against what it may actually spend rather
+    /// than against the raw balance. <see cref="RequiredDrops"/> already carries this run's own
+    /// base and peak-ticket reserves; what it cannot know is the reserve the account was already
+    /// under before the run started, and a balance gate that ignores that passes an account whose
+    /// first TicketCreate is answered <c>tecINSUFFICIENT_RESERVE</c> with chunks already paid for.
+    /// </summary>
+    public bool BalanceCovers => BalanceDrops - LockedReserveDrops >= RequiredDrops;
 }
 
 public static class PublicationEstimator
@@ -76,7 +97,12 @@ public static class PublicationEstimator
         long transactions = memos + mints;
 
         NetworkFees fees = await source.FeesAsync(cancellationToken).ConfigureAwait(false);
-        long balance = await source.BalanceDropsAsync(account, cancellationToken).ConfigureAwait(false);
+
+        // Balance and owner count from one answer, so the coverage check below describes one
+        // ledger. What the account already owns is not decoration: every one of those objects
+        // locks an owner reserve the run cannot spend, and a run approved against the raw balance
+        // is a run whose first mint is answered tecINSUFFICIENT_RESERVE after the chunks are paid.
+        AccountState state = await source.AccountStateAsync(account, cancellationToken).ConfigureAwait(false);
 
         long feeTotal = transactions * fees.OpenLedgerFeeDrops;
         long feeWorstCase = transactions * maxAttempts * fees.OpenLedgerFeeDrops;
@@ -91,7 +117,8 @@ public static class PublicationEstimator
 
         return new PublicationEstimate(
             chunks, blocks, lists, mints, transactions,
-            fees.OpenLedgerFeeDrops, feeTotal, maxAttempts, feeWorstCase, peakReserve, fees.BaseReserveDrops, required, balance);
+            fees.OpenLedgerFeeDrops, feeTotal, maxAttempts, feeWorstCase, peakReserve,
+            fees.BaseReserveDrops, fees.OwnerReserveDrops, required, state.BalanceDrops, state.OwnerCount);
     }
 
     /// <summary>
@@ -109,7 +136,8 @@ public static class PublicationEstimator
         if (!estimate.BalanceCovers)
         {
             throw new XrplFileException(XrplFileError.InsufficientBalance,
-                $"the run needs {estimate.RequiredDrops} drops and the account holds {estimate.BalanceDrops}");
+                $"the run needs {estimate.RequiredDrops} drops and the account holds {estimate.BalanceDrops}, "
+                + $"of which {estimate.LockedReserveDrops} is locked by the {estimate.OwnerCount} objects it already owns");
         }
     }
 

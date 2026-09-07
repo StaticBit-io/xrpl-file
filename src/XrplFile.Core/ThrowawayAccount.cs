@@ -7,11 +7,20 @@ namespace XrplFile;
 /// <param name="Address">The classic address the money has to reach.</param>
 /// <param name="RequiredDrops">What the run's estimate says the account must hold.</param>
 /// <param name="BalanceDrops">What it holds at the moment this was read.</param>
-public sealed record FundingRequest(string Address, long RequiredDrops, long BalanceDrops)
+/// <param name="LockedReserveDrops">
+/// What the objects the account already owns lock out of that balance. Normally zero — the
+/// account was made for this one run — but a run that was called off leaves its unspent tickets
+/// live, and judging the funding by the raw balance would report "covered" for an amount
+/// <see cref="PublicationEstimator.Require"/> then refuses.
+/// </param>
+public sealed record FundingRequest(string Address, long RequiredDrops, long BalanceDrops, long LockedReserveDrops)
 {
-    public bool Covered => BalanceDrops >= RequiredDrops;
+    /// <summary>What the balance leaves for the run once the account's own objects are paid for.</summary>
+    public long SpendableDrops => BalanceDrops - LockedReserveDrops;
 
-    public long MissingDrops => Math.Max(0, RequiredDrops - BalanceDrops);
+    public bool Covered => SpendableDrops >= RequiredDrops;
+
+    public long MissingDrops => Math.Max(0, RequiredDrops - SpendableDrops);
 
     /// <summary>
     /// What a QR code on the funding screen encodes: the address, and nothing else.
@@ -90,9 +99,13 @@ public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, Xrp
     {
         ArgumentNullException.ThrowIfNull(estimate);
 
-        long balance = await _source.BalanceDropsAsync(Address, cancellationToken).ConfigureAwait(false);
+        // The same read the balance alone used to come from — BalanceDropsAsync is this call with
+        // the owner count thrown away — so this costs the polling loop nothing and keeps the
+        // funding screen's verdict and the session's own balance gate on one rule.
+        AccountState state = await _source.AccountStateAsync(Address, cancellationToken).ConfigureAwait(false);
 
-        return new FundingRequest(Address, estimate.RequiredDrops, balance);
+        return new FundingRequest(
+            Address, estimate.RequiredDrops, state.BalanceDrops, state.OwnerCount * estimate.OwnerReserveDrops);
     }
 
     /// <summary>

@@ -164,6 +164,43 @@ public class PublicationEstimateTests
     }
 
     [Fact]
+    public async Task A_balance_the_accounts_own_objects_already_lock_does_not_cover_the_run()
+    {
+        // A mainnet-shaped account: five trust lines, one XRP of owner reserve locked out of a
+        // balance that clears RequiredDrops (1,800,180 here) on its face. Comparing the raw
+        // balance passes the gate and the first TicketCreate is answered tecINSUFFICIENT_RESERVE,
+        // with chunks already paid for.
+        FakeLedgerSource node = Node(2_000_000);
+        node.OwnerCounts["rWriter"] = 5;
+
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            node, "rWriter", fileBytes: 2500, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
+
+        Assert.Equal(5, estimate.OwnerCount);
+        Assert.Equal(1_000_000, estimate.LockedReserveDrops);
+        Assert.Equal(2_000_000, estimate.BalanceDrops);
+        Assert.True(estimate.BalanceDrops >= estimate.RequiredDrops, "the raw balance is what used to be compared");
+        Assert.False(estimate.BalanceCovers);
+
+        XrplFileException error = Assert.Throws<XrplFileException>(() => PublicationEstimator.Require(estimate, budgetDrops: null));
+
+        Assert.Equal(XrplFileError.InsufficientBalance, error.Error);
+        Assert.Contains("1000000", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_account_owning_nothing_is_judged_on_its_whole_balance()
+    {
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            Node(1_900_000), "rWriter", fileBytes: 2500, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, estimate.OwnerCount);
+        Assert.Equal(0, estimate.LockedReserveDrops);
+        Assert.True(estimate.BalanceCovers);
+        PublicationEstimator.Require(estimate, budgetDrops: null);
+    }
+
+    [Fact]
     public async Task Every_batching_pass_mints_for_itself()
     {
         // 50 chunks, one block, no list. The writer calls SubmitAllAsync once for the chunks and

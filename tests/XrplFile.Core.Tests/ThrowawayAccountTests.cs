@@ -8,9 +8,10 @@ public class ThrowawayAccountTests
     private static readonly XrplWallet Throwaway = XrplWallet.Generate();
 
     private static PublicationEstimate Estimate(long required) =>
-        new(Chunks: 3, Blocks: 1, Lists: 0, Mints: 1, Transactions: 5,
-            FeeDropsPerTransaction: 10, FeeDropsTotal: 50, MaxAttempts: 3, FeeDropsWorstCase: 150,
-            PeakReserveDrops: 800_000, BaseReserveDrops: 1_000_000, RequiredDrops: required, BalanceDrops: 0);
+        new(Chunks: 3, Blocks: 1, Lists: 0, Mints: 2, Transactions: 6,
+            FeeDropsPerTransaction: 10, FeeDropsTotal: 60, MaxAttempts: 3, FeeDropsWorstCase: 180,
+            PeakReserveDrops: 800_000, BaseReserveDrops: 1_000_000, OwnerReserveDrops: 200_000,
+            RequiredDrops: required, BalanceDrops: 0, OwnerCount: 0);
 
     private static FakeLedgerSource Node(long balance = 0, long current = 5000, int ownerCount = 0)
     {
@@ -44,7 +45,7 @@ public class ThrowawayAccountTests
         Assert.Equal(Throwaway.ClassicAddress, account.Address);
         Assert.Equal(
             Throwaway.ClassicAddress,
-            new FundingRequest(Throwaway.ClassicAddress, 1, 0).QrPayload);
+            new FundingRequest(Throwaway.ClassicAddress, 1, 0, 0).QrPayload);
     }
 
     [Fact]
@@ -57,6 +58,24 @@ public class ThrowawayAccountTests
 
         Assert.True(request.Covered);
         Assert.Equal(0, request.MissingDrops);
+    }
+
+    [Fact]
+    public async Task Tickets_an_aborted_run_left_live_are_not_money_the_next_one_can_spend()
+    {
+        // Ten tickets an interrupted run never spent, at 200,000 drops of owner reserve each: the
+        // balance clears RequiredDrops on its face and the account cannot carry the run. Reporting
+        // it as funded is how a person is told to pay, pays, and is then refused by the session's
+        // own balance gate.
+        FakeLedgerSource ledger = Node(balance: 3_000_000, ownerCount: 10);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+
+        FundingRequest request = await account.FundingAsync(Estimate(2_500_000), TestContext.Current.CancellationToken);
+
+        Assert.Equal(2_000_000, request.LockedReserveDrops);
+        Assert.Equal(1_000_000, request.SpendableDrops);
+        Assert.False(request.Covered);
+        Assert.Equal(1_500_000, request.MissingDrops);
     }
 
     [Fact]
