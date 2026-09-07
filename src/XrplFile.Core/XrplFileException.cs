@@ -28,7 +28,8 @@ public enum XrplFileError
 
     /// <summary>
     /// A resume was asked to pick up a state file it cannot honestly pick up: the run it names
-    /// already finished, or the file handed to it is not the one the run was started for.
+    /// already finished, the file handed to it is not the one the run was started for, or the
+    /// strategy handed to it signs as an account other than the run's writer.
     /// </summary>
     ResumeMismatch,
 }

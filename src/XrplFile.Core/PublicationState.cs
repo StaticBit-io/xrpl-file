@@ -38,7 +38,14 @@ public sealed record PublicationState(
     string Phase,
     IReadOnlyDictionary<int, string> ChunkHashes)
 {
-    public const int CurrentVersion = 1;
+    /// <summary>
+    /// 2 since <see cref="Root"/> became something a run records at its start rather than at its
+    /// end. A version 1 file names a started run with no root in it, and a resume that read one
+    /// would have nothing to check the bytes it was handed against — so those files are refused
+    /// by <see cref="Load"/> and listed as unreadable by <see cref="PublicationSession.Unfinished"/>,
+    /// which is where a person can still see the account and the ledger they name.
+    /// </summary>
+    public const int CurrentVersion = 2;
 
     /// <summary>The one this file ends with, on every platform, so two hosts write the same bytes.</summary>
     private const string LineEnding = "\n";

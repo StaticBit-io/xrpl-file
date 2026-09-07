@@ -31,6 +31,17 @@ public interface ISubmissionStrategy : IAsyncDisposable
     /// </summary>
     long FeeDropsPerTransaction { get; }
 
+    /// <summary>
+    /// The classic address every transaction this strategy submits is signed by.
+    ///
+    /// It is on the interface for the same reason the fee is: somebody else has to agree with it.
+    /// A publication is recorded, reported and read under one writer, and a strategy signing as
+    /// another account would put the rest of a file into a history nobody is going to look in — so
+    /// <see cref="PublicationSession.StartAsync"/> and <see cref="PublicationSession.ResumeAsync"/>
+    /// compare this against the writer they were given, and refuse when it differs.
+    /// </summary>
+    string Account { get; }
+
     Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken);
 }

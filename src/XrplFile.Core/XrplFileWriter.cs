@@ -2,6 +2,30 @@ using Xrpl.Client.Exceptions;
 
 namespace XrplFile;
 
+/// <summary>
+/// One memo a resumed run found already in the ledger: the transaction that carried it, the ledger
+/// it landed in, and the bytes it holds.
+///
+/// The ledger is part of it because a manifest's window is made of ledgers, not of positions. A
+/// chunk re-sent by a second run lands after the ones around it, so a window taken from the first
+/// and last chunk *index* would leave it outside — and the reader gates every chunk on that window,
+/// so the file would stop reading back.
+/// </summary>
+public sealed record LandedMemo(string TxHash, long LedgerIndex, string MemoDataHex);
+
+/// <summary>
+/// What the ledger already holds for one publication: chunks by chunk index, block lists by list
+/// index.
+///
+/// Both are checked against the bytes this run would send before they are believed — the chunks by
+/// the session's sweep, which has them, and the lists here in the writer, which is the only place
+/// the list payloads exist. A marker names no publication of its own, so <c>xf/c/0</c> is
+/// <c>xf/c/0</c> for every file an account has ever published; the bytes are what tell them apart.
+/// </summary>
+public sealed record LandedMemos(
+    IReadOnlyDictionary<int, LandedMemo> Chunks,
+    IReadOnlyDictionary<int, LandedMemo> Lists);
+
 public sealed class WriterOptions
 {
     /// <summary>Read everything back through the reader before writing the manifest. On by default; the format does not require it.</summary>
@@ -31,7 +55,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
     public async Task<PublishResult> PublishAsync(
         ReadOnlyMemory<byte> file, string type, string? name, string writer, string network,
-        IReadOnlyDictionary<int, string>? alreadyLanded, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
+        LandedMemos? alreadyLanded, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
     {
         if (file.IsEmpty) throw new ArgumentException("an empty file has no chunks and no root", nameof(file));
         if (string.IsNullOrWhiteSpace(type)) throw new ArgumentException("a manifest needs a MIME type", nameof(type));
@@ -88,7 +112,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
     private async Task<PublishResult> PublishCoreAsync(
         ReadOnlyMemory<byte> file, string type, string? name, string writer, string network,
-        IReadOnlyDictionary<int, string>? alreadyLanded, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
+        LandedMemos? alreadyLanded, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
     {
         IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
         int blocks = FileTree.BlockCount(chunks.Count);
@@ -102,26 +126,46 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
         List<MemoSubmission> missingMemos = [];
         List<int> missingIndices = [];
 
+        // Two maps, both keyed by chunk index rather than by position in a batch: the transaction
+        // that carried each chunk, and the ledger it is in. The second one is what the manifest's
+        // window is built from, so it has to cover every chunk -- an already-landed one brings its
+        // ledger with it, and a freshly sent one is looked up below.
+        Dictionary<int, string> chunkByIndex = [];
+        Dictionary<int, long> chunkLedgers = [];
+
         for (int i = 0; i < chunkMemos.Count; i++)
         {
-            if (alreadyLanded is not null && alreadyLanded.ContainsKey(i)) continue;
+            if (alreadyLanded is not null && alreadyLanded.Chunks.TryGetValue(i, out LandedMemo? landed))
+            {
+                chunkByIndex[i] = landed.TxHash;
+                chunkLedgers[i] = landed.LedgerIndex;
+                continue;
+            }
 
             missingMemos.Add(chunkMemos[i]);
             missingIndices.Add(i);
         }
 
-        Dictionary<int, string> chunkByIndex = alreadyLanded is null ? [] : new Dictionary<int, string>(alreadyLanded);
-
         if (missingMemos.Count > 0)
         {
+            int carried = chunkByIndex.Count;
+
             IReadOnlyList<SubmittedMemo> sent = await _strategy.SubmitAllAsync(
                 missingMemos,
-                new Progress<int>(done => progress?.Report(new PublishProgress("chunks", chunkByIndex.Count + done, chunkMemos.Count))),
+                new Progress<int>(done => progress?.Report(new PublishProgress("chunks", carried + done, chunkMemos.Count))),
                 cancellationToken).ConfigureAwait(false);
 
             foreach (SubmittedMemo memo in sent)
             {
                 chunkByIndex[missingIndices[memo.Index]] = memo.TxHash;
+            }
+
+            // Per chunk, not per position. A strategy hands back a hash and nothing else, and the
+            // ledger a hash is in is the only thing that puts it inside or outside the window.
+            foreach (SubmittedMemo memo in sent)
+            {
+                int index = missingIndices[memo.Index];
+                chunkLedgers[index] = await LedgerOfAsync(memo.TxHash, cancellationToken).ConfigureAwait(false);
             }
         }
         else
@@ -131,16 +175,22 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
         List<string> chunkHashes = [.. Enumerable.Range(0, chunkMemos.Count).Select(i => chunkByIndex[i])];
 
-        long firstLedger = await LedgerOfAsync(chunkHashes[0], cancellationToken).ConfigureAwait(false);
-        long lastLedger = await LedgerOfAsync(chunkHashes[^1], cancellationToken).ConfigureAwait(false);
+        // The window is the ledgers the chunks are actually in, not the ledgers of the first and
+        // last index. Those agree only when one run sent every chunk in order; a resumed run whose
+        // surviving set has a hole re-sends a low index late, and reading the window off the ends
+        // would put that chunk -- or every chunk of the first run -- outside it.
+        long firstLedger = chunkLedgers.Values.Min();
+        long lastLedger = chunkLedgers.Values.Max();
 
-        // Block entries: hash over the chunks in memory, first ledger from the ledger itself.
+        // Block entries: hash over the chunks in memory, first ledger from the ledger itself --
+        // the earliest of the block's own chunks, which is where a reader has to start paging to
+        // find all of them.
         List<BlockEntry> entries = new(blocks);
         for (int block = 0; block < blocks; block++)
         {
             int firstChunk = block * FileTree.BlockChunks;
             List<byte[]> members = [.. chunks.Skip(firstChunk).Take(FileTree.BlockChunks)];
-            long ledger = await LedgerOfAsync(chunkHashes[firstChunk], cancellationToken).ConfigureAwait(false);
+            long ledger = Enumerable.Range(firstChunk, members.Count).Min(i => chunkLedgers[i]);
             entries.Add(new BlockEntry(block, Convert.ToHexString(FileTree.BlockHash(members)), ledger));
         }
 
@@ -154,13 +204,61 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
             IReadOnlyList<MemoSubmission> listMemos =
                 [.. payloads.Select((payload, j) => new MemoSubmission(MemoLayout.ListMarkerHex(j), MemoLayout.Utf8Hex(payload), MemoLayout.JsonFormatHex))];
 
-            IReadOnlyList<SubmittedMemo> listsLanded = await _strategy.SubmitAllAsync(
-                listMemos,
-                new Progress<int>(done => progress?.Report(new PublishProgress("lists", done, listMemos.Count))),
-                cancellationToken).ConfigureAwait(false);
+            List<MemoSubmission> missingLists = [];
+            List<int> missingListIndices = [];
+            Dictionary<int, string> listByIndex = [];
+            Dictionary<int, long> listLedgers = [];
 
-            listHashes = [.. listsLanded.OrderBy(memo => memo.Index).Select(memo => memo.TxHash)];
-            lastLedger = Math.Max(lastLedger, await LedgerOfAsync(listHashes[^1], cancellationToken).ConfigureAwait(false));
+            for (int j = 0; j < listMemos.Count; j++)
+            {
+                // A run can die during the read-back or the manifest, which is after the lists
+                // have landed -- so they are reconciled like the chunks rather than assumed
+                // absent. The bytes decide: a list payload carries the per-block ledgers, so the
+                // same index from an interrupted run can describe a different window, and only an
+                // identical payload is the one this run would have sent.
+                if (alreadyLanded is not null
+                    && alreadyLanded.Lists.TryGetValue(j, out LandedMemo? landedList)
+                    && string.Equals(landedList.MemoDataHex, listMemos[j].MemoDataHex, StringComparison.OrdinalIgnoreCase))
+                {
+                    listByIndex[j] = landedList.TxHash;
+                    listLedgers[j] = landedList.LedgerIndex;
+                    continue;
+                }
+
+                missingLists.Add(listMemos[j]);
+                missingListIndices.Add(j);
+            }
+
+            if (missingLists.Count > 0)
+            {
+                int carried = listByIndex.Count;
+
+                IReadOnlyList<SubmittedMemo> listsLanded = await _strategy.SubmitAllAsync(
+                    missingLists,
+                    new Progress<int>(done => progress?.Report(new PublishProgress("lists", carried + done, listMemos.Count))),
+                    cancellationToken).ConfigureAwait(false);
+
+                foreach (SubmittedMemo memo in listsLanded)
+                {
+                    listByIndex[missingListIndices[memo.Index]] = memo.TxHash;
+                }
+
+                foreach (SubmittedMemo memo in listsLanded)
+                {
+                    int index = missingListIndices[memo.Index];
+                    listLedgers[index] = await LedgerOfAsync(memo.TxHash, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                progress?.Report(new PublishProgress("lists", listMemos.Count, listMemos.Count));
+            }
+
+            listHashes = [.. Enumerable.Range(0, listMemos.Count).Select(j => listByIndex[j])];
+
+            // Every list memo, not only the last one: they are reachable through the window too,
+            // and a resumed run's lists need not be in one ledger or in index order.
+            lastLedger = Math.Max(lastLedger, listLedgers.Values.Max());
         }
 
         Manifest manifest = new(type, file.Length, MemoLayout.ChunkBytes, root, firstLedger, lastLedger, blocks, listHashes.Count, name);

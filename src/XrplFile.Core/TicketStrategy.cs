@@ -86,6 +86,8 @@ public sealed class TicketStrategy(
 
     public long FeeDropsPerTransaction => _options.FeeDrops;
 
+    public string Account => _wallet.ClassicAddress;
+
     public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
     {

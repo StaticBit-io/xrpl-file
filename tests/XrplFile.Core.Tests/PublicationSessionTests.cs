@@ -323,7 +323,7 @@ public class PublicationSessionTests : IDisposable
         // unspent reserve; dropping it from the list is dropping the only record of that money.
         await File.WriteAllTextAsync(
             path,
-            """{"Version":2,"Network":"testnet","Writer":"rSomebody","KeyReference":"key-9","Phase":"chunks"}""",
+            """{"Version":9000,"Network":"testnet","Writer":"rSomebody","KeyReference":"key-9","Phase":"chunks"}""",
             TestContext.Current.CancellationToken);
 
         UnfinishedRun only = Assert.Single(PublicationSession.Unfinished(_stateDirectory));
@@ -472,4 +472,268 @@ public class PublicationSessionTests : IDisposable
 
         Assert.Equal(XrplFileError.ResumeMismatch, error.Error);
     }
+
+    [Fact]
+    public async Task A_resumed_run_with_a_hole_in_the_middle_puts_every_chunk_inside_the_window()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        byte[] file = VectorStream.Bytes("hole", 2500);
+
+        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
+            Options(), TestContext.Current.CancellationToken);
+
+        // Chunks 0 and 2 land and the run dies. The hole is in the middle on purpose: what the
+        // second run sends is not the last index, so it lands after the last index's ledger, and a
+        // window read off the first and last index leaves it outside.
+        IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
+        await strategy.SubmitAllAsync(
+            [
+                new MemoSubmission(MemoLayout.ChunkMarkerHex(0), MemoLayout.Hex(chunks[0]), null),
+                new MemoSubmission(MemoLayout.ChunkMarkerHex(2), MemoLayout.Hex(chunks[2]), null),
+            ],
+            null, TestContext.Current.CancellationToken);
+
+        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        PublicationSession second = await PublicationSession.ResumeAsync(
+            resumed, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken);
+
+        PublicationReport report = await second.RunAsync(null, TestContext.Current.CancellationToken);
+
+        long resent = await LedgerOfAsync(ledger, report.ChunkHashes[1]);
+        long lastIndexed = await LedgerOfAsync(ledger, report.ChunkHashes[^1]);
+        Assert.True(resent > lastIndexed, "the re-sent chunk has to land after the last index's for this test to mean anything");
+
+        foreach (string hash in report.ChunkHashes)
+        {
+            Assert.InRange(await LedgerOfAsync(ledger, hash), report.Manifest.FirstLedger, report.Manifest.LastLedger);
+        }
+
+        ReadResult read = await new XrplFileReader(ledger).ReadAsync(report.Link, TestContext.Current.CancellationToken);
+        Assert.Equal(file, read.Bytes);
+    }
+
+    [Fact]
+    public async Task A_resumed_run_does_not_adopt_a_chunk_the_next_publication_wrote()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        byte[] file = VectorStream.Bytes("mine", 2500);
+        byte[] theirs = VectorStream.Bytes("theirs", 2500);
+
+        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
+            Options(), TestContext.Current.CancellationToken);
+
+        // The run dies before submitting anything, and the same account then starts a different
+        // file. Its chunks carry xf/c/0..2 as well and are inside the swept range -- a marker names
+        // no publication of its own, so only the bytes tell one from the other.
+        IReadOnlyList<byte[]> others = FileTree.Split(theirs, MemoLayout.ChunkBytes);
+        await strategy.SubmitAllAsync(
+            [.. others.Select((chunk, i) => new MemoSubmission(MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex(chunk), null))],
+            null, TestContext.Current.CancellationToken);
+
+        int beforeTheResume = sink.Submitted.Count;
+
+        // Read-back off on purpose: the sweep has to be right on its own rather than because a
+        // check the caller is allowed to turn off catches it afterwards.
+        SessionOptions options = new() { StateDirectory = _stateDirectory, TicketsPerBatch = 100, ReadBack = false };
+
+        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        PublicationSession second = await PublicationSession.ResumeAsync(
+            resumed, ledger, file, first.StatePath, options, TestContext.Current.CancellationToken);
+
+        PublicationReport report = await second.RunAsync(null, TestContext.Current.CancellationToken);
+
+        // Three chunks of this file, and the manifest: nothing was adopted.
+        Assert.Equal(beforeTheResume + 4, sink.Submitted.Count);
+
+        ReadResult read = await new XrplFileReader(ledger).ReadAsync(report.Link, TestContext.Current.CancellationToken);
+        Assert.Equal(file, read.Bytes);
+    }
+
+    [Fact]
+    public async Task A_resumed_run_does_not_re_send_the_block_lists_the_ledger_already_holds()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+
+        // 1024001 bytes: 1025 chunks over two blocks, so there is a block list to reconcile.
+        byte[] file = VectorStream.Bytes("lists", 1_024_001);
+
+        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, file, "application/octet-stream", null, Wallet.ClassicAddress, "key-1", "testnet",
+            Options(), TestContext.Current.CancellationToken);
+
+        // Every chunk and the block list land, and then the run dies -- in the read-back or the
+        // manifest, both of which come after the lists. That a partial run never reaches the lists
+        // is only true of a run that died earlier than this one.
+        IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
+        IReadOnlyList<SubmittedMemo> sent = await strategy.SubmitAllAsync(
+            [.. chunks.Select((chunk, i) => new MemoSubmission(MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex(chunk), null))],
+            null, TestContext.Current.CancellationToken);
+
+        Dictionary<int, string> byIndex = sent.ToDictionary(memo => memo.Index, memo => memo.TxHash);
+        List<BlockEntry> entries = [];
+
+        for (int block = 0; block < FileTree.BlockCount(chunks.Count); block++)
+        {
+            int firstChunk = block * FileTree.BlockChunks;
+            List<byte[]> members = [.. chunks.Skip(firstChunk).Take(FileTree.BlockChunks)];
+            long earliest = long.MaxValue;
+
+            for (int i = firstChunk; i < firstChunk + members.Count; i++)
+            {
+                earliest = Math.Min(earliest, await LedgerOfAsync(ledger, byIndex[i]));
+            }
+
+            entries.Add(new BlockEntry(block, Convert.ToHexString(FileTree.BlockHash(members)), earliest));
+        }
+
+        await strategy.SubmitAllAsync(
+            [.. FileTree.EncodeEntries(entries).Select((payload, j) =>
+                new MemoSubmission(MemoLayout.ListMarkerHex(j), MemoLayout.Utf8Hex(payload), MemoLayout.JsonFormatHex))],
+            null, TestContext.Current.CancellationToken);
+
+        int beforeTheResume = sink.Submitted.Count;
+
+        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        PublicationSession second = await PublicationSession.ResumeAsync(
+            resumed, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken);
+
+        PublicationReport report = await second.RunAsync(null, TestContext.Current.CancellationToken);
+
+        // Only the manifest. The list is adopted only because the writer rebuilt the same payload,
+        // per-block ledger included -- which is also what pins a block's first ledger to the
+        // earliest of its own chunks rather than to the ledger of its first index.
+        Assert.Equal(beforeTheResume + 1, sink.Submitted.Count);
+        Assert.Single(report.ListHashes);
+
+        ReadResult read = await new XrplFileReader(ledger).ReadAsync(report.Link, TestContext.Current.CancellationToken);
+        Assert.Equal(file, read.Bytes);
+    }
+
+    [Fact]
+    public async Task A_resume_signed_by_another_account_is_refused()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        byte[] file = VectorStream.Bytes("s", 2500);
+
+        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
+            Options(), TestContext.Current.CancellationToken);
+
+        await using SequenceStrategy elsewhere = new(sink, XrplWallet.Generate(), StrategyOptions);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            elsewhere, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.ResumeMismatch, error.Error);
+        Assert.Empty(sink.Submitted);
+    }
+
+    [Fact]
+    public async Task A_run_recorded_for_one_account_and_signed_by_another_never_starts()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+
+        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
+            XrplWallet.Generate().ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken));
+
+        Assert.Empty(sink.Submitted);
+    }
+
+    [Fact]
+    public async Task A_resume_of_a_state_file_that_records_no_root_is_refused()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        byte[] file = VectorStream.Bytes("s", 2500);
+
+        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
+            Options(), TestContext.Current.CancellationToken);
+
+        // A root is the only thing a resume can check the bytes it was handed against. Without one
+        // the check is refused, not skipped.
+        (PublicationState.Load(first.StatePath) with { Root = null }).Save(first.StatePath);
+
+        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            resumed, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.ResumeMismatch, error.Error);
+    }
+
+    [Fact]
+    public async Task A_resume_of_a_state_file_written_at_another_chunk_size_is_refused()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        byte[] file = VectorStream.Bytes("s", 2500);
+
+        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
+            Options(), TestContext.Current.CancellationToken);
+
+        // The writer always re-splits at the current constant, so an old run's indices would be
+        // matched against bytes that are no longer the ones at those indices.
+        (PublicationState.Load(first.StatePath) with { Chunk = MemoLayout.ChunkBytes - 1 }).Save(first.StatePath);
+
+        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            resumed, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.ResumeMismatch, error.Error);
+    }
+
+    [Fact]
+    public void A_state_file_from_before_the_root_was_recorded_at_the_start_is_not_read()
+    {
+        // Version 1 is the shape whose Root stayed null until "done". Reading one as if it were
+        // current would resume it with no identity to check the bytes against.
+        Directory.CreateDirectory(_stateDirectory);
+        string path = Path.Combine(_stateDirectory, "old.json");
+
+        File.WriteAllText(path, $$"""
+            {
+              "Version": 1,
+              "Network": "testnet",
+              "Writer": "{{Wallet.ClassicAddress}}",
+              "KeyReference": "key-1",
+              "Type": "text/plain",
+              "Name": null,
+              "Size": 2500,
+              "Chunk": {{MemoLayout.ChunkBytes}},
+              "Root": null,
+              "StartedInLedger": 5000,
+              "Phase": "chunks",
+              "ChunkHashes": {}
+            }
+            """);
+
+        Assert.Throws<FormatException>(() => PublicationState.Load(path));
+
+        UnfinishedRun listed = Assert.Single(PublicationSession.Unfinished(_stateDirectory));
+        Assert.Null(listed.State);
+        Assert.NotNull(listed.Unreadable);
+    }
+
+    /// <summary>The ledger a transaction is in, for a test that has to know where a memo landed.</summary>
+    private static async Task<long> LedgerOfAsync(FakeLedgerSource ledger, string hash) =>
+        (await ledger.TransactionAsync(hash, TestContext.Current.CancellationToken))!.LedgerIndex;
 }

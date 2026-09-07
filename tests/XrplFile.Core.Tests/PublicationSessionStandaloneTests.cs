@@ -94,4 +94,79 @@ public class PublicationSessionStandaloneTests : IDisposable
             await client.Disconnect();
         }
     }
+
+    [Fact]
+    public async Task A_resumed_run_with_a_hole_in_the_middle_reads_back_from_the_node()
+    {
+        using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(15));
+        CancellationToken token = timeout.Token;
+
+        IXrplClient client = new XrplClient(Endpoint);
+        await client.Connect(token);
+
+        try
+        {
+            XrplClientLedgerSink sink = new(client);
+            XrplClientLedgerSource source = new(client);
+            XrplWallet writer = await StandaloneFixture.FundedAccountAsync(client, sink, 700_000_000, token);
+
+            // Ten chunks in one block: few enough to run in a handful of ledgers, and enough to
+            // leave a hole with landed chunks on both sides of it.
+            byte[] file = VectorStream.Bytes("hole", 10_000);
+            IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
+
+            SessionOptions options = new() { StateDirectory = _stateDirectory, TicketsPerBatch = 100 };
+
+            PublicationEstimate priced = await PublicationSession.EstimateAsync(
+                source, writer.ClassicAddress, file.Length, options, token);
+            SequenceStrategyOptions strategyOptions = new() { FeeDrops = (int)priced.FeeDropsPerTransaction };
+
+            string statePath;
+
+            // Every chunk but one lands, and the run stops there. The missing index is not the
+            // last, so what the second session sends lands after the highest index's ledger -- a
+            // window taken from the first and last index would leave it outside, and the file
+            // would no longer read back.
+            await using (SequenceStrategy first = new(sink, writer, strategyOptions))
+            {
+                PublicationSession session = await PublicationSession.StartAsync(
+                    first, source, file, "application/octet-stream", "hole.bin",
+                    writer.ClassicAddress, "key-standalone", "1", options, token);
+
+                statePath = session.StatePath;
+
+                await first.SubmitAllAsync(
+                    [.. chunks
+                        .Select((chunk, index) => (Chunk: chunk, Index: index))
+                        .Where(pair => pair.Index != 4)
+                        .Select(pair => new MemoSubmission(MemoLayout.ChunkMarkerHex(pair.Index), MemoLayout.Hex(pair.Chunk), null))],
+                    null, token);
+            }
+
+            await using SequenceStrategy second = new(sink, writer, strategyOptions);
+
+            PublicationSession resumed = await PublicationSession.ResumeAsync(second, source, file, statePath, options, token);
+            PublicationReport report = await resumed.RunAsync(null, token);
+
+            long resent = (await source.TransactionAsync(report.ChunkHashes[4], token))!.LedgerIndex;
+            long highest = (await source.TransactionAsync(report.ChunkHashes[^1], token))!.LedgerIndex;
+            Assert.True(resent > highest, "the hole's chunk has to land after the highest index's for this test to mean anything");
+
+            foreach (string hash in report.ChunkHashes)
+            {
+                LedgerTransaction landed = (await source.TransactionAsync(hash, token))!;
+                Assert.InRange(landed.LedgerIndex, report.Manifest.FirstLedger, report.Manifest.LastLedger);
+            }
+
+            // The proof is the read: a stranger's reader gets the file back byte for byte.
+            ReadResult read = await new XrplFileReader(source).ReadAsync(report.Link, token);
+
+            Assert.Equal(file, read.Bytes);
+            Assert.Equal(writer.ClassicAddress, read.Writer);
+        }
+        finally
+        {
+            await client.Disconnect();
+        }
+    }
 }

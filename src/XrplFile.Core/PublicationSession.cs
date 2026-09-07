@@ -93,11 +93,11 @@ public sealed class PublicationSession
     private int _run;
 
     /// <summary>
-    /// What <see cref="ResumeAsync"/> found already in the ledger, by chunk index. Empty for a
-    /// run that started fresh through <see cref="StartAsync"/> -- there is nothing to reconcile
-    /// against on a first run.
+    /// What <see cref="ResumeAsync"/> found already in the ledger: chunks and block lists, each by
+    /// its own index. Null for a run that started fresh through <see cref="StartAsync"/> -- there
+    /// is nothing to reconcile against on a first run.
     /// </summary>
-    private Dictionary<int, string> _landed = [];
+    private LandedMemos? _landed;
 
     private PublicationSession(
         ISubmissionStrategy strategy, ILedgerSource source, ReadOnlyMemory<byte> file,
@@ -144,6 +144,18 @@ public sealed class PublicationSession
         // happens. An XRPL account is base58 and cannot hold a separator or a dot-dot; something
         // that can is not an account, and must not get to choose where the state file lands.
         RequireNameableAccount(writer);
+
+        // The writer the run is recorded under and the account that will sign every transaction
+        // must be the same one, or the state file, the report and the manifest all name an account
+        // that published nothing. Here it is a caller's mistake, visible without asking the node
+        // anything, so it is refused as one.
+        if (!string.Equals(strategy.Account, writer, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                $"the run is to be recorded for {writer} and the strategy signs as {strategy.Account}; "
+                + "one publication has one writer",
+                nameof(writer));
+        }
 
         PublicationEstimate estimate = await PublicationEstimator
             .EstimateAsync(source, writer, file.Length, options.TicketsPerBatch, cancellationToken).ConfigureAwait(false);
@@ -197,14 +209,27 @@ public sealed class PublicationSession
     /// interruption; it does not decide what still needs sending.
     ///
     /// A resumed run still spends money, so it is checked exactly as a fresh one is: a fresh
-    /// estimate for the whole file is priced against the strategy's fee, and the caller's budget
-    /// and the account's balance are checked against it, before the sweep below even runs.
+    /// estimate is priced against the strategy's fee, and the caller's budget and the account's
+    /// balance are checked against it, before the sweep below even runs. That estimate is for the
+    /// <em>whole file</em>, not for the part still missing — the chunks already in the ledger are
+    /// priced again, and their tickets with them. A budget sized for the original run therefore
+    /// carries the resume as well; one sized for the remainder refuses it.
     /// </summary>
     public static async Task<PublicationSession> ResumeAsync(
         ISubmissionStrategy strategy, ILedgerSource source, ReadOnlyMemory<byte> file,
         string statePath, SessionOptions options, CancellationToken cancellationToken)
     {
         PublicationState state = PublicationState.Load(statePath);
+
+        // Before anything else, because everything else is about this account: the sweep reads the
+        // recorded writer's history, and a strategy signing as somebody else would submit the rest
+        // of the file from an account the manifest and the report never name.
+        if (!string.Equals(strategy.Account, state.Writer, StringComparison.Ordinal))
+        {
+            throw new XrplFileException(XrplFileError.ResumeMismatch,
+                $"{statePath} records {state.Writer} as the writer and the strategy signs as {strategy.Account}; "
+                + "a publication cannot change accounts half-way");
+        }
 
         if (string.Equals(state.Phase, "done", StringComparison.Ordinal))
         {
@@ -218,12 +243,29 @@ public sealed class PublicationSession
                 $"{statePath} was started for {state.Size} bytes and this file is {file.Length}");
         }
 
+        // The run's indices mean nothing under a different chunk size: PublishCoreAsync always
+        // re-splits at the current constant, so an old run's chunk 7 would be matched against
+        // bytes that are no longer chunk 7's.
+        if (state.Chunk != MemoLayout.ChunkBytes)
+        {
+            throw new XrplFileException(XrplFileError.ResumeMismatch,
+                $"{statePath} was started at {state.Chunk} bytes per chunk and this library writes {MemoLayout.ChunkBytes}");
+        }
+
         // The size matching is not enough: two different files of one size are ordinary. The root
-        // is the identity, so it is what the check is made of.
+        // is the identity, so it is what the check is made of -- and a file that does not carry one
+        // is refused rather than resumed without it, because skipping the check is exactly how a
+        // resume publishes the wrong bytes under a started run's name.
         IReadOnlyList<byte[]> chunks = FileTree.Split(file, state.Chunk);
         string root = RootOf(chunks, state.StartedInLedger);
 
-        if (state.Root is { } recorded && !string.Equals(recorded, root, StringComparison.Ordinal))
+        if (state.Root is not { } recorded)
+        {
+            throw new XrplFileException(XrplFileError.ResumeMismatch,
+                $"{statePath} records no root, so there is nothing to check this file against");
+        }
+
+        if (!string.Equals(recorded, root, StringComparison.Ordinal))
         {
             throw new XrplFileException(XrplFileError.ResumeMismatch,
                 $"{statePath} was started for a file rooted at {recorded} and this one roots at {root}");
@@ -247,20 +289,28 @@ public sealed class PublicationSession
 
         PublicationSession session = new(
             strategy, source, file, state, statePath, options, estimate.FeeDropsPerTransaction, estimate.Mints);
-        session._landed = await session.ReconcileAsync(chunks.Count, cancellationToken).ConfigureAwait(false);
+        session._landed = await session.ReconcileAsync(chunks, cancellationToken).ConfigureAwait(false);
 
         return session;
     }
 
     /// <summary>
-    /// Which chunk indices are already in the ledger, read from the ledger itself.
+    /// Which of this publication's memos are already in the ledger, read from the ledger itself.
     ///
     /// The sweep starts at the ledger the run started in, which is why that number is in the
     /// state file: without it this would read the account's whole history.
+    ///
+    /// Starting there excludes the account's earlier publications. It does not exclude a later
+    /// one — a marker names no publication, so <c>xf/c/0</c> written by the next file up is
+    /// <c>xf/c/0</c> here too — so a chunk is adopted only when its bytes are the bytes this run
+    /// would have sent. The block lists cannot be checked that way here, because their payloads
+    /// carry per-block ledgers that are not known until the chunks are reconciled; they are
+    /// collected raw and checked byte for byte by the writer, which is where they are built.
     /// </summary>
-    private async Task<Dictionary<int, string>> ReconcileAsync(int chunkCount, CancellationToken cancellationToken)
+    private async Task<LandedMemos> ReconcileAsync(IReadOnlyList<byte[]> chunks, CancellationToken cancellationToken)
     {
-        Dictionary<int, string> landed = [];
+        Dictionary<int, LandedMemo> landedChunks = [];
+        Dictionary<int, LandedMemo> landedLists = [];
         long to = await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
 
         await foreach (LedgerTransaction tx in _source
@@ -268,14 +318,29 @@ public sealed class PublicationSession
             .ConfigureAwait(false))
         {
             if (!tx.Succeeded || !tx.Validated) continue;
-            if (MemoLayout.ChunkIndexOf(tx.MemoTypeHex) is not { } index) continue;
-            if (index < 0 || index >= chunkCount) continue;
+            if (tx.MemoDataHex is not { } data) continue;
 
-            // First in canonical order, exactly as a reader will resolve it.
-            landed.TryAdd((int)index, tx.Hash);
+            if (MemoLayout.ChunkIndexOf(tx.MemoTypeHex) is { } chunkIndex)
+            {
+                if (chunkIndex < 0 || chunkIndex >= chunks.Count) continue;
+                if (!string.Equals(data, MemoLayout.Hex(chunks[(int)chunkIndex]), StringComparison.OrdinalIgnoreCase)) continue;
+
+                // First in canonical order, exactly as a reader will resolve it.
+                landedChunks.TryAdd((int)chunkIndex, new LandedMemo(tx.Hash, tx.LedgerIndex, data));
+                continue;
+            }
+
+            if (MemoLayout.ListIndexOf(tx.MemoTypeHex) is { } listIndex)
+            {
+                if (listIndex < 0 || listIndex > int.MaxValue) continue;
+
+                // Last in canonical order wins for a list, again exactly as the reader resolves
+                // one -- it walks the range backwards and keeps the first copy it meets.
+                landedLists[(int)listIndex] = new LandedMemo(tx.Hash, tx.LedgerIndex, data);
+            }
         }
 
-        return landed;
+        return new LandedMemos(landedChunks, landedLists);
     }
 
     /// <summary>The file's root, computed the way the writer will compute it -- over block hashes alone.</summary>
@@ -317,8 +382,7 @@ public sealed class PublicationSession
             XrplFileWriter writer = new(_strategy, _source, new WriterOptions { ReadBack = _options.ReadBack });
 
             PublishResult result = await writer.PublishAsync(
-                _file, started.Type, started.Name, started.Writer, started.Network,
-                _landed.Count > 0 ? _landed : null,
+                _file, started.Type, started.Name, started.Writer, started.Network, _landed,
                 new PhaseRecordingProgress(this, progress), cancellationToken).ConfigureAwait(false);
 
             Advance("done", result.Manifest.Root, result.ChunkHashes);
