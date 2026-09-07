@@ -16,6 +16,15 @@ public enum XrplFileError
     NodeUnreachable,
     InsufficientBalance,
     BudgetExceeded,
+
+    /// <summary>
+    /// The estimate a run was approved against and the strategy that would submit it price a
+    /// transaction differently, so the budget and balance checks describe a different run.
+    /// </summary>
+    FeeMismatch,
+
+    /// <summary>A session that has run, or is running, was asked to run again.</summary>
+    SessionAlreadyRun,
 }
 
 public sealed class XrplFileException : Exception

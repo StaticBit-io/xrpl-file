@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -14,7 +15,11 @@ namespace XrplFile;
 /// Where reconciliation begins on a resume. Without it a resumed run would sweep the account's
 /// entire history rather than the few hundred ledgers it wrote in.
 /// </param>
-/// <param name="Phase">One of "chunks", "lists", "manifest", "done".</param>
+/// <param name="Phase">
+/// The last stage the run was seen in: one of "chunks", "lists", "read-back", "manifest", "done".
+/// It is written when the stage changes, so a run interrupted half-way names the stage it died in
+/// rather than the one it started in.
+/// </param>
 /// <param name="ChunkHashes">
 /// What has landed so far, by index. A resume does not trust this — the ledger decides — but it
 /// carries the run's report through an interruption.
@@ -35,6 +40,9 @@ public sealed record PublicationState(
 {
     public const int CurrentVersion = 1;
 
+    /// <summary>The one this file ends with, on every platform, so two hosts write the same bytes.</summary>
+    private const string LineEnding = "\n";
+
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
@@ -47,9 +55,18 @@ public sealed record PublicationState(
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
 
         // Written beside and moved into place: a crash during the write must not leave a state
-        // file that parses as something it is not.
+        // file that parses as something it is not. The flush is what makes that true of a machine
+        // losing power rather than only of a process dying: without it the move can reach the disk
+        // ahead of the bytes it moves, and the run's record comes back empty or truncated.
         string temporary = path + ".writing";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(this, Options) + "\n");
+
+        using (FileStream stream = new(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(this, Options) + LineEnding);
+            stream.Write(bytes, 0, bytes.Length);
+            stream.Flush(flushToDisk: true);
+        }
+
         File.Move(temporary, path, overwrite: true);
     }
 

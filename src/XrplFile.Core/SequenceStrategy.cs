@@ -35,6 +35,8 @@ public sealed class SequenceStrategy(ILedgerSink sink, XrplWallet wallet, Sequen
     private readonly XrplWallet _wallet = wallet;
     private readonly SequenceStrategyOptions _options = options ?? new SequenceStrategyOptions();
 
+    public long FeeDropsPerTransaction => _options.FeeDrops;
+
     public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
     {

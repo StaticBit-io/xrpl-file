@@ -19,6 +19,18 @@ public sealed record SubmittedMemo(int Index, string TxHash);
 /// </summary>
 public interface ISubmissionStrategy : IAsyncDisposable
 {
+    /// <summary>
+    /// The fee, in drops, every transaction this strategy puts on the ledger carries — the memos,
+    /// and the tickets where a strategy mints them. It is fixed for the strategy's lifetime: a
+    /// caller who wants the network's current price reads it before constructing the strategy.
+    ///
+    /// It is on the interface because it is the one number somebody else has to agree with. A run
+    /// is approved against an estimate priced at some fee; a strategy that charges another turns
+    /// that approval into a statement about a run nobody is going to submit, which is why
+    /// <see cref="PublicationSession.StartAsync"/> compares the two and refuses to start.
+    /// </summary>
+    long FeeDropsPerTransaction { get; }
+
     Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken);
 }

@@ -84,6 +84,8 @@ public sealed class TicketStrategy(
     /// <summary>What a sweep learned about one batch: which markers wrote, and which reached a ledger at all.</summary>
     private sealed record SweepResult(IReadOnlyDictionary<string, string> Landed, IReadOnlySet<string> Seen);
 
+    public long FeeDropsPerTransaction => _options.FeeDrops;
+
     public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
     {
