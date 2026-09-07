@@ -18,8 +18,6 @@ public class StandaloneTests
             ? "ws://localhost:6006"
             : Environment.GetEnvironmentVariable("XRPL_FILE_NODE_URL")!;
 
-    private const string GenesisSeed = "snoPBrXtMeMyMHUVTgbuqAfg1SUTb";
-
     [Theory]
     [InlineData("xf/c/999999999999", null, 1000, true)]
     [InlineData("xf/c/999999999999", null, 1001, false)]
@@ -36,7 +34,7 @@ public class StandaloneTests
         try
         {
             XrplClientLedgerSink sink = new(client);
-            XrplWallet writer = await FundedAccountAsync(client, sink, timeout.Token);
+            XrplWallet writer = await StandaloneFixture.FundedAccountAsync(client, sink, 500_000_000, timeout.Token);
             uint sequence = await sink.SequenceAsync(writer.ClassicAddress, validated: false, timeout.Token);
 
             Dictionary<string, object> memo = new()
@@ -98,7 +96,7 @@ public class StandaloneTests
         {
             XrplClientLedgerSink sink = new(client);
             XrplClientLedgerSource source = new(client);
-            XrplWallet writer = await FundedAccountAsync(client, sink, timeout.Token);
+            XrplWallet writer = await StandaloneFixture.FundedAccountAsync(client, sink, 500_000_000, timeout.Token);
 
             await using SequenceStrategy strategy = new(sink, writer);
             PublishResult published = await new XrplFileWriter(strategy, source).PublishAsync(
@@ -116,33 +114,5 @@ public class StandaloneTests
         {
             await client.Disconnect();
         }
-    }
-
-    private static async Task<XrplWallet> FundedAccountAsync(IXrplClient client, XrplClientLedgerSink sink, CancellationToken token)
-    {
-        XrplWallet genesis = XrplWallet.FromSeed(GenesisSeed);
-        XrplWallet fresh = XrplWallet.Generate();
-        uint sequence = await sink.SequenceAsync(genesis.ClassicAddress, validated: false, token);
-
-        Dictionary<string, object> payment = new()
-        {
-            ["TransactionType"] = "Payment",
-            ["Account"] = genesis.ClassicAddress,
-            ["Destination"] = fresh.ClassicAddress,
-            ["Amount"] = "500000000",
-            ["Sequence"] = sequence,
-            ["Fee"] = "12",
-            ["SigningPubKey"] = genesis.PublicKey,
-        };
-
-        SubmitOutcome outcome = await sink.SubmitAsync(payment, genesis, token);
-        Assert.True(outcome.EngineResult is "tesSUCCESS" or "terQUEUED", outcome.EngineResult);
-
-        while (await sink.SequenceAsync(genesis.ClassicAddress, validated: true, token) <= sequence)
-        {
-            await Task.Delay(TimeSpan.FromSeconds(1), token);
-        }
-
-        return fresh;
     }
 }

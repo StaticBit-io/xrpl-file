@@ -10,6 +10,13 @@ public sealed class FakeLedgerSource : ILedgerSource
 {
     private readonly List<LedgerTransaction> _transactions = [];
 
+    /// <summary>
+    /// Transactions held back from a sweep's view: revealed once this many more
+    /// AccountTransactionsAsync calls ("sweeps") have happened. Backs FakeLedgerSink's
+    /// QueuedUntilSweep, which needs a landing that a sweep in progress cannot see yet.
+    /// </summary>
+    private readonly List<(int RemainingSweeps, LedgerTransaction Tx)> _delayed = [];
+
     public long? EarliestLedger { get; set; } = 1;
 
     public List<AccountTransactionsCall> Calls { get; } = [];
@@ -19,6 +26,17 @@ public sealed class FakeLedgerSource : ILedgerSource
     public FakeLedgerSource Add(LedgerTransaction tx)
     {
         _transactions.Add(tx);
+        if (tx.LedgerIndex > CurrentLedger) CurrentLedger = tx.LedgerIndex;
+        return this;
+    }
+
+    /// <summary>
+    /// Holds a transaction back from AccountTransactionsAsync until the given number of further
+    /// sweeps have passed, then reveals it — a queued submission that lands only later.
+    /// </summary>
+    public FakeLedgerSource AddDelayed(LedgerTransaction tx, int sweepsUntilVisible)
+    {
+        _delayed.Add((Math.Max(sweepsUntilVisible, 0), tx));
         return this;
     }
 
@@ -51,6 +69,21 @@ public sealed class FakeLedgerSource : ILedgerSource
         string account, long fromLedger, long toLedger, bool forward, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         Calls.Add(new AccountTransactionsCall(account, fromLedger, toLedger, forward));
+
+        for (int i = _delayed.Count - 1; i >= 0; i--)
+        {
+            (int remaining, LedgerTransaction tx) = _delayed[i];
+
+            if (remaining <= 0)
+            {
+                Add(tx);
+                _delayed.RemoveAt(i);
+            }
+            else
+            {
+                _delayed[i] = (remaining - 1, tx);
+            }
+        }
 
         IEnumerable<(LedgerTransaction Tx, int Position)> matching = _transactions
             .Select((tx, position) => (Tx: tx, Position: position))

@@ -32,6 +32,18 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     /// <summary>Thrown instead of submitting, at this position — a node failing the way the SDK reports it.</summary>
     public Dictionary<int, Exception> Throws { get; } = [];
 
+    /// <summary>Tickets this fake account holds, minted by TicketCreate and spent by use.</summary>
+    public HashSet<uint> LiveTickets { get; } = [];
+
+    /// <summary>Which submissions (by position) answer terQUEUED and land only on a later sweep.</summary>
+    public Dictionary<int, int> QueuedUntilSweep { get; } = [];
+
+    /// <summary>Markers whose every submission validates as failed, however often it is retried.</summary>
+    public HashSet<string> FailMarkers { get; } = [];
+
+    /// <summary>Names a marker that always fails; the type exists so a test reads as a sentence.</summary>
+    public sealed record FailEvery(string Marker);
+
     /// <summary>
     /// Every call this sink saw, in order: "query" for a validated-sequence call (SequenceAsync
     /// with validated: true), and "chunk" / "list" / "manifest" / "submit" for a submission,
@@ -83,6 +95,31 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
 
         _nextSequence = Convert.ToUInt32(transaction["Sequence"]) + 1;
 
+        if (transaction.TryGetValue("TransactionType", out object? kind) && (string)kind == "TicketCreate")
+        {
+            uint at = Convert.ToUInt32(transaction["Sequence"]);
+            uint count = Convert.ToUInt32(transaction["TicketCount"]);
+
+            // Exactly what rippled does: tickets at+1..at+count, and the sequence lands at at+1+count.
+            for (uint ticket = at + 1; ticket <= at + count; ticket++) LiveTickets.Add(ticket);
+            _nextSequence = at + count + 1;
+
+            Events.Add("mint");
+            ledger.Add(new LedgerTransaction(
+                hash, firstLedger + position / 100 + _ledgersClosed, (string)transaction["Account"],
+                Succeeded: true, Validated: true, MemoTypeHex: null, MemoDataHex: null, MemoFormatHex: null));
+
+            return Task.FromResult(new SubmitOutcome("tesSUCCESS", hash));
+        }
+
+        if (transaction.TryGetValue("TicketSequence", out object? ticketField))
+        {
+            uint ticket = Convert.ToUInt32(ticketField);
+
+            // A node refuses a ticket it does not hold, which is what terPRE_TICKET says.
+            if (!LiveTickets.Remove(ticket)) return Task.FromResult(new SubmitOutcome("terPRE_TICKET", hash));
+        }
+
         string? memoType = null, memoData = null, memoFormat = null;
         if (transaction.TryGetValue("Memos", out object? memos))
         {
@@ -94,16 +131,26 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
 
         if (memoData is not null && StoredAs.TryGetValue(position, out Func<string, string>? corrupt)) memoData = corrupt(memoData);
 
+        bool failed = FailsAs.Contains(position) || (memoType is not null && FailMarkers.Contains(memoType));
+
         Events.Add(
             MemoLayout.ChunkIndexOf(memoType) is not null ? "chunk"
             : MemoLayout.ListIndexOf(memoType) is not null ? "list"
             : MemoLayout.IsManifest(memoType) ? "manifest"
             : "submit");
 
-        ledger.Add(new LedgerTransaction(
+        LedgerTransaction stored = new(
             hash, firstLedger + position / 100 + _ledgersClosed, (string)transaction["Account"],
-            Succeeded: !FailsAs.Contains(position), Validated: true,
-            memoType, memoData, memoFormat));
+            Succeeded: !failed, Validated: true,
+            memoType, memoData, memoFormat);
+
+        if (QueuedUntilSweep.TryGetValue(position, out int sweepsUntilVisible))
+        {
+            ledger.AddDelayed(stored, sweepsUntilVisible);
+            return Task.FromResult(new SubmitOutcome("terQUEUED", hash));
+        }
+
+        ledger.Add(stored);
 
         return Task.FromResult(new SubmitOutcome("tesSUCCESS", hash));
     }
