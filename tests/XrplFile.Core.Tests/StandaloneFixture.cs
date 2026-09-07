@@ -18,27 +18,56 @@ internal static class StandaloneFixture
     {
         XrplWallet genesis = XrplWallet.FromSeed(GenesisSeed);
         XrplWallet fresh = XrplWallet.Generate();
-        uint sequence = await sink.SequenceAsync(genesis.ClassicAddress, validated: false, cancellationToken);
+
+        await PayAsync(sink, genesis, fresh.ClassicAddress, drops, cancellationToken);
+
+        return fresh;
+    }
+
+    /// <summary>
+    /// Sends drops from one wallet to an address and waits for the payment to be validated,
+    /// which the sender's own sequence advancing is proof of.
+    /// </summary>
+    public static async Task PayAsync(
+        XrplClientLedgerSink sink, XrplWallet from, string destination, long drops, CancellationToken cancellationToken)
+    {
+        uint sequence = await sink.SequenceAsync(from.ClassicAddress, validated: false, cancellationToken);
 
         Dictionary<string, object> payment = new()
         {
             ["TransactionType"] = "Payment",
-            ["Account"] = genesis.ClassicAddress,
-            ["Destination"] = fresh.ClassicAddress,
+            ["Account"] = from.ClassicAddress,
+            ["Destination"] = destination,
             ["Amount"] = drops.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["Sequence"] = sequence,
             ["Fee"] = "12",
-            ["SigningPubKey"] = genesis.PublicKey,
+            ["SigningPubKey"] = from.PublicKey,
         };
 
-        SubmitOutcome outcome = await sink.SubmitAsync(payment, genesis, cancellationToken);
+        SubmitOutcome outcome = await sink.SubmitAsync(payment, from, cancellationToken);
         Assert.True(outcome.EngineResult is "tesSUCCESS" or "terQUEUED", outcome.EngineResult);
 
-        while (await sink.SequenceAsync(genesis.ClassicAddress, validated: true, cancellationToken) <= sequence)
+        while (await sink.SequenceAsync(from.ClassicAddress, validated: true, cancellationToken) <= sequence)
         {
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
         }
+    }
 
-        return fresh;
+    /// <summary>
+    /// Polls until the account holds more than it did, so a test can wait for money sent to
+    /// somebody else's account to arrive — where there is no sequence of one's own to watch.
+    /// The caller's token is the only deadline.
+    /// </summary>
+    public static async Task<long> WaitForBalanceAboveAsync(
+        ILedgerSource source, string account, long floorDrops, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            long balance = await source.BalanceDropsAsync(account, cancellationToken);
+
+            if (balance > floorDrops) return balance;
+
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+        }
     }
 }
