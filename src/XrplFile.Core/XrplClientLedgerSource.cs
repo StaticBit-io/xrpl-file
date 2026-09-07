@@ -14,8 +14,9 @@ namespace XrplFile;
 /// SDK's typed models, so both api_version shapes parse and a field the models lack is not lost.
 /// Every failure leaves here as an <see cref="XrplFileException"/> or a cancellation: a dropped
 /// connection, a request the node never answered and a node error other than <c>txnNotFound</c>
-/// are all <see cref="XrplFileError.NodeUnreachable"/>, carrying what the node said. The browser
-/// mirror raises the same error in the same three places.
+/// (for a tx lookup) or <c>actNotFound</c> (for a balance lookup) are all
+/// <see cref="XrplFileError.NodeUnreachable"/>, carrying what the node said. The browser mirror
+/// raises the same error in the same places.
 /// </summary>
 public sealed class XrplClientLedgerSource : ILedgerSource
 {
@@ -138,12 +139,20 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
         try
         {
-            answer = await AskAsync(new AccountInfoRequest(account), "account_info", cancellationToken).ConfigureAwait(false);
+            answer = await _request(new AccountInfoRequest(account), cancellationToken).ConfigureAwait(false);
         }
-        catch (XrplFileException e) when (e.Message.Contains("actNotFound", StringComparison.Ordinal))
+        catch (Exception e) when (IsNodeFailure(e))
+        {
+            throw Unreachable("account_info", e);
+        }
+
+        if (answer.TryGetProperty("error", out JsonElement error))
         {
             // An account nobody funded is not a failure to answer: it is an answer, and it is zero.
-            return 0;
+            // Anything else the node says about an account_info request is a failure to read.
+            if (string.Equals(error.GetString(), XrplErrorCodes.ActNotFound, StringComparison.Ordinal)) return 0;
+
+            throw Answered("account_info", error);
         }
 
         return answer.TryGetProperty("account_data", out JsonElement data) && Text(data, "Balance") is { } balance

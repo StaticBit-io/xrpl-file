@@ -246,6 +246,25 @@ public class XrplClientLedgerSourceTests
     }
 
     [Fact]
+    public async Task A_node_error_other_than_act_not_found_leaves_the_balance_lookup_unreachable()
+    {
+        // "actNotFoundToo" is not a real rippled error code -- it stands in for whatever unrelated
+        // code could one day carry "actNotFound" as a substring, exactly the risk a message-prose
+        // scan cannot rule out. Comparing the raw error field for an exact match, the way this
+        // source now does, correctly treats it as a different error; scanning exception prose for
+        // that substring would wrongly treat it as an answer and hand back zero instead of
+        // surfacing the failure.
+        ScriptedNode node = new();
+        node.Answer("""{"error":"actNotFoundToo"}""");
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => new XrplClientLedgerSource(node.HandleAsync).BalanceDropsAsync("rWriter", TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+        Assert.Contains("actNotFoundToo", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task The_current_ledger_is_the_validated_index()
     {
         ScriptedNode node = new();
