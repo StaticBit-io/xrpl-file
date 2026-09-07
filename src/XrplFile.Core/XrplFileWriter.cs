@@ -31,7 +31,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
     public async Task<PublishResult> PublishAsync(
         ReadOnlyMemory<byte> file, string type, string? name, string writer, string network,
-        IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
+        IReadOnlyDictionary<int, string>? alreadyLanded, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
     {
         if (file.IsEmpty) throw new ArgumentException("an empty file has no chunks and no root", nameof(file));
         if (string.IsNullOrWhiteSpace(type)) throw new ArgumentException("a manifest needs a MIME type", nameof(type));
@@ -44,7 +44,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
         try
         {
-            return await PublishCoreAsync(file, type, name, writer, canonical, progress, cancellationToken).ConfigureAwait(false);
+            return await PublishCoreAsync(file, type, name, writer, canonical, alreadyLanded, progress, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception e) when (IsTransportFailure(e))
         {
@@ -88,21 +88,48 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
     private async Task<PublishResult> PublishCoreAsync(
         ReadOnlyMemory<byte> file, string type, string? name, string writer, string network,
-        IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
+        IReadOnlyDictionary<int, string>? alreadyLanded, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
     {
         IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
         int blocks = FileTree.BlockCount(chunks.Count);
 
-        // Chunks.
+        // Chunks. A resumed run is handed what the ledger already holds for some indices; those
+        // are not sent again -- re-sending would be paid for twice and would put a second copy of
+        // each chunk in the account's history.
         IReadOnlyList<MemoSubmission> chunkMemos =
             [.. chunks.Select((chunk, i) => new MemoSubmission(MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex(chunk), null))];
 
-        IReadOnlyList<SubmittedMemo> chunksLanded = await _strategy.SubmitAllAsync(
-            chunkMemos,
-            new Progress<int>(done => progress?.Report(new PublishProgress("chunks", done, chunkMemos.Count))),
-            cancellationToken).ConfigureAwait(false);
+        List<MemoSubmission> missingMemos = [];
+        List<int> missingIndices = [];
 
-        List<string> chunkHashes = [.. chunksLanded.OrderBy(memo => memo.Index).Select(memo => memo.TxHash)];
+        for (int i = 0; i < chunkMemos.Count; i++)
+        {
+            if (alreadyLanded is not null && alreadyLanded.ContainsKey(i)) continue;
+
+            missingMemos.Add(chunkMemos[i]);
+            missingIndices.Add(i);
+        }
+
+        Dictionary<int, string> chunkByIndex = alreadyLanded is null ? [] : new Dictionary<int, string>(alreadyLanded);
+
+        if (missingMemos.Count > 0)
+        {
+            IReadOnlyList<SubmittedMemo> sent = await _strategy.SubmitAllAsync(
+                missingMemos,
+                new Progress<int>(done => progress?.Report(new PublishProgress("chunks", chunkByIndex.Count + done, chunkMemos.Count))),
+                cancellationToken).ConfigureAwait(false);
+
+            foreach (SubmittedMemo memo in sent)
+            {
+                chunkByIndex[missingIndices[memo.Index]] = memo.TxHash;
+            }
+        }
+        else
+        {
+            progress?.Report(new PublishProgress("chunks", chunkMemos.Count, chunkMemos.Count));
+        }
+
+        List<string> chunkHashes = [.. Enumerable.Range(0, chunkMemos.Count).Select(i => chunkByIndex[i])];
 
         long firstLedger = await LedgerOfAsync(chunkHashes[0], cancellationToken).ConfigureAwait(false);
         long lastLedger = await LedgerOfAsync(chunkHashes[^1], cancellationToken).ConfigureAwait(false);

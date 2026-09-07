@@ -25,6 +25,12 @@ public enum XrplFileError
 
     /// <summary>A session that has run, or is running, was asked to run again.</summary>
     SessionAlreadyRun,
+
+    /// <summary>
+    /// A resume was asked to pick up a state file it cannot honestly pick up: the run it names
+    /// already finished, or the file handed to it is not the one the run was started for.
+    /// </summary>
+    ResumeMismatch,
 }
 
 public sealed class XrplFileException : Exception

@@ -100,7 +100,7 @@ public class StandaloneTests
 
             await using SequenceStrategy strategy = new(sink, writer);
             PublishResult published = await new XrplFileWriter(strategy, source).PublishAsync(
-                file, "application/octet-stream", $"vector-{size}.bin", writer.ClassicAddress, "1", null, timeout.Token);
+                file, "application/octet-stream", $"vector-{size}.bin", writer.ClassicAddress, "1", null, null, timeout.Token);
 
             Assert.Equal(vector.Root, published.Manifest.Root);
             Assert.Equal(vector.Blocks, published.Manifest.Blocks);

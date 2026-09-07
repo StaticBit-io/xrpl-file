@@ -365,4 +365,111 @@ public class PublicationSessionTests : IDisposable
 
         Assert.False(Directory.Exists(_stateDirectory));
     }
+
+    [Fact]
+    public async Task A_resumed_run_does_not_re_send_the_chunks_the_ledger_already_holds()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        byte[] file = VectorStream.Bytes("resume", 2500);
+
+        // A first run that dies after its chunks: the strategy refuses everything past the third
+        // submission, which is where the manifest would have gone.
+        sink.Refusals[3] = "tefBAD_AUTH";
+        await using (SequenceStrategy dying = new(sink, Wallet, StrategyOptions))
+        {
+            PublicationSession first = await PublicationSession.StartAsync(
+                dying, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
+                Options(), TestContext.Current.CancellationToken);
+
+            await Assert.ThrowsAsync<XrplFileException>(() => first.RunAsync(null, TestContext.Current.CancellationToken));
+        }
+
+        int submittedByTheFirstRun = sink.Submitted.Count;
+        sink.Refusals.Clear();
+
+        // The state file is all the second run is given, besides the file itself.
+        string statePath = Directory.EnumerateFiles(_stateDirectory, "*.json").Single();
+
+        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        PublicationSession second = await PublicationSession.ResumeAsync(
+            resumed, ledger, file, statePath, Options(), TestContext.Current.CancellationToken);
+
+        PublicationReport report = await second.RunAsync(null, TestContext.Current.CancellationToken);
+
+        // Three chunks landed in the first run and are not sent again; only the manifest is.
+        Assert.Equal(submittedByTheFirstRun + 1, sink.Submitted.Count);
+        Assert.Equal(3, report.ChunkHashes.Count);
+    }
+
+    [Fact]
+    public async Task A_resumed_run_reads_the_ledger_rather_than_believing_the_state_file()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        byte[] file = VectorStream.Bytes("resume", 2500);
+
+        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
+            Options(), TestContext.Current.CancellationToken);
+
+        // The chunks reach the ledger, and then the process dies before anything is written down:
+        // the state file still says nothing has landed.
+        IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
+        await strategy.SubmitAllAsync(
+            [.. chunks.Select((chunk, i) => new MemoSubmission(MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex(chunk), null))],
+            null, TestContext.Current.CancellationToken);
+
+        int alreadyThere = sink.Submitted.Count;
+        PublicationState onDisk = PublicationState.Load(first.StatePath);
+        Assert.Empty(onDisk.ChunkHashes);
+
+        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        PublicationSession second = await PublicationSession.ResumeAsync(
+            resumed, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken);
+
+        await second.RunAsync(null, TestContext.Current.CancellationToken);
+
+        // Only the manifest was needed, because the sweep found the chunks the file did not know about.
+        Assert.Equal(alreadyThere + 1, sink.Submitted.Count);
+    }
+
+    [Fact]
+    public async Task A_resume_with_a_different_file_is_refused()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+
+        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("one", 2500), "text/plain", null,
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
+
+        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            resumed, ledger, VectorStream.Bytes("another", 2500), first.StatePath, Options(), TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.ResumeMismatch, error.Error);
+    }
+
+    [Fact]
+    public async Task A_resume_of_a_finished_run_is_refused_rather_than_publishing_twice()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        byte[] file = VectorStream.Bytes("s", 2500);
+
+        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
+            Options(), TestContext.Current.CancellationToken);
+        await first.RunAsync(null, TestContext.Current.CancellationToken);
+
+        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            resumed, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.ResumeMismatch, error.Error);
+    }
 }

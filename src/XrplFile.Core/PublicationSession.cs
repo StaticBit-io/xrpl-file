@@ -92,6 +92,13 @@ public sealed class PublicationSession
     /// <summary>0 before the run, 1 while it is running, 2 once it is over either way.</summary>
     private int _run;
 
+    /// <summary>
+    /// What <see cref="ResumeAsync"/> found already in the ledger, by chunk index. Empty for a
+    /// run that started fresh through <see cref="StartAsync"/> -- there is nothing to reconcile
+    /// against on a first run.
+    /// </summary>
+    private Dictionary<int, string> _landed = [];
+
     private PublicationSession(
         ISubmissionStrategy strategy, ILedgerSource source, ReadOnlyMemory<byte> file,
         PublicationState state, string statePath, SessionOptions options, long feeDropsPerTransaction, int mints)
@@ -155,22 +162,136 @@ public sealed class PublicationSession
 
         long startedIn = await source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
 
+        // Computed now, from the bytes alone, rather than left for the manifest to fill in later:
+        // it is what a resume checks a second file against, and a run that dies before its first
+        // transaction still needs an identity to be resumed by. The root is over block hashes
+        // only (see RootOf), so a placeholder ledger here costs the check nothing -- it is the
+        // same root the manifest will carry once the real per-block ledgers are known.
+        IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
+        string root = RootOf(chunks, startedIn);
+
         PublicationState state = new(
             PublicationState.CurrentVersion, network, writer, keyReference, type, name,
-            file.Length, MemoLayout.ChunkBytes, Root: null, startedIn, Phase: Stages[0],
+            file.Length, MemoLayout.ChunkBytes, root, startedIn, Phase: Stages[0],
             ChunkHashes: new Dictionary<int, string>());
 
         // One run, one file, and no two runs share one. Two publications from one account inside
         // one ledger — four seconds, ordinary in a batch loop — would otherwise agree on a name,
         // and the second would overwrite the only record of money the first had already spent.
-        // The file's own root would be the natural name and is not known until the end, so the run
-        // is told apart by chance instead; what is inside says which run it is.
+        // The root is now known up front, but a hex root is an unfriendly file name and offers no
+        // ordering, so the run is still told apart by a random suffix rather than by its identity.
         string suffix = Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
         string path = Path.Combine(options.StateDirectory, $"{startedIn}-{writer}-{suffix}.json");
         state.Save(path);
 
         return new PublicationSession(
             strategy, source, file, state, path, options, estimate.FeeDropsPerTransaction, estimate.Mints);
+    }
+
+    /// <summary>
+    /// Picks a run back up from its state file.
+    ///
+    /// The file is where to look, not what to believe. A crash can fall between a submission and
+    /// its record, so the ledger is read from the run's starting point and whatever is actually
+    /// there is what counts. The file's own map of hashes carries the report through the
+    /// interruption; it does not decide what still needs sending.
+    ///
+    /// A resumed run still spends money, so it is checked exactly as a fresh one is: a fresh
+    /// estimate for the whole file is priced against the strategy's fee, and the caller's budget
+    /// and the account's balance are checked against it, before the sweep below even runs.
+    /// </summary>
+    public static async Task<PublicationSession> ResumeAsync(
+        ISubmissionStrategy strategy, ILedgerSource source, ReadOnlyMemory<byte> file,
+        string statePath, SessionOptions options, CancellationToken cancellationToken)
+    {
+        PublicationState state = PublicationState.Load(statePath);
+
+        if (string.Equals(state.Phase, "done", StringComparison.Ordinal))
+        {
+            throw new XrplFileException(XrplFileError.ResumeMismatch,
+                $"{statePath} describes a run that finished; publishing it again would put a second copy in the ledger");
+        }
+
+        if (state.Size != file.Length)
+        {
+            throw new XrplFileException(XrplFileError.ResumeMismatch,
+                $"{statePath} was started for {state.Size} bytes and this file is {file.Length}");
+        }
+
+        // The size matching is not enough: two different files of one size are ordinary. The root
+        // is the identity, so it is what the check is made of.
+        IReadOnlyList<byte[]> chunks = FileTree.Split(file, state.Chunk);
+        string root = RootOf(chunks, state.StartedInLedger);
+
+        if (state.Root is { } recorded && !string.Equals(recorded, root, StringComparison.Ordinal))
+        {
+            throw new XrplFileException(XrplFileError.ResumeMismatch,
+                $"{statePath} was started for a file rooted at {recorded} and this one roots at {root}");
+        }
+
+        PublicationEstimate estimate = await PublicationEstimator
+            .EstimateAsync(source, state.Writer, file.Length, options.TicketsPerBatch, cancellationToken).ConfigureAwait(false);
+
+        // Same rule StartAsync holds: the estimate this run is approved against and the strategy
+        // that would submit it must price a transaction the same way, or the checks below describe
+        // a run nobody is going to submit.
+        if (strategy.FeeDropsPerTransaction != estimate.FeeDropsPerTransaction)
+        {
+            throw new XrplFileException(XrplFileError.FeeMismatch,
+                $"the estimate prices every transaction at {estimate.FeeDropsPerTransaction} drops and the strategy "
+                + $"charges {strategy.FeeDropsPerTransaction}; build the strategy from the estimate's fee, or the "
+                + "budget and balance checks describe a run nobody is going to submit");
+        }
+
+        PublicationEstimator.Require(estimate, options.BudgetDrops);
+
+        PublicationSession session = new(
+            strategy, source, file, state, statePath, options, estimate.FeeDropsPerTransaction, estimate.Mints);
+        session._landed = await session.ReconcileAsync(chunks.Count, cancellationToken).ConfigureAwait(false);
+
+        return session;
+    }
+
+    /// <summary>
+    /// Which chunk indices are already in the ledger, read from the ledger itself.
+    ///
+    /// The sweep starts at the ledger the run started in, which is why that number is in the
+    /// state file: without it this would read the account's whole history.
+    /// </summary>
+    private async Task<Dictionary<int, string>> ReconcileAsync(int chunkCount, CancellationToken cancellationToken)
+    {
+        Dictionary<int, string> landed = [];
+        long to = await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+
+        await foreach (LedgerTransaction tx in _source
+            .AccountTransactionsAsync(_state.Writer, _state.StartedInLedger, to, forward: true, cancellationToken)
+            .ConfigureAwait(false))
+        {
+            if (!tx.Succeeded || !tx.Validated) continue;
+            if (MemoLayout.ChunkIndexOf(tx.MemoTypeHex) is not { } index) continue;
+            if (index < 0 || index >= chunkCount) continue;
+
+            // First in canonical order, exactly as a reader will resolve it.
+            landed.TryAdd((int)index, tx.Hash);
+        }
+
+        return landed;
+    }
+
+    /// <summary>The file's root, computed the way the writer will compute it -- over block hashes alone.</summary>
+    private static string RootOf(IReadOnlyList<byte[]> chunks, long placeholderLedger)
+    {
+        int blocks = FileTree.BlockCount(chunks.Count);
+        List<BlockEntry> entries = new(blocks);
+
+        for (int block = 0; block < blocks; block++)
+        {
+            List<byte[]> members = [.. chunks.Skip(block * FileTree.BlockChunks).Take(FileTree.BlockChunks)];
+            entries.Add(new BlockEntry(block, Convert.ToHexString(FileTree.BlockHash(members)), placeholderLedger));
+        }
+
+        // The root is over the block hashes alone; the ledger in an entry does not enter it.
+        return FileTree.RootHex(entries);
     }
 
     public async Task<PublicationReport> RunAsync(IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
@@ -197,6 +318,7 @@ public sealed class PublicationSession
 
             PublishResult result = await writer.PublishAsync(
                 _file, started.Type, started.Name, started.Writer, started.Network,
+                _landed.Count > 0 ? _landed : null,
                 new PhaseRecordingProgress(this, progress), cancellationToken).ConfigureAwait(false);
 
             Advance("done", result.Manifest.Root, result.ChunkHashes);
