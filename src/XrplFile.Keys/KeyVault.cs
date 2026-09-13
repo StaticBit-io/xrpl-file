@@ -468,6 +468,16 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
             byte[] dataKey = BorrowDataKey(out long generation);
             try
             {
+                if (HoldsAddressAlready(dataKey, record, entry.Network, entry.Address))
+                {
+                    // Refuses rather than silently holding the same key twice — an import of a
+                    // container or a bare seed the vault already has is a no-op the caller should
+                    // be told about, not a second entry nobody asked for (design section 8).
+                    throw new VaultException(
+                        VaultError.DuplicateAddress,
+                        $"An entry for address '{entry.Address}' on network '{entry.Network}' already exists.");
+                }
+
                 string reference = Guid.NewGuid().ToString("N");
                 VaultEntryInfo info = new(
                     reference,
@@ -1207,6 +1217,32 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
             : throw new VaultException(
                 VaultError.EntryDamaged,
                 $"The entry at reference '{reference}' failed its authentication tag.");
+
+    /// <summary>
+    /// Whether some entry already carries this exact (network, address) pair. Checked by
+    /// <see cref="StoreAsync"/> before a new reference is even assigned, so that a bare seed or a
+    /// container reimported for a key the vault already holds is refused rather than filed under a
+    /// second reference nobody asked for. A damaged existing entry cannot be compared and is
+    /// skipped — the same tolerance <see cref="ListAsync"/> and <see cref="VerifyAndInstall"/> give
+    /// damage elsewhere: one unreadable entry must not block every future store.
+    /// </summary>
+    private static bool HoldsAddressAlready(byte[] dataKey, VaultRecord record, string network, string address)
+    {
+        foreach (KeyValuePair<string, byte[]> existing in record.Entries)
+        {
+            if (TryReadEntry(dataKey, existing.Key, existing.Value, out VaultEntry? read))
+            {
+                bool matches = string.Equals(read.Info.Network, network, StringComparison.Ordinal) &&
+                               string.Equals(read.Info.Address, address, StringComparison.Ordinal);
+                if (matches)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     private static bool TryReadEntry(
         byte[] dataKey, string reference, byte[] sealedEntry, [NotNullWhen(true)] out VaultEntry? entry)

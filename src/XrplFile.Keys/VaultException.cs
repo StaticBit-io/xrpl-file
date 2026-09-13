@@ -15,6 +15,14 @@ public enum VaultError
     /// <summary>No entry with that reference.</summary>
     NoSuchEntry,
 
+    /// <summary>
+    /// Another entry already holds this address on this network. <see cref="IKeyVault.StoreAsync"/>
+    /// refuses rather than silently holding the same key twice — an import of a container or a bare
+    /// seed the vault already has is a no-op the caller should be told about, not a second entry
+    /// nobody asked for.
+    /// </summary>
+    DuplicateAddress,
+
     /// <summary>An entry failed its authentication tag: damaged bytes, or moved between references.</summary>
     EntryDamaged,
 

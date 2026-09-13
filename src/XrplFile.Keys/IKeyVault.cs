@@ -126,7 +126,13 @@ public interface IKeyVault
     /// <summary>Everything about every entry except its secret.</summary>
     Task<IReadOnlyList<VaultEntryInfo>> ListAsync(CancellationToken cancellationToken);
 
-    /// <summary>Adds an entry and returns the reference the vault assigned to it.</summary>
+    /// <summary>
+    /// Adds an entry and returns the reference the vault assigned to it. Throws
+    /// <see cref="VaultException"/> with <see cref="VaultError.DuplicateAddress"/> when another
+    /// entry already holds this same address on this same network — an import that hands back a
+    /// key already in the vault is refused rather than filed under a second reference (design
+    /// section 8).
+    /// </summary>
     Task<string> StoreAsync(NewVaultEntry entry, CancellationToken cancellationToken);
 
     /// <summary>

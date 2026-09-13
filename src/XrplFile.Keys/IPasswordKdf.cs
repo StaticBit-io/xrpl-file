@@ -23,7 +23,13 @@ public sealed record KdfParameters(int MemoryKib, int Iterations, int Parallelis
 /// </summary>
 public interface IPasswordKdf
 {
-    /// <summary>2 = Argon2id. 1 is reserved for PBKDF2-HMAC-SHA256, for compatibility if it is ever wanted.</summary>
+    /// <summary>
+    /// 2 = Argon2id. 1 is reserved for PBKDF2-HMAC-SHA256, for compatibility if it is ever wanted.
+    /// There is no passwordless <c>kdfId</c> 0: every container this library writes, vault record or
+    /// export container alike, has its own password (D1, D10). A container with no password would
+    /// be a seed sitting in plaintext, which is the opposite of D1's whole point — fewer things that
+    /// open everything, not a second one that opens itself.
+    /// </summary>
     int KdfId { get; }
 
     /// <summary>
