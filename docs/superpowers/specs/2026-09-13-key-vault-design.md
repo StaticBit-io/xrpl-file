@@ -116,11 +116,25 @@ on the unlock path means extra KDF passes at every launch. They are written into
 vaults written by installed builds.
 
 Measured on the development desktop with `Konscious.Security.Cryptography.Argon2` 1.3.1
-(`tools/XrplFile.KeyBench`): `memoryKib = 524288` (512 MiB), `iterations = 3`, `parallelism = 4`,
-at roughly 850 ms — the largest grid point at or under the 1000 ms budget, out of a sweep from
-64 to 512 MiB and 1 to 4 iterations. The next point up, 4 iterations at 512 MiB, lands at or above
-1000 ms and was rejected on that basis. The target is the slowest unlock a person will accept once
-per session, which is a different budget from a wallet unlocking on every payment.
+(`tools/XrplFile.KeyBench`): `memoryKib = 262144` (256 MiB), `iterations = 3`, `parallelism = 4`,
+at roughly 510 ms (482–563 ms across five re-verification runs), out of a sweep from 64 to 512 MiB
+and 1 to 4 iterations. 512 MiB at the same iteration count was the largest grid point at or under
+the 1000 ms budget and was the first pick, but 512 MiB was rejected in review, not for its time —
+for its size. The target is the slowest unlock a person will accept once per session, which is a
+different budget from a wallet unlocking on every payment, but the grid point at or under that
+budget is not automatically the right pick: it only accounts for what an attacker pays, not for
+what a legitimate device has to pay to open the file at all.
+
+`kdfParams` travels inside every vault record (5), so whatever is chosen here is not a desktop-only
+decision: a vault written on a desktop is opened later with these same parameters wherever the file
+goes. Part C of this project is a MAUI Blazor Hybrid application, and MAUI's targets include phones,
+not only desktops. A vault written at 512 MiB is one that a memory-constrained device may fail to
+open at all, or open only after a long stall — and nothing in this spec scopes part C away from
+mobile. 256 MiB is chosen instead: it still sits far above every published Argon2id recommendation
+for a password-wrapped secret, so the factor-of-two loss in brute-force cost against 512 MiB is
+cheap, and it buys back a platform that 512 MiB would quietly foreclose. Raising these numbers
+later is not only a decision about how hard the vault is to attack — it is a decision about which
+devices can still open one, and it should be made with a phone in hand, not only a desktop.
 
 ## 5. The record
 
@@ -330,9 +344,11 @@ the same call, and a mistyped confirmation must not end the session it was meant
 ## 10. What must be measured before it is believed
 
 1. **Argon2id parameters** (4.3): measured with `tools/XrplFile.KeyBench` on the development
-   desktop, using `Konscious.Security.Cryptography.Argon2` 1.3.1. `memoryKib = 524288` (512 MiB),
-   `iterations = 3`, `parallelism = 4`, at roughly 850 ms — the largest swept grid point at or
-   under the 1000 ms per-session unlock budget.
+   desktop, using `Konscious.Security.Cryptography.Argon2` 1.3.1. `memoryKib = 262144` (256 MiB),
+   `iterations = 3`, `parallelism = 4`, at roughly 510 ms — a grid point well under the 1000 ms
+   per-session unlock budget, chosen over the larger 512 MiB point (which the budget alone would
+   have picked) because the parameters travel inside every vault record and part C's MAUI target
+   reaches phones, which 512 MiB risks foreclosing.
 2. **The cost of deriving a wallet per signature.** `XrplWallet.FromSeed` measured at roughly
    0.7 ms per call (1000 calls in under a second on the same machine). A 20 MB publication is
    roughly 21,000 transactions, so deriving fresh on every signature adds on the order of 15
