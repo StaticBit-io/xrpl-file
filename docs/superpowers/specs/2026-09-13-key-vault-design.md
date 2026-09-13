@@ -115,9 +115,12 @@ on the unlock path means extra KDF passes at every launch. They are written into
 (`kdfId`, `memoryKib`, `iterations`, `parallelism`) so that a future recalibration still opens
 vaults written by installed builds.
 
-The measurement that fixes them is task 0 of the plan. The target is the slowest unlock a person
-will accept once per session, which is a different budget from a wallet unlocking on every
-payment.
+Measured on the development desktop with `Konscious.Security.Cryptography.Argon2` 1.3.1
+(`tools/XrplFile.KeyBench`): `memoryKib = 524288` (512 MiB), `iterations = 3`, `parallelism = 4`,
+at roughly 850 ms — the largest grid point at or under the 1000 ms budget, out of a sweep from
+64 to 512 MiB and 1 to 4 iterations. The next point up, 4 iterations at 512 MiB, lands at or above
+1000 ms and was rejected on that basis. The target is the slowest unlock a person will accept once
+per session, which is a different budget from a wallet unlocking on every payment.
 
 ## 5. The record
 
@@ -326,15 +329,17 @@ the same call, and a mistyped confirmation must not end the session it was meant
 
 ## 10. What must be measured before it is believed
 
-1. **Argon2id parameters** (4.3) on a desktop machine: the memory, iteration and parallelism
-   triple whose unlock time is acceptable once per session.
-2. **The cost of deriving a wallet per signature.** `XrplWallet.FromSeed` takes a string and
-   derives a key. If that is affordable at publication rates, `VaultSigner` derives per signature
-   and the secret's lifetime is one operation. If it is not, the signer caches the derived wallet
-   for the unlocked session — and this document is amended to say the secret lives until the lock,
-   rather than leaving the cheaper claim standing.
+1. **Argon2id parameters** (4.3): measured with `tools/XrplFile.KeyBench` on the development
+   desktop, using `Konscious.Security.Cryptography.Argon2` 1.3.1. `memoryKib = 524288` (512 MiB),
+   `iterations = 3`, `parallelism = 4`, at roughly 850 ms — the largest swept grid point at or
+   under the 1000 ms per-session unlock budget.
+2. **The cost of deriving a wallet per signature.** `XrplWallet.FromSeed` measured at roughly
+   0.7 ms per call (1000 calls in under a second on the same machine). A 20 MB publication is
+   roughly 21,000 transactions, so deriving fresh on every signature adds on the order of 15
+   seconds against a run of tens of minutes — affordable. `VaultSigner` derives per signature and
+   the secret's lifetime is one operation.
 
-Both are task 0 of the plan, before anything depends on the answer.
+Both were measured as task 0 of the plan, before anything else depended on the answer.
 
 ## 11. Known limitations
 
