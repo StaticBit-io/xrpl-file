@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 
 using Xunit;
 
@@ -132,6 +133,44 @@ public class ExportContainerTests : VaultTestHarness
     }
 
     [Fact]
+    public void A_memoryKib_field_above_int_MaxValue_is_rejected_as_corrupt()
+    {
+        // BinaryPrimitives.ReadUInt32BigEndian reads the full unsigned 32-bit range, and the header
+        // parser narrows that with checked((int)...) — a value above int.MaxValue is exactly what
+        // trips the OverflowException branch, which nothing else in this suite reaches: every other
+        // rejected memoryKib (e.g. the AAD-downgrade test) stays within a signed int and fails on
+        // the authentication tag instead.
+        VaultEntry[] entries = [MakeEntry("one")];
+        byte[] container = ExportContainer.Protect(entries, Password("right").Span, FastExportParameters);
+
+        // memoryKib is the four big-endian bytes right after magic, version and kdfId.
+        byte[] tampered = (byte[])container.Clone();
+        BinaryPrimitives.WriteUInt32BigEndian(tampered.AsSpan(6, 4), uint.MaxValue);
+
+        VaultException error = Assert.Throws<VaultException>(
+            () => ExportContainer.Open(tampered, Password("right").Span));
+
+        Assert.Equal(VaultError.Corrupt, error.Error);
+    }
+
+    [Fact]
+    public void An_iterations_field_above_int_MaxValue_is_rejected_as_corrupt()
+    {
+        // The mirror of the memoryKib case, for the field parsed right after it.
+        VaultEntry[] entries = [MakeEntry("one")];
+        byte[] container = ExportContainer.Protect(entries, Password("right").Span, FastExportParameters);
+
+        // iterations is the four big-endian bytes right after memoryKib.
+        byte[] tampered = (byte[])container.Clone();
+        BinaryPrimitives.WriteUInt32BigEndian(tampered.AsSpan(10, 4), uint.MaxValue);
+
+        VaultException error = Assert.Throws<VaultException>(
+            () => ExportContainer.Open(tampered, Password("right").Span));
+
+        Assert.Equal(VaultError.Corrupt, error.Error);
+    }
+
+    [Fact]
     public void The_container_layout_matches_spec_section_8_byte_for_byte()
     {
         KdfParameters parameters = new(MemoryKib: 8, Iterations: 1, Parallelism: 1);
@@ -172,6 +211,139 @@ public class ExportContainerTests : VaultTestHarness
         IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(token);
         Assert.True(listed.Single(entry => entry.Reference == exportedReference).Exported);
         Assert.False(listed.Single(entry => entry.Reference == otherReference).Exported);
+    }
+
+    [Fact]
+    public async Task ExportAsync_on_a_locked_vault_throws_Locked()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+        await vault.LockAsync();
+
+        VaultException error = await Assert.ThrowsAsync<VaultException>(
+            () => vault.ExportAsync(reference, Password("export password"), token));
+
+        Assert.Equal(VaultError.Locked, error.Error);
+    }
+
+    [Fact]
+    public async Task ExportAsync_of_an_unknown_reference_throws_NoSuchEntry()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+
+        VaultException error = await Assert.ThrowsAsync<VaultException>(
+            () => vault.ExportAsync("no-such-reference", Password("export password"), token));
+
+        Assert.Equal(VaultError.NoSuchEntry, error.Error);
+    }
+
+    [Fact]
+    public async Task ExportAsync_of_a_damaged_entry_throws_EntryDamaged()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+        await vault.LockAsync();
+        FlipOneByteOfEntry(reference);
+        await vault.UnlockAsync(Password("open sesame"), token);
+
+        VaultException error = await Assert.ThrowsAsync<VaultException>(
+            () => vault.ExportAsync(reference, Password("export password"), token));
+
+        Assert.Equal(VaultError.EntryDamaged, error.Error);
+    }
+
+    [Fact]
+    public async Task ExportAsync_seals_the_entry_and_marks_only_it_Exported()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string exportedReference = await vault.StoreAsync(Entry("exported"), token);
+        string otherReference = await vault.StoreAsync(Entry("other"), token);
+
+        byte[] container = await vault.ExportAsync(exportedReference, Password("export password"), token);
+
+        IReadOnlyList<VaultEntry> opened = ExportContainer.Open(container, Password("export password").Span);
+        Assert.Equal("sSecretOfexported", opened.Single().Secret);
+
+        IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(token);
+        Assert.True(listed.Single(entry => entry.Reference == exportedReference).Exported);
+        Assert.False(listed.Single(entry => entry.Reference == otherReference).Exported);
+    }
+
+    [Fact]
+    public async Task A_failure_sealing_the_container_leaves_Exported_untouched()
+    {
+        // A KDF that does not validate its own parameters, so the vault can be created and unlocked
+        // under a Parallelism that ExportContainer.Protect's own guard refuses (it must fit one
+        // byte in the header — spec section 8). The real Argon2idKdf checks only a lower bound
+        // (>= 1), so this parallelism would sail through vault creation and only trip the guard
+        // that is unique to Protect — pinning "a failure sealing the container" without depending
+        // on timing or memory behaviour deep inside Argon2id.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KdfParameters unsealable = new(MemoryKib: 8, Iterations: 1, Parallelism: byte.MaxValue + 1);
+        KeyVault vault = NewVault(new ParameterBlindKdf(), unsealable);
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => vault.ExportAsync(reference, Password("export password"), token));
+
+        IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(token);
+        Assert.False(listed.Single().Exported);
+    }
+
+    [Fact]
+    public async Task A_failure_recording_Exported_still_returns_the_sealed_container()
+    {
+        // The seal already succeeded before the write is attempted; only the flag's persistence
+        // fails. Losing the container here would make the one guaranteed recovery path (D10)
+        // unreliable exactly when storage already is, so the container comes back regardless —
+        // and the entry is left exactly as the file has it, unexported, so the caller is nagged to
+        // export it again rather than told a backup exists that the disk never actually received.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        FailableWrites disk = new();
+        KeyVault vault = NewVault(disk.WriteAsync);
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+
+        disk.Fail = true;
+        byte[] container = await vault.ExportAsync(reference, Password("export password"), token);
+
+        Assert.NotEmpty(container);
+        IReadOnlyList<VaultEntry> opened = ExportContainer.Open(container, Password("export password").Span);
+        Assert.Equal("sSecretOfone", opened.Single().Secret);
+
+        IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(token);
+        Assert.False(listed.Single().Exported);
+
+        disk.Fail = false;
+    }
+
+    /// <summary>
+    /// Delegates to a real <see cref="Argon2idKdf"/> when the parameters are within its own
+    /// checks, and otherwise fabricates deterministic output rather than throw — the seam
+    /// <see cref="A_failure_sealing_the_container_leaves_Exported_untouched"/> needs to get a vault
+    /// open under a <see cref="KdfParameters.Parallelism"/> that only <see cref="ExportContainer"/>'s
+    /// own guard refuses.
+    /// </summary>
+    private sealed class ParameterBlindKdf : IPasswordKdf
+    {
+        private readonly Argon2idKdf _inner = new();
+
+        public int KdfId => _inner.KdfId;
+
+        public byte[] Derive(
+            ReadOnlySpan<byte> password, ReadOnlySpan<byte> salt, KdfParameters parameters, int outputLength) =>
+            parameters.Parallelism is >= 1 and <= byte.MaxValue
+                ? _inner.Derive(password, salt, parameters, outputLength)
+                : RandomNumberGenerator.GetBytes(outputLength);
     }
 
     [Fact]

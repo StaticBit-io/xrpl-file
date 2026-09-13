@@ -552,6 +552,75 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Reveals under the same gate every other public method uses, so a concurrent idle-lock cannot
+    /// land between the reveal and the seal (see the type's remarks on the gate). Sealing happens
+    /// before the record is touched at all: a throw out of <see cref="ExportContainer.Protect"/>
+    /// leaves <c>Exported</c> exactly as it was, satisfying the same "not before the container
+    /// exists" rule <see cref="UpdateAsync"/> would otherwise let a caller violate by calling it
+    /// ahead of a <see cref="ExportContainer.Protect"/> that never returns.
+    /// </remarks>
+    public async Task<byte[]> ExportAsync(
+        string reference, ReadOnlyMemory<byte> containerPassword, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reference);
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            VaultRecord record = RequireUnlocked();
+            byte[] dataKey = BorrowDataKey(out long generation);
+            try
+            {
+                VaultEntry entry = ReadEntryOrThrow(dataKey, reference, FindEntry(record, reference));
+
+                // Sealed before a single byte of the record is edited. If this throws, nothing
+                // below ever runs, so the entry cannot end up claiming an export that never
+                // happened — the one lie Exported cannot afford.
+                byte[] container = ExportContainer.Protect(
+                    [entry], containerPassword.Span, _parameters);
+
+                byte[] previousSealedEntry = record.Entries[reference];
+                VaultEntryInfo exported = entry.Info with { Exported = true };
+                record.Entries[reference] = SealEntry(dataKey, reference, entry with { Info = exported });
+
+                try
+                {
+                    await PersistAsync(record, dataKey, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // The container above is already sealed and correct — the only thing that
+                    // failed is recording that it happened. A cancellation is let through unchanged
+                    // (this class never swallows one, see EnableDeviceUnlockAsync for the same
+                    // rule) because the caller asked to stop, not to have the write's outcome
+                    // reinterpreted; every other failure here is storage refusing the write, and for
+                    // that one the cache is rolled back so it agrees with the file (Exported stays
+                    // false, matching what is actually on disk), and the container is handed back
+                    // anyway rather than discarding the export's actual deliverable. A caller who
+                    // reads Exported afterwards is nagged to export this key again, which is the
+                    // safe direction to be wrong in; throwing here instead would make
+                    // the one guaranteed recovery path unreliable exactly when storage already is.
+                    record.Entries[reference] = previousSealedEntry;
+                    EnsureStillOpen(generation);
+                    return container;
+                }
+
+                EnsureStillOpen(generation);
+                return container;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(dataKey);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task UpdateAsync(string reference, VaultEntryEdit edit, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reference);

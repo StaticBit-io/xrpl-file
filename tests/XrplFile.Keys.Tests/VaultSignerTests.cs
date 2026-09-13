@@ -214,6 +214,10 @@ public class VaultSignerTests : VaultTestHarness
             return inner.RevealAsync(reference, reason, cancellationToken);
         }
 
+        public Task<byte[]> ExportAsync(
+            string reference, ReadOnlyMemory<byte> containerPassword, CancellationToken cancellationToken) =>
+            inner.ExportAsync(reference, containerPassword, cancellationToken);
+
         public Task UpdateAsync(string reference, VaultEntryEdit edit, CancellationToken cancellationToken) =>
             inner.UpdateAsync(reference, edit, cancellationToken);
 

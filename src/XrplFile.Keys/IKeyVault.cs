@@ -141,6 +141,43 @@ public interface IKeyVault
     /// </summary>
     Task<VaultEntry> RevealAsync(string reference, string reason, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Reveals one entry, seals it into a portable <see cref="ExportContainer"/> under
+    /// <paramref name="containerPassword"/>, and marks the entry <c>Exported</c> — the guaranteed
+    /// path design section 8 and D10 require: per-key export is the only way back from a forgotten
+    /// master password, so nothing may reveal a secret for export without also recording that it
+    /// happened. <see cref="ExportContainer.Protect"/> and <see cref="ExportContainer.Open"/> remain
+    /// usable on their own for a caller that already holds an entry from <see cref="RevealAsync"/>;
+    /// this method exists so that the common case — export, then mark — cannot be split into two
+    /// calls a caller might forget the second half of.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Exported</c> is set only after the container has been sealed: if
+    /// <see cref="ExportContainer.Protect"/> throws, the entry is untouched — marking an entry
+    /// exported before the container that proves it exists on disk would be a lie the vault told
+    /// about itself.
+    /// </para>
+    /// <para>
+    /// The reverse failure — the container is sealed but the write that records <c>Exported</c>
+    /// fails — still returns the container. The container is the operation's actual deliverable and
+    /// is already correct and complete; discarding it because a one-bit metadata flag could not be
+    /// persisted would make the one guaranteed recovery path unreliable exactly when storage is
+    /// already misbehaving. The entry is left exactly as it was on disk (<c>Exported</c> unset), so
+    /// a caller that lists entries afterwards is nagged to export again — a false negative, which is
+    /// the safe direction for this flag to be wrong in.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="VaultException">
+    /// <see cref="VaultError.Locked"/> on a locked vault, <see cref="VaultError.NoSuchEntry"/> for an
+    /// unknown reference, <see cref="VaultError.EntryDamaged"/> for an entry that fails its own
+    /// authentication tag — the same three conditions <see cref="RevealAsync"/> reports, since this
+    /// method reveals the same way. Whatever <see cref="ExportContainer.Protect"/> itself throws
+    /// propagates unchanged when it throws before the container exists.
+    /// </exception>
+    Task<byte[]> ExportAsync(
+        string reference, ReadOnlyMemory<byte> containerPassword, CancellationToken cancellationToken);
+
     /// <summary>Changes an entry's mutable metadata. Reaches neither the secret, the kind, nor the address.</summary>
     Task UpdateAsync(string reference, VaultEntryEdit edit, CancellationToken cancellationToken);
 

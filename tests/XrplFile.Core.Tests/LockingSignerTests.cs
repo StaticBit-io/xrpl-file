@@ -109,6 +109,10 @@ public class LockingSignerTests
         public Task<VaultEntry> RevealAsync(string reference, string reason, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
+        public Task<byte[]> ExportAsync(
+            string reference, ReadOnlyMemory<byte> containerPassword, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         public Task UpdateAsync(string reference, VaultEntryEdit edit, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
