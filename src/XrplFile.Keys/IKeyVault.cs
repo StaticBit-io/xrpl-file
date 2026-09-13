@@ -41,6 +41,43 @@ public enum VaultUnlockResult
 }
 
 /// <summary>
+/// How a master-password change ended. It is an enumeration rather than a <see langword="bool"/>
+/// because the change has two outcomes that both mean "the password is now the new one" and that a
+/// caller must show differently — and a <see langword="bool"/> leaves the second unsayable.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Three values rather than two flags, so that the combination which cannot occur — the password
+/// unchanged and yet device unlock dropped — cannot be spelled. <see cref="WrongPassword"/> is
+/// first, and so the default, because a value nobody set must never read as success.
+/// </para>
+/// <para>
+/// Every other failure throws (design 6.2). A damaged record, a refused disk and a device store
+/// that cannot answer are all conditions this type deliberately has no value for.
+/// </para>
+/// </remarks>
+public enum VaultPasswordChange
+{
+    /// <summary>
+    /// The old password does not unwrap the data key already on disk. Nothing was written, and
+    /// this is the only outcome a caller may count against a failed-attempt limit.
+    /// </summary>
+    WrongPassword,
+
+    /// <summary>The password was changed. Not one entry's bytes were touched.</summary>
+    Changed,
+
+    /// <summary>
+    /// The password was changed, and "remember on this device" went with it. A fresh salt makes a
+    /// fresh header, both wraps are bound to that header, and this machine could not re-seal the
+    /// device wrap under it — so the wrap was dropped rather than left unopenable, and the store
+    /// was asked to forget the secret behind it. The setting is off, only the user can turn it
+    /// back on, and only a caller that was told can say so.
+    /// </summary>
+    ChangedAndDeviceUnlockDropped,
+}
+
+/// <summary>
 /// An encrypted store for the keys that sign publications. One password opens it; the keys inside
 /// are handed back one at a time and only on request.
 /// </summary>
@@ -122,19 +159,26 @@ public interface IKeyVault
     /// touched — that is the entire reason the vault wraps a data key rather than encrypting
     /// entries directly under a password-derived key.
     /// </summary>
+    /// <remarks>
+    /// A password is usually changed because the old one leaked, so the change leaves nothing
+    /// behind that the old one opens: the copy the durable write keeps beside the vault is removed
+    /// once the new record is confirmed on disk.
+    /// </remarks>
     /// <returns>
-    /// <see langword="false"/> for exactly one condition: <paramref name="oldPassword"/> does not
-    /// unwrap the data key already on disk. Every other failure throws — a damaged record reported
-    /// as a wrong password is how a disk fault becomes a user's fault.
+    /// <see cref="VaultPasswordChange.WrongPassword"/> for exactly one condition:
+    /// <paramref name="oldPassword"/> does not unwrap the data key already on disk. Every other
+    /// failure throws <see cref="VaultException"/> — a damaged record reported as a wrong password
+    /// is how a disk fault becomes a user's fault.
     /// </returns>
-    Task<bool> ChangePasswordAsync(
+    Task<VaultPasswordChange> ChangePasswordAsync(
         ReadOnlyMemory<byte> oldPassword, ReadOnlyMemory<byte> newPassword, CancellationToken cancellationToken);
 
     /// <summary>
     /// Turns on "remember on this device": gets or creates this machine's secret and wraps the
     /// already-unlocked data key under it. Asks for no password, because the data key is already
     /// in memory. Returns <see langword="false"/> and writes nothing when the device secret store
-    /// refuses to create a secret.
+    /// refuses to create a secret; a store that fails rather than refuses throws
+    /// <see cref="VaultException"/> with <see cref="VaultError.StorageFailed"/>.
     /// </summary>
     Task<bool> EnableDeviceUnlockAsync(CancellationToken cancellationToken);
 

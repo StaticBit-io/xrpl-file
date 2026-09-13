@@ -233,7 +233,7 @@ public interface IKeyVault
     Task UpdateAsync(string reference, VaultEntryEdit edit, CancellationToken cancellationToken);
     Task DeleteAsync(string reference, CancellationToken cancellationToken);
 
-    Task<bool> ChangePasswordAsync(
+    Task<VaultPasswordChange> ChangePasswordAsync(
         ReadOnlyMemory<byte> oldPassword, ReadOnlyMemory<byte> newPassword, CancellationToken cancellationToken);
     Task<bool> EnableDeviceUnlockAsync(CancellationToken cancellationToken);
     Task DisableDeviceUnlockAsync(CancellationToken cancellationToken);
@@ -252,9 +252,20 @@ Password buffers belong to the caller throughout. The vault reads them, derives 
 never stores them — and does not zero them either, because the caller usually still needs the
 buffer for a confirmation comparison or a retry, and a callee that wipes its argument is a trap.
 
-`ChangePasswordAsync` returns `false` for exactly one condition: the old password is wrong. Every
-other failure throws. A damaged record reported as a wrong password is how a disk fault becomes a
-user's fault.
+`ChangePasswordAsync` reports `VaultPasswordChange.WrongPassword` for exactly one condition: the old
+password is wrong. Every other failure throws. A damaged record reported as a wrong password is how
+a disk fault becomes a user's fault.
+
+The return is an enumeration rather than a `bool` because a change has a second outcome a caller
+must be able to show: a fresh salt makes a fresh header, both key wraps are bound to that header
+(4.2), and a machine that cannot re-seal the device wrap under the new one drops it rather than
+leave a wrap nothing will open. `ChangedAndDeviceUnlockDropped` says so; a `bool` whose `false`
+already means "wrong password" leaves it unsayable, and the user finds out at the next launch.
+
+The change also removes the copy the durable write keeps beside the vault. Everywhere else that
+copy is what makes an interrupted write survivable; here it is a whole record that the password the
+user has just replaced still opens, with no attacker needed to place it — the rollback limitation
+in 11 assumes one.
 
 ### 6.3 Concurrency
 

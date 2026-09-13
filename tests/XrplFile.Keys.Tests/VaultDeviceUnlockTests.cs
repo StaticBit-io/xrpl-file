@@ -177,8 +177,9 @@ public class VaultDeviceUnlockTests : VaultTestHarness
         string reference = await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
         Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
 
-        Assert.True(await vault.ChangePasswordAsync(
-            Password("old"), Password("new"), TestContext.Current.CancellationToken));
+        Assert.Equal(
+            VaultPasswordChange.Changed,
+            await vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
         await vault.LockAsync();
 
         Assert.Equal(
@@ -264,26 +265,93 @@ public class VaultDeviceUnlockTests : VaultTestHarness
         Assert.Null(await Devices.GetAsync(TestContext.Current.CancellationToken));
     }
 
-    /// <summary>The disk, with a switch. Mirrors the double in <c>KeyVaultTests</c>.</summary>
-    private sealed class FailableWrites
+    [Fact]
+    public async Task A_password_change_with_the_machine_secret_gone_drops_the_wrap_and_asks_the_store_to_forget_it()
     {
-        internal bool Fail { get; set; }
+        // Genuine absence — the store says it holds nothing — is the one case that may drop the
+        // wrap: one bound to a header nobody will present again is worse than none. It must be
+        // dropped out loud, and it must not leave dead key material behind in the platform store.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("old"), TestContext.Current.CancellationToken);
+        string reference = await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+        Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
 
-        internal Task WriteAsync(string path, byte[] contents, CancellationToken cancellationToken) =>
-            Fail
-                ? Task.FromException(new VaultException(VaultError.StorageFailed, "The disk refused the write."))
-                : DurableFile.WriteAsync(path, contents, cancellationToken);
+        await Devices.DeleteAsync(TestContext.Current.CancellationToken);
+        int deletionsBefore = Devices.Deletions;
+
+        Assert.Equal(
+            VaultPasswordChange.ChangedAndDeviceUnlockDropped,
+            await vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
+
+        Assert.Null(ReadRecordFromFile().DeviceDek);
+        Assert.True(Devices.Deletions > deletionsBefore);
+
+        // The password half of the change is untouched by the drop.
+        await vault.LockAsync();
+        Assert.Equal(
+            VaultUnlockResult.VaultMissing,
+            await vault.UnlockWithDeviceAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(
+            VaultUnlockResult.Success,
+            await vault.UnlockAsync(Password("new"), TestContext.Current.CancellationToken));
+        Assert.Equal(
+            "sSecretOfone",
+            (await vault.RevealAsync(reference, "test", TestContext.Current.CancellationToken)).Secret);
     }
 
-    /// <summary>A device secret store that cannot even answer whether it holds a secret.</summary>
-    private sealed class FailingDeviceSecretStore : IDeviceSecretStore
+    [Fact]
+    public async Task A_password_change_on_a_machine_the_wrap_was_not_sealed_for_does_not_re_seal_it_there()
     {
-        public Task<byte[]?> GetAsync(CancellationToken cancellationToken) =>
-            Task.FromException<byte[]?>(new IOException("The platform secret store is unavailable."));
+        // The device secret is machine-wide, not per-vault. Re-sealing under whatever secret the
+        // machine happens to hold hands passwordless unlock to a machine whose owner never enabled
+        // it for this vault — off the back of a password change, of all things.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("old"), TestContext.Current.CancellationToken);
+        Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
 
-        public Task<byte[]> CreateAsync(CancellationToken cancellationToken) =>
-            Task.FromException<byte[]>(new IOException("The platform secret store is unavailable."));
+        // The machine now holds a different secret — one this vault's wrap was never sealed under.
+        await Devices.CreateAsync(TestContext.Current.CancellationToken);
 
-        public Task DeleteAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        Assert.Equal(
+            VaultPasswordChange.ChangedAndDeviceUnlockDropped,
+            await vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
+
+        Assert.Null(ReadRecordFromFile().DeviceDek);
+        await vault.LockAsync();
+        Assert.Equal(
+            VaultUnlockResult.VaultMissing,
+            await vault.UnlockWithDeviceAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task A_password_change_gives_device_unlock_to_no_vault_that_never_asked_for_it()
+    {
+        // The machine holds a secret, for some other vault. This one never enabled the setting,
+        // and a password change is not where it gets turned on.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("old"), TestContext.Current.CancellationToken);
+        await Devices.CreateAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            VaultPasswordChange.Changed,
+            await vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
+
+        Assert.Null(ReadRecordFromFile().DeviceDek);
+    }
+
+    [Fact]
+    public async Task Enabling_device_unlock_over_a_store_that_fails_reports_a_typed_vault_failure()
+    {
+        // Every other failure on this type is a VaultException a caller can switch on. A raw
+        // IOException out of the platform store is the one that would escape unhandled.
+        KeyVault vault = NewVault(new FailingDeviceSecretStore());
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+
+        VaultException error = await Assert.ThrowsAsync<VaultException>(
+            () => vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(VaultError.StorageFailed, error.Error);
+
+        Assert.Null(ReadRecordFromFile().DeviceDek);
+        Assert.True(vault.IsUnlocked);
     }
 }

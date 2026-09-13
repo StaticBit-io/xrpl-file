@@ -567,20 +567,6 @@ public class KeyVaultTests : VaultTestHarness
         await vault.DisposeAsync();
     }
 
-    /// <summary>
-    /// The disk, with a switch. Writes go through to <see cref="DurableFile"/> until
-    /// <see cref="Fail"/> is set, after which they fail the way a full or unwritable one does.
-    /// </summary>
-    private sealed class FailableWrites
-    {
-        internal bool Fail { get; set; }
-
-        internal Task WriteAsync(string path, byte[] contents, CancellationToken cancellationToken) =>
-            Fail
-                ? Task.FromException(new VaultException(VaultError.StorageFailed, "The disk refused the write."))
-                : DurableFile.WriteAsync(path, contents, cancellationToken);
-    }
-
     private static async Task AssertLocked(Func<Task> operation)
     {
         VaultException error = await Assert.ThrowsAsync<VaultException>(operation);

@@ -66,6 +66,35 @@ internal static class DurableFile
     }
 
     /// <summary>
+    /// Removes the copy a previous write kept, if there is one. Succeeds when there is none: the
+    /// caller is asking for an end state, not for an event.
+    /// </summary>
+    /// <remarks>
+    /// The backup is what makes an interrupted write survivable, so this is not something an
+    /// ordinary write does. It exists for the one operation whose backup is a liability rather
+    /// than a safety net — a password change, after which the kept copy is a whole vault that the
+    /// password the user just replaced still opens. Called only once the new record is confirmed
+    /// on disk, so a crash between the two leaves the previous file, which is what the write
+    /// already guarantees; what it must not leave is a permanent one.
+    /// </remarks>
+    internal static void DiscardBackup(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        string backupPath = path + BackupSuffix;
+
+        try
+        {
+            File.Delete(backupPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new VaultException(
+                VaultError.StorageFailed, $"The kept copy of the vault at '{backupPath}' could not be removed.", ex);
+        }
+    }
+
+    /// <summary>
     /// Reads the current contents, falling back to the kept backup when the current file is gone.
     /// Returns <see langword="null"/> when neither exists — a missing vault is not a failure.
     /// A leftover <c>.tmp</c> from an interrupted write is never considered.

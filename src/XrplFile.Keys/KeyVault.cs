@@ -265,6 +265,14 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 return VaultUnlockResult.VaultUnsupported;
             }
 
+            if (!WrapCouldHoldADataKey(record.Dek))
+            {
+                // Damage, not a mistyped password: no password opens a wrap of an impossible
+                // length, and only WrongPassword may advance a caller's failed-attempt counter.
+                // Checked ahead of the derivation for the same reason as the version above.
+                return VaultUnlockResult.VaultCorrupt;
+            }
+
             byte[]? dataKey = null;
             byte[] passwordKey = await DerivePasswordKeyAsync(password, record.Salt, record.KdfParams, cancellationToken)
                 .ConfigureAwait(false);
@@ -274,11 +282,6 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 {
                     // Nothing has been touched: a failed attempt leaves an already-open vault open.
                     return VaultUnlockResult.WrongPassword;
-                }
-
-                if (dataKey.Length != DataKeyLength)
-                {
-                    return VaultUnlockResult.VaultCorrupt;
                 }
 
                 Install(record, dataKey);
@@ -628,8 +631,13 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     /// fault must never come back looking like a wrong password. If this instance already holds
     /// the vault open, its cache is updated with the new wrap once the write lands, so that a
     /// later store or delete does not resurrect the old one.
+    /// <para>
+    /// The copy the write keeps beside the vault is removed afterwards, and only here. It is what
+    /// makes an interrupted write survivable everywhere else; on this one operation it is a record
+    /// the password the user has just replaced still opens.
+    /// </para>
     /// </remarks>
-    public async Task<bool> ChangePasswordAsync(
+    public async Task<VaultPasswordChange> ChangePasswordAsync(
         ReadOnlyMemory<byte> oldPassword, ReadOnlyMemory<byte> newPassword, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -651,21 +659,30 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                     VaultError.Unsupported, "This build cannot change the password of a record in this format.");
             }
 
+            if (!WrapCouldHoldADataKey(record.Dek))
+            {
+                // Ahead of the derivation and the unwrap, because the unwrap answers a wrap of an
+                // impossible length with the same refusal it gives a mistyped password — and the
+                // refusal this method returns means one thing only.
+                throw new VaultException(
+                    VaultError.Corrupt, "The vault record's key wrap is not the shape of a wrapped data key.");
+            }
+
+            // Taken before the salt changes: it is the associated data both wraps on disk were
+            // sealed under, and the device wrap must be opened under it to say whose it is.
+            byte[] headerBeforeTheChange = VaultRecordCodec.Header(record);
+            byte[]? deviceDekBeforeTheChange = record.DeviceDek;
+
             byte[] oldPasswordKey = await DerivePasswordKeyAsync(oldPassword, record.Salt, record.KdfParams, cancellationToken)
                 .ConfigureAwait(false);
             byte[]? dataKey = null;
             try
             {
-                if (!TryOpen(oldPasswordKey, record.Dek, VaultRecordCodec.Header(record), out dataKey))
+                if (!TryOpen(oldPasswordKey, record.Dek, headerBeforeTheChange, out dataKey))
                 {
-                    // The one and only condition this method reports as false. Nothing on disk
-                    // has been touched.
-                    return false;
-                }
-
-                if (dataKey.Length != DataKeyLength)
-                {
-                    throw new VaultException(VaultError.Corrupt, "The unwrapped data key is not the expected length.");
+                    // The one and only condition this method reports rather than throws. Nothing
+                    // on disk has been touched.
+                    return VaultPasswordChange.WrongPassword;
                 }
 
                 // Not a rewrite of a single entry: the data key above is exactly what every entry
@@ -686,16 +703,25 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 // The header just changed — it carries the salt — and the device wrap's associated
                 // data is that same header (4.2). Left alone, a correct device secret would stop
                 // opening its own wrap the moment the password changes. Re-seal it under the new
-                // header when there is a secret to do it with; drop it, rather than leave a wrap no
-                // header will ever match again, when there is not.
-                if (record.DeviceDek is not null)
+                // header when this machine holds the secret it was sealed under; drop it, rather
+                // than leave a wrap no header will ever match again, when it does not. A vault that
+                // never carried a device wrap gains none here: the platform secret is machine-wide
+                // rather than per-vault, so "this machine holds one" is not consent.
+                bool deviceUnlockDropped = false;
+                if (deviceDekBeforeTheChange is not null)
                 {
-                    record.DeviceDek = await RewrapDeviceKeyAsync(record, dataKey, cancellationToken).ConfigureAwait(false);
+                    record.DeviceDek = await RewrapDeviceKeyAsync(
+                            record, deviceDekBeforeTheChange, headerBeforeTheChange, dataKey, cancellationToken)
+                        .ConfigureAwait(false);
+                    deviceUnlockDropped = record.DeviceDek is null;
                 }
 
                 Reseal(record, dataKey);
                 await _write(_path, VaultRecordCodec.Serialise(record), cancellationToken).ConfigureAwait(false);
 
+                // Ahead of everything below, and immediately after the write: a later store or
+                // delete reseals from this cache, so leaving it stale past a committed write is
+                // how the old password's wrap gets written back over the new one.
                 if (_record is not null)
                 {
                     _record.Salt = record.Salt;
@@ -704,7 +730,19 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                     _record.Mac = record.Mac;
                 }
 
-                return true;
+                // The write kept the previous contents beside the vault, and those are a whole
+                // record that the password just replaced still opens — reachable with no attacker
+                // at all, since ReadAsync serves the copy when the main file is gone. Removed only
+                // now, so that the durability of the write itself is unchanged.
+                DurableFile.DiscardBackup(_path);
+
+                if (!deviceUnlockDropped)
+                {
+                    return VaultPasswordChange.Changed;
+                }
+
+                await ForgetTheOrphanedDeviceSecretAsync(cancellationToken).ConfigureAwait(false);
+                return VaultPasswordChange.ChangedAndDeviceUnlockDropped;
             }
             finally
             {
@@ -731,19 +769,27 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
             byte[] dataKey = BorrowDataKey(out long generation);
             try
             {
-                byte[]? deviceSecret = await DeviceSecrets.GetAsync(cancellationToken).ConfigureAwait(false);
-                if (deviceSecret is null)
+                byte[] deviceSecret;
+                try
                 {
-                    try
-                    {
-                        deviceSecret = await DeviceSecrets.CreateAsync(cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (NotSupportedException)
-                    {
-                        // The store refuses to make one. Nothing is written: the vault is exactly
-                        // as it was before this call.
-                        return false;
-                    }
+                    deviceSecret = await DeviceSecrets.GetAsync(cancellationToken).ConfigureAwait(false)
+                        ?? await DeviceSecrets.CreateAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (NotSupportedException)
+                {
+                    // The store refuses to make one — this build has no platform store at all.
+                    // Nothing is written: the vault is exactly as it was before this call.
+                    return false;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // A store that failed rather than refused. Typed, because every other failure
+                    // this type can produce is a VaultException a caller can switch on, and a raw
+                    // platform exception out of here is the one that escapes that.
+                    throw new VaultException(
+                        VaultError.StorageFailed,
+                        "The device secret store could not be read or written, so device unlock was not enabled.",
+                        ex);
                 }
 
                 try
@@ -838,10 +884,32 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     /// <summary>
     /// Re-wraps the data key for "remember on this device" under a header that just changed
     /// because the password did. Returns <see langword="null"/> — dropping the device wrap rather
-    /// than leaving one bound to a header nothing will ever present again — when this machine's
-    /// secret cannot be read.
+    /// than leaving one bound to a header nothing will ever present again — when this machine
+    /// genuinely holds no secret, or holds one that is not the secret
+    /// <paramref name="deviceDekBeforeTheChange"/> was sealed under.
     /// </summary>
-    private async Task<byte[]?> RewrapDeviceKeyAsync(VaultRecord record, byte[] dataKey, CancellationToken cancellationToken)
+    /// <remarks>
+    /// <para>
+    /// Absence and failure are two different events and get two different answers. A store that
+    /// says it holds nothing is the only one that may cost the user the setting; a store that
+    /// could not answer is transient — the same event <see cref="UnlockWithDeviceAsync"/> reports
+    /// as <see cref="VaultUnlockResult.VaultUnavailable"/> — and throws, so that a keychain locked
+    /// for a moment cannot silently delete a feature. Nothing has been written when it does.
+    /// </para>
+    /// <para>
+    /// The existing wrap is opened under the header it was sealed under before this change, as the
+    /// proof that the secret this machine holds is the one device unlock was enabled with. Without
+    /// that step a machine holding a secret for some other vault would re-seal this one under it
+    /// and hand itself passwordless unlock nobody enabled — the secret is machine-wide (4.2), so
+    /// its mere presence says nothing about this vault.
+    /// </para>
+    /// </remarks>
+    private async Task<byte[]?> RewrapDeviceKeyAsync(
+        VaultRecord record,
+        byte[] deviceDekBeforeTheChange,
+        byte[] headerBeforeTheChange,
+        byte[] dataKey,
+        CancellationToken cancellationToken)
     {
         byte[]? deviceSecret;
         try
@@ -850,7 +918,11 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            deviceSecret = null;
+            throw new VaultException(
+                VaultError.StorageFailed,
+                "The device secret store could not be read, so the device wrap could be neither re-sealed nor " +
+                "safely dropped. The password was not changed.",
+                ex);
         }
 
         if (deviceSecret is null)
@@ -862,12 +934,42 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
             HashAlgorithmName.SHA256, deviceSecret, DataKeyLength, salt: null, info: DeviceInfo);
         try
         {
+            if (!TryOpen(devicePasswordKey, deviceDekBeforeTheChange, headerBeforeTheChange, out byte[]? enrolled))
+            {
+                return null;
+            }
+
+            CryptographicOperations.ZeroMemory(enrolled);
             return Seal(devicePasswordKey, dataKey, VaultRecordCodec.Header(record));
         }
         finally
         {
             CryptographicOperations.ZeroMemory(devicePasswordKey);
             CryptographicOperations.ZeroMemory(deviceSecret);
+        }
+    }
+
+    /// <summary>
+    /// Asks the store to drop a secret the vault has just stopped pointing at, the way
+    /// <see cref="DisableDeviceUnlockAsync"/> does: the vault owns the record, the store owns its
+    /// item, and neither should leave the other holding something dead.
+    /// </summary>
+    /// <remarks>
+    /// A failure here is swallowed on purpose, and it is the one place in this type where that is
+    /// the right answer. The password change is already committed to disk; what is left behind is
+    /// key material that opens nothing, while discarding the outcome of a committed change would
+    /// leave the caller unable to say what happened — or, worse, retrying with a password that is
+    /// no longer the vault's.
+    /// </remarks>
+    private async Task ForgetTheOrphanedDeviceSecretAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await DeviceSecrets.DeleteAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Nothing to do and nothing to say: see the remarks above.
         }
     }
 
@@ -1066,6 +1168,15 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
 
         return blob;
     }
+
+    /// <summary>
+    /// Whether a blob is even the shape of a wrapped data key: nonce, thirty-two sealed bytes,
+    /// tag. Any other length is damage rather than a wrong password — no password would open it —
+    /// and the two must be told apart before <see cref="TryOpen"/> is asked, because it answers
+    /// both with the same refusal.
+    /// </summary>
+    private static bool WrapCouldHoldADataKey(byte[]? wrap) =>
+        wrap is not null && wrap.Length == NonceLength + DataKeyLength + TagLength;
 
     private static bool TryOpen(
         ReadOnlySpan<byte> key, byte[] blob, ReadOnlySpan<byte> associatedData, [NotNullWhen(true)] out byte[]? plaintext)

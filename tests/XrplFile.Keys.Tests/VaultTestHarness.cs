@@ -31,6 +31,13 @@ public abstract class VaultTestHarness : IAsyncDisposable
     /// <summary>The file every vault this harness builds reads and writes.</summary>
     protected string VaultPath => Path.Combine(_directory, "vault.json");
 
+    /// <summary>
+    /// The copy a durable write leaves beside the vault. It is what makes the previous contents
+    /// survivable, and — after a password change — what must not be left holding a record the old
+    /// password still opens.
+    /// </summary>
+    protected string VaultBackupPath => VaultPath + ".bak";
+
     /// <summary>The device store every vault this harness builds is given.</summary>
     protected InMemoryDeviceSecretStore Devices { get; } = new();
 
@@ -158,6 +165,36 @@ public abstract class VaultTestHarness : IAsyncDisposable
 }
 
 /// <summary>
+/// The disk, with a switch. It lives here rather than being restated in each test class: three of
+/// them need to fail a write, and three copies of one double are three places for the failure they
+/// stand for to drift apart.
+/// </summary>
+internal sealed class FailableWrites
+{
+    internal bool Fail { get; set; }
+
+    internal Task WriteAsync(string path, byte[] contents, CancellationToken cancellationToken) =>
+        Fail
+            ? Task.FromException(new VaultException(VaultError.StorageFailed, "The disk refused the write."))
+            : DurableFile.WriteAsync(path, contents, cancellationToken);
+}
+
+/// <summary>A device secret store that cannot even answer whether it holds a secret.</summary>
+public sealed class FailingDeviceSecretStore : IDeviceSecretStore
+{
+    /// <inheritdoc/>
+    public Task<byte[]?> GetAsync(CancellationToken cancellationToken) =>
+        Task.FromException<byte[]?>(new IOException("The platform secret store is unavailable."));
+
+    /// <inheritdoc/>
+    public Task<byte[]> CreateAsync(CancellationToken cancellationToken) =>
+        Task.FromException<byte[]>(new IOException("The platform secret store is unavailable."));
+
+    /// <inheritdoc/>
+    public Task DeleteAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+/// <summary>
 /// A device secret store that keeps its secret in a field. It is what lets the unit suite exercise
 /// "remember on this device" without a platform secret store — and therefore without the operating
 /// system having any say in whether the suite passes.
@@ -168,6 +205,12 @@ public sealed class InMemoryDeviceSecretStore : IDeviceSecretStore
 
     /// <summary>How many times a secret has been created. A test can assert a device was enrolled once.</summary>
     public int Creations { get; private set; }
+
+    /// <summary>
+    /// How many times the vault asked for the secret to be dropped. A test can assert that a vault
+    /// which stopped pointing at the machine's secret also stopped leaving it behind.
+    /// </summary>
+    public int Deletions { get; private set; }
 
     /// <inheritdoc/>
     public Task<byte[]?> GetAsync(CancellationToken cancellationToken) =>
@@ -185,6 +228,7 @@ public sealed class InMemoryDeviceSecretStore : IDeviceSecretStore
     public Task DeleteAsync(CancellationToken cancellationToken)
     {
         _secret = null;
+        Deletions++;
         return Task.CompletedTask;
     }
 }
