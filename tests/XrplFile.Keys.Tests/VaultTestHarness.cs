@@ -57,6 +57,18 @@ public abstract class VaultTestHarness : IAsyncDisposable
     }
 
     /// <summary>
+    /// A vault over <see cref="VaultPath"/> built on a device secret store of the caller's
+    /// choosing, rather than the harness's shared <see cref="Devices"/> — what a test needs to put
+    /// two vaults over the same file on two different "machines".
+    /// </summary>
+    protected KeyVault NewVault(IDeviceSecretStore devices, KdfParameters? parameters = null)
+    {
+        KeyVault vault = new(VaultPath, new Argon2idKdf(), devices, parameters ?? FastParameters);
+        _vaults.Add(vault);
+        return vault;
+    }
+
+    /// <summary>
     /// A vault whose writes — and, when asked, whose key material — come from the caller. These are
     /// the seams a test needs to fail a write and to look at the array the vault was handed.
     /// </summary>

@@ -66,6 +66,13 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     /// </summary>
     private static readonly byte[] IntegrityInfo = "xrpl-file.vault.integrity"u8.ToArray();
 
+    /// <summary>
+    /// Domain separation for the device-unlock key, derived from the platform secret rather than
+    /// from a password. It shares no key material with <see cref="IntegrityInfo"/> or with the
+    /// password-derived key that wraps <see cref="VaultRecord.Dek"/>.
+    /// </summary>
+    private static readonly byte[] DeviceInfo = "xrpl-file.vault.device"u8.ToArray();
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _path;
     private readonly IPasswordKdf _kdf;
@@ -131,8 +138,10 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     }
 
     /// <summary>
-    /// The device-secret seam this vault was built with. Device unlock itself is not implemented
-    /// yet; the store is held here because the vault, not its caller, owns that relationship.
+    /// The device-secret seam this vault was built with. It is held here, rather than passed at
+    /// each call, because the vault — not its caller — owns the relationship with the platform
+    /// store: <see cref="EnableDeviceUnlockAsync"/> and <see cref="DisableDeviceUnlockAsync"/> are
+    /// the only two places that reach into it.
     /// </summary>
     internal IDeviceSecretStore DeviceSecrets { get; }
 
@@ -279,6 +288,96 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
             finally
             {
                 CryptographicOperations.ZeroMemory(passwordKey);
+                if (dataKey is not null)
+                {
+                    CryptographicOperations.ZeroMemory(dataKey);
+                }
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<VaultUnlockResult> UnlockWithDeviceAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            byte[]? bytes = await DurableFile.ReadAsync(_path, cancellationToken).ConfigureAwait(false);
+            if (bytes is null)
+            {
+                return VaultUnlockResult.VaultMissing;
+            }
+
+            VaultRecord record;
+            try
+            {
+                record = VaultRecordCodec.Parse(bytes);
+            }
+            catch (VaultException ex) when (ex.Error == VaultError.Corrupt)
+            {
+                return VaultUnlockResult.VaultCorrupt;
+            }
+
+            if (record.V != CurrentVersion || record.KdfId != _kdf.KdfId)
+            {
+                return VaultUnlockResult.VaultUnsupported;
+            }
+
+            if (record.DeviceDek is null)
+            {
+                // Nothing left to open with. Indistinguishable, from here, from a store that lost
+                // its secret independently of the record — both mean the same thing to a caller:
+                // turn the setting off.
+                return VaultUnlockResult.VaultMissing;
+            }
+
+            byte[]? deviceSecret;
+            try
+            {
+                deviceSecret = await DeviceSecrets.GetAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The store itself failed. Transient, and never a wrong password: no password is
+                // involved on this path at all.
+                return VaultUnlockResult.VaultUnavailable;
+            }
+
+            if (deviceSecret is null)
+            {
+                return VaultUnlockResult.VaultMissing;
+            }
+
+            byte[]? dataKey = null;
+            byte[] devicePasswordKey = HKDF.DeriveKey(
+                HashAlgorithmName.SHA256, deviceSecret, DataKeyLength, salt: null, info: DeviceInfo);
+            try
+            {
+                if (!TryOpen(devicePasswordKey, record.DeviceDek, VaultRecordCodec.Header(record), out dataKey))
+                {
+                    // The wrap does not open with the secret this store holds. Not a wrong
+                    // password — there is no password here — so this is VaultMissing, not
+                    // WrongPassword: the caller's job is to turn the setting off.
+                    return VaultUnlockResult.VaultMissing;
+                }
+
+                if (dataKey.Length != DataKeyLength)
+                {
+                    return VaultUnlockResult.VaultCorrupt;
+                }
+
+                Install(record, dataKey);
+                dataKey = null;
+                return VaultUnlockResult.Success;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(devicePasswordKey);
+                CryptographicOperations.ZeroMemory(deviceSecret);
                 if (dataKey is not null)
                 {
                     CryptographicOperations.ZeroMemory(dataKey);
@@ -519,6 +618,256 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Reads and re-parses the file itself, rather than trusting a cached record, so that a
+    /// damaged record throws here exactly as it would from <see cref="UnlockAsync"/> — a disk
+    /// fault must never come back looking like a wrong password. If this instance already holds
+    /// the vault open, its cache is updated with the new wrap once the write lands, so that a
+    /// later store or delete does not resurrect the old one.
+    /// </remarks>
+    public async Task<bool> ChangePasswordAsync(
+        ReadOnlyMemory<byte> oldPassword, ReadOnlyMemory<byte> newPassword, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            byte[]? bytes = await DurableFile.ReadAsync(_path, cancellationToken).ConfigureAwait(false);
+            if (bytes is null)
+            {
+                throw new InvalidOperationException("There is no vault at this path to change the password of.");
+            }
+
+            // A parse failure throws VaultException(Corrupt) and propagates unchanged: that is
+            // exactly the "every other failure throws" this method promises.
+            VaultRecord record = VaultRecordCodec.Parse(bytes);
+
+            if (record.V != CurrentVersion || record.KdfId != _kdf.KdfId)
+            {
+                throw new VaultException(
+                    VaultError.Unsupported, "This build cannot change the password of a record in this format.");
+            }
+
+            byte[] oldPasswordKey = await DerivePasswordKeyAsync(oldPassword, record.Salt, record.KdfParams, cancellationToken)
+                .ConfigureAwait(false);
+            byte[]? dataKey = null;
+            try
+            {
+                if (!TryOpen(oldPasswordKey, record.Dek, VaultRecordCodec.Header(record), out dataKey))
+                {
+                    // The one and only condition this method reports as false. Nothing on disk
+                    // has been touched.
+                    return false;
+                }
+
+                if (dataKey.Length != DataKeyLength)
+                {
+                    throw new VaultException(VaultError.Corrupt, "The unwrapped data key is not the expected length.");
+                }
+
+                // Not a rewrite of a single entry: the data key above is exactly what every entry
+                // is already encrypted under, and it does not change here. Only its wrapping does.
+                record.Salt = _random(SaltLength);
+
+                byte[] newPasswordKey = await DerivePasswordKeyAsync(newPassword, record.Salt, record.KdfParams, cancellationToken)
+                    .ConfigureAwait(false);
+                try
+                {
+                    record.Dek = Seal(newPasswordKey, dataKey, VaultRecordCodec.Header(record));
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(newPasswordKey);
+                }
+
+                // The header just changed — it carries the salt — and the device wrap's associated
+                // data is that same header (4.2). Left alone, a correct device secret would stop
+                // opening its own wrap the moment the password changes. Re-seal it under the new
+                // header when there is a secret to do it with; drop it, rather than leave a wrap no
+                // header will ever match again, when there is not.
+                if (record.DeviceDek is not null)
+                {
+                    record.DeviceDek = await RewrapDeviceKeyAsync(record, dataKey, cancellationToken).ConfigureAwait(false);
+                }
+
+                Reseal(record, dataKey);
+                await _write(_path, VaultRecordCodec.Serialise(record), cancellationToken).ConfigureAwait(false);
+
+                if (_record is not null)
+                {
+                    _record.Salt = record.Salt;
+                    _record.Dek = record.Dek;
+                    _record.DeviceDek = record.DeviceDek;
+                    _record.Mac = record.Mac;
+                }
+
+                return true;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(oldPasswordKey);
+                if (dataKey is not null)
+                {
+                    CryptographicOperations.ZeroMemory(dataKey);
+                }
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> EnableDeviceUnlockAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            VaultRecord record = RequireUnlocked();
+            byte[] dataKey = BorrowDataKey(out long generation);
+            try
+            {
+                byte[]? deviceSecret = await DeviceSecrets.GetAsync(cancellationToken).ConfigureAwait(false);
+                if (deviceSecret is null)
+                {
+                    try
+                    {
+                        deviceSecret = await DeviceSecrets.CreateAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (NotSupportedException)
+                    {
+                        // The store refuses to make one. Nothing is written: the vault is exactly
+                        // as it was before this call.
+                        return false;
+                    }
+                }
+
+                try
+                {
+                    byte[] devicePasswordKey = HKDF.DeriveKey(
+                        HashAlgorithmName.SHA256, deviceSecret, DataKeyLength, salt: null, info: DeviceInfo);
+
+                    byte[]? previousDeviceDek = record.DeviceDek;
+                    try
+                    {
+                        record.DeviceDek = Seal(devicePasswordKey, dataKey, VaultRecordCodec.Header(record));
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(devicePasswordKey);
+                    }
+
+                    try
+                    {
+                        await PersistAsync(record, dataKey, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        record.DeviceDek = previousDeviceDek;
+                        throw;
+                    }
+
+                    EnsureStillOpen(generation);
+                    return true;
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(deviceSecret);
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(dataKey);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task DisableDeviceUnlockAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            VaultRecord record = RequireUnlocked();
+            byte[] dataKey = BorrowDataKey(out long generation);
+            try
+            {
+                if (record.DeviceDek is not null)
+                {
+                    byte[] previousDeviceDek = record.DeviceDek;
+                    record.DeviceDek = null;
+
+                    try
+                    {
+                        await PersistAsync(record, dataKey, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        record.DeviceDek = previousDeviceDek;
+                        throw;
+                    }
+
+                    EnsureStillOpen(generation);
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(dataKey);
+            }
+
+            // The vault owns the record above; the store owns its own item here. Asked for
+            // unconditionally, and after the record write lands, so that a store failure above
+            // leaves the platform secret in place rather than dropping it out from under a wrap
+            // that a rolled-back write just put back.
+            await DeviceSecrets.DeleteAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Re-wraps the data key for "remember on this device" under a header that just changed
+    /// because the password did. Returns <see langword="null"/> — dropping the device wrap rather
+    /// than leaving one bound to a header nothing will ever present again — when this machine's
+    /// secret cannot be read.
+    /// </summary>
+    private async Task<byte[]?> RewrapDeviceKeyAsync(VaultRecord record, byte[] dataKey, CancellationToken cancellationToken)
+    {
+        byte[]? deviceSecret;
+        try
+        {
+            deviceSecret = await DeviceSecrets.GetAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            deviceSecret = null;
+        }
+
+        if (deviceSecret is null)
+        {
+            return null;
+        }
+
+        byte[] devicePasswordKey = HKDF.DeriveKey(
+            HashAlgorithmName.SHA256, deviceSecret, DataKeyLength, salt: null, info: DeviceInfo);
+        try
+        {
+            return Seal(devicePasswordKey, dataKey, VaultRecordCodec.Header(record));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(devicePasswordKey);
+            CryptographicOperations.ZeroMemory(deviceSecret);
         }
     }
 

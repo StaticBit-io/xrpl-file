@@ -103,4 +103,45 @@ public interface IKeyVault
 
     /// <summary>Removes an entry. Succeeds silently when there is no such entry.</summary>
     Task DeleteAsync(string reference, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Opens the vault using whatever secret "remember on this device" left behind, and no
+    /// password. Returns <see cref="VaultUnlockResult.VaultMissing"/> when the record has no
+    /// device wrap, the store holds no secret, or the wrap does not open with the secret it does
+    /// hold — all three mean there is nothing left to open with, and the caller's job is to turn
+    /// the setting off. Returns <see cref="VaultUnlockResult.VaultUnavailable"/> when the store
+    /// itself failed; that is transient, and nothing can be concluded from it.
+    /// <see cref="VaultUnlockResult.WrongPassword"/> is unreachable here: no password is involved,
+    /// and a caller counting it would advance a failed-attempt counter for a path that has none.
+    /// </summary>
+    Task<VaultUnlockResult> UnlockWithDeviceAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Changes the master password. The old password is verified against the wrap already on
+    /// disk; the new one wraps the same data key under a fresh salt. Not one entry's bytes are
+    /// touched — that is the entire reason the vault wraps a data key rather than encrypting
+    /// entries directly under a password-derived key.
+    /// </summary>
+    /// <returns>
+    /// <see langword="false"/> for exactly one condition: <paramref name="oldPassword"/> does not
+    /// unwrap the data key already on disk. Every other failure throws — a damaged record reported
+    /// as a wrong password is how a disk fault becomes a user's fault.
+    /// </returns>
+    Task<bool> ChangePasswordAsync(
+        ReadOnlyMemory<byte> oldPassword, ReadOnlyMemory<byte> newPassword, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Turns on "remember on this device": gets or creates this machine's secret and wraps the
+    /// already-unlocked data key under it. Asks for no password, because the data key is already
+    /// in memory. Returns <see langword="false"/> and writes nothing when the device secret store
+    /// refuses to create a secret.
+    /// </summary>
+    Task<bool> EnableDeviceUnlockAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Turns off "remember on this device": clears the device wrap from the record, then asks the
+    /// store to drop its secret. The password wrap is never touched, so the vault stays openable
+    /// either way. Succeeds silently when the option was already off.
+    /// </summary>
+    Task DisableDeviceUnlockAsync(CancellationToken cancellationToken);
 }
