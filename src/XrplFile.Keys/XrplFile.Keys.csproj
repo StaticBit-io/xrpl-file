@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>XrplFile.Keys</RootNamespace>
+    <PackageId>XrplFile.Keys</PackageId>
+    <Description>An encrypted store for the keys that sign xrpl-file publications.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Konscious.Security.Cryptography.Argon2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\XrplFile.Core\XrplFile.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="XrplFile.Keys.Tests" />
+  </ItemGroup>
+</Project>
