@@ -168,8 +168,13 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     /// (<see cref="VaultUnlockResult.WrongPassword"/>) never reaches that point, so it leaves this
     /// list exactly as it was. A reveal whose entry fails its tag still throws
     /// <see cref="VaultError.EntryDamaged"/> independently of this list.
+    /// <para>
+    /// Wrapped rather than handed over: the field behind it is the vault's own idea of what it
+    /// holds, and a caller who received the array itself could cast it back to <c>string[]</c> and
+    /// rewrite that — with no write, and with the file left disagreeing.
+    /// </para>
     /// </remarks>
-    public IReadOnlyList<string> DamagedReferences => _damagedReferences;
+    public IReadOnlyList<string> DamagedReferences => Array.AsReadOnly(_damagedReferences);
 
     /// <inheritdoc/>
     public async Task<bool> ExistsAsync(CancellationToken cancellationToken)

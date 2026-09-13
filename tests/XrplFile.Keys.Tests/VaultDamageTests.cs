@@ -169,4 +169,59 @@ public class VaultDamageTests : VaultTestHarness
         Assert.Equal(new[] { damaged }, vault.DamagedReferences);
         Assert.Equal("two", (await vault.RevealAsync(intact, "test", TestContext.Current.CancellationToken)).Info.Label);
     }
+
+    [Fact]
+    public async Task Damaged_references_cannot_be_mutated_by_casting()
+    {
+        // DamagedReferences must be wrapped read-only, so a caller cannot cast the result back
+        // to string[] and rewrite it. This test pins that invariant.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        string damaged = await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+        FlipOneByteOfEntry(damaged);
+        await vault.UnlockAsync(Password("right"), TestContext.Current.CancellationToken);
+
+        IReadOnlyList<string> damageList = vault.DamagedReferences;
+        Assert.Single(damageList);
+        Assert.Equal(damaged, damageList[0]);
+
+        // Attempt to mutate through casting should fail if wrapping is in place
+        try
+        {
+            string[] leaked = (string[])damageList;
+            leaked[0] = "forged";
+            // If we reach here without an exception, wrapping is missing
+            Assert.Fail("DamagedReferences did not prevent mutation through casting.");
+        }
+        catch (InvalidCastException)
+        {
+            // Expected: ReadOnlyCollection<string> cannot be cast to string[]
+        }
+
+        // Verify the property still returns the correct value
+        Assert.Equal(damaged, vault.DamagedReferences[0]);
+    }
+
+    [Fact]
+    public async Task A_device_unlock_with_mac_mismatch_but_no_entry_damage_opens_degraded()
+    {
+        // Every entry stays byte-for-byte intact; only the record's own integrity code disagrees
+        // with its current bytes. The device-unlock path should run the same whole-record check
+        // as the password path, and this test ensures it does.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        string reference = await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+        await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+
+        MutateRecordInFile(record => record.Mac[0] ^= 0x01);
+
+        VaultUnlockResult result = await vault.UnlockWithDeviceAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(VaultUnlockResult.VaultDegraded, result);
+        Assert.Empty(vault.DamagedReferences);
+        Assert.Equal(
+            "sSecretOfone", (await vault.RevealAsync(reference, "test", TestContext.Current.CancellationToken)).Secret);
+    }
 }
