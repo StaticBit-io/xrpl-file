@@ -44,7 +44,7 @@ internal static class StandaloneFixture
             ["SigningPubKey"] = from.PublicKey,
         };
 
-        SubmitOutcome outcome = await sink.SubmitAsync(payment, from, cancellationToken);
+        SubmitOutcome outcome = await sink.SubmitAsync(payment, new WalletSigner(from), cancellationToken);
         Assert.True(outcome.EngineResult is "tesSUCCESS" or "terQUEUED", outcome.EngineResult);
 
         while (await sink.SequenceAsync(from.ClassicAddress, validated: true, cancellationToken) <= sequence)
@@ -73,7 +73,7 @@ internal static class StandaloneFixture
             ["SigningPubKey"] = wallet.PublicKey,
         };
 
-        SubmitOutcome outcome = await sink.SubmitAsync(mint, wallet, cancellationToken);
+        SubmitOutcome outcome = await sink.SubmitAsync(mint, new WalletSigner(wallet), cancellationToken);
         Assert.True(outcome.EngineResult is "tesSUCCESS" or "terQUEUED", outcome.EngineResult);
 
         // A mint that landed moves the account's sequence past every ticket it created.

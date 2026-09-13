@@ -13,6 +13,7 @@ namespace XrplFile.Tests;
 public class XrplClientLedgerSinkTests
 {
     private static readonly XrplWallet Wallet = XrplWallet.Generate();
+    private static readonly ITransactionSigner Signer = new WalletSigner(Wallet);
 
     [Fact]
     public async Task A_plain_success_is_reported_with_one_call()
@@ -149,7 +150,7 @@ public class XrplClientLedgerSinkTests
             },
         };
 
-        return sink.SubmitAsync(transaction, Wallet, TestContext.Current.CancellationToken);
+        return sink.SubmitAsync(transaction, Signer, TestContext.Current.CancellationToken);
     }
 
     /// <summary>A node whose answers to "submit" and "tx" are scripted, in call order.</summary>

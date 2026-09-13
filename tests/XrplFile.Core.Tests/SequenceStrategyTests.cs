@@ -6,6 +6,7 @@ namespace XrplFile.Tests;
 public class SequenceStrategyTests
 {
     private static readonly XrplWallet Wallet = XrplWallet.Generate();
+    private static readonly ITransactionSigner Signer = new WalletSigner(Wallet);
 
     private static IReadOnlyList<MemoSubmission> Memos(int count) =>
         [.. Enumerable.Range(0, count).Select(i => new MemoSubmission(MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex([(byte)i]), null))];
@@ -15,7 +16,7 @@ public class SequenceStrategyTests
     {
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
 
         IReadOnlyList<SubmittedMemo> submitted = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
 
@@ -29,7 +30,7 @@ public class SequenceStrategyTests
     {
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, new SequenceStrategyOptions { BatchSize = 2 });
+        await using SequenceStrategy strategy = new(sink, Signer, new SequenceStrategyOptions { BatchSize = 2 });
 
         await strategy.SubmitAllAsync(Memos(5), null, TestContext.Current.CancellationToken);
 
@@ -45,7 +46,7 @@ public class SequenceStrategyTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
         sink.Refusals[1] = "tecINSUFFICIENT_RESERVE";
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
             () => strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken));
@@ -61,7 +62,7 @@ public class SequenceStrategyTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
         List<int> seen = [];
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
 
         await strategy.SubmitAllAsync(Memos(4), new SynchronousProgress<int>(seen.Add), TestContext.Current.CancellationToken);
 
@@ -73,7 +74,7 @@ public class SequenceStrategyTests
     {
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
 
         await strategy.SubmitAllAsync(
             [new MemoSubmission(MemoLayout.ChunkMarkerHex(0), "00", null),

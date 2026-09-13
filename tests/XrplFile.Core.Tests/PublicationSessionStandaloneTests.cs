@@ -40,6 +40,7 @@ public class PublicationSessionStandaloneTests : IDisposable
             // for 1025 chunks plus the list and manifest that peaks well past what a SequenceStrategy
             // publish of the same file would need, so this account is funded more generously.
             XrplWallet writer = await StandaloneFixture.FundedAccountAsync(client, sink, 700_000_000, token);
+            ITransactionSigner signer = new WalletSigner(writer);
 
             // 1024001 bytes: 1025 chunks over two blocks, so the list phase is exercised too.
             VectorFile vector = Vectors.File(1_024_001);
@@ -61,7 +62,7 @@ public class PublicationSessionStandaloneTests : IDisposable
 
             // The first session publishes the chunks by hand and then stops, which is what a
             // process dying between the chunks and the manifest leaves behind.
-            await using (TicketStrategy first = new(sink, source, writer, strategyOptions))
+            await using (TicketStrategy first = new(sink, source, signer, strategyOptions))
             {
                 PublicationSession session = await PublicationSession.StartAsync(
                     first, source, file, "application/octet-stream", "resumed.bin",
@@ -76,7 +77,7 @@ public class PublicationSessionStandaloneTests : IDisposable
             }
 
             // A second session, given only the state file and the bytes.
-            await using TicketStrategy second = new(sink, source, writer, strategyOptions);
+            await using TicketStrategy second = new(sink, source, signer, strategyOptions);
 
             PublicationSession resumed = await PublicationSession.ResumeAsync(second, source, file, statePath, options, token);
             PublicationReport report = await resumed.RunAsync(null, token);
@@ -109,6 +110,7 @@ public class PublicationSessionStandaloneTests : IDisposable
             XrplClientLedgerSink sink = new(client);
             XrplClientLedgerSource source = new(client);
             XrplWallet writer = await StandaloneFixture.FundedAccountAsync(client, sink, 700_000_000, token);
+            ITransactionSigner signer = new WalletSigner(writer);
 
             // Ten chunks in one block: few enough to run in a handful of ledgers, and enough to
             // leave a hole with landed chunks on both sides of it.
@@ -127,7 +129,7 @@ public class PublicationSessionStandaloneTests : IDisposable
             // last, so what the second session sends lands after the highest index's ledger -- a
             // window taken from the first and last index would leave it outside, and the file
             // would no longer read back.
-            await using (SequenceStrategy first = new(sink, writer, strategyOptions))
+            await using (SequenceStrategy first = new(sink, signer, strategyOptions))
             {
                 PublicationSession session = await PublicationSession.StartAsync(
                     first, source, file, "application/octet-stream", "hole.bin",
@@ -143,7 +145,7 @@ public class PublicationSessionStandaloneTests : IDisposable
                     null, token);
             }
 
-            await using SequenceStrategy second = new(sink, writer, strategyOptions);
+            await using SequenceStrategy second = new(sink, signer, strategyOptions);
 
             PublicationSession resumed = await PublicationSession.ResumeAsync(second, source, file, statePath, options, token);
             PublicationReport report = await resumed.RunAsync(null, token);

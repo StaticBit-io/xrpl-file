@@ -6,6 +6,7 @@ namespace XrplFile.Tests;
 public class XrplFileWriterTests
 {
     private static readonly XrplWallet Wallet = XrplWallet.Generate();
+    private static readonly ITransactionSigner Signer = new WalletSigner(Wallet);
 
     [Fact]
     public async Task A_two_block_file_is_published_and_reads_back()
@@ -16,7 +17,7 @@ public class XrplFileWriterTests
         FakeLedgerSink sink = new(ledger);
         List<PublishProgress> progress = [];
 
-        await using SequenceStrategy strategy = new(sink, Wallet, new SequenceStrategyOptions { BatchSize = 200 });
+        await using SequenceStrategy strategy = new(sink, Signer, new SequenceStrategyOptions { BatchSize = 200 });
         XrplFileWriter writer = new(strategy, ledger);
 
         PublishResult result = await writer.PublishAsync(
@@ -49,7 +50,7 @@ public class XrplFileWriterTests
         SequenceStrategyOptions options = new() { BatchSize = 100 };
         byte[] file = VectorStream.Bytes("batch", 2_500_000);
 
-        await using SequenceStrategy strategy = new(sink, Wallet, options);
+        await using SequenceStrategy strategy = new(sink, Signer, options);
         XrplFileWriter writer = new(strategy, ledger);
 
         PublishResult result = await writer.PublishAsync(
@@ -76,7 +77,7 @@ public class XrplFileWriterTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
 
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         await writer.PublishAsync(
@@ -96,7 +97,7 @@ public class XrplFileWriterTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
 
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         await writer.PublishAsync(
@@ -120,7 +121,7 @@ public class XrplFileWriterTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
 
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         PublishResult result = await writer.PublishAsync(
@@ -145,7 +146,7 @@ public class XrplFileWriterTests
         FakeLedgerSink sink = new(ledger);
         sink.Refusals[1] = "tecINSUFFICIENT_RESERVE";
 
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
@@ -164,7 +165,7 @@ public class XrplFileWriterTests
         FakeLedgerSink sink = new(ledger);
         sink.StoredAs[2] = _ => new string('0', 1000);
 
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
@@ -180,7 +181,7 @@ public class XrplFileWriterTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger) { ValidatedQueryTimeouts = 1 };
 
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         PublishResult result = await writer.PublishAsync(
@@ -200,7 +201,7 @@ public class XrplFileWriterTests
         // the same-length one above, which the existing test cannot produce.
         sink.StoredAs[2] = _ => new string('a', 2000);
 
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
@@ -215,7 +216,7 @@ public class XrplFileWriterTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
 
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         // The link is built from the network at the very end of a publication. Refusing it there
@@ -235,7 +236,7 @@ public class XrplFileWriterTests
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
 
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         PublishResult result = await writer.PublishAsync(
@@ -253,7 +254,7 @@ public class XrplFileWriterTests
         sink.Throws[0] = new Xrpl.Client.Exceptions.RippledException(
             "Account not found.", new Xrpl.Models.Subscriptions.ErrorResponse { Error = "actNotFound" });
 
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
@@ -281,7 +282,7 @@ public class XrplFileWriterTests
             _ => new Xrpl.Client.Exceptions.TimeoutException("the node took too long"),
         };
 
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
@@ -300,7 +301,7 @@ public class XrplFileWriterTests
         // same answer the reading side gives, not a refusal.
         sink.Throws[0] = new Xrpl.Client.Exceptions.XrplException("Connect: created null websocket");
 
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
@@ -320,7 +321,7 @@ public class XrplFileWriterTests
         // the first chunk which ledger it landed in.
         sink.FailsAs.Add(0);
 
-        await using SequenceStrategy strategy = new(sink, Wallet);
+        await using SequenceStrategy strategy = new(sink, Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
@@ -336,7 +337,7 @@ public class XrplFileWriterTests
     {
         FakeLedgerSource ledger = new();
 
-        await using SequenceStrategy strategy = new(new FakeLedgerSink(ledger), Wallet);
+        await using SequenceStrategy strategy = new(new FakeLedgerSink(ledger), Signer);
         XrplFileWriter writer = new(strategy, ledger);
 
         await Assert.ThrowsAsync<ArgumentException>(() => writer.PublishAsync(

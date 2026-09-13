@@ -33,7 +33,7 @@ public class TicketStrategyStandaloneTests
             IReadOnlyList<MemoSubmission> memos =
                 [.. Enumerable.Range(0, 200).Select(i => new MemoSubmission(MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex([(byte)(i % 251)]), null))];
 
-            await using TicketStrategy strategy = new(sink, source, writer, new TicketStrategyOptions { TicketsPerBatch = 100 });
+            await using TicketStrategy strategy = new(sink, source, new WalletSigner(writer), new TicketStrategyOptions { TicketsPerBatch = 100 });
 
             IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(memos, null, token);
 
@@ -89,7 +89,7 @@ public class TicketStrategyStandaloneTests
             IReadOnlyList<MemoSubmission> memos =
                 [.. Enumerable.Range(0, 60).Select(i => new MemoSubmission(MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex([(byte)i]), null))];
 
-            await using TicketStrategy strategy = new(sink, source, writer, new TicketStrategyOptions
+            await using TicketStrategy strategy = new(sink, source, new WalletSigner(writer), new TicketStrategyOptions
             {
                 TicketsPerBatch = 100,
                 FeeDrops = (int)fees.OpenLedgerFeeDrops,
@@ -147,7 +147,7 @@ public class TicketStrategyStandaloneTests
                 },
             };
 
-            SubmitOutcome outcome = await sink.SubmitAsync(onNothing, writer, token);
+            SubmitOutcome outcome = await sink.SubmitAsync(onNothing, new WalletSigner(writer), token);
 
             Assert.Equal("terPRE_TICKET", outcome.EngineResult);
         }

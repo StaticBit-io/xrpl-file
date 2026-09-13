@@ -7,6 +7,7 @@ namespace XrplFile.Tests;
 public class PublicationSessionTests : IDisposable
 {
     private static readonly XrplWallet Wallet = XrplWallet.Generate();
+    private static readonly ITransactionSigner Signer = new WalletSigner(Wallet);
 
     private readonly string _stateDirectory =
         Path.Combine(Path.GetTempPath(), "xrpl-file-tests", Guid.NewGuid().ToString("N"));
@@ -41,7 +42,7 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         PublicationSession session = await PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", "s.txt",
@@ -67,7 +68,7 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -82,7 +83,7 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node(balanceDrops: 1_000);
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -97,7 +98,7 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         PublicationSession session = await PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -116,7 +117,7 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         PublicationSession session = await PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -134,7 +135,7 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         await PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -152,7 +153,7 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         PublicationSession session = await PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -180,7 +181,7 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         PublicationEstimate estimate = await PublicationSession.EstimateAsync(
             ledger, Wallet.ClassicAddress, fileBytes: 2500, Options(), TestContext.Current.CancellationToken);
@@ -202,7 +203,7 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         PublicationSession session = await PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -226,8 +227,8 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy first = new(sink, Wallet, StrategyOptions);
-        await using SequenceStrategy second = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy first = new(sink, Signer, StrategyOptions);
+        await using SequenceStrategy second = new(sink, Signer, StrategyOptions);
 
         PublicationSession one = await PublicationSession.StartAsync(
             first, ledger, VectorStream.Bytes("a", 2500), "text/plain", null,
@@ -248,7 +249,7 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         PublicationSession session = await PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -269,7 +270,7 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         PublicationSession session = await PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -293,7 +294,7 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         PublicationSession session = await PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -342,7 +343,7 @@ public class PublicationSessionTests : IDisposable
 
         // The node prices a transaction at NodeFeeDrops; this strategy would pay one more. The
         // estimate that approves the run and the run itself would then be two different runs.
-        await using SequenceStrategy strategy = new(sink, Wallet, new SequenceStrategyOptions { FeeDrops = NodeFeeDrops + 1 });
+        await using SequenceStrategy strategy = new(sink, Signer, new SequenceStrategyOptions { FeeDrops = NodeFeeDrops + 1 });
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -362,7 +363,7 @@ public class PublicationSessionTests : IDisposable
         // TicketStrategyOptions.FeeDrops defaults to a hardcoded 12 and the node here charges 10,
         // as mainnet, testnet and the CI stand all do. A caller who builds the strategy without
         // saying what it costs is the caller the documented flow used to describe.
-        await using TicketStrategy defaulted = new(sink, ledger, Wallet);
+        await using TicketStrategy defaulted = new(sink, ledger, Signer);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.StartAsync(
             defaulted, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -382,7 +383,7 @@ public class PublicationSessionTests : IDisposable
         PublicationEstimate estimate = await PublicationSession.EstimateAsync(
             ledger, Wallet.ClassicAddress, fileBytes: 2500, Options(), TestContext.Current.CancellationToken);
 
-        await using TicketStrategy strategy = new(sink, ledger, Wallet,
+        await using TicketStrategy strategy = new(sink, ledger, Signer,
             new TicketStrategyOptions
             {
                 FeeDrops = (int)estimate.FeeDropsPerTransaction,
@@ -406,7 +407,7 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         await Assert.ThrowsAsync<ArgumentException>(() => PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -425,7 +426,7 @@ public class PublicationSessionTests : IDisposable
         // A first run that dies after its chunks: the strategy refuses everything past the third
         // submission, which is where the manifest would have gone.
         sink.Refusals[3] = "tefBAD_AUTH";
-        await using (SequenceStrategy dying = new(sink, Wallet, StrategyOptions))
+        await using (SequenceStrategy dying = new(sink, Signer, StrategyOptions))
         {
             PublicationSession first = await PublicationSession.StartAsync(
                 dying, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
@@ -440,7 +441,7 @@ public class PublicationSessionTests : IDisposable
         // The state file is all the second run is given, besides the file itself.
         string statePath = Directory.EnumerateFiles(_stateDirectory, "*.json").Single();
 
-        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy resumed = new(sink, Signer, StrategyOptions);
         PublicationSession second = await PublicationSession.ResumeAsync(
             resumed, ledger, file, statePath, Options(), TestContext.Current.CancellationToken);
 
@@ -458,7 +459,7 @@ public class PublicationSessionTests : IDisposable
         FakeLedgerSink sink = new(ledger);
         byte[] file = VectorStream.Bytes("resume", 2500);
 
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
         PublicationSession first = await PublicationSession.StartAsync(
             strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
             Options(), TestContext.Current.CancellationToken);
@@ -474,7 +475,7 @@ public class PublicationSessionTests : IDisposable
         PublicationState onDisk = PublicationState.Load(first.StatePath);
         Assert.Empty(onDisk.ChunkHashes);
 
-        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy resumed = new(sink, Signer, StrategyOptions);
         PublicationSession second = await PublicationSession.ResumeAsync(
             resumed, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken);
 
@@ -490,12 +491,12 @@ public class PublicationSessionTests : IDisposable
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
 
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
         PublicationSession first = await PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("one", 2500), "text/plain", null,
             Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
 
-        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy resumed = new(sink, Signer, StrategyOptions);
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
             resumed, ledger, VectorStream.Bytes("another", 2500), first.StatePath, Options(), TestContext.Current.CancellationToken));
 
@@ -509,13 +510,13 @@ public class PublicationSessionTests : IDisposable
         FakeLedgerSink sink = new(ledger);
         byte[] file = VectorStream.Bytes("s", 2500);
 
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
         PublicationSession first = await PublicationSession.StartAsync(
             strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
             Options(), TestContext.Current.CancellationToken);
         await first.RunAsync(null, TestContext.Current.CancellationToken);
 
-        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy resumed = new(sink, Signer, StrategyOptions);
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
             resumed, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken));
 
@@ -529,7 +530,7 @@ public class PublicationSessionTests : IDisposable
         FakeLedgerSink sink = new(ledger);
         byte[] file = VectorStream.Bytes("hole", 2500);
 
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
         PublicationSession first = await PublicationSession.StartAsync(
             strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
             Options(), TestContext.Current.CancellationToken);
@@ -545,7 +546,7 @@ public class PublicationSessionTests : IDisposable
             ],
             null, TestContext.Current.CancellationToken);
 
-        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy resumed = new(sink, Signer, StrategyOptions);
         PublicationSession second = await PublicationSession.ResumeAsync(
             resumed, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken);
 
@@ -572,7 +573,7 @@ public class PublicationSessionTests : IDisposable
         byte[] file = VectorStream.Bytes("mine", 2500);
         byte[] theirs = VectorStream.Bytes("theirs", 2500);
 
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
         PublicationSession first = await PublicationSession.StartAsync(
             strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
             Options(), TestContext.Current.CancellationToken);
@@ -591,7 +592,7 @@ public class PublicationSessionTests : IDisposable
         // check the caller is allowed to turn off catches it afterwards.
         SessionOptions options = new() { StateDirectory = _stateDirectory, TicketsPerBatch = 100, ReadBack = false };
 
-        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy resumed = new(sink, Signer, StrategyOptions);
         PublicationSession second = await PublicationSession.ResumeAsync(
             resumed, ledger, file, first.StatePath, options, TestContext.Current.CancellationToken);
 
@@ -613,7 +614,7 @@ public class PublicationSessionTests : IDisposable
         // 1024001 bytes: 1025 chunks over two blocks, so there is a block list to reconcile.
         byte[] file = VectorStream.Bytes("lists", 1_024_001);
 
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
         PublicationSession first = await PublicationSession.StartAsync(
             strategy, ledger, file, "application/octet-stream", null, Wallet.ClassicAddress, "key-1", "testnet",
             Options(), TestContext.Current.CancellationToken);
@@ -650,7 +651,7 @@ public class PublicationSessionTests : IDisposable
 
         int beforeTheResume = sink.Submitted.Count;
 
-        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy resumed = new(sink, Signer, StrategyOptions);
         PublicationSession second = await PublicationSession.ResumeAsync(
             resumed, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken);
 
@@ -673,12 +674,12 @@ public class PublicationSessionTests : IDisposable
         FakeLedgerSink sink = new(ledger);
         byte[] file = VectorStream.Bytes("s", 2500);
 
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
         PublicationSession first = await PublicationSession.StartAsync(
             strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
             Options(), TestContext.Current.CancellationToken);
 
-        await using SequenceStrategy elsewhere = new(sink, XrplWallet.Generate(), StrategyOptions);
+        await using SequenceStrategy elsewhere = new(sink, new WalletSigner(XrplWallet.Generate()), StrategyOptions);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
             elsewhere, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken));
@@ -693,7 +694,7 @@ public class PublicationSessionTests : IDisposable
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
 
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
 
         await Assert.ThrowsAsync<ArgumentException>(() => PublicationSession.StartAsync(
             strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null,
@@ -709,7 +710,7 @@ public class PublicationSessionTests : IDisposable
         FakeLedgerSink sink = new(ledger);
         byte[] file = VectorStream.Bytes("s", 2500);
 
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
         PublicationSession first = await PublicationSession.StartAsync(
             strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
             Options(), TestContext.Current.CancellationToken);
@@ -718,7 +719,7 @@ public class PublicationSessionTests : IDisposable
         // the check is refused, not skipped.
         (PublicationState.Load(first.StatePath) with { Root = null }).Save(first.StatePath);
 
-        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy resumed = new(sink, Signer, StrategyOptions);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
             resumed, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken));
@@ -733,7 +734,7 @@ public class PublicationSessionTests : IDisposable
         FakeLedgerSink sink = new(ledger);
         byte[] file = VectorStream.Bytes("s", 2500);
 
-        await using SequenceStrategy strategy = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
         PublicationSession first = await PublicationSession.StartAsync(
             strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
             Options(), TestContext.Current.CancellationToken);
@@ -742,7 +743,7 @@ public class PublicationSessionTests : IDisposable
         // matched against bytes that are no longer the ones at those indices.
         (PublicationState.Load(first.StatePath) with { Chunk = MemoLayout.ChunkBytes - 1 }).Save(first.StatePath);
 
-        await using SequenceStrategy resumed = new(sink, Wallet, StrategyOptions);
+        await using SequenceStrategy resumed = new(sink, Signer, StrategyOptions);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
             resumed, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken));

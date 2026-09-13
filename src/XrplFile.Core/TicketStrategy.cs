@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using Xrpl.Wallet;
 
 namespace XrplFile;
 
@@ -55,7 +54,7 @@ public sealed class TicketStrategyOptions
 /// same, because within a single call the batch is sent in parallel.
 /// </summary>
 public sealed class TicketStrategy(
-    ILedgerSink sink, ILedgerSource source, XrplWallet wallet, TicketStrategyOptions? options = null) : ISubmissionStrategy
+    ILedgerSink sink, ILedgerSource source, ITransactionSigner signer, TicketStrategyOptions? options = null) : ISubmissionStrategy
 {
     /// <summary>rippled's kMaxValidCount: the most tickets one TicketCreate may mint.</summary>
     public const int MaxTicketsPerMint = 250;
@@ -65,7 +64,7 @@ public sealed class TicketStrategy(
 
     private readonly ILedgerSink _sink = sink;
     private readonly ILedgerSource _source = source;
-    private readonly XrplWallet _wallet = wallet;
+    private readonly ITransactionSigner _signer = signer;
     private readonly TicketStrategyOptions _options = options ?? new TicketStrategyOptions();
 
     /// <summary>Guards both ticket collections. A batch is sent in parallel; the queue is not.</summary>
@@ -86,7 +85,7 @@ public sealed class TicketStrategy(
 
     public long FeeDropsPerTransaction => _options.FeeDrops;
 
-    public string Account => _wallet.ClassicAddress;
+    public string Account => _signer.Account;
 
     public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
@@ -254,7 +253,7 @@ public sealed class TicketStrategy(
     private async Task<long?> EnsureTicketsAsync(int need, CancellationToken cancellationToken)
     {
         long? firstMintLedger = null;
-        string account = _wallet.ClassicAddress;
+        string account = _signer.Account;
 
         while (TicketsInHand < need)
         {
@@ -281,10 +280,10 @@ public sealed class TicketStrategy(
                 ["Sequence"] = sequence,
                 ["TicketCount"] = (uint)mint,
                 ["Fee"] = _options.FeeDrops.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["SigningPubKey"] = _wallet.PublicKey,
+                ["SigningPubKey"] = _signer.PublicKey,
             };
 
-            SubmitOutcome outcome = await _sink.SubmitAsync(transaction, _wallet, cancellationToken).ConfigureAwait(false);
+            SubmitOutcome outcome = await _sink.SubmitAsync(transaction, _signer, cancellationToken).ConfigureAwait(false);
 
             if (outcome.EngineResult is not ("tesSUCCESS" or "terQUEUED"))
             {
@@ -391,15 +390,15 @@ public sealed class TicketStrategy(
         Dictionary<string, object> transaction = new()
         {
             ["TransactionType"] = "AccountSet",
-            ["Account"] = _wallet.ClassicAddress,
+            ["Account"] = _signer.Account,
             ["Sequence"] = 0u,
             ["TicketSequence"] = ticket,
             ["Fee"] = _options.FeeDrops.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["SigningPubKey"] = _wallet.PublicKey,
+            ["SigningPubKey"] = _signer.PublicKey,
             ["Memos"] = new List<object> { new Dictionary<string, object> { ["Memo"] = fields } },
         };
 
-        SubmitOutcome outcome = await _sink.SubmitAsync(transaction, _wallet, cancellationToken).ConfigureAwait(false);
+        SubmitOutcome outcome = await _sink.SubmitAsync(transaction, _signer, cancellationToken).ConfigureAwait(false);
 
         // terPRE_TICKET means the ticket is not in a ledger yet, which can only happen if the mint
         // was not awaited. That is a bug here, not a network condition, and it is worth saying so.
@@ -444,7 +443,7 @@ public sealed class TicketStrategy(
             long to = await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
 
             await foreach (LedgerTransaction tx in _source
-                .AccountTransactionsAsync(_wallet.ClassicAddress, from, to, forward: true, cancellationToken)
+                .AccountTransactionsAsync(_signer.Account, from, to, forward: true, cancellationToken)
                 .ConfigureAwait(false))
             {
                 if (!tx.Validated || tx.MemoTypeHex is null) continue;

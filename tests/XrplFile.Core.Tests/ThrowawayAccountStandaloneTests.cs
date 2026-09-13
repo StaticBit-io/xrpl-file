@@ -36,7 +36,8 @@ public class ThrowawayAccountStandaloneTests : IDisposable
 
             XrplWallet funder = await StandaloneFixture.FundedAccountAsync(client, sink, 900_000_000, token);
             XrplWallet throwaway = XrplWallet.Generate();
-            ThrowawayAccount account = new(sink, source, throwaway);
+            ITransactionSigner signer = new WalletSigner(throwaway);
+            ThrowawayAccount account = new(sink, source, signer);
 
             byte[] file = VectorStream.Bytes("throwaway", 12_000);
             long startedIn = await source.CurrentLedgerAsync(token);
@@ -63,7 +64,7 @@ public class ThrowawayAccountStandaloneTests : IDisposable
             // The session prices its own estimate from the node and refuses a strategy that would
             // charge anything else, so the strategy is built from the fee the estimate was read at.
             await using TicketStrategy strategy = new(
-                sink, source, throwaway,
+                sink, source, signer,
                 new TicketStrategyOptions { TicketsPerBatch = 100, FeeDrops = (int)estimate.FeeDropsPerTransaction });
 
             PublicationSession session = await PublicationSession.StartAsync(
@@ -123,7 +124,7 @@ public class ThrowawayAccountStandaloneTests : IDisposable
 
             XrplWallet funder = await StandaloneFixture.FundedAccountAsync(client, sink, 900_000_000, token);
             XrplWallet throwaway = XrplWallet.Generate();
-            ThrowawayAccount account = new(sink, source, throwaway);
+            ThrowawayAccount account = new(sink, source, new WalletSigner(throwaway));
 
             NetworkFees fees = await source.FeesAsync(token);
             await StandaloneFixture.PayAsync(sink, funder, throwaway.ClassicAddress, fees.BaseReserveDrops * 4, token);

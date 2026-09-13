@@ -1,5 +1,4 @@
 using System.Globalization;
-using Xrpl.Wallet;
 
 namespace XrplFile;
 
@@ -73,7 +72,7 @@ public sealed record RefundResult(string Destination, long SentDrops, long LeftB
 /// publishing this way needs no second key in any store: this library never asks for, holds, or
 /// moves the account the money came from.
 /// </summary>
-public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, XrplWallet wallet)
+public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, ITransactionSigner signer)
 {
     /// <summary>
     /// How far past an account's <c>Sequence</c> the ledger index must be before AccountDelete
@@ -90,10 +89,10 @@ public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, Xrp
 
     private readonly ILedgerSink _sink = sink;
     private readonly ILedgerSource _source = source;
-    private readonly XrplWallet _wallet = wallet;
+    private readonly ITransactionSigner _signer = signer;
 
     /// <summary>The classic address: what goes on the screen to copy, and what the QR code carries.</summary>
-    public string Address => _wallet.ClassicAddress;
+    public string Address => _signer.Account;
 
     public async Task<FundingRequest> FundingAsync(PublicationEstimate estimate, CancellationToken cancellationToken)
     {
@@ -215,10 +214,10 @@ public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, Xrp
             ["Amount"] = sendable.ToString(CultureInfo.InvariantCulture),
             ["Sequence"] = sequence,
             ["Fee"] = fees.OpenLedgerFeeDrops.ToString(CultureInfo.InvariantCulture),
-            ["SigningPubKey"] = _wallet.PublicKey,
+            ["SigningPubKey"] = _signer.PublicKey,
         };
 
-        SubmitOutcome outcome = await _sink.SubmitAsync(payment, _wallet, cancellationToken).ConfigureAwait(false);
+        SubmitOutcome outcome = await _sink.SubmitAsync(payment, _signer, cancellationToken).ConfigureAwait(false);
 
         if (outcome.EngineResult is not ("tesSUCCESS" or "terQUEUED"))
         {

@@ -4,7 +4,6 @@ using Xrpl.Client.Exceptions;
 using Xrpl.Client.Json;
 using Xrpl.Models.Common;
 using Xrpl.Models.Methods;
-using Xrpl.Wallet;
 // Xrpl.Models.Ledger also declares a LedgerTransaction; only the enum is wanted from it.
 using LedgerIndexType = Xrpl.Models.Ledger.LedgerIndexType;
 
@@ -66,10 +65,11 @@ public sealed class XrplClientLedgerSink : ILedgerSink
     /// rather than reported as a refusal. When all three attempts pass without the node ever
     /// answering, the node is unreachable and the caller is told so.
     /// </summary>
-    public async Task<SubmitOutcome> SubmitAsync(Dictionary<string, object> transaction, XrplWallet wallet, CancellationToken cancellationToken)
+    public async Task<SubmitOutcome> SubmitAsync(
+        Dictionary<string, object> transaction, ITransactionSigner signer, CancellationToken cancellationToken)
     {
-        SignatureResult signed = wallet.Sign(transaction);
-        string hash = signed.Hash.ToUpperInvariant();
+        SignedTransaction signed = await signer.SignAsync(transaction, cancellationToken).ConfigureAwait(false);
+        string hash = signed.Hash;
 
         for (int attempt = 1; attempt <= MaxSubmitAttempts; attempt++)
         {

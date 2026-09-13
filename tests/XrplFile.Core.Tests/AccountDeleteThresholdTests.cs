@@ -134,7 +134,7 @@ public class AccountDeleteThresholdTests
                 ["Fee"] = "12",
                 ["SigningPubKey"] = account.PublicKey,
             };
-            SubmitOutcome outcome = await sink.SubmitAsync(noop, account, token);
+            SubmitOutcome outcome = await sink.SubmitAsync(noop, new WalletSigner(account), token);
             Assert.True(outcome.EngineResult is "tesSUCCESS" or "terQUEUED", outcome.EngineResult);
             await WaitForSequenceAsync(sink, account.ClassicAddress, sequence + 1, token);
 
@@ -195,7 +195,7 @@ public class AccountDeleteThresholdTests
             ["SigningPubKey"] = wallet.PublicKey,
         };
 
-        SubmitOutcome outcome = await sink.SubmitAsync(mint, wallet, token);
+        SubmitOutcome outcome = await sink.SubmitAsync(mint, new WalletSigner(wallet), token);
         Assert.True(outcome.EngineResult is "tesSUCCESS" or "terQUEUED", outcome.EngineResult);
 
         await WaitForSequenceAsync(sink, wallet.ClassicAddress, sequence + count + 1, token);
@@ -251,7 +251,7 @@ public class AccountDeleteThresholdTests
             ["SigningPubKey"] = wallet.PublicKey,
         };
 
-        return (await sink.SubmitAsync(delete, wallet, token)).EngineResult;
+        return (await sink.SubmitAsync(delete, new WalletSigner(wallet), token)).EngineResult;
     }
 
     private static async Task<long> OwnerReserveDropsAsync(IXrplClient client, CancellationToken token)
@@ -278,7 +278,7 @@ public class AccountDeleteThresholdTests
             ["SigningPubKey"] = funder.PublicKey,
         };
 
-        SubmitOutcome outcome = await sink.SubmitAsync(payment, funder, token);
+        SubmitOutcome outcome = await sink.SubmitAsync(payment, new WalletSigner(funder), token);
         Assert.True(outcome.EngineResult is "tesSUCCESS" or "terQUEUED", outcome.EngineResult);
 
         await WaitForSequenceAsync(sink, funder.ClassicAddress, sequence + 1, token);

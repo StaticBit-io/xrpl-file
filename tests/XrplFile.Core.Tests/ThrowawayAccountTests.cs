@@ -6,6 +6,7 @@ namespace XrplFile.Tests;
 public class ThrowawayAccountTests
 {
     private static readonly XrplWallet Throwaway = XrplWallet.Generate();
+    private static readonly ITransactionSigner Signer = new WalletSigner(Throwaway);
 
     private static PublicationEstimate Estimate(long required) =>
         new(Chunks: 3, Blocks: 1, Lists: 0, Mints: 2, Transactions: 6,
@@ -25,7 +26,7 @@ public class ThrowawayAccountTests
     public async Task The_funding_request_names_the_address_and_what_it_needs()
     {
         FakeLedgerSource ledger = Node();
-        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Signer);
 
         FundingRequest request = await account.FundingAsync(Estimate(2_500_000), TestContext.Current.CancellationToken);
 
@@ -40,7 +41,7 @@ public class ThrowawayAccountTests
     public void The_thing_a_wallet_scans_is_the_address_itself()
     {
         FakeLedgerSource ledger = Node();
-        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Signer);
 
         Assert.Equal(Throwaway.ClassicAddress, account.Address);
         Assert.Equal(
@@ -52,7 +53,7 @@ public class ThrowawayAccountTests
     public async Task Money_that_arrived_covers_the_request()
     {
         FakeLedgerSource ledger = Node(balance: 3_000_000);
-        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Signer);
 
         FundingRequest request = await account.FundingAsync(Estimate(2_500_000), TestContext.Current.CancellationToken);
 
@@ -68,7 +69,7 @@ public class ThrowawayAccountTests
         // it as funded is how a person is told to pay, pays, and is then refused by the session's
         // own balance gate.
         FakeLedgerSource ledger = Node(balance: 3_000_000, ownerCount: 10);
-        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Signer);
 
         FundingRequest request = await account.FundingAsync(Estimate(2_500_000), TestContext.Current.CancellationToken);
 
@@ -82,7 +83,7 @@ public class ThrowawayAccountTests
     public async Task Waiting_returns_as_soon_as_the_money_is_there()
     {
         FakeLedgerSource ledger = Node();
-        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Signer);
 
         Task<FundingRequest> waiting = account.AwaitFundingAsync(
             Estimate(2_500_000), TimeSpan.FromMilliseconds(5), TestContext.Current.CancellationToken);
@@ -99,7 +100,7 @@ public class ThrowawayAccountTests
     public async Task Waiting_stops_when_the_caller_cancels()
     {
         FakeLedgerSource ledger = Node();
-        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Signer);
         using CancellationTokenSource giveUp = new(TimeSpan.FromMilliseconds(50));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
@@ -117,7 +118,7 @@ public class ThrowawayAccountTests
                 "AAAA", 5001, "rWhoeverPaid", Succeeded: true, Validated: true, Result: "tesSUCCESS",
                 MemoTypeHex: null, MemoDataHex: null, MemoFormatHex: null),
             Throwaway.ClassicAddress);
-        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Signer);
 
         string? funder = await account.FunderAsync(5000, TestContext.Current.CancellationToken);
 
@@ -132,7 +133,7 @@ public class ThrowawayAccountTests
         // source is what turns it into one -- pinned against a node's own two error shapes by
         // XrplClientLedgerSourceTests, because a fake that cannot fail proves nothing here.
         FakeLedgerSource ledger = Node();
-        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Signer);
 
         Assert.Null(await account.FunderAsync(5000, TestContext.Current.CancellationToken));
     }
@@ -146,7 +147,7 @@ public class ThrowawayAccountTests
         FakeLedgerSource ledger = Node();
         ledger.AccountTransactionsFailure = new XrplFileException(
             XrplFileError.NodeUnreachable, "fake: the node answered internal to account_tx");
-        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Signer);
 
         XrplFileException failed = await Assert.ThrowsAsync<XrplFileException>(
             () => account.FunderAsync(5000, TestContext.Current.CancellationToken));
@@ -161,7 +162,7 @@ public class ThrowawayAccountTests
         ledger.Add(new LedgerTransaction(
             "AAAA", 5001, Throwaway.ClassicAddress, Succeeded: true, Validated: true, Result: "tesSUCCESS",
             MemoTypeHex: null, MemoDataHex: null, MemoFormatHex: null));
-        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Signer);
 
         Assert.Null(await account.FunderAsync(5000, TestContext.Current.CancellationToken));
     }
@@ -171,7 +172,7 @@ public class ThrowawayAccountTests
     {
         FakeLedgerSource ledger = Node(balance: 3_000_000);
         FakeLedgerSink sink = new(ledger);
-        ThrowawayAccount account = new(sink, ledger, Throwaway);
+        ThrowawayAccount account = new(sink, ledger, Signer);
 
         RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
 
@@ -199,7 +200,7 @@ public class ThrowawayAccountTests
         // is exactly when a person most wants their money back.
         FakeLedgerSource ledger = Node(balance: 3_000_000, ownerCount: 5);
         FakeLedgerSink sink = new(ledger);
-        ThrowawayAccount account = new(sink, ledger, Throwaway);
+        ThrowawayAccount account = new(sink, ledger, Signer);
 
         RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
 
@@ -214,7 +215,7 @@ public class ThrowawayAccountTests
     {
         FakeLedgerSource ledger = Node(balance: 1_000_000);
         FakeLedgerSink sink = new(ledger);
-        ThrowawayAccount account = new(sink, ledger, Throwaway);
+        ThrowawayAccount account = new(sink, ledger, Signer);
 
         RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
 
@@ -230,7 +231,7 @@ public class ThrowawayAccountTests
         // still has nothing to give back.
         FakeLedgerSource ledger = Node(balance: 1_500_000, ownerCount: 5);
         FakeLedgerSink sink = new(ledger);
-        ThrowawayAccount account = new(sink, ledger, Throwaway);
+        ThrowawayAccount account = new(sink, ledger, Signer);
 
         RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
 
@@ -247,7 +248,7 @@ public class ThrowawayAccountTests
         // truth, and the drops it forgets are real ones on a real account.
         FakeLedgerSource ledger = Node(balance: 1_000_005);
         FakeLedgerSink sink = new(ledger);
-        ThrowawayAccount account = new(sink, ledger, Throwaway);
+        ThrowawayAccount account = new(sink, ledger, Signer);
 
         RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
 
@@ -262,7 +263,7 @@ public class ThrowawayAccountTests
         FakeLedgerSource ledger = Node(balance: 3_000_000);
         FakeLedgerSink sink = new(ledger);
         sink.Refusals[0] = "terQUEUED";
-        ThrowawayAccount account = new(sink, ledger, Throwaway);
+        ThrowawayAccount account = new(sink, ledger, Signer);
 
         RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
 
@@ -276,7 +277,7 @@ public class ThrowawayAccountTests
     public async Task A_refund_without_a_destination_is_refused()
     {
         FakeLedgerSource ledger = Node(balance: 3_000_000);
-        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Throwaway);
+        ThrowawayAccount account = new(new FakeLedgerSink(ledger), ledger, Signer);
 
         await Assert.ThrowsAsync<ArgumentException>(
             () => account.RefundAsync("   ", TestContext.Current.CancellationToken));
@@ -288,7 +289,7 @@ public class ThrowawayAccountTests
         FakeLedgerSource ledger = Node(balance: 3_000_000);
         FakeLedgerSink sink = new(ledger);
         sink.Refusals[0] = "tecUNFUNDED_PAYMENT";
-        ThrowawayAccount account = new(sink, ledger, Throwaway);
+        ThrowawayAccount account = new(sink, ledger, Signer);
 
         XrplFileException refused = await Assert.ThrowsAsync<XrplFileException>(
             () => account.RefundAsync("rBack", TestContext.Current.CancellationToken));
@@ -301,7 +302,7 @@ public class ThrowawayAccountTests
     {
         FakeLedgerSource ledger = Node(balance: 1_000_000, current: 5000);
         FakeLedgerSink sink = new(ledger);
-        ThrowawayAccount account = new(sink, ledger, Throwaway);
+        ThrowawayAccount account = new(sink, ledger, Signer);
 
         // The fake sink hands out sequence 10 for this account.
         long from = await account.DeletableFromLedgerAsync(TestContext.Current.CancellationToken);

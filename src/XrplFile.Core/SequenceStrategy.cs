@@ -1,5 +1,3 @@
-using Xrpl.Wallet;
-
 namespace XrplFile;
 
 public sealed class SequenceStrategyOptions
@@ -29,20 +27,20 @@ public sealed class SequenceStrategyOptions
 /// lists, manifest) now re-reads the account's unvalidated sequence at its own start, where the
 /// old writer read it once for the whole publication.
 /// </summary>
-public sealed class SequenceStrategy(ILedgerSink sink, XrplWallet wallet, SequenceStrategyOptions? options = null) : ISubmissionStrategy
+public sealed class SequenceStrategy(ILedgerSink sink, ITransactionSigner signer, SequenceStrategyOptions? options = null) : ISubmissionStrategy
 {
     private readonly ILedgerSink _sink = sink;
-    private readonly XrplWallet _wallet = wallet;
+    private readonly ITransactionSigner _signer = signer;
     private readonly SequenceStrategyOptions _options = options ?? new SequenceStrategyOptions();
 
     public long FeeDropsPerTransaction => _options.FeeDrops;
 
-    public string Account => _wallet.ClassicAddress;
+    public string Account => _signer.Account;
 
     public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
     {
-        string account = _wallet.ClassicAddress;
+        string account = _signer.Account;
         uint sequence = await _sink.SequenceAsync(account, validated: false, cancellationToken).ConfigureAwait(false);
 
         List<SubmittedMemo> landed = new(memos.Count);
@@ -75,14 +73,14 @@ public sealed class SequenceStrategy(ILedgerSink sink, XrplWallet wallet, Sequen
         Dictionary<string, object> transaction = new()
         {
             ["TransactionType"] = "AccountSet",
-            ["Account"] = _wallet.ClassicAddress,
+            ["Account"] = _signer.Account,
             ["Sequence"] = sequence,
             ["Fee"] = _options.FeeDrops.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["SigningPubKey"] = _wallet.PublicKey,
+            ["SigningPubKey"] = _signer.PublicKey,
             ["Memos"] = new List<object> { new Dictionary<string, object> { ["Memo"] = fields } },
         };
 
-        SubmitOutcome outcome = await _sink.SubmitAsync(transaction, _wallet, cancellationToken).ConfigureAwait(false);
+        SubmitOutcome outcome = await _sink.SubmitAsync(transaction, _signer, cancellationToken).ConfigureAwait(false);
 
         if (outcome.EngineResult is not ("tesSUCCESS" or "terQUEUED"))
         {

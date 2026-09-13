@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Xrpl.Wallet;
 
 namespace XrplFile.Tests;
 
@@ -138,7 +137,7 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
         }
     }
 
-    public async Task<SubmitOutcome> SubmitAsync(Dictionary<string, object> transaction, XrplWallet wallet, CancellationToken cancellationToken)
+    public async Task<SubmitOutcome> SubmitAsync(Dictionary<string, object> transaction, ITransactionSigner signer, CancellationToken cancellationToken)
     {
         int position;
 

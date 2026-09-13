@@ -12,12 +12,13 @@ namespace XrplFile.Tests;
 public class TicketStrategyTests
 {
     private static readonly XrplWallet Wallet = XrplWallet.Generate();
+    private static readonly ITransactionSigner Signer = new WalletSigner(Wallet);
 
     private static IReadOnlyList<MemoSubmission> Memos(int count, int from = 0) =>
         [.. Enumerable.Range(from, count).Select(i => new MemoSubmission(MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex([(byte)i]), null))];
 
     private static TicketStrategy Strategy(FakeLedgerSink sink, FakeLedgerSource ledger, int ticketsPerBatch = 100) =>
-        new(sink, ledger, Wallet, new TicketStrategyOptions
+        new(sink, ledger, Signer, new TicketStrategyOptions
         {
             TicketsPerBatch = ticketsPerBatch,
             SweepPoll = TimeSpan.FromMilliseconds(1),
@@ -93,7 +94,7 @@ public class TicketStrategyTests
     {
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
-        await using TicketStrategy strategy = new(sink, ledger, Wallet, new TicketStrategyOptions
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
         {
             TicketsPerBatch = 5000,
             SweepPoll = TimeSpan.FromMilliseconds(1),
@@ -337,7 +338,7 @@ public class TicketStrategyTests
         // Every attempt at this memo lands with a tec, so no attempt ever writes it.
         FakeLedgerSink.FailEvery failing = new(Marker: MemoLayout.ChunkMarkerHex(1));
         sink.FailMarkers.Add(failing.Marker);
-        await using TicketStrategy strategy = new(sink, ledger, Wallet, new TicketStrategyOptions
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
         {
             TicketsPerBatch = 3,
             MaxAttemptsPerMemo = 2,
@@ -381,7 +382,7 @@ public class TicketStrategyTests
     {
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger) { SubmitDelay = TimeSpan.FromMilliseconds(5) };
-        await using TicketStrategy strategy = new(sink, ledger, Wallet, new TicketStrategyOptions
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
         {
             TicketsPerBatch = 40,
             MaxInFlight = 4,

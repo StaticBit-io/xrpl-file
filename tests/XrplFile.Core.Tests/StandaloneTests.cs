@@ -57,7 +57,7 @@ public class StandaloneTests
             string outcome;
             try
             {
-                outcome = (await sink.SubmitAsync(tx, writer, timeout.Token)).EngineResult;
+                outcome = (await sink.SubmitAsync(tx, new WalletSigner(writer), timeout.Token)).EngineResult;
             }
             catch (Exception e)
             {
@@ -98,7 +98,7 @@ public class StandaloneTests
             XrplClientLedgerSource source = new(client);
             XrplWallet writer = await StandaloneFixture.FundedAccountAsync(client, sink, 500_000_000, timeout.Token);
 
-            await using SequenceStrategy strategy = new(sink, writer);
+            await using SequenceStrategy strategy = new(sink, new WalletSigner(writer));
             PublishResult published = await new XrplFileWriter(strategy, source).PublishAsync(
                 file, "application/octet-stream", $"vector-{size}.bin", writer.ClassicAddress, "1", null, null, timeout.Token);
 
