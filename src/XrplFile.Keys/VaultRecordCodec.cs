@@ -26,10 +26,25 @@ internal static class VaultRecordCodec
         PropertyNameCaseInsensitive = true,
     };
 
-    internal static byte[] Canonical(VaultRecord record)
+    /// <summary>
+    /// The header: everything that describes how the key wraps were made, and nothing that was
+    /// made with them. It is the associated data of both wraps, which is what stops an attacker
+    /// lowering the KDF cost recorded in the file and having the wrap still open — a silent
+    /// downgrade of the only defence a single password leaves standing.
+    /// </summary>
+    /// <remarks>
+    /// It is the leading run of <see cref="Canonical"/>, written by the same code, so the two
+    /// cannot drift into a file whose integrity code and whose wraps disagree about the header.
+    /// </remarks>
+    internal static byte[] Header(VaultRecord record)
     {
         using MemoryStream buffer = new();
+        WriteHeader(buffer, record);
+        return buffer.ToArray();
+    }
 
+    private static void WriteHeader(Stream buffer, VaultRecord record)
+    {
         void Text(string value) => buffer.Write(Encoding.UTF8.GetBytes(value));
         void Raw(byte[]? value) { if (value is not null) buffer.Write(value); }
 
@@ -39,6 +54,17 @@ internal static class VaultRecordCodec
         Text(";t=");       Text(record.KdfParams.Iterations.ToString(CultureInfo.InvariantCulture));
         Text(";p=");       Text(record.KdfParams.Parallelism.ToString(CultureInfo.InvariantCulture));
         Text(";salt=");    Raw(record.Salt);
+    }
+
+    internal static byte[] Canonical(VaultRecord record)
+    {
+        using MemoryStream buffer = new();
+
+        void Text(string value) => buffer.Write(Encoding.UTF8.GetBytes(value));
+        void Raw(byte[]? value) { if (value is not null) buffer.Write(value); }
+
+        WriteHeader(buffer, record);
+
         Text(";dek=");     Raw(record.Dek);
         Text(";device=");  Raw(record.DeviceDek);
         Text(";entries=");
