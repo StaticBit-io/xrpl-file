@@ -91,6 +91,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
 
     private volatile bool _isUnlocked;
     private volatile string[] _references = [];
+    private volatile string[] _damagedReferences = [];
     private volatile bool _disposed;
 
     /// <param name="path">The vault file. Its directory must exist.</param>
@@ -158,12 +159,17 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Always empty in this build. The unlock-time sweep that fills it, and the
-    /// <see cref="VaultUnlockResult.VaultDegraded"/> outcome that reports it, are not implemented
-    /// yet; a reveal whose entry fails its tag still throws
-    /// <see cref="VaultError.EntryDamaged"/>, so no damaged entry is ever handed back as a key.
+    /// Filled by <see cref="VerifyAndInstall"/>, which both <see cref="UnlockAsync"/> and
+    /// <see cref="UnlockWithDeviceAsync"/> run once they hold a data key that opened the record: a
+    /// reference is added here when its entry fails its own authentication tag during that sweep,
+    /// rather than the sweep throwing over it — one unreadable key must not stop the others from
+    /// being counted, or from opening. Cleared by <see cref="Forget"/> and replaced wholesale by
+    /// the next unlock that gets far enough to look; a failed attempt on an already-open vault
+    /// (<see cref="VaultUnlockResult.WrongPassword"/>) never reaches that point, so it leaves this
+    /// list exactly as it was. A reveal whose entry fails its tag still throws
+    /// <see cref="VaultError.EntryDamaged"/> independently of this list.
     /// </remarks>
-    public IReadOnlyList<string> DamagedReferences => [];
+    public IReadOnlyList<string> DamagedReferences => _damagedReferences;
 
     /// <inheritdoc/>
     public async Task<bool> ExistsAsync(CancellationToken cancellationToken)
@@ -284,9 +290,9 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                     return VaultUnlockResult.WrongPassword;
                 }
 
-                Install(record, dataKey);
+                VaultUnlockResult outcome = VerifyAndInstall(record, dataKey);
                 dataKey = null;
-                return VaultUnlockResult.Success;
+                return outcome;
             }
             finally
             {
@@ -373,9 +379,9 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                     return VaultUnlockResult.VaultCorrupt;
                 }
 
-                Install(record, dataKey);
+                VaultUnlockResult outcome = VerifyAndInstall(record, dataKey);
                 dataKey = null;
-                return VaultUnlockResult.Success;
+                return outcome;
             }
             finally
             {
@@ -1057,6 +1063,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         _record = null;
         _isUnlocked = false;
         _references = [];
+        _damagedReferences = [];
         _generation++;
     }
 
@@ -1081,6 +1088,76 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         try
         {
             record.Mac = VaultRecordCodec.Mac(integrityKey, record);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(integrityKey);
+        }
+    }
+
+    /// <summary>
+    /// Runs once a password or a device secret has produced a data key that opens the record:
+    /// walks every entry's own authentication tag, checks the record's <c>mac</c> against one
+    /// freshly computed over its current bytes, and installs the vault open either way. Nothing
+    /// found from here on is ever reported as a wrong password — the unwrap has already succeeded,
+    /// so the caller is, correctly, in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The two checks catch different damage. A per-entry tag fails only for the entry whose own
+    /// sealed bytes changed, and a failure there is collected rather than thrown: one unreadable
+    /// key must not stop the sweep from counting the others. <see cref="VaultRecordCodec.Mac"/>
+    /// covers the header and every entry's raw bytes together (see <see cref="Reseal"/>), so it
+    /// also fails when an entry disappears from the file entirely, or the file is rolled back to
+    /// an earlier version — damage no per-entry tag can see, because there is nothing left at that
+    /// reference to open. A caller told "the vault is degraded" with an empty
+    /// <see cref="DamagedReferences"/> still learns something true: the record's own bytes disagree
+    /// with its own integrity code, even though nothing it could still name is unreadable.
+    /// </para>
+    /// <para>
+    /// Cost: one AES-256-GCM decrypt per entry, its plaintext zeroed immediately, plus one
+    /// HMAC-SHA256 over the whole canonical record. Both are linear in the vault's size and paid
+    /// once per unlock — not per <see cref="RevealAsync"/> — which is why this runs here rather
+    /// than being left to accumulate from callers drawing entries one at a time.
+    /// </para>
+    /// </remarks>
+    private VaultUnlockResult VerifyAndInstall(VaultRecord record, byte[] dataKey)
+    {
+        List<string> damaged = [];
+        foreach (KeyValuePair<string, byte[]> entry in record.Entries)
+        {
+            if (TryOpen(dataKey, entry.Value, Encoding.UTF8.GetBytes(entry.Key), out byte[]? plaintext))
+            {
+                CryptographicOperations.ZeroMemory(plaintext);
+            }
+            else
+            {
+                damaged.Add(entry.Key);
+            }
+        }
+
+        bool macMatches = MacMatches(record, dataKey);
+
+        Install(record, dataKey);
+        _damagedReferences = damaged.ToArray();
+
+        return macMatches && damaged.Count == 0 ? VaultUnlockResult.Success : VaultUnlockResult.VaultDegraded;
+    }
+
+    /// <summary>
+    /// Whether the record's stored <c>mac</c> matches one freshly computed over its current
+    /// canonical bytes. Needs the data key, and so the integrity key derived from it (see
+    /// <see cref="Reseal"/>) — which is exactly why this can run only after a wrap has already
+    /// opened, and never ahead of it.
+    /// </summary>
+    private static bool MacMatches(VaultRecord record, byte[] dataKey)
+    {
+        byte[] integrityKey = HKDF.DeriveKey(
+            HashAlgorithmName.SHA256, dataKey, IntegrityKeyLength, salt: null, info: IntegrityInfo);
+        try
+        {
+            byte[] expected = VaultRecordCodec.Mac(integrityKey, record);
+            return CryptographicOperations.FixedTimeEquals(expected, record.Mac);
         }
         finally
         {
