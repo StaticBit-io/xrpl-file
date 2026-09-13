@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Xunit;
 
 namespace XrplFile.Keys.Tests;
@@ -34,6 +35,30 @@ public class VaultRecordCodecTests
             "v=1;kdfId=2;m=65536;t=3;p=4;salt=" + Encoding.Latin1.GetString(Enumerable.Repeat((byte)0x11, 16).ToArray())
             + ";dek=" + Encoding.Latin1.GetString(Enumerable.Repeat((byte)0x22, 60).ToArray())
             + ";device=;entries="
+            + "a=" + Encoding.Latin1.GetString(Enumerable.Repeat((byte)0x44, 40).ToArray()) + ";"
+            + "b=" + Encoding.Latin1.GetString(Enumerable.Repeat((byte)0x33, 40).ToArray()) + ";";
+
+        Assert.Equal(Encoding.Latin1.GetBytes(expected), canonical);
+    }
+
+    [Fact]
+    public void The_canonical_form_pins_a_non_null_device_dek()
+    {
+        // Pinned deliberately, alongside the null-device vector above. Every other test in this
+        // file uses a sample with DeviceDek == null, so nothing would fail if a future edit
+        // dropped the device-wrap bytes from the canonical form or moved them to another
+        // position — a vault with device unlock configured would then have a mac computed over
+        // the wrong bytes.
+        VaultRecord record = Sample();
+        record.DeviceDek = Enumerable.Repeat((byte)0x66, 60).ToArray();
+
+        byte[] canonical = VaultRecordCodec.Canonical(record);
+
+        string expected =
+            "v=1;kdfId=2;m=65536;t=3;p=4;salt=" + Encoding.Latin1.GetString(Enumerable.Repeat((byte)0x11, 16).ToArray())
+            + ";dek=" + Encoding.Latin1.GetString(Enumerable.Repeat((byte)0x22, 60).ToArray())
+            + ";device=" + Encoding.Latin1.GetString(Enumerable.Repeat((byte)0x66, 60).ToArray())
+            + ";entries="
             + "a=" + Encoding.Latin1.GetString(Enumerable.Repeat((byte)0x44, 40).ToArray()) + ";"
             + "b=" + Encoding.Latin1.GetString(Enumerable.Repeat((byte)0x33, 40).ToArray()) + ";";
 
@@ -95,5 +120,98 @@ public class VaultRecordCodecTests
             () => VaultRecordCodec.Parse("not json at all"u8));
 
         Assert.Equal(VaultError.Corrupt, error.Error);
+    }
+
+    [Fact]
+    public void Parse_throws_corrupt_when_a_required_field_is_missing()
+    {
+        // Valid JSON, but "salt" is entirely absent (not merely null).
+        const string json = """
+            {
+              "v": 1,
+              "kdfId": 2,
+              "kdfParams": { "memoryKib": 65536, "iterations": 3, "parallelism": 4 },
+              "dek": "AAAA",
+              "mac": "AAAA",
+              "entries": {}
+            }
+            """;
+
+        VaultException error = Assert.Throws<VaultException>(
+            () => VaultRecordCodec.Parse(Encoding.UTF8.GetBytes(json)));
+
+        Assert.Equal(VaultError.Corrupt, error.Error);
+        Assert.DoesNotContain(json, error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Parse_throws_corrupt_when_salt_is_not_base64()
+    {
+        const string json = """
+            {
+              "v": 1,
+              "kdfId": 2,
+              "kdfParams": { "memoryKib": 65536, "iterations": 3, "parallelism": 4 },
+              "salt": "not-valid-base64!!",
+              "dek": "AAAA",
+              "mac": "AAAA",
+              "entries": {}
+            }
+            """;
+
+        VaultException error = Assert.Throws<VaultException>(
+            () => VaultRecordCodec.Parse(Encoding.UTF8.GetBytes(json)));
+
+        Assert.Equal(VaultError.Corrupt, error.Error);
+        Assert.DoesNotContain("not-valid-base64", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Serialise_writes_the_spec_wire_shape()
+    {
+        // Section 5 of the design draws the on-disk record as lowercase properties with a nested
+        // "kdfParams" object. Pinning the shape here is what stops a future serializer-options
+        // edit from silently drifting away from it again.
+        byte[] bytes = VaultRecordCodec.Serialise(Sample());
+
+        using JsonDocument document = JsonDocument.Parse(bytes);
+        JsonElement root = document.RootElement;
+
+        Assert.Equal(1, root.GetProperty("v").GetInt32());
+        Assert.Equal(2, root.GetProperty("kdfId").GetInt32());
+
+        JsonElement kdfParams = root.GetProperty("kdfParams");
+        Assert.Equal(65536, kdfParams.GetProperty("memoryKib").GetInt32());
+        Assert.Equal(3, kdfParams.GetProperty("iterations").GetInt32());
+        Assert.Equal(4, kdfParams.GetProperty("parallelism").GetInt32());
+
+        Assert.Equal(JsonValueKind.String, root.GetProperty("salt").ValueKind);
+        Assert.Equal(JsonValueKind.String, root.GetProperty("dek").ValueKind);
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("deviceDek").ValueKind);
+        Assert.Equal(JsonValueKind.String, root.GetProperty("mac").ValueKind);
+
+        JsonElement entries = root.GetProperty("entries");
+        Assert.Equal(JsonValueKind.Object, entries.ValueKind);
+        Assert.True(entries.TryGetProperty("a", out _));
+        Assert.True(entries.TryGetProperty("b", out _));
+
+        Assert.False(root.TryGetProperty("V", out _));
+        Assert.False(root.TryGetProperty("KdfId", out _));
+        Assert.False(root.TryGetProperty("MemoryKib", out _));
+        Assert.False(root.TryGetProperty("DeviceDek", out _));
+    }
+
+    [Fact]
+    public void An_absent_device_dek_round_trips_as_null_not_an_empty_array()
+    {
+        // An empty array would change the canonical bytes (and therefore the mac) relative to
+        // null, since VaultRecordCodec.Canonical treats "no device wrap configured" as nothing
+        // written at all. Null must stay null across the wire.
+        VaultRecord original = Sample();
+        Assert.Null(original.DeviceDek);
+
+        VaultRecord parsed = VaultRecordCodec.Parse(VaultRecordCodec.Serialise(original));
+
+        Assert.Null(parsed.DeviceDek);
     }
 }

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace XrplFile.Keys;
 
@@ -68,9 +69,12 @@ internal static class VaultRecordCodec
         {
             V = record.V,
             KdfId = record.KdfId,
-            MemoryKib = record.KdfParams.MemoryKib,
-            Iterations = record.KdfParams.Iterations,
-            Parallelism = record.KdfParams.Parallelism,
+            KdfParams = new KdfParamsDto
+            {
+                MemoryKib = record.KdfParams.MemoryKib,
+                Iterations = record.KdfParams.Iterations,
+                Parallelism = record.KdfParams.Parallelism,
+            },
             Salt = Convert.ToBase64String(record.Salt),
             Dek = Convert.ToBase64String(record.Dek),
             DeviceDek = record.DeviceDek is null ? null : Convert.ToBase64String(record.DeviceDek),
@@ -98,7 +102,7 @@ internal static class VaultRecordCodec
             throw new VaultException(VaultError.Corrupt, "The vault record is empty.");
         }
 
-        if (dto.Salt is null || dto.Dek is null || dto.Mac is null || dto.Entries is null)
+        if (dto.Salt is null || dto.Dek is null || dto.Mac is null || dto.Entries is null || dto.KdfParams is null)
         {
             throw new VaultException(VaultError.Corrupt, "The vault record is missing a required field.");
         }
@@ -109,7 +113,7 @@ internal static class VaultRecordCodec
             {
                 V = dto.V,
                 KdfId = dto.KdfId,
-                KdfParams = new KdfParameters(dto.MemoryKib, dto.Iterations, dto.Parallelism),
+                KdfParams = new KdfParameters(dto.KdfParams.MemoryKib, dto.KdfParams.Iterations, dto.KdfParams.Parallelism),
                 Salt = Convert.FromBase64String(dto.Salt),
                 Dek = Convert.FromBase64String(dto.Dek),
                 DeviceDek = dto.DeviceDek is null ? null : Convert.FromBase64String(dto.DeviceDek),
@@ -134,17 +138,48 @@ internal static class VaultRecordCodec
         }
     }
 
+    /// <summary>
+    /// The on-disk shape, per the design's section 5: lowercase properties, <c>kdfParams</c>
+    /// nested. Kept distinct from <see cref="VaultRecord"/> deliberately — this type's shape is a
+    /// wire contract another language may one day read, while <see cref="VaultRecord"/> is free
+    /// to change as the library's internals do.
+    /// </summary>
     private sealed class RecordDto
     {
+        [JsonPropertyName("v")]
         public int V { get; set; }
+
+        [JsonPropertyName("kdfId")]
         public int KdfId { get; set; }
-        public int MemoryKib { get; set; }
-        public int Iterations { get; set; }
-        public int Parallelism { get; set; }
+
+        [JsonPropertyName("kdfParams")]
+        public KdfParamsDto? KdfParams { get; set; }
+
+        [JsonPropertyName("salt")]
         public string? Salt { get; set; }
+
+        [JsonPropertyName("dek")]
         public string? Dek { get; set; }
+
+        [JsonPropertyName("deviceDek")]
         public string? DeviceDek { get; set; }
+
+        [JsonPropertyName("mac")]
         public string? Mac { get; set; }
+
+        [JsonPropertyName("entries")]
         public Dictionary<string, string?>? Entries { get; set; }
+    }
+
+    private sealed class KdfParamsDto
+    {
+        [JsonPropertyName("memoryKib")]
+        public int MemoryKib { get; set; }
+
+        [JsonPropertyName("iterations")]
+        public int Iterations { get; set; }
+
+        [JsonPropertyName("parallelism")]
+        public int Parallelism { get; set; }
     }
 }
