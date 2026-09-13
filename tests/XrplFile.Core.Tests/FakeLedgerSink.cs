@@ -12,6 +12,13 @@ namespace XrplFile.Tests;
 /// submissions genuinely overlap; a fake that completed synchronously would let each task run to
 /// the end before the next one started, and every test of concurrency written against it would be
 /// vacuous. Everything it mutates is guarded, so an overlapping sender corrupts nothing.
+///
+/// It signs through the signer it is handed, at the point a real sink signs: before a position is
+/// taken and before anything reaches the ledger. It does not use the blob — the hashes here are
+/// derived from a submission's position so a test can read them — but a signer that refuses now
+/// fails the submission and leaves no trace, which is the whole behaviour a vault-backed signer
+/// exists for. Before this the parameter was ignored outright, and a strategy that stopped passing
+/// its signer through would have been caught by nothing short of a run against a real node.
 /// </summary>
 public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5000) : ILedgerSink
 {
@@ -21,6 +28,21 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     private int _ledgersClosed;
     private int _inFlight;
     private int _peakInFlight;
+    private int _signatures;
+    private readonly List<string> _unsignable = [];
+
+    /// <summary>How many signatures this sink has asked its signer for, refusals not counted.</summary>
+    public int Signatures => Volatile.Read(ref _signatures);
+
+    /// <summary>
+    /// The submissions the binary codec would not encode, because a test filled a field with a
+    /// placeholder instead of a ledger value. Kept so the concession that lets them through is
+    /// visible rather than silent.
+    /// </summary>
+    public IReadOnlyList<string> Unsignable
+    {
+        get { lock (_gate) return [.. _unsignable]; }
+    }
 
     public IReadOnlyList<Dictionary<string, object>> Submitted
     {
@@ -139,6 +161,28 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
 
     public async Task<SubmitOutcome> SubmitAsync(Dictionary<string, object> transaction, ITransactionSigner signer, CancellationToken cancellationToken)
     {
+        // First, and before a position is taken: a refused signature must leave nothing behind,
+        // and a submission that was never signed must not occupy an index the scripted refusals
+        // below are keyed by. A signer that answers in memory — which every signer driven against
+        // this fake does — completes this await synchronously, so parallel senders still take
+        // their positions in arrival order, exactly as they did when this call was not here.
+        try
+        {
+            _ = await signer.SignAsync(transaction, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Xrpl.BinaryCodec.InvalidJsonException e)
+        {
+            // A field this fake's caller filled with a placeholder rather than a ledger value —
+            // an account named "rBack", say. The binary codec is entitled to refuse it and a test
+            // written around such a fixture is not about signing, so the submission carries on;
+            // but it is written down rather than swallowed, so a test that cares can look, and so
+            // that this concession can never quietly grow to cover a signer that genuinely
+            // refused. Every other refusal — a locked vault above all — travels untouched.
+            lock (_gate) _unsignable.Add(e.Message);
+        }
+
+        Interlocked.Increment(ref _signatures);
+
         int position;
 
         lock (_gate)
