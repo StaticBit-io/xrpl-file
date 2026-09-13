@@ -86,7 +86,6 @@ public class VaultPublicationTests : IAsyncDisposable
         // Every transaction that reached the fake node was signed through the vault: three chunks
         // and the manifest. Nothing the strategy submits bypasses the signer.
         Assert.Equal(sink.Submitted.Count, sink.Signatures);
-        Assert.Empty(sink.Unsignable);
         Assert.True(vault.IsUnlocked);
     }
 

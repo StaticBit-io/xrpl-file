@@ -75,6 +75,18 @@ public sealed class VaultSigner : ITransactionSigner
         VaultEntry entry = await vault.RevealAsync(reference, "read a public key", cancellationToken).ConfigureAwait(false);
         XrplWallet wallet = XrplWallet.FromSeed(entry.Secret);
 
+        // StoreAsync never checks an entry's recorded address against the key behind it, so a
+        // mistyped or foreign address can sit in the vault indefinitely. Left unchecked here,
+        // every chunk this signer builds would be addressed to the wrong account while signed by
+        // a key that cannot authorise it — a failure that surfaces only at submission, as
+        // tefBAD_AUTH_MASTER, after the account has already been funded.
+        if (!string.Equals(entry.Info.Address, wallet.ClassicAddress, StringComparison.Ordinal))
+        {
+            throw new VaultException(
+                VaultError.AddressMismatch,
+                $"The entry at reference '{reference}' records an address that does not match its key.");
+        }
+
         return new VaultSigner(vault, reference, entry.Info.Address, wallet.PublicKey);
     }
 

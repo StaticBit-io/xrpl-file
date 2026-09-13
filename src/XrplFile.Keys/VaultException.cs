@@ -20,6 +20,14 @@ public enum VaultError
 
     /// <summary>Reading or writing the vault file failed.</summary>
     StorageFailed,
+
+    /// <summary>
+    /// An entry's recorded address does not match the address its own key derives to. Nothing on
+    /// <see cref="IKeyVault.StoreAsync"/> checks the two against each other, so a mistyped or
+    /// foreign address survives storage; this is where it is finally caught, before anything is
+    /// built or signed for the wrong account.
+    /// </summary>
+    AddressMismatch,
 }
 
 public sealed class VaultException : Exception

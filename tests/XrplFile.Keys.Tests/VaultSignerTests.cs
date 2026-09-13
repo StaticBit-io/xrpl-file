@@ -112,6 +112,51 @@ public class VaultSignerTests : VaultTestHarness
     }
 
     [Fact]
+    public async Task Creating_a_signer_for_an_entry_whose_address_does_not_match_its_key_is_refused()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        XrplWallet wallet = XrplWallet.Generate();
+        string foreignAddress = XrplWallet.Generate().ClassicAddress;
+        KeyVault vault = NewVault();
+
+        await vault.CreateAsync(Password("open sesame"), token);
+
+        // An entry imported with an address that is not this key's own — a typo, or a mismatched
+        // pair from a migration. StoreAsync never checks the two against each other, so this must
+        // be caught here, before a chunk is ever built for an account this key cannot authorise.
+        string reference = await vault.StoreAsync(
+            new NewVaultEntry(VaultEntryKind.Generated, "publisher", "standalone", foreignAddress, wallet.Seed),
+            token);
+
+        VaultException refused = await Assert.ThrowsAsync<VaultException>(
+            () => VaultSigner.CreateAsync(vault, reference, token));
+
+        Assert.Equal(VaultError.AddressMismatch, refused.Error);
+
+        // No key material in the message: not the seed, not the public key.
+        Assert.DoesNotContain(wallet.Seed, refused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(wallet.PublicKey, refused.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Signing_for_a_damaged_entry_is_refused_as_entry_damaged()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (KeyVault vault, string reference, XrplWallet wallet) = await VaultHoldingAKeyAsync(token);
+
+        VaultSigner signer = new(vault, reference, wallet.ClassicAddress, wallet.PublicKey);
+
+        await vault.LockAsync();
+        FlipOneByteOfEntry(reference);
+        await vault.UnlockAsync(Password("open sesame"), token);
+
+        VaultException refused = await Assert.ThrowsAsync<VaultException>(
+            () => signer.SignAsync(Transaction(wallet, 7u), token));
+
+        Assert.Equal(VaultError.EntryDamaged, refused.Error);
+    }
+
+    [Fact]
     public async Task Every_signature_asks_the_vault_again()
     {
         CancellationToken token = TestContext.Current.CancellationToken;

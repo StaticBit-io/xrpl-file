@@ -29,20 +29,13 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     private int _inFlight;
     private int _peakInFlight;
     private int _signatures;
-    private readonly List<string> _unsignable = [];
-
-    /// <summary>How many signatures this sink has asked its signer for, refusals not counted.</summary>
-    public int Signatures => Volatile.Read(ref _signatures);
 
     /// <summary>
-    /// The submissions the binary codec would not encode, because a test filled a field with a
-    /// placeholder instead of a ledger value. Kept so the concession that lets them through is
-    /// visible rather than silent.
+    /// How many signatures this sink has asked its signer for and actually received, refusals —
+    /// a locked vault, an unencodable transaction, anything the signer throws — not counted: the
+    /// increment sits after the await, so an exception there skips it.
     /// </summary>
-    public IReadOnlyList<string> Unsignable
-    {
-        get { lock (_gate) return [.. _unsignable]; }
-    }
+    public int Signatures => Volatile.Read(ref _signatures);
 
     public IReadOnlyList<Dictionary<string, object>> Submitted
     {
@@ -166,20 +159,13 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
         // below are keyed by. A signer that answers in memory — which every signer driven against
         // this fake does — completes this await synchronously, so parallel senders still take
         // their positions in arrival order, exactly as they did when this call was not here.
-        try
-        {
-            _ = await signer.SignAsync(transaction, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Xrpl.BinaryCodec.InvalidJsonException e)
-        {
-            // A field this fake's caller filled with a placeholder rather than a ledger value —
-            // an account named "rBack", say. The binary codec is entitled to refuse it and a test
-            // written around such a fixture is not about signing, so the submission carries on;
-            // but it is written down rather than swallowed, so a test that cares can look, and so
-            // that this concession can never quietly grow to cover a signer that genuinely
-            // refused. Every other refusal — a locked vault above all — travels untouched.
-            lock (_gate) _unsignable.Add(e.Message);
-        }
+        //
+        // Nothing here catches what the signer throws — a locked vault above all, but just as much
+        // whatever the real binary codec refuses to encode. A caller that hands this fake a
+        // transaction the codec cannot turn into bytes gets exactly what a real node would never
+        // have seen: no submission, no signature counted. Swallowing that would let a regression —
+        // an integer Amount, a dropped SigningPubKey — sail through a green suite.
+        _ = await signer.SignAsync(transaction, cancellationToken).ConfigureAwait(false);
 
         Interlocked.Increment(ref _signatures);
 

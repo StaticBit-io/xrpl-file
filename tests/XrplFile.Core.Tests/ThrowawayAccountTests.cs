@@ -8,6 +8,15 @@ public class ThrowawayAccountTests
     private static readonly XrplWallet Throwaway = XrplWallet.Generate();
     private static readonly ITransactionSigner Signer = new WalletSigner(Throwaway);
 
+    /// <summary>
+    /// A real, codec-valid classic address for the refund tests' destination — a generated wallet
+    /// whose seed nothing here needs, only its address. The binary codec has to accept it for a
+    /// signature to happen at all, which is exactly the point: a refund that regressed to write an
+    /// unencodable transaction must fail these tests rather than sail through a fake that swallows
+    /// what a real node would never see.
+    /// </summary>
+    private static readonly string BackAddress = XrplWallet.Generate().ClassicAddress;
+
     private static PublicationEstimate Estimate(long required) =>
         new(Chunks: 3, Blocks: 1, Lists: 0, Mints: 2, Transactions: 6,
             FeeDropsPerTransaction: 10, FeeDropsTotal: 60, MaxAttempts: 3, FeeDropsWorstCase: 180,
@@ -174,18 +183,18 @@ public class ThrowawayAccountTests
         FakeLedgerSink sink = new(ledger);
         ThrowawayAccount account = new(sink, ledger, Signer);
 
-        RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
+        RefundResult refund = await account.RefundAsync(BackAddress, TestContext.Current.CancellationToken);
 
         // Three XRP held, one XRP of base reserve stays, ten drops pay for the payment.
         Assert.Equal(3_000_000 - 1_000_000 - 10, refund.SentDrops);
         Assert.Equal(1_000_000, refund.LeftBehindDrops);
-        Assert.Equal("rBack", refund.Destination);
+        Assert.Equal(BackAddress, refund.Destination);
         Assert.Equal(RefundOutcome.Submitted, refund.Outcome);
 
         // The fields that move money are read off what was actually signed, not off the record
         // describing it: a version that reported the sendable and sent the balance would satisfy
         // every assertion above.
-        Assert.Equal("rBack", sink.Submitted[0]["Destination"]);
+        Assert.Equal(BackAddress, sink.Submitted[0]["Destination"]);
         Assert.Equal("1999990", sink.Submitted[0]["Amount"]);
         Assert.Equal("10", sink.Submitted[0]["Fee"]);
     }
@@ -202,7 +211,7 @@ public class ThrowawayAccountTests
         FakeLedgerSink sink = new(ledger);
         ThrowawayAccount account = new(sink, ledger, Signer);
 
-        RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
+        RefundResult refund = await account.RefundAsync(BackAddress, TestContext.Current.CancellationToken);
 
         // One XRP of base reserve, five fifths of an XRP of owner reserve, ten drops of fee.
         Assert.Equal(3_000_000 - 1_000_000 - 1_000_000 - 10, refund.SentDrops);
@@ -217,7 +226,7 @@ public class ThrowawayAccountTests
         FakeLedgerSink sink = new(ledger);
         ThrowawayAccount account = new(sink, ledger, Signer);
 
-        RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
+        RefundResult refund = await account.RefundAsync(BackAddress, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, refund.SentDrops);
         Assert.Equal(RefundOutcome.NothingToSend, refund.Outcome);
@@ -233,7 +242,7 @@ public class ThrowawayAccountTests
         FakeLedgerSink sink = new(ledger);
         ThrowawayAccount account = new(sink, ledger, Signer);
 
-        RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
+        RefundResult refund = await account.RefundAsync(BackAddress, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, refund.SentDrops);
         Assert.Equal(1_500_000, refund.LeftBehindDrops);
@@ -250,7 +259,7 @@ public class ThrowawayAccountTests
         FakeLedgerSink sink = new(ledger);
         ThrowawayAccount account = new(sink, ledger, Signer);
 
-        RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
+        RefundResult refund = await account.RefundAsync(BackAddress, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, refund.SentDrops);
         Assert.Equal(1_000_005, refund.LeftBehindDrops);
@@ -265,7 +274,7 @@ public class ThrowawayAccountTests
         sink.Refusals[0] = "terQUEUED";
         ThrowawayAccount account = new(sink, ledger, Signer);
 
-        RefundResult refund = await account.RefundAsync("rBack", TestContext.Current.CancellationToken);
+        RefundResult refund = await account.RefundAsync(BackAddress, TestContext.Current.CancellationToken);
 
         // terQUEUED is not arrival. The queue can drop the submission, and until a ledger takes
         // it every drop is still on the throwaway account.
@@ -292,7 +301,7 @@ public class ThrowawayAccountTests
         ThrowawayAccount account = new(sink, ledger, Signer);
 
         XrplFileException refused = await Assert.ThrowsAsync<XrplFileException>(
-            () => account.RefundAsync("rBack", TestContext.Current.CancellationToken));
+            () => account.RefundAsync(BackAddress, TestContext.Current.CancellationToken));
 
         Assert.Equal(XrplFileError.SubmitRefused, refused.Error);
     }
