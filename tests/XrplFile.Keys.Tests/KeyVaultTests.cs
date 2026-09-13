@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 using Xunit;
 
 namespace XrplFile.Keys.Tests;
@@ -371,9 +373,10 @@ public class KeyVaultTests : VaultTestHarness
     [Fact]
     public async Task A_kdf_cost_edited_in_the_file_does_not_open_the_vault()
     {
-        // The recorded cost both drives the derivation and is bound into the wrap as associated
-        // data, so an attacker who lowers it in the file gets a wrap that no longer opens rather
-        // than a cheaper attack — which is the whole of what stands behind a single password.
+        // What this pins is the outcome, not the mechanism: the recorded cost is an input to the
+        // derivation, so lowering it changes the key as well and the unwrap would fail on that
+        // alone. The associated-data binding that also covers it is pinned separately, by
+        // A_header_field_the_derivation_never_sees_is_still_bound_to_the_wrap.
         KeyVault vault = NewVault();
         await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
         await vault.LockAsync();
@@ -383,6 +386,199 @@ public class KeyVaultTests : VaultTestHarness
         Assert.Equal(
             VaultUnlockResult.WrongPassword,
             await vault.UnlockAsync(Password("right"), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task A_header_field_the_derivation_never_sees_is_still_bound_to_the_wrap()
+    {
+        // The record's header is the associated data of the key wrap, so an attacker who edits the
+        // header of a stolen file gets a wrap that no longer opens rather than a cheaper attack.
+        // Most header fields cannot show that on their own: the salt and the three cost figures
+        // are also inputs to the derivation, so editing one of them changes the derived key too
+        // and the unwrap would fail either way. `kdfId` is the one field that is associated data
+        // and nothing else — it never reaches Derive — and the only reason it is normally out of
+        // reach is that a record naming a KDF this build does not have is refused before the
+        // unwrap is attempted. A KDF that derives exactly as Argon2id does but answers to another
+        // identifier removes that refusal and leaves the binding, and nothing else, deciding.
+        const int AnotherIdentifier = 7;
+
+        KeyVault creator = NewVault();
+        await creator.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        await creator.LockAsync();
+
+        VaultRecord written = ReadRecordFromFile();
+        Assert.Equal(new Argon2idKdf().KdfId, written.KdfId);
+
+        // The relabelling changes the label and not the key: the two KDFs derive the same bytes
+        // from the salt and cost this record carries, so nothing below turns on the derivation.
+        IPasswordKdf relabelled = new RelabelledKdf(AnotherIdentifier, new Argon2idKdf());
+        Assert.Equal(
+            new Argon2idKdf().Derive(Password("right").Span, written.Salt, written.KdfParams, 32),
+            relabelled.Derive(Password("right").Span, written.Salt, written.KdfParams, 32));
+
+        // Only the header changes. Salt, cost and wrapped bytes are untouched.
+        MutateRecordInFile(record => record.KdfId = AnotherIdentifier);
+
+        KeyVault opener = NewVault(relabelled);
+
+        Assert.Equal(
+            VaultUnlockResult.WrongPassword,
+            await opener.UnlockAsync(Password("right"), TestContext.Current.CancellationToken));
+        Assert.False(opener.IsUnlocked);
+    }
+
+    /// <summary>
+    /// Argon2id under another identifier. It exists so that a test can edit the one header field
+    /// that is associated data and nothing else, and still reach the unwrap.
+    /// </summary>
+    private sealed class RelabelledKdf(int kdfId, IPasswordKdf inner) : IPasswordKdf
+    {
+        public int KdfId => kdfId;
+
+        public byte[] Derive(
+            ReadOnlySpan<byte> password, ReadOnlySpan<byte> salt, KdfParameters parameters, int outputLength) =>
+            inner.Derive(password, salt, parameters, outputLength);
+    }
+
+    [Fact]
+    public async Task A_store_whose_write_fails_leaves_the_vault_saying_what_the_file_holds()
+    {
+        // The in-memory record is what References and every later reveal are answered from, and it
+        // is mutated before the write rather than after it. A write that fails and is not rolled
+        // back would therefore hand back a reference for an entry the file never received — the
+        // key-less publication this vault exists to prevent.
+        FailableWrites disk = new();
+        KeyVault vault = NewVault(disk.WriteAsync);
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        string kept = await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+
+        disk.Fail = true;
+        VaultException error = await Assert.ThrowsAsync<VaultException>(
+            () => vault.StoreAsync(Entry("two"), TestContext.Current.CancellationToken));
+        Assert.Equal(VaultError.StorageFailed, error.Error);
+
+        Assert.Equal([kept], vault.References);
+        Assert.Equal([kept], ReadRecordFromFile().Entries.Keys);
+
+        // The rollback undid the attempt, not the vault: it still works once the disk does.
+        disk.Fail = false;
+        string second = await vault.StoreAsync(Entry("two"), TestContext.Current.CancellationToken);
+        string[] both = [kept, second];
+        Assert.Equal(both.Order(StringComparer.Ordinal), vault.References.Order(StringComparer.Ordinal));
+        Assert.Equal(
+            both.Order(StringComparer.Ordinal),
+            ReadRecordFromFile().Entries.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(
+            "sSecretOfone",
+            (await vault.RevealAsync(kept, "test", TestContext.Current.CancellationToken)).Secret);
+    }
+
+    [Fact]
+    public async Task A_delete_whose_write_fails_leaves_the_entry_the_file_still_holds()
+    {
+        // The mirror of the store case. A vault that forgot an entry the file still carries would
+        // report a usable key as gone, and nothing would ever put it back.
+        FailableWrites disk = new();
+        KeyVault vault = NewVault(disk.WriteAsync);
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        string reference = await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+
+        disk.Fail = true;
+        VaultException error = await Assert.ThrowsAsync<VaultException>(
+            () => vault.DeleteAsync(reference, TestContext.Current.CancellationToken));
+        Assert.Equal(VaultError.StorageFailed, error.Error);
+
+        Assert.Equal([reference], vault.References);
+        Assert.Equal([reference], ReadRecordFromFile().Entries.Keys);
+        Assert.Equal(
+            "sSecretOfone",
+            (await vault.RevealAsync(reference, "test", TestContext.Current.CancellationToken)).Secret);
+
+        disk.Fail = false;
+        await vault.DeleteAsync(reference, TestContext.Current.CancellationToken);
+        Assert.Empty(vault.References);
+        Assert.Empty(ReadRecordFromFile().Entries);
+    }
+
+    [Fact]
+    public async Task A_create_whose_write_fails_does_not_leave_the_data_key_in_memory()
+    {
+        // A vault that never opened is the one case where nothing later wipes the key it minted:
+        // the handover to the vault's own field never happened, so the failure path is the only
+        // place those thirty-two bytes can be wiped.
+        const int DataKeyLength = 32;
+        byte[]? dataKey = null;
+
+        FailableWrites disk = new() { Fail = true };
+        KeyVault vault = NewVault(
+            disk.WriteAsync,
+            length =>
+            {
+                byte[] bytes = RandomNumberGenerator.GetBytes(length);
+                if (length == DataKeyLength)
+                {
+                    dataKey = bytes;
+                }
+
+                return bytes;
+            });
+
+        await Assert.ThrowsAsync<VaultException>(
+            () => vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken));
+
+        Assert.NotNull(dataKey);
+        Assert.All(dataKey, b => Assert.Equal(0, b));
+        Assert.False(vault.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task References_cannot_be_written_through_by_whoever_reads_it()
+    {
+        // Handing out the live array lets a caller cast it back and rewrite the vault's own idea
+        // of what it holds — silently, and without the file agreeing.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        string reference = await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+
+        IReadOnlyCollection<string> references = vault.References;
+
+        Assert.IsNotType<string[]>(references);
+        Assert.Throws<NotSupportedException>(() => ((IList<string>)references)[0] = "tampered");
+        Assert.Equal([reference], vault.References);
+    }
+
+    [Fact]
+    public async Task An_operation_arriving_after_disposal_is_refused_rather_than_faulted()
+    {
+        // Disposal is a lock that also ends the vault, so what a late caller meets is a locked
+        // vault — not an ObjectDisposedException out of the gate it happened to race.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        string reference = await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+
+        await vault.DisposeAsync();
+
+        Assert.False(vault.IsUnlocked);
+        await AssertLocked(() => vault.ListAsync(TestContext.Current.CancellationToken));
+        await AssertLocked(() => vault.StoreAsync(Entry("two"), TestContext.Current.CancellationToken));
+        await AssertLocked(() => vault.RevealAsync(reference, "test", TestContext.Current.CancellationToken));
+
+        // And disposing twice is still a no-op.
+        await vault.DisposeAsync();
+    }
+
+    /// <summary>
+    /// The disk, with a switch. Writes go through to <see cref="DurableFile"/> until
+    /// <see cref="Fail"/> is set, after which they fail the way a full or unwritable one does.
+    /// </summary>
+    private sealed class FailableWrites
+    {
+        internal bool Fail { get; set; }
+
+        internal Task WriteAsync(string path, byte[] contents, CancellationToken cancellationToken) =>
+            Fail
+                ? Task.FromException(new VaultException(VaultError.StorageFailed, "The disk refused the write."))
+                : DurableFile.WriteAsync(path, contents, cancellationToken);
     }
 
     private static async Task AssertLocked(Func<Task> operation)

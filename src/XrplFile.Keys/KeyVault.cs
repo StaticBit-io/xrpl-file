@@ -6,6 +6,20 @@ using System.Text.Json;
 namespace XrplFile.Keys;
 
 /// <summary>
+/// How the vault's bytes reach the disk. Production passes <see cref="DurableFile.WriteAsync"/>;
+/// the seam exists so that a test can fail a write and pin the rollback that keeps the in-memory
+/// record from claiming an entry the file does not hold.
+/// </summary>
+internal delegate Task VaultFileWriter(string path, byte[] contents, CancellationToken cancellationToken);
+
+/// <summary>
+/// Where the vault's fresh key material comes from. Production passes
+/// <see cref="RandomNumberGenerator.GetBytes(int)"/>; the seam exists so that a test can keep hold
+/// of the array the vault was handed and assert it was wiped.
+/// </summary>
+internal delegate byte[] VaultRandomBytes(int length);
+
+/// <summary>
 /// The vault: one file, one password, and the keys that sign publications handed back one at a
 /// time. See the design document for the key schedule (4), the record (5) and the concurrency
 /// rules this class exists to enforce (6.3).
@@ -56,6 +70,8 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     private readonly string _path;
     private readonly IPasswordKdf _kdf;
     private readonly KdfParameters _parameters;
+    private readonly VaultFileWriter _write;
+    private readonly VaultRandomBytes _random;
 
     private VaultRecord? _record;
     private byte[]? _dataKey;
@@ -86,6 +102,22 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         IPasswordKdf kdf,
         IDeviceSecretStore? devices = null,
         KdfParameters? parameters = null)
+        : this(path, kdf, devices, parameters, write: null, random: null)
+    {
+    }
+
+    /// <summary>
+    /// The same vault with its two side effects on the outside world handed in. Both default to
+    /// what the public constructor uses; the seam exists so that the suite can fail a write and
+    /// look at the key material the vault was given, neither of which is reachable otherwise.
+    /// </summary>
+    internal KeyVault(
+        string path,
+        IPasswordKdf kdf,
+        IDeviceSecretStore? devices,
+        KdfParameters? parameters,
+        VaultFileWriter? write,
+        VaultRandomBytes? random)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(kdf);
@@ -93,6 +125,8 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         _path = Path.GetFullPath(path);
         _kdf = kdf;
         _parameters = parameters ?? KdfParameters.Default;
+        _write = write ?? DurableFile.WriteAsync;
+        _random = random ?? RandomNumberGenerator.GetBytes;
         DeviceSecrets = devices ?? new NoDeviceSecretStore();
     }
 
@@ -106,7 +140,12 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     public bool IsUnlocked => _isUnlocked;
 
     /// <inheritdoc/>
-    public IReadOnlyCollection<string> References => _references;
+    /// <remarks>
+    /// Wrapped rather than handed over: the field behind it is the vault's own idea of what it
+    /// holds, and a caller who received the array itself could cast it back to <c>string[]</c> and
+    /// rewrite that — with no write, and with the file left disagreeing.
+    /// </remarks>
+    public IReadOnlyCollection<string> References => Array.AsReadOnly(_references);
 
     /// <inheritdoc/>
     /// <remarks>
@@ -143,35 +182,44 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                     "A vault already exists at this path. Creating over it would destroy every key inside it.");
             }
 
-            byte[] salt = RandomNumberGenerator.GetBytes(SaltLength);
-            byte[] dataKey = RandomNumberGenerator.GetBytes(DataKeyLength);
-
-            VaultRecord record = new()
-            {
-                V = CurrentVersion,
-                KdfId = _kdf.KdfId,
-                KdfParams = _parameters,
-                Salt = salt,
-                Dek = [],
-                Mac = [],
-            };
-
-            byte[] passwordKey = await DerivePasswordKeyAsync(password, salt, _parameters, cancellationToken)
-                .ConfigureAwait(false);
+            byte[] salt = _random(SaltLength);
+            byte[] dataKey = _random(DataKeyLength);
             try
             {
-                record.Dek = Seal(passwordKey, dataKey, VaultRecordCodec.Header(record));
+                VaultRecord record = new()
+                {
+                    V = CurrentVersion,
+                    KdfId = _kdf.KdfId,
+                    KdfParams = _parameters,
+                    Salt = salt,
+                    Dek = [],
+                    Mac = [],
+                };
+
+                byte[] passwordKey = await DerivePasswordKeyAsync(password, salt, _parameters, cancellationToken)
+                    .ConfigureAwait(false);
+                try
+                {
+                    record.Dek = Seal(passwordKey, dataKey, VaultRecordCodec.Header(record));
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(passwordKey);
+                }
+
+                Reseal(record, dataKey);
+                await _write(_path, VaultRecordCodec.Serialise(record), cancellationToken).ConfigureAwait(false);
+
+                Install(record, dataKey);
             }
-            finally
+            catch
             {
-                CryptographicOperations.ZeroMemory(passwordKey);
+                // Install is the handover: until it runs, nothing else will ever wipe these bytes.
+                // A derivation that was cancelled or a disk that refused the write would otherwise
+                // leave a live data key lying in the heap of a vault that never even opened.
+                CryptographicOperations.ZeroMemory(dataKey);
+                throw;
             }
-
-            Reseal(record, dataKey);
-            await DurableFile.WriteAsync(_path, VaultRecordCodec.Serialise(record), cancellationToken)
-                .ConfigureAwait(false);
-
-            Install(record, dataKey);
         }
         finally
         {
@@ -474,17 +522,32 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         }
     }
 
-    /// <summary>Locks the vault and releases the gate. Disposing twice is a no-op.</summary>
+    /// <summary>Locks the vault for good. Disposing twice is a no-op.</summary>
+    /// <remarks>
+    /// Disposal takes the gate like every other operation, so it cannot land in the middle of one
+    /// — the same rule, and for the same reason, as <see cref="LockAsync"/>. The gate itself is
+    /// deliberately not disposed: <see cref="SemaphoreSlim.Dispose()"/> only releases a wait
+    /// handle this class never asks for, and disposing it would turn the typed refusal an
+    /// operation arriving afterwards gets today into an <see cref="ObjectDisposedException"/>
+    /// thrown out of the gate it happened to race.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
-        if (_disposed)
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
         {
-            return;
-        }
+            if (_disposed)
+            {
+                return;
+            }
 
-        await LockAsync().ConfigureAwait(false);
-        _disposed = true;
-        _gate.Dispose();
+            Forget();
+            _disposed = true;
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     // ---- state, touched only under the gate ----------------------------------------------------
@@ -551,8 +614,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     private async Task PersistAsync(VaultRecord record, byte[] dataKey, CancellationToken cancellationToken)
     {
         Reseal(record, dataKey);
-        await DurableFile.WriteAsync(_path, VaultRecordCodec.Serialise(record), cancellationToken)
-            .ConfigureAwait(false);
+        await _write(_path, VaultRecordCodec.Serialise(record), cancellationToken).ConfigureAwait(false);
         _references = [.. record.Entries.Keys];
     }
 

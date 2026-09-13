@@ -48,6 +48,25 @@ public abstract class VaultTestHarness : IAsyncDisposable
         return vault;
     }
 
+    /// <summary>A vault over <see cref="VaultPath"/> built on a KDF of the caller's choosing.</summary>
+    internal KeyVault NewVault(IPasswordKdf kdf, KdfParameters? parameters = null)
+    {
+        KeyVault vault = new(VaultPath, kdf, Devices, parameters ?? FastParameters);
+        _vaults.Add(vault);
+        return vault;
+    }
+
+    /// <summary>
+    /// A vault whose writes — and, when asked, whose key material — come from the caller. These are
+    /// the seams a test needs to fail a write and to look at the array the vault was handed.
+    /// </summary>
+    internal KeyVault NewVault(VaultFileWriter write, VaultRandomBytes? random = null, KdfParameters? parameters = null)
+    {
+        KeyVault vault = new(VaultPath, new Argon2idKdf(), Devices, parameters ?? FastParameters, write, random);
+        _vaults.Add(vault);
+        return vault;
+    }
+
     /// <summary>A password as the vault takes one: the UTF-8 bytes of what a user typed.</summary>
     protected static ReadOnlyMemory<byte> Password(string text) => Encoding.UTF8.GetBytes(text);
 
