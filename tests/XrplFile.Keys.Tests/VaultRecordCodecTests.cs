@@ -219,11 +219,13 @@ public class VaultRecordCodecTests
         // header binding that would have rejected the tampering has had any chance to speak. The
         // export container already calls a cost like this corruption; this is the vault saying
         // the same word.
-        VaultRecord record = Sample();
-        record.KdfParams = new KdfParameters(memoryKib, iterations, parallelism);
+        // The cost goes in at the JSON level: KdfParameters itself now refuses this range, so a
+        // record carrying one can only come from outside this library — which is what a tampered
+        // header is.
+        byte[] tampered = KdfCostInJson.Rewritten(
+            VaultRecordCodec.Serialise(Sample()), memoryKib, iterations, parallelism);
 
-        VaultException error = Assert.Throws<VaultException>(
-            () => VaultRecordCodec.Parse(VaultRecordCodec.Serialise(record)));
+        VaultException error = Assert.Throws<VaultException>(() => VaultRecordCodec.Parse(tampered));
 
         Assert.Equal(VaultError.Corrupt, error.Error);
     }

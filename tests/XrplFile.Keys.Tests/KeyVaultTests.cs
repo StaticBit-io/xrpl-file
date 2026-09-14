@@ -381,7 +381,8 @@ public class KeyVaultTests : VaultTestHarness
         await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
         await vault.LockAsync();
 
-        MutateRecordInFile(record => record.KdfParams = record.KdfParams with { Iterations = 2 });
+        MutateRecordInFile(record => record.KdfParams =
+            new KdfParameters(record.KdfParams.MemoryKib, Iterations: 2, record.KdfParams.Parallelism));
 
         Assert.Equal(
             VaultUnlockResult.WrongPassword,
@@ -398,7 +399,7 @@ public class KeyVaultTests : VaultTestHarness
         await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
         await vault.LockAsync();
 
-        MutateRecordInFile(record => record.KdfParams = record.KdfParams with { MemoryKib = 0 });
+        WriteKdfCostIntoTheFile(memoryKib: 0, iterations: 1, parallelism: 1);
 
         Assert.Equal(
             VaultUnlockResult.VaultCorrupt,
@@ -416,12 +417,39 @@ public class KeyVaultTests : VaultTestHarness
         await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
         await vault.LockAsync();
 
-        MutateRecordInFile(record => record.KdfParams = record.KdfParams with { MemoryKib = 2_000_000_000 });
+        WriteKdfCostIntoTheFile(memoryKib: 2_000_000_000, iterations: 1, parallelism: 1);
 
         Assert.Equal(
             VaultUnlockResult.VaultCorrupt,
             await vault.UnlockAsync(Password("right"), TestContext.Current.CancellationToken));
         Assert.False(vault.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task A_vault_is_never_created_at_a_cost_it_could_not_be_reopened_at()
+    {
+        // The two tests above are the reader refusing a cost an attacker wrote. This is the other
+        // side of the same figures, and it is the one that used to be missing: a cost the vault's
+        // own constructor accepted but its reader calls damage produced a file that answered
+        // VaultCorrupt for ever, on the very next unlock, with the keys still inside it.
+        //
+        // Nothing a KeyVault can be handed can do that any more, because the cost cannot be built.
+        // What is left is the positive half — the widest corner of the accepted range really does
+        // come back — so the refusal above is never refusing a vault somebody legitimately wrote.
+        CancellationToken token = TestContext.Current.CancellationToken;
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new KdfParameters(MemoryKib: 65536, Iterations: 3, Parallelism: 256));
+
+        KdfParameters corner = new(
+            MemoryKib: KdfParameterBounds.MinimumMemoryKibPerLane * 8, Iterations: 1, Parallelism: 8);
+        KeyVault vault = NewVault(corner);
+        await vault.CreateAsync(Password("right"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+        await vault.LockAsync();
+
+        Assert.Equal(VaultUnlockResult.Success, await vault.UnlockAsync(Password("right"), token));
+        Assert.Equal("sSecretOfone", (await vault.RevealAsync(reference, "test", token)).Secret);
     }
 
     [Fact]

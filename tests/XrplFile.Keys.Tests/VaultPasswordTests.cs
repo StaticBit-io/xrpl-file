@@ -412,7 +412,7 @@ public class VaultPasswordTests : VaultTestHarness
         await vault.CreateAsync(Password("old"), TestContext.Current.CancellationToken);
         await vault.LockAsync();
 
-        MutateRecordInFile(record => record.KdfParams = record.KdfParams with { MemoryKib = 0 });
+        WriteKdfCostIntoTheFile(memoryKib: 0, iterations: 1, parallelism: 1);
 
         VaultException error = await Assert.ThrowsAsync<VaultException>(
             () => vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));

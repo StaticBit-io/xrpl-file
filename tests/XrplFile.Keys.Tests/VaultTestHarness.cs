@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 
 namespace XrplFile.Keys.Tests;
 
@@ -143,6 +144,20 @@ public abstract class VaultTestHarness : IAsyncDisposable
     internal void WriteRecordToFile(VaultRecord record) =>
         File.WriteAllBytes(VaultPath, VaultRecordCodec.Serialise(record));
 
+    /// <summary>
+    /// Writes a KDF cost straight into the file's JSON, past the record model.
+    /// </summary>
+    /// <remarks>
+    /// It has to go past the model because <see cref="KdfParameters"/> no longer holds a cost
+    /// outside what the format can carry — that is the point of it. A file can still be carrying
+    /// one all the same: that is exactly what an edited header is, and answering for it is the
+    /// reader's job, which is what the tests using this are about.
+    /// </remarks>
+    protected void WriteKdfCostIntoTheFile(int memoryKib, int iterations, int parallelism) =>
+        File.WriteAllBytes(
+            VaultPath,
+            KdfCostInJson.Rewritten(File.ReadAllBytes(VaultPath), memoryKib, iterations, parallelism));
+
     /// <summary>Reads the record, lets <paramref name="mutate"/> change it, and writes it back.</summary>
     internal void MutateRecordInFile(Action<VaultRecord> mutate)
     {
@@ -161,6 +176,32 @@ public abstract class VaultTestHarness : IAsyncDisposable
 
         Directory.Delete(_directory, recursive: true);
         GC.SuppressFinalize(this);
+    }
+}
+
+/// <summary>
+/// Rewrites the KDF cost inside a serialised record, at the JSON level.
+/// </summary>
+/// <remarks>
+/// The only way left to express a file carrying a cost no build would have written:
+/// <see cref="KdfParameters"/> refuses to hold one, so a test cannot build the record and then
+/// serialise it. Editing the bytes is also closer to what is being tested — a header somebody
+/// else wrote.
+/// </remarks>
+internal static class KdfCostInJson
+{
+    internal static byte[] Rewritten(byte[] record, int memoryKib, int iterations, int parallelism)
+    {
+        JsonNode root = JsonNode.Parse(Encoding.UTF8.GetString(record))
+            ?? throw new InvalidOperationException("The record to rewrite is not JSON.");
+        JsonNode cost = root["kdfParams"]
+            ?? throw new InvalidOperationException("The record to rewrite carries no kdfParams.");
+
+        cost["memoryKib"] = memoryKib;
+        cost["iterations"] = iterations;
+        cost["parallelism"] = parallelism;
+
+        return Encoding.UTF8.GetBytes(root.ToJsonString());
     }
 }
 

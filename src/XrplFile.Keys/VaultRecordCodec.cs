@@ -133,16 +133,22 @@ internal static class VaultRecordCodec
             throw new VaultException(VaultError.Corrupt, "The vault record is missing a required field.");
         }
 
-        KdfParameters parameters = new(dto.KdfParams.MemoryKib, dto.KdfParams.Iterations, dto.KdfParams.Parallelism);
-        if (!KdfParameterBounds.CouldHaveBeenWritten(parameters))
+        if (!KdfParameterBounds.CouldHaveBeenWritten(
+                dto.KdfParams.MemoryKib, dto.KdfParams.Iterations, dto.KdfParams.Parallelism))
         {
             // Refused here rather than by whoever derives from it. The record's header is the
             // associated data of both wraps, so a tampered cost is caught — but only once the
             // derivation it describes has been paid for, and a cost outside these bounds is
             // chosen precisely so that it cannot be. See KdfParameterBounds for the figures.
+            //
+            // Asked before the numbers are handed to KdfParameters, which refuses the same range
+            // with an ArgumentOutOfRangeException: a damaged file is damage, and this method's
+            // contract is that it reports it as such.
             throw new VaultException(
                 VaultError.Corrupt, "The vault record's KDF cost is not one any build could have written.");
         }
+
+        KdfParameters parameters = new(dto.KdfParams.MemoryKib, dto.KdfParams.Iterations, dto.KdfParams.Parallelism);
 
         try
         {

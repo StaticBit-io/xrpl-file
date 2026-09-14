@@ -92,6 +92,11 @@ public static class ExportContainer
     {
         ArgumentNullException.ThrowIfNull(entries);
         ArgumentNullException.ThrowIfNull(parameters);
+
+        // Redundant since KdfParameters began refusing the same range in its own constructor, and
+        // kept for the reason a lock on an inner door is kept: this is the guard that says what
+        // *this* format can carry, and it must not quietly stop being checked if that type's
+        // bounds ever move.
         ArgumentOutOfRangeException.ThrowIfLessThan(parameters.Parallelism, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(parameters.Parallelism, byte.MaxValue);
         ArgumentOutOfRangeException.ThrowIfNegative(parameters.MemoryKib);
@@ -164,14 +169,15 @@ public static class ExportContainer
                 "This build cannot open an export container of this format version or KDF.");
         }
 
-        KdfParameters parameters;
+        int memoryKib;
+        int iterations;
+        byte parallelism;
         byte[] salt;
         try
         {
-            int memoryKib = checked((int)BinaryPrimitives.ReadUInt32BigEndian(header[6..10]));
-            int iterations = checked((int)BinaryPrimitives.ReadUInt32BigEndian(header[10..14]));
-            byte parallelism = header[14];
-            parameters = new KdfParameters(memoryKib, iterations, parallelism);
+            memoryKib = checked((int)BinaryPrimitives.ReadUInt32BigEndian(header[6..10]));
+            iterations = checked((int)BinaryPrimitives.ReadUInt32BigEndian(header[10..14]));
+            parallelism = header[14];
             salt = header[15..HeaderLength].ToArray();
         }
         catch (OverflowException ex)
@@ -181,15 +187,18 @@ public static class ExportContainer
             throw new VaultException(VaultError.Corrupt, "The export container's header is malformed.", ex);
         }
 
-        if (!KdfParameterBounds.CouldHaveBeenWritten(parameters))
+        if (!KdfParameterBounds.CouldHaveBeenWritten(memoryKib, iterations, parallelism))
         {
             // The same refusal the vault record makes, and for the same reason: the catch below
             // covers only what the KDF itself rejects outright, which leaves every cost that is
             // merely unpayable — a header asking for two terabytes is answered here rather than by
-            // the allocator.
+            // the allocator. Asked before KdfParameters is built from these numbers, which refuses
+            // the same range as an argument fault; a damaged container is damage.
             throw new VaultException(
                 VaultError.Corrupt, "The export container's KDF cost is not one any build could have written.");
         }
+
+        KdfParameters parameters = new(memoryKib, iterations, parallelism);
 
         ReadOnlySpan<byte> nonce = container.Slice(HeaderLength, NonceLength);
         ReadOnlySpan<byte> ciphertext = container[(HeaderLength + NonceLength)..^TagLength];

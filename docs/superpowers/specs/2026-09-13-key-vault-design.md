@@ -160,6 +160,16 @@ export container's one-byte lane field can carry (8) — and at least 4 KiB of m
 is the floor the Argon2 implementation itself enforces and therefore the floor below which no vault
 could have been written in the first place.
 
+The same bounds are enforced by `KdfParameters` itself, so that what a reader is willing to open is
+exactly what a writer is able to write. Without that, the check above closes only half the door: a
+cost outside the bounds could still be handed to `new KeyVault(...)`, which would create and store
+happily, and the first `UnlockAsync` afterwards — and every one after it — would answer
+`VaultCorrupt` over a file whose keys are still inside and which no password can reach. The
+constructor refuses such a cost with `ArgumentOutOfRangeException`, and the properties have no
+setters, so `with` cannot reach past it either. A cost read out of a file is a different question
+and is still asked first against `KdfParameterBounds`, which is why a damaged header is reported as
+damage rather than as an argument fault.
+
 ## 5. The record
 
 One file. The vault is small — tens of entries at most — and a file per entry buys nothing but
@@ -515,6 +525,7 @@ Recorded because they are real, not because they are acceptable everywhere.
 | A cancelled write | Cancel the token mid-write: the cache holds exactly what the file holds, on export as on store |
 | Someone else's device secret | Disable, and change the password, on a machine holding a secret this vault's wrap does not open: the secret is still there afterwards |
 | A tampered KDF cost | Zero memory, and two terabytes of it: `VaultCorrupt`, with nothing derived |
+| A cost no reader would accept | The same costs refused where they are named: no vault can be created at one |
 | Writing while degraded | A write over a mismatched `mac` is refused until acknowledged, and the mismatch survives the refusal |
 | Portability | A vault written on one path opens from another with the password, and its device wrap is inert |
 | The seam | At least one part A integration publication driven through `VaultSigner` against a standalone node |

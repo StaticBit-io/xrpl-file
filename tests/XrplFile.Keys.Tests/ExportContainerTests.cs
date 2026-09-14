@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Security.Cryptography;
 
 using Xunit;
 
@@ -278,25 +277,40 @@ public class ExportContainerTests : VaultTestHarness
     }
 
     [Fact]
-    public async Task A_failure_sealing_the_container_leaves_Exported_untouched()
+    public async Task No_vault_can_hold_a_cost_its_own_export_container_could_not_carry()
     {
-        // A KDF that does not validate its own parameters, so the vault can be created and unlocked
-        // under a Parallelism that ExportContainer.Protect's own guard refuses (it must fit one
-        // byte in the header — spec section 8). The real Argon2idKdf checks only a lower bound
-        // (>= 1), so this parallelism would sail through vault creation and only trip the guard
-        // that is unique to Protect — pinning "a failure sealing the container" without depending
-        // on timing or memory behaviour deep inside Argon2id.
+        // This replaces a test that built a vault at a Parallelism only ExportContainer.Protect
+        // refused — lanes must fit one byte in the header (spec 8) — and pinned that the failed
+        // seal left Exported alone. That vault can no longer be built: KdfParameters refuses the
+        // cost where it is named, so the export path can never be reached with one it would
+        // reject. The replaced comment claimed such a vault "can be created and unlocked"; only
+        // the first half was ever true, and the test passed only because it never reopened the
+        // file — the reader calls that cost damage, so the vault was sealed shut with its keys in.
+        //
+        // What is pinned instead is the guarantee that makes the old case unreachable: every cost
+        // a vault can be built with is one its own container carries, and export is the only way
+        // back from a forgotten password (D10). The rollback the old test watched is still pinned
+        // by A_failure_recording_Exported_still_returns_the_sealed_container and by
+        // A_cancelled_export_leaves_the_entry_saying_what_the_file_says.
         CancellationToken token = TestContext.Current.CancellationToken;
-        KdfParameters unsealable = new(MemoryKib: 8, Iterations: 1, Parallelism: byte.MaxValue + 1);
-        KeyVault vault = NewVault(new ParameterBlindKdf(), unsealable);
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new KdfParameters(MemoryKib: 8, Iterations: 1, Parallelism: byte.MaxValue + 1));
+
+        KdfParameters widest = new(
+            MemoryKib: KdfParameterBounds.MinimumMemoryKibPerLane * KdfParameterBounds.MaximumParallelism,
+            Iterations: 1,
+            Parallelism: KdfParameterBounds.MaximumParallelism);
+        KeyVault vault = NewVault(widest);
         await vault.CreateAsync(Password("open sesame"), token);
         string reference = await vault.StoreAsync(Entry("one"), token);
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
-            () => vault.ExportAsync(reference, Password("export password"), token));
+        byte[] container = await vault.ExportAsync(reference, Password("export password"), token);
 
+        Assert.Equal(
+            "sSecretOfone", ExportContainer.Open(container, Password("export password").Span).Single().Secret);
         IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(token);
-        Assert.False(listed.Single().Exported);
+        Assert.True(listed.Single().Exported);
     }
 
     [Fact]
@@ -402,26 +416,6 @@ public class ExportContainerTests : VaultTestHarness
             Cancellation.Cancel();
             return Task.FromCanceled(Cancellation.Token);
         }
-    }
-
-    /// <summary>
-    /// Delegates to a real <see cref="Argon2idKdf"/> when the parameters are within its own
-    /// checks, and otherwise fabricates deterministic output rather than throw — the seam
-    /// <see cref="A_failure_sealing_the_container_leaves_Exported_untouched"/> needs to get a vault
-    /// open under a <see cref="KdfParameters.Parallelism"/> that only <see cref="ExportContainer"/>'s
-    /// own guard refuses.
-    /// </summary>
-    private sealed class ParameterBlindKdf : IPasswordKdf
-    {
-        private readonly Argon2idKdf _inner = new();
-
-        public int KdfId => _inner.KdfId;
-
-        public byte[] Derive(
-            ReadOnlySpan<byte> password, ReadOnlySpan<byte> salt, KdfParameters parameters, int outputLength) =>
-            parameters.Parallelism is >= 1 and <= byte.MaxValue
-                ? _inner.Derive(password, salt, parameters, outputLength)
-                : RandomNumberGenerator.GetBytes(outputLength);
     }
 
     [Fact]

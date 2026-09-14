@@ -82,6 +82,36 @@ public class Argon2idKdfTests
         Assert.Equal(32, derived.Length);
     }
 
+    [Theory]
+    [InlineData(0, 3, 4)]
+    [InlineData(7, 3, 4)]
+    [InlineData(65536, 0, 4)]
+    [InlineData(65536, 3, 0)]
+    [InlineData(2_000_000_000, 3, 4)]
+    [InlineData(65536, 2_000_000_000, 4)]
+    [InlineData(65536, 3, 256)]
+    [InlineData(8, 1, 3)]
+    public void A_cost_no_reader_would_accept_cannot_be_held_at_all(int memoryKib, int iterations, int parallelism)
+    {
+        // The same eight costs VaultRecordCodecTests watches a reader call damage. A vault written
+        // at one of them answers VaultCorrupt for ever, with its keys inside and no password able
+        // to reach them — so the place to refuse it is where it is named, before a file exists.
+        // These are exactly the values a constructor used to take happily.
+        Assert.Throws<ArgumentOutOfRangeException>(() => new KdfParameters(memoryKib, iterations, parallelism));
+    }
+
+    [Fact]
+    public void A_cost_cannot_be_edited_out_of_range_after_it_is_built()
+    {
+        // The properties have no setters, so `with` cannot reach past the constructor — a second
+        // doorway to the same unopenable file. This is a compile-time guarantee; the assertion
+        // here is that the value object really is closed, not merely validated on the way in.
+        KdfParameters parameters = new(MemoryKib: 8, Iterations: 1, Parallelism: 1);
+
+        Assert.DoesNotContain(typeof(KdfParameters).GetProperties(), property => property.CanWrite);
+        Assert.Equal(new KdfParameters(MemoryKib: 8, Iterations: 1, Parallelism: 1), parameters);
+    }
+
     [Fact]
     public void The_default_parameters_are_the_measured_ones()
     {

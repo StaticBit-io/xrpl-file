@@ -4,17 +4,86 @@ namespace XrplFile.Keys;
 /// Argon2id cost. Stored in the vault record so that a future recalibration still opens vaults
 /// written by installed builds.
 /// </summary>
+/// <remarks>
+/// <para>
+/// No instance of this type can hold a cost outside what a vault record or an export container
+/// could carry (<see cref="KdfParameterBounds"/>), and that is a safety property rather than
+/// tidiness. The cost travels into the file the key material is sealed under, and the file is
+/// opened at the cost recorded inside it — so a vault written at a cost the reader refuses is a
+/// vault that answers <see cref="VaultUnlockResult.VaultCorrupt"/> for ever, with its keys still
+/// inside and no password able to reach them.
+/// </para>
+/// <para>
+/// The properties have no setters, so <c>with</c> cannot produce an instance the constructor would
+/// have refused: a second doorway to the same unopenable file. A cost read out of a file is a
+/// different matter and never reaches this constructor unchecked — see
+/// <see cref="KdfParameterBounds.CouldHaveBeenWritten(int, int, int)"/>, which both readers consult
+/// first so that a header carrying such a cost is reported as damage rather than thrown as an
+/// argument fault.
+/// </para>
+/// </remarks>
 /// <param name="MemoryKib">Memory in kibibytes. This is the parameter GPUs cannot cheaply ignore.</param>
 /// <param name="Iterations">Passes over that memory.</param>
 /// <param name="Parallelism">Lanes.</param>
+/// <exception cref="ArgumentOutOfRangeException">
+/// The cost is outside what this format can carry, and a vault written at it could never be
+/// reopened.
+/// </exception>
 public sealed record KdfParameters(int MemoryKib, int Iterations, int Parallelism)
 {
+    /// <summary>Memory in kibibytes. This is the parameter GPUs cannot cheaply ignore.</summary>
+    public int MemoryKib { get; } = ValidMemory(MemoryKib, Parallelism);
+
+    /// <summary>Passes over that memory.</summary>
+    public int Iterations { get; } = ValidIterations(Iterations);
+
+    /// <summary>Lanes.</summary>
+    public int Parallelism { get; } = ValidParallelism(Parallelism);
+
     /// <summary>
     /// Measured on a desktop machine against a budget of one unlock per session. Changing these
     /// changes nothing about vaults already written — every record carries the parameters it was
     /// written with — but it does change what new vaults cost to open.
     /// </summary>
     public static KdfParameters Default { get; } = new(MemoryKib: 262144, Iterations: 3, Parallelism: 4);
+
+    private static int ValidMemory(int memoryKib, int parallelism)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(memoryKib, KdfParameterBounds.MinimumMemoryKib);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(memoryKib, KdfParameterBounds.MaximumMemoryKib);
+
+        // The one rule that is not a field's own range: Argon2id refuses a cost whose lanes have
+        // less than four blocks each, so a vault written at one could not be opened at it either.
+        if (parallelism >= KdfParameterBounds.MinimumParallelism &&
+            parallelism <= KdfParameterBounds.MaximumParallelism &&
+            memoryKib < KdfParameterBounds.MinimumMemoryKibPerLane * parallelism)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(memoryKib),
+                memoryKib,
+                $"Argon2id needs at least {KdfParameterBounds.MinimumMemoryKibPerLane} KiB for each of the " +
+                $"{parallelism} lanes asked for, so a vault written at this cost could not be opened at it.");
+        }
+
+        return memoryKib;
+    }
+
+    private static int ValidIterations(int iterations)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(iterations, KdfParameterBounds.MinimumIterations);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(iterations, KdfParameterBounds.MaximumIterations);
+        return iterations;
+    }
+
+    private static int ValidParallelism(int parallelism)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(parallelism, KdfParameterBounds.MinimumParallelism);
+
+        // The export container carries lanes in a single byte (8), and export is the only way back
+        // from a forgotten password (D10): a vault written above this could never be exported from.
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(parallelism, KdfParameterBounds.MaximumParallelism);
+        return parallelism;
+    }
 }
 
 /// <summary>

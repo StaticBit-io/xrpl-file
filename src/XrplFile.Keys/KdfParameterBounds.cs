@@ -7,6 +7,12 @@ namespace XrplFile.Keys;
 /// </summary>
 /// <remarks>
 /// <para>
+/// The same figures bound <see cref="KdfParameters"/> itself, so the two questions cannot drift
+/// apart: what a reader is willing to open is exactly what a writer is able to write. That is the
+/// property that keeps a vault from being created at a cost its own reader would call damage —
+/// which would seal the file shut with the keys inside it and no password able to reach them.
+/// </para>
+/// <para>
 /// The header is the associated data of the key wraps, so a tampered cost is caught — but only
 /// <em>after</em> the derivation it describes has been paid for, which is too late for a cost
 /// chosen to be unpayable. Below the floor, Argon2id answers with a raw
@@ -57,13 +63,21 @@ internal static class KdfParameterBounds
     internal const int MinimumMemoryKibPerLane = 4;
 
     /// <summary>
-    /// Whether these parameters are ones a file this software wrote could be carrying. False means
-    /// the header was damaged or edited, never that the cost is merely one this build disagrees
-    /// with — nothing in that range is reachable by writing a vault or a container.
+    /// Whether these three numbers are a cost a file this software wrote could be carrying. False
+    /// means the header was damaged or edited, never that the cost is merely one this build
+    /// disagrees with — nothing in that range is reachable by writing a vault or a container.
     /// </summary>
-    internal static bool CouldHaveBeenWritten(KdfParameters parameters) =>
-        parameters.MemoryKib is >= MinimumMemoryKib and <= MaximumMemoryKib &&
-        parameters.Iterations is >= MinimumIterations and <= MaximumIterations &&
-        parameters.Parallelism is >= MinimumParallelism and <= MaximumParallelism &&
-        parameters.MemoryKib >= MinimumMemoryKibPerLane * parameters.Parallelism;
+    /// <remarks>
+    /// Takes the raw fields rather than a <see cref="KdfParameters"/> because it is asked before
+    /// one exists. Every reader of a header reaches this first and reports
+    /// <see cref="VaultError.Corrupt"/> on a refusal; handing the numbers to
+    /// <see cref="KdfParameters"/> unchecked would answer a damaged file with an
+    /// <see cref="ArgumentOutOfRangeException"/> instead — an argument fault raised over bytes no
+    /// argument of the caller's chose.
+    /// </remarks>
+    internal static bool CouldHaveBeenWritten(int memoryKib, int iterations, int parallelism) =>
+        memoryKib is >= MinimumMemoryKib and <= MaximumMemoryKib &&
+        iterations is >= MinimumIterations and <= MaximumIterations &&
+        parallelism is >= MinimumParallelism and <= MaximumParallelism &&
+        memoryKib >= MinimumMemoryKibPerLane * parallelism;
 }
