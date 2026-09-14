@@ -118,9 +118,11 @@ class library, five size constants, and `IPasswordKdf`, which B already defines.
 B defines the interface but implements only Argon2id, so a `Pbkdf2Kdf` reporting `KdfId` 1 is
 added beside it — the number B reserved for exactly this. It must be byte-compatible with the
 Wallet's, which derives through `Rfc2898DeriveBytes.Pbkdf2` with SHA-256, and is pinned against
-RFC 6070's vectors so a library change cannot move it. Their assembly is
-not referenced — it carries MAUI and wallet-domain types, and coupling two applications through a
-security library makes both harder to change.
+RFC 6070's vectors so a library change cannot move it.
+
+The Wallet's assembly is not referenced. It carries MAUI and wallet-domain types, and coupling two
+applications through a security library makes both harder to change: what is adopted here is a
+format and two self-contained files, not a dependency.
 
 ### 5.2 What this costs
 
