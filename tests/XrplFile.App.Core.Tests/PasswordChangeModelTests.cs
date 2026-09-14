@@ -56,12 +56,15 @@ public class PasswordChangeModelDescribeTests
     {
         // A failing sentence-count test only says "expected N, got M" — this pins the actual text
         // for the simplest case, so a reader of a failure here can tell it is this sentence, not
-        // merely that a count moved.
+        // merely that a count moved. "master password" and "was changed" are checked together,
+        // not as two independent words: a sentence about a password unrelated to this change (or
+        // one that changed for a different reason) could contain "password" and "changed" apart
+        // without saying what actually happened here.
         PasswordChangeReport report = PasswordChangeModel.Describe(VaultPasswordChange.Changed, @"C:\vault\vault.json");
 
         string sentence = Assert.Single(report.ThingsToTell);
-        Assert.Contains("password", sentence, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("changed", sentence, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("master password", sentence, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("was changed", sentence, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -70,6 +73,18 @@ public class PasswordChangeModelDescribeTests
         // Pins content, not just count: a reader of a failure here can tell which sentence is
         // missing rather than only that the total moved. Each assertion checks the sentence that
         // flag is documented to add exists and mentions the thing it is about.
+        //
+        // Every check below anchors on a phrase that ties the fact to its meaning, not on
+        // independent words that a weaker or even wrong sentence could contain apart from each
+        // other. The device-unlock check is the one this was found to be missing for: "device" and
+        // "off" as separate substrings would pass for almost any sentence that happens to mention a
+        // device being off, including one that says nothing about the setting this model turned on
+        // now being off. "remember on this device" plus "turned off" only appears together in the
+        // sentence that actually says that. The same reasoning applies to the integrity sentence,
+        // strengthened here alongside it: bare "integrity" is a single word that any passing
+        // mention of integrity would satisfy, so it is anchored on "integrity code" together with
+        // "repaired" instead. The surviving-copy check already anchors on the literal computed
+        // path, which only the intended sentence can contain, so it needed no change.
         PasswordChangeReport report = PasswordChangeModel.Describe(
             VaultPasswordChange.Changed
             | VaultPasswordChange.DeviceUnlockDropped
@@ -78,15 +93,16 @@ public class PasswordChangeModelDescribeTests
             @"C:\vault\vault.json");
 
         Assert.Contains(
-            report.ThingsToTell, s => s.Contains("password", StringComparison.OrdinalIgnoreCase)
-                                       && s.Contains("changed", StringComparison.OrdinalIgnoreCase));
+            report.ThingsToTell, s => s.Contains("master password", StringComparison.OrdinalIgnoreCase)
+                                       && s.Contains("was changed", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(
-            report.ThingsToTell, s => s.Contains("device", StringComparison.OrdinalIgnoreCase)
-                                       && s.Contains("off", StringComparison.OrdinalIgnoreCase));
+            report.ThingsToTell, s => s.Contains("remember on this device", StringComparison.OrdinalIgnoreCase)
+                                       && s.Contains("turned off", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(
             report.ThingsToTell, s => s.Contains(@"C:\vault\vault.json.bak", StringComparison.Ordinal));
         Assert.Contains(
-            report.ThingsToTell, s => s.Contains("integrity", StringComparison.OrdinalIgnoreCase));
+            report.ThingsToTell, s => s.Contains("integrity code", StringComparison.OrdinalIgnoreCase)
+                                       && s.Contains("repaired", StringComparison.OrdinalIgnoreCase));
     }
 }
 

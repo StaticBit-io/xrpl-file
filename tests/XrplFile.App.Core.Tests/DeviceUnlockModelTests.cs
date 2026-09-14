@@ -17,7 +17,7 @@ public class DeviceUnlockModelTests : VaultHarness
         bool enabled = await model.EnableAsync(token);
 
         Assert.True(enabled);
-        Assert.True(model.Enabled);
+        Assert.True(await model.IsEnabledAsync(token));
         Assert.True(await vault.HasDeviceWrapAsync(token));
     }
 
@@ -31,7 +31,7 @@ public class DeviceUnlockModelTests : VaultHarness
 
         await model.DisableAsync(token);
 
-        Assert.False(model.Enabled);
+        Assert.False(await model.IsEnabledAsync(token));
         Assert.False(await vault.HasDeviceWrapAsync(token));
     }
 
@@ -46,7 +46,7 @@ public class DeviceUnlockModelTests : VaultHarness
 
         await model.DisableAsync(token);
 
-        Assert.False(model.Enabled);
+        Assert.False(await model.IsEnabledAsync(token));
         Assert.False(await vault.HasDeviceWrapAsync(token));
     }
 
@@ -71,12 +71,40 @@ public class DeviceUnlockModelTests : VaultHarness
             bool enabled = await model.EnableAsync(token);
 
             Assert.False(enabled);
-            Assert.False(model.Enabled);
+            Assert.False(await model.IsEnabledAsync(token));
             Assert.False(await vault.HasDeviceWrapAsync(token));
         }
         finally
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task A_password_change_that_drops_the_wrap_is_reflected_without_this_model_touching_it()
+    {
+        // Finding 1: Enabled must not be a field this model caches. Enable, then change the
+        // password through PasswordChangeModel — a different model, going straight to the vault —
+        // in circumstances where the vault cannot re-seal the wrap under the new header and drops
+        // it (VaultPasswordChange.DeviceUnlockDropped; see
+        // VaultDeviceUnlockTests.A_password_change_with_the_machine_secret_gone_drops_the_wrap_and_asks_the_store_to_forget_it
+        // for the same recipe: delete the platform secret out from under the vault first). Nothing
+        // in this DeviceUnlockModel instance is told about that change directly — only asking the
+        // vault can catch it.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("old password"), token);
+        DeviceUnlockModel model = new(vault);
+        Assert.True(await model.EnableAsync(token));
+        Assert.True(await model.IsEnabledAsync(token));
+
+        await Devices.DeleteAsync(Path.GetFullPath(VaultPath), token);
+        PasswordChangeModel passwordChange = new(vault, VaultPath);
+        PasswordChangeReport report = await passwordChange.ChangeAsync(
+            Password("old password"), Password("new password"), token);
+        Assert.True(report.Changed);
+
+        Assert.False(await model.IsEnabledAsync(token));
+        Assert.False(await vault.HasDeviceWrapAsync(token));
     }
 }

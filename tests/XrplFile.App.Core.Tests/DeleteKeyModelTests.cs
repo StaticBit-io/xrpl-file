@@ -128,4 +128,34 @@ public class DeleteKeyModelTests : VaultHarness
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => model.DeleteAsync(reference, token));
     }
+
+    [Fact]
+    public async Task A_failed_delete_also_consumes_the_preparation_and_a_retry_needs_a_fresh_warning()
+    {
+        // Finding 2: a preparation must be good for one attempt only, whether that attempt
+        // succeeds or fails. Prepare, then force the delete to fail (the vault locked underneath
+        // it), then — without preparing again — try to delete the same reference a second time.
+        // Under the old "clear on success only" rule, the failed first attempt would leave
+        // _prepared still set, so this second attempt would go straight through to
+        // IKeyVault.DeleteAsync and remove the entry with nobody having seen the warning for this
+        // attempt. It must be refused instead.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("p"), token);
+        string reference = await vault.StoreAsync(Entry("mine"), token);
+        DeleteKeyModel model = new(vault);
+        await model.PrepareAsync(reference, token);
+        await vault.LockAsync();
+
+        VaultException failure = await Assert.ThrowsAsync<VaultException>(() => model.DeleteAsync(reference, token));
+        Assert.Equal(VaultError.Locked, failure.Error);
+
+        Assert.Equal(VaultUnlockResult.Success, await vault.UnlockAsync(Password("p"), token));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => model.DeleteAsync(reference, token));
+        Assert.Contains(reference, vault.References);
+
+        await model.PrepareAsync(reference, token);
+        await model.DeleteAsync(reference, token);
+        Assert.DoesNotContain(reference, vault.References);
+    }
 }

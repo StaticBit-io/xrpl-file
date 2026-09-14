@@ -78,17 +78,23 @@ public sealed class DeleteKeyModel(IKeyVault vault)
     /// recently succeeded for this same reference — see the type remarks.
     /// </summary>
     /// <remarks>
-    /// Clears the prepared reference only on success, the same as <c>AddKeyModel.StoreAsync</c>
-    /// clears what it prepared: a delete that failed — the vault now locked, or writes refused over
-    /// unacknowledged damage — leaves the warning already shown to the person still in force, so a
-    /// retry does not have to walk them through it again.
+    /// A preparation is good for one attempt only: <see cref="_prepared"/> is cleared as soon as
+    /// this method accepts the reference, before <see cref="IKeyVault.DeleteAsync"/> is even
+    /// called, so it is cleared whether that call succeeds or throws. The warning
+    /// <see cref="PrepareAsync"/> reported was shown to the person for one confirmation, not a
+    /// standing authorization to delete this reference again later — a delete that fails (the vault
+    /// now locked, writes refused over unacknowledged damage) must not leave that authorization
+    /// sitting live for a later, unrelated press to spend without the warning having been in front
+    /// of anyone at that moment. A retry requires a fresh <see cref="PrepareAsync"/>, and therefore
+    /// a fresh look at the warning, every time.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// <see cref="PrepareAsync"/> has not most recently succeeded for <paramref name="reference"/>.
     /// </exception>
     /// <exception cref="VaultException">
     /// Whatever <see cref="IKeyVault.DeleteAsync"/> itself throws — <see cref="VaultError.Degraded"/>
-    /// when writes are refused over unacknowledged damage — propagates unchanged.
+    /// when writes are refused over unacknowledged damage — propagates unchanged. The preparation is
+    /// still consumed: see the remarks above.
     /// </exception>
     public async Task DeleteAsync(string reference, CancellationToken cancellationToken)
     {
@@ -100,7 +106,7 @@ public sealed class DeleteKeyModel(IKeyVault vault)
                 $"'{reference}' was not prepared for deletion. Call PrepareAsync for it first.");
         }
 
-        await vault.DeleteAsync(reference, cancellationToken).ConfigureAwait(false);
         _prepared = null;
+        await vault.DeleteAsync(reference, cancellationToken).ConfigureAwait(false);
     }
 }
