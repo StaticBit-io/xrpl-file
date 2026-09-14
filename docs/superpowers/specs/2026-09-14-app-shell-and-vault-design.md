@@ -20,10 +20,13 @@ the packaging and the test story before anything can go wrong expensively.
 ## 1. Scope
 
 **In.** The MAUI Blazor Hybrid application, Windows first. Creating a vault, unlocking it by
-password or by device, locking it, and the idle lock. Listing keys. Adding a key by import or by
-generation. Exporting a key to an encrypted container and revealing a seed on screen. Changing
-the master password and turning device unlock on and off. Deleting a key. Reporting damage.
-Settings: where the vault file is, and opening a different one.
+password or by device, locking it, and the idle lock. Listing keys. Adding a key by import, by
+generation, or from an opened backup container. Exporting a key to an encrypted container and
+revealing a seed on screen. Changing the master password and turning device unlock on and off.
+Deleting a key. Reporting damage. Settings: where the vault file is.
+
+**Shipped narrower than planned.** Opening a different vault file was in scope above and is not
+in this build: see the correction to E5 and to section 6's "Settings" below.
 
 Also in, because the screens cannot be honest without it: replacing the export container with the
 Wallet project's format (section 5), and giving an entry the algorithm its key was derived with
@@ -40,11 +43,20 @@ Windows: the code must not be gratuitously Windows-only, but nothing else is bui
 | E2 | Razor components hold no decisions | A component with an `if` in it is a decision nothing can test. It moves to the model |
 | E3 | CI builds a solution filter on Linux and the app on Windows | A `net10.0-windows` project cannot build on `ubuntu-latest`, and the current job builds the whole solution. The filter keeps the libraries and the app models tested cheaply on every push; a second job compiles the UI so it cannot rot unnoticed |
 | E4 | C1 contacts no node | Addresses derive from a seed locally. A part that needs no network needs no connection settings, no reachability handling and no second moving piece while the shell is being stood up |
-| E5 | The vault lives in the application's data directory by default, its path is shown, and another file can be opened | A backup is a copy of the file, so the file must be findable. Opening another is how it arrives on a new machine |
+| E5 | The vault lives in the application's data directory, at a fixed path, and that path is shown | A backup is a copy of the file, so the file must be findable |
 | E6 | The export container becomes the Wallet project's format, byte for byte | Owner's decision. A key that cannot move between the two products is a key locked in whichever one made it, and inventing a third format serves nobody |
 | E7 | The container is therefore PBKDF2 (`kdfId = 1`), not Argon2id | The Wallet's header carries an iteration count and nothing else; Argon2id's three parameters do not fit. The vault file keeps Argon2id — see 5.2 |
 | E8 | An entry records the algorithm its key uses | Not for correct derivation: an XRPL family seed carries its own curve in its prefix, and `XrplKeypairs.DeriveKeypair` (`Base/Xrpl.Keypairs/XrplKeypairs.cs`) reads it from there, ignoring the `algorithm` argument entirely — the vault already holds a secp256k1 key correctly with no field at all. It exists for interoperability and display: the shared container format carries an algorithm per key, a Wallet backup arrives with one, and dropping it on the way through would lose what that backup said. Absent still means ed25519 for anything already stored. An earlier revision of this decision claimed the vault could not hold a secp256k1 key; that was wrong — see 5.4 |
 | E9 | No component-test framework | Components are thin by E2, and testing a binding tests Blazor. The obligation E2 creates is what replaces it |
+
+**Correction to E5.** An earlier revision of this row said "another file can be opened." That did
+not ship: `IKeyVault` is wired as a process-wide singleton over `VaultLocation.DefaultPath` in
+`MauiProgram.RegisterVault` (3.1), and nothing built for this task can repoint it at a different
+file without restarting the process. `Settings.razor` says so plainly rather than offering a
+control that looks like it works and does not — see the correction to section 6 below. The intent
+behind the original reasoning is not withdrawn, only deferred: "opening another is how it arrives
+on a new machine" is still the eventual point of a findable, portable file, and section 10 now
+carries this as a known limitation.
 
 ## 3. Projects
 
@@ -71,8 +83,10 @@ unavoidable:
 
 A model is a plain class with a constructor, state, and methods. It does not know Razor exists.
 `VaultListModel` holds the entries and whether the vault is degraded; `AddKeyModel` validates a
-seed and a label before it will let anything be stored; `ChangePasswordModel` turns a
-`VaultPasswordChange` into the set of sentences a person needs to read.
+seed and a label before it will let anything be stored; `PasswordChangeModel` (named
+`ChangePasswordModel` in an earlier revision of this document; the class as built is
+`PasswordChangeModel`) turns a `VaultPasswordChange` into the set of sentences a person needs to
+read.
 
 The test for each is the same shape as B's: a real `KeyVault` over a temporary directory, an
 in-memory device store, and small `KdfParameters` so the suite stays fast.
@@ -222,16 +236,18 @@ and the user is owed that difference.
 
 ### 5.6 What else comes with it
 
-**A bound on inflation.** Our `ExportContainer.Decompress` copies the deflate stream out with no
-limit. A container that decrypts — which needs only that the attacker chose the password and told
-it to the user — can expand without bound and take the application down. The Wallet caps it at
-`AssumedMaxWallets × AssumedMaxEntrySize` plus an envelope allowance, and reports the overrun as
-"not our container" rather than as a wrong password, because the password was right.
+**A bound on inflation.** B's now-removed `ExportContainer.Decompress` copied the deflate stream
+out with no limit. A container that decrypts — which needs only that the attacker chose the
+password and told it to the user — can expand without bound and take the application down. The
+Wallet caps it at `AssumedMaxWallets × AssumedMaxEntrySize` plus an envelope allowance, and reports
+the overrun as "not our container" rather than as a wrong password, because the password was
+right. `BackupContainer` (5.1) carries this bound forward as `MaxInflatedSize`.
 
-**Four outcomes instead of one.** Ours reports everything as `Corrupt`, so "this is not a
-container" and "the password is wrong" are indistinguishable and the user hunts for a typo that
-was never the problem. Theirs distinguishes: not our container, wrong password, password-less from
-a source that may not carry one, iterations out of range.
+**Four outcomes instead of one.** B's container reported everything as `Corrupt`, so "this is not
+a container" and "the password is wrong" were indistinguishable and the user hunted for a typo
+that was never the problem. The Wallet's distinguishes: not our container, wrong password,
+password-less from a source that may not carry one, iterations out of range —
+`BackupContainer.TryUnpack`'s four `BackupUnpackError` values.
 
 One of their choices is subtler and is kept deliberately: **a tampered header byte is not told
 apart from a wrong password.** The whole header is associated data, so any edit fails the tag the
@@ -251,11 +267,18 @@ this.
 been exported, prominently. That flag exists so the application can show which throwaway accounts
 exist nowhere else; a list that hides it wastes both the flag and the decision it came from.
 
-**Adding a key.** Import a seed or generate one; both need a label and a network, and import needs
-the algorithm when the address does not match ed25519 derivation. Immediately after generating,
-the screen offers to export — not a menu item elsewhere. Part A requires a throwaway's key to be
-in the vault before its address is shown, and B makes export the only way back; the moment a key
-is born is the one moment the user is certainly looking.
+**Adding a key.** Three routes, on their own tabs: generate one, import a typed seed, or open a
+backup container — the format shared with the Wallet application (section 5) — and choose one or
+more keys out of it. All three need a label and a network; none of them ask for an algorithm,
+because an XRPL seed carries its own curve in its prefix and every route decodes it from the seed
+itself rather than asking (5.4's correction — an earlier revision of this paragraph said import
+needed the algorithm when the address did not match ed25519 derivation, and that stopped being
+true along with the claim in 5.4 that it corrects). The container route is not in the original
+scope: it exists because a container that only this application can write and never read back is
+half of interoperability, not all of it. Immediately after generating, the screen offers to
+export — not a menu item elsewhere. Part A requires a throwaway's key to be in the vault before
+its address is shown, and B makes export the only way back; the moment a key is born is the one
+moment the user is certainly looking.
 
 **Export and reveal** are two separate acts. Export writes a container with its own password
 through `KeyVault.ExportAsync`, which also sets the flag. Reveal shows the seed on screen, under
@@ -277,8 +300,13 @@ witness that an entry was deleted or the file rolled back, and a loop that ackno
 looking destroys the evidence exactly as the code did before it was fixed.
 
 **Settings.** The vault file's path with a button to show it in the file manager, because a backup
-is a copy and a copy must be findable. Opening a different vault. And the device-unlock switch,
-which says plainly that it is tied to this path: rename the file and the password is needed once.
+is a copy and a copy must be findable. And the device-unlock switch, which says plainly that it is
+tied to this path: rename the file and the password is needed once.
+
+**Correction.** An earlier revision of this paragraph also listed "opening a different vault" as a
+Settings capability. It is not one: `Settings.razor` names the vault's path and, under its own
+heading, says plainly that opening one kept elsewhere is not available in this build and that the
+application always opens the vault at the path shown — see the correction to E5 and section 10.
 
 ## 7. Failures on screen
 
@@ -303,7 +331,20 @@ Adopted from the Wallet's sections 8.3 and 8.5, because these are measured platf
 rather than preferences.
 
 **Revealing a seed.** It comes from `RevealAsync` with a reason, is hidden by default, appears on
-a deliberate press, hides itself after 60 seconds, and is cleared immediately when the vault locks.
+a deliberate press, and hides itself after 60 seconds.
+
+**Correction.** "Cleared immediately when the vault locks" is what this paragraph originally said
+and is not what shipped. `RevealModel.Shown` is computed from `IKeyVault.IsUnlocked` on every
+read rather than pushed to by a lock notification — `IKeyVault` raises none — so it does become
+`null` on any read after the vault locks, from its own sixty-second timer or from anything else
+that calls `LockAsync`, with no separate wiring needed. What that does not give is instant
+clearing on screen: `RevealSeed.razor` learns of a lock (or the sixty-second window elapsing) only
+by polling `Model.Shown` once a second and re-rendering, a gap its own file comment states
+outright as "a gap against design section 8's wording, not a match for it." So the true bound is
+about a second, not the instant, and it is a bound on the model's own field, not a guarantee about
+the screen: nothing here reaches into the UI to blank a value already painted — a label, a copied
+clipboard entry, a screenshot taken in that window — the screen only stops rendering the secret
+once it next reads `Shown`. See section 10.
 
 **The clipboard.** Copying a secret needs platform options, or it leaves the device before any
 timer in the application can fire:
@@ -376,6 +417,20 @@ the markup is shared and the day it runs on iOS must not be the day it is discov
   password once. Inherited from B, where the alternative was a record-format change.
 - **Existing vault entries have no algorithm.** Absent means ed25519, which is what they were
   derived as, so nothing already stored changes meaning.
+- **Opening a different vault file is not available.** `IKeyVault` is wired as a process-wide
+  singleton over the fixed default path (`MauiProgram.RegisterVault`, 3.1), and nothing built for
+  this task can repoint it without restarting the process. This was in scope (section 1) and in an
+  earlier revision of E5 and of section 6's "Settings" paragraph; `Settings.razor` says plainly
+  that it is not available rather than offering a control that looks like it works. Moving a vault
+  onto a new machine today means placing the file at that machine's own default path before the
+  application first runs there, not opening it from within the application.
+- **A revealed seed clears from the model within about a second of a lock, not instantly, and the
+  screen does not erase what it already painted.** `RevealModel.Shown` reads `IKeyVault.IsUnlocked`
+  on every access, so no read after a lock ever returns the secret, but `RevealSeed.razor` only
+  learns to stop rendering it by polling once a second — an earlier revision of section 8 said the
+  seed is "cleared immediately when the vault locks," which overstated the screen's own guarantee.
+  Nothing here scrubs a value already on screen, copied to the clipboard, or captured in a
+  screenshot during that window.
 
 ## 11. Testing
 

@@ -22,9 +22,12 @@ and its reasoning are in [docs/superpowers/specs](docs/superpowers/specs).
 | `web/xrpl-file.js` | the same reading in dependency-free browser JavaScript |
 | `tests/vectors/v1.json` | vectors both implementations are held to |
 | `tools/XrplFile.Vectors` | regenerates the vectors from the .NET code |
+| `app/XrplFile.App.Core` | models for the desktop application's screens — no MAUI, no UI |
+| `app/XrplFile.App` | the desktop application itself: MAUI Blazor Hybrid, Windows only so far |
 
 A command-line uploader, an HTTP gateway, a demo page and an embeddable `<xrpl-file>` element
-are planned next.
+are planned next, alongside the rest of the desktop application below: publishing a file, reclaiming
+a throwaway account's reserve, and reading a link back.
 
 ## Reading a file (.NET)
 
@@ -244,15 +247,71 @@ continuously for tens of minutes never locks itself out mid-run even while `Vaul
 window keeps a machine left alone from staying unlocked forever. It is optional: a `VaultSigner`
 built with none touches nothing, and the vault only ever locks when something calls `LockAsync`.
 
+## The desktop application
+
+`app/XrplFile.App` is a MAUI Blazor Hybrid application, Windows only for now, built on
+`XrplFile.Keys`. It is the first slice of a larger application (design in
+[docs/superpowers/specs](docs/superpowers/specs)): today it creates and unlocks a vault, lists keys,
+adds one by generating it, importing a typed seed, or opening a backup container and choosing a key
+out of it, exports and reveals a seed, changes the master password, turns "remember on this device"
+on and off, deletes a key, and reports damage. It does not yet spend any XRP — publishing a file,
+reclaiming a throwaway account's reserve, and reading a link back are still done by calling
+`XrplFile.Core` directly, the way the samples above show.
+
+Every key the application manages lives in one vault file, encrypted under a single master password
+chosen when the vault is created. The file is deliberately portable: a backup is a copy of it, and a
+machine that dies does not take the keys with it. The other side of that is a forgotten master
+password loses every key that was never taken out of the vault another way — which is exactly why
+exporting exists, and why the key list marks a generated key that has never been exported: that flag
+is how the application shows which throwaway accounts exist nowhere else, before the day the
+password is the only thing standing between someone and them.
+
+Signing goes through the vault rather than through a wallet held in memory, so locking it takes the
+signing key away for real, not just a reference to one still resident. A vault that locks in the
+middle of a publication fails the very next signature, and that failure is recovered the same way
+any interrupted publication is: unlock the vault and resume the session from its state file, rather
+than starting the run over and paying for its chunks a second time.
+
+A container exported here can be imported into the Wallet application, and a container written there
+can be imported here: the export format is the Wallet project's own — `"SBW1"`, PBKDF2-HMAC-SHA256
+at up to 1,000,000 iterations — adopted so that a key is not locked into whichever of the two
+products happened to create it. The vault file itself is untouched by that and stays Argon2id; the
+container is a different artifact, the one that actually travels.
+
+### Building and running it
+
+.NET 10 SDK with the `maui-windows` workload:
+
+```bash
+dotnet workload install maui-windows
+dotnet build app/XrplFile.App/XrplFile.App.csproj --configuration Release
+dotnet run --project app/XrplFile.App/XrplFile.App.csproj
+```
+
+Windows is the only target this repository builds or tests. `XrplFile.App.Core` carries no
+Windows-specific code — every decision the screens make lives there and is covered by
+`XrplFile.App.Core.Tests` with no operating system in the loop — but the two places the platform is
+unavoidable, "remember on this device" and the clipboard and file-picker services, have only a
+Windows implementation so far. CI mirrors this split: the Linux jobs build and test everything in
+`XrplFile.Libraries.slnf`, and a separate `windows-latest` job builds `XrplFile.App.csproj` itself,
+with no tests of its own to run — its job is proving the markup still compiles against the models.
+
 ## Building and testing
 
 .NET 10 SDK and Node 22+.
 
 ```bash
-dotnet build XrplFile.sln
+dotnet build XrplFile.Libraries.slnf
 dotnet run --project tests/XrplFile.Core.Tests -- -trait- "Category=Integration"
+dotnet run --project tests/XrplFile.App.Core.Tests -- -trait- "Category=Integration"
+dotnet run --project tests/XrplFile.Keys.Tests -- -trait- "Category=Integration"
 cd web && node --test test/*.test.mjs
 ```
+
+`XrplFile.Libraries.slnf` is a solution filter over `XrplFile.sln` that excludes `XrplFile.App`
+(`net10.0-windows10.0.19041.0`) — the only project in the solution that cannot build outside
+Windows. `dotnet build XrplFile.sln` itself now needs Windows and the `maui-windows` workload for
+that reason; see "The desktop application" above for building and running `XrplFile.App` itself.
 
 `dotnet test` does not run xunit.v3 on the .NET 10 SDK: the test project is an executable and
 is driven with `dotnet run`, taking xunit's own filters (`-class`, `-method`, `-trait`, `-trait-`)
