@@ -140,6 +140,21 @@ honours it. The Wallet bounds the range at 600,000 to 1,000,000; a count outside
 before the derivation runs, so a container written on a fast machine cannot hang an import on a
 slow one.
 
+**Comparing the two approaches (measured on the same machine):**
+
+| | Derivation | Measured |
+|---|---|---|
+| The vault file | Argon2id, 256 MiB, 3 passes, 4 lanes | ~510 ms |
+| The export container | PBKDF2-HMAC-SHA256, 1,000,000 iterations | ~122–126 ms |
+
+This is four times slower wall-clock time, but the smaller half of the story. Argon2id is
+memory-hard by design — it resists parallel attack with graphics hardware because memory bandwidth
+is the bottleneck. PBKDF2 is memory-independent and therefore trivial to accelerate on a GPU.
+An attacker with specialized hardware gains far more against PBKDF2 than the four-fold time
+difference alone suggests. The iteration count cannot simply be raised: 1,000,000 is the top of the
+range the Wallet's header format accepts, so the container is bounded by format compatibility
+rather than by what this machine could afford. See section 9 for the full measurements.
+
 ### 5.3 The payload
 
 The Wallet's `BackupWalletEntry`, with our fields added as further optional properties:
@@ -322,6 +337,8 @@ the markup is shared and the day it runs on iOS must not be the day it is discov
    Both runs are monotonic within noise and every point sits far under the 500 ms budget — even
    the floor of the range costs nowhere near a slow import. `Pbkdf2Kdf` is written at
    **1,000,000 iterations** (the largest value in the Wallet's range), measured at **122–126 ms**.
+   For a comparison of this cost against the vault's Argon2id derivation (measured at ~510 ms on
+   the same machine), see section 5.2.
 2. **That a MAUI Blazor Hybrid application on `net10.0-windows` builds and starts in this
    repository**, with `XrplFile.Keys` referenced, before any screen is written. Confirmed outside
    the repository with `dotnet new maui-blazor -n ShellProbe -f net10.0`

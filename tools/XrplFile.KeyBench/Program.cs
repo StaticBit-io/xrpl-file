@@ -50,7 +50,7 @@ static void TimeWalletDerivation()
 
 static void TimePbkdf2()
 {
-    byte[] password = System.Text.Encoding.UTF8.GetBytes("correct horse battery staple");
+    byte[] password = Encoding.UTF8.GetBytes("correct horse battery staple");
     byte[] salt = new byte[16];
     Random.Shared.NextBytes(salt);
 
