@@ -1,8 +1,18 @@
 @implements IDisposable
 @inject UnlockModel Model
 
-@* One window, no router (design section 6). What renders is entirely the model's own Stage —
-   this component switches on it but never sets it, and never composes a word of its own. *@
+@* One window, no router (design section 6). What renders is entirely the model's own Stage --
+   this component switches on it but never sets it, and never composes a word of its own.
+
+   The timer below is why that Stage is ever right: the vault can be shut by something this screen
+   never hears about -- VaultAutoLock's idle window, or App.xaml.cs locking on the window closing --
+   and IKeyVault raises no notification, so a shell that only recomputed on user events went on
+   drawing the key list and a Lock button over a vault that was already locked. RevealSeed.razor
+   polls once a second for exactly the same reason and states the same limit in its own comment;
+   this is the same mechanism at the same interval, so the two screens can never disagree about
+   whether the vault is open. UnlockModel.NoticeLock is what makes it cheap enough to do every
+   second -- one property read, no file touched -- and the model, not this markup, is what decides
+   that a shut vault behind an unlocked screen means the screen is stale. *@
 
 @if (_ready)
 {
@@ -62,7 +72,16 @@ else
         Settings,
     }
 
+    /// <summary>
+    /// How often the shell asks whether the vault has been shut behind it. One second, matching
+    /// RevealSeed.razor, so the two screens notice a lock at the same moment rather than one of
+    /// them lagging the other.
+    /// </summary>
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+
     private readonly CancellationTokenSource _cts = new();
+    private Timer? _lockPollTimer;
+    private bool _disposed;
     private bool _ready;
     private UnlockedView _unlockedView = UnlockedView.KeyList;
 
@@ -70,6 +89,31 @@ else
     {
         await Model.RefreshAsync(_cts.Token);
         _ready = true;
+
+        // Started only once the first refresh has run, so a tick can never race the initial Stage.
+        _lockPollTimer = new Timer(OnLockPollTick, state: null, PollInterval, PollInterval);
+    }
+
+    private void OnLockPollTick(object? state)
+    {
+        // The same disposal discipline RevealSeed.razor documents: Timer.Dispose does not wait for
+        // a callback already running on a thread-pool thread, so the _disposed check has to happen
+        // inside a delegate the renderer's own dispatcher runs -- that delegate and Dispose() are
+        // then ordered against each other, and a render can never land on a disposed component.
+        _ = InvokeAsync(async () =>
+        {
+            if (_disposed || !Model.NoticeLock())
+            {
+                return;
+            }
+
+            _unlockedView = UnlockedView.KeyList;
+
+            // One file read, here, rather than one per tick: NoticeLock deliberately leaves
+            // DeviceUnlockOffered alone, and the unlock screen this is about to show needs it.
+            await Model.RefreshAsync(_cts.Token);
+            StateHasChanged();
+        });
     }
 
     private async Task LockAsync()
@@ -81,6 +125,9 @@ else
 
     public void Dispose()
     {
+        // Set before the timer is disposed, for the reason RevealSeed.razor's own Dispose explains.
+        _disposed = true;
+        _lockPollTimer?.Dispose();
         _cts.Cancel();
         _cts.Dispose();
     }

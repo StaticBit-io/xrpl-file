@@ -460,6 +460,13 @@ the markup is shared and the day it runs on iOS must not be the day it is discov
   password once. Inherited from B, where the alternative was a record-format change.
 - **Existing vault entries have no algorithm.** Absent means ed25519, which is what they were
   derived as, so nothing already stored changes meaning.
+- **A screen learns of a lock within about a second of it happening, not instantly.** `IKeyVault`
+  raises no lock notification, so both screens that care poll once a second: `RevealSeed.razor`
+  for `RevealModel.Shown`, and `Shell.razor` for `UnlockModel.NoticeLock`. The two share the
+  interval deliberately — two screens disagreeing about whether the vault is open is worse than
+  either answer — and `NoticeLock` is a single property read rather than a refresh, so the poll
+  costs no file access and, because `TouchingVault` counts a property read as a read rather than
+  as use, cannot itself keep the idle lock from firing.
 - **A revealed seed clears from the model within about a second of a lock, not instantly, and the
   screen does not erase what it already painted.** `RevealModel.Shown` reads `IKeyVault.IsUnlocked`
   on every access, so no read after a lock ever returns the secret, but `RevealSeed.razor` only

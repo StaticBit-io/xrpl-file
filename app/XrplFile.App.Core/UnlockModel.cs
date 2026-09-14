@@ -233,6 +233,54 @@ public sealed class UnlockModel(IKeyVault vault, bool vaultPathIsDefault = true)
         Stage = UnlockStage.Locked;
     }
 
+    /// <summary>
+    /// Notices that the vault has been shut by something other than this model — the idle lock, or
+    /// the window-closing handler — and moves <see cref="Stage"/> to <see cref="UnlockStage.Locked"/>
+    /// to match.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why a screen has to ask at all.</b> <see cref="IKeyVault"/> raises no lock notification,
+    /// and <see cref="Stage"/> is otherwise only recomputed by <see cref="RefreshAsync"/> and by
+    /// the model's own actions. So when <c>VaultAutoLock</c>'s idle timer fires, the shell went on
+    /// rendering the key list and a "Lock" button over a vault that was already shut, and the first
+    /// sign of it was a model refusing an action. <c>RevealSeed.razor</c> already polls once a
+    /// second for exactly this reason (design section 8's correction, and section 10's known
+    /// limitation); this method is what lets <c>Shell.razor</c> do the same without paying for it.
+    /// </para>
+    /// <para>
+    /// <b>Why this and not <see cref="RefreshAsync"/>.</b> A poll must be cheap and must not itself
+    /// count as activity. <see cref="RefreshAsync"/> on a locked vault reads the file twice — once
+    /// for <see cref="IKeyVault.ExistsAsync"/> and once for <see cref="IKeyVault.HasDeviceWrapAsync"/>
+    /// — which is a file read every second, forever, on the unlock screen. This reads one property
+    /// and writes one field. <c>TouchingVault</c> treats a property read as a read and not as use,
+    /// so polling this cannot hold the data key open: an idle vault still locks under a screen that
+    /// is watching for it.
+    /// </para>
+    /// <para>
+    /// It only ever moves <see cref="Stage"/> from <see cref="UnlockStage.Unlocked"/> to
+    /// <see cref="UnlockStage.Locked"/>. It never unlocks, never opens a file, and never touches
+    /// <see cref="DeviceUnlockOffered"/> — which needs a read of the record, and is therefore left
+    /// for the one <see cref="RefreshAsync"/> a caller does after this returns
+    /// <see langword="true"/>, rather than being paid for on every tick.
+    /// </para>
+    /// </remarks>
+    /// <returns>
+    /// <see langword="true"/> when this call changed <see cref="Stage"/> — the caller should
+    /// re-render, and refresh what a locked screen needs. <see langword="false"/> when there was
+    /// nothing to notice, which is every tick but one.
+    /// </returns>
+    public bool NoticeLock()
+    {
+        if (Stage != UnlockStage.Unlocked || vault.IsUnlocked)
+        {
+            return false;
+        }
+
+        Stage = UnlockStage.Locked;
+        return true;
+    }
+
     private void Apply(VaultUnlockResult result)
     {
         LastMessage = UnlockMessages.For(result);

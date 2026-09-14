@@ -28,6 +28,60 @@ public class UnlockModelTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_lock_from_somewhere_else_is_noticed_rather_than_rendered_over()
+    {
+        // The idle lock, or the window-closing handler, shuts the vault without going through this
+        // model. Nothing tells the shell -- IKeyVault raises no notification -- so until this call
+        // existed the window went on drawing the key list and a Lock button over a shut vault, and
+        // the first sign of it was a model refusing an action.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        UnlockModel model = new(vault);
+        await model.CreateAsync(Password("passphrase"), token);
+        Assert.Equal(UnlockStage.Unlocked, model.Stage);
+
+        await vault.LockAsync();
+
+        Assert.True(model.NoticeLock());
+        Assert.Equal(UnlockStage.Locked, model.Stage);
+    }
+
+    [Fact]
+    public async Task Noticing_a_lock_says_nothing_happened_when_nothing_did()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        UnlockModel model = new(vault);
+        await model.CreateAsync(Password("passphrase"), token);
+
+        // An open vault: every tick but the one that matters.
+        Assert.False(model.NoticeLock());
+        Assert.Equal(UnlockStage.Unlocked, model.Stage);
+
+        await vault.LockAsync();
+        Assert.True(model.NoticeLock());
+
+        // And the tick after that one: already noticed, nothing to report, no second re-render.
+        Assert.False(model.NoticeLock());
+        Assert.Equal(UnlockStage.Locked, model.Stage);
+    }
+
+    [Fact]
+    public async Task Noticing_a_lock_never_unlocks_and_never_leaves_the_create_screen()
+    {
+        // A poll must only ever narrow what the screen claims. On a vault that does not exist yet
+        // the stage is NoVault and IsUnlocked is false, and this must not read that as a lock and
+        // send a first-run person to a password prompt for a vault nobody has created.
+        KeyVault vault = NewVault();
+        UnlockModel model = new(vault);
+        await model.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(UnlockStage.NoVault, model.Stage);
+
+        Assert.False(model.NoticeLock());
+        Assert.Equal(UnlockStage.NoVault, model.Stage);
+    }
+
+    [Fact]
     public async Task A_wrong_password_reports_it_and_leaves_the_vault_shut()
     {
         KeyVault vault = NewVault();
