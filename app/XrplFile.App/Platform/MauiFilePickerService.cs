@@ -67,6 +67,26 @@ public sealed class MauiFilePickerService : IFilePickerService
         return buffer.ToArray();
     }
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <see cref="StorageFile.Path"/> is populated for an item this picker hands back on this
+    /// platform: on an unpackaged Win32 desktop app the file open picker only ever returns ordinary
+    /// filesystem items, never a content-provider item with no path of its own the way Android's
+    /// picker can. <see cref="IFilePickerService"/>'s own remarks say why that platform difference
+    /// is exactly why this method exists at all rather than being folded into
+    /// <see cref="PickFileAsync"/>.
+    /// </remarks>
+    public async Task<string?> PickExistingFilePathAsync(CancellationToken cancellationToken)
+    {
+        FileOpenPicker picker = new();
+        picker.FileTypeFilter.Add("*");
+
+        InitializeWithWindow.Initialize(picker, GetActiveWindowHandle());
+
+        StorageFile? file = await picker.PickSingleFileAsync().AsTask(cancellationToken).ConfigureAwait(false);
+        return file?.Path is { Length: > 0 } path ? path : null;
+    }
+
     /// <summary>
     /// The native handle of this application's one window. Both WinRT pickers refuse to open
     /// without one on an unpackaged desktop app such as this (<c>WindowsPackageType=None</c>).

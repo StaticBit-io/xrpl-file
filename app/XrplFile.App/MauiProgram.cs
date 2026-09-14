@@ -47,7 +47,9 @@ public static class MauiProgram
 
     /// <summary>
     /// Wires the one vault this application ever constructs (design section 3.1: "nothing
-    /// constructs a vault anywhere else") and everything that reads it.
+    /// constructs a vault anywhere else") and everything that reads it, over whichever path
+    /// <see cref="VaultLocation.Resolve"/> reports for this start — <see cref="VaultLocation.DefaultPath"/>
+    /// until a person has chosen a different vault through <see cref="VaultLocationModel.ChooseAsync"/>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -109,21 +111,44 @@ public static class MauiProgram
     /// </remarks>
     private static void RegisterVault(IServiceCollection services)
     {
+        // VaultLocation.Resolve reads IVaultLocationStore, so the store is built here, once, ahead
+        // of everything else that depends on the path it produces -- see VaultLocationModel's own
+        // remarks on why a running process resolves this exactly once rather than on every access.
+        IVaultLocationStore locationStore = new FileVaultLocationStore();
+        string vaultPath = VaultLocation.Resolve(locationStore);
+
         // KeyVault.CreateAsync writes through DurableFile, which opens its temporary file directly
         // under this path and does not create the directory itself (KeyVault's own constructor
         // documents the directory as a precondition). VaultLocation.DefaultPath is under the
         // platform's application-data directory, which is not guaranteed to already contain an
-        // "XrplFile" folder on a machine that has never run this application before.
-        Directory.CreateDirectory(Path.GetDirectoryName(VaultLocation.DefaultPath)!);
+        // "XrplFile" folder on a machine that has never run this application before. A chosen path
+        // (VaultLocationModel.ChooseAsync) was picked from an existing file, so its directory
+        // existed at pick time -- but removable media unplugged, or a synced folder not mounted yet
+        // by the time this process starts, can make it gone again. Creating it is therefore
+        // attempted and, unlike the default path, allowed to fail quietly: nothing here can tell
+        // "definitely gone" apart from "not mounted yet", and this is process startup, not a screen
+        // that could show either outcome. IKeyVault.ExistsAsync and CreateAsync already turn a
+        // missing directory into VaultUnlockResult.VaultMissing / VaultError.StorageFailed for the
+        // unlock screen to report normally (DurableFile.ReadAsync treats DirectoryNotFoundException
+        // as absence; DurableFile.WriteAsync turns it into StorageFailed) -- so nothing is lost by
+        // not crashing the whole application over it here.
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(vaultPath)!);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
 
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IPasswordKdf, Argon2idKdf>();
         services.AddSingleton<IDeviceSecretStore, SecureStorageDeviceSecretStore>();
         services.AddSingleton<IClipboardService, MauiClipboardService>();
         services.AddSingleton<IFilePickerService, MauiFilePickerService>();
+        services.AddSingleton(locationStore);
 
         services.AddSingleton<IKeyVault>(provider => new KeyVault(
-            VaultLocation.DefaultPath,
+            vaultPath,
             provider.GetRequiredService<IPasswordKdf>(),
             provider.GetRequiredService<IDeviceSecretStore>()));
 
@@ -140,6 +165,7 @@ public static class MauiProgram
         services.AddSingleton<DeviceUnlockModel>();
         services.AddSingleton<DeleteKeyModel>();
         services.AddSingleton(provider => new PasswordChangeModel(
-            provider.GetRequiredService<IKeyVault>(), VaultLocation.DefaultPath));
+            provider.GetRequiredService<IKeyVault>(), vaultPath));
+        services.AddSingleton(new VaultLocationModel(locationStore, vaultPath));
     }
 }

@@ -1,10 +1,10 @@
 namespace XrplFile.App.Core;
 
 /// <summary>
-/// Where the vault lives when nobody has pointed the application at a different file (design
-/// E5). The file must be findable for a backup to mean anything, so the path is derived once,
-/// from the platform's own application-data directory, rather than assembled ad hoc wherever a
-/// vault is opened.
+/// Where the vault lives: <see cref="DefaultPath"/> until somebody points the application at a
+/// different file, and <see cref="Resolve"/> from then on (design E5). The file must be findable
+/// for a backup to mean anything, so the default path is derived once, from the platform's own
+/// application-data directory, rather than assembled ad hoc wherever a vault is opened.
 /// </summary>
 public static class VaultLocation
 {
@@ -24,4 +24,40 @@ public static class VaultLocation
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             ApplicationDirectoryName,
             FileName));
+
+    /// <summary>
+    /// The vault a process should actually open (design E5's correction): whatever
+    /// <paramref name="store"/> last had chosen with <see cref="VaultLocationModel.ChooseAsync"/>,
+    /// normalised the same way <see cref="DefaultPath"/> is, or <see cref="DefaultPath"/> itself
+    /// when nothing has ever been chosen.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A method taking the store as a parameter, not an eagerly-computed static property the way
+    /// <see cref="DefaultPath"/> is. <see cref="DefaultPath"/> touches nothing but
+    /// <see cref="Environment.GetFolderPath(Environment.SpecialFolder)"/> and is safe to evaluate
+    /// the moment this type is first touched, including from a test that only ever asks about it.
+    /// This method reads a file through <paramref name="store"/>, and doing that as a side effect
+    /// of touching an unrelated static member of this class — which is what an eager property
+    /// initializer here would do, since a type's static field initializers all run together — would
+    /// make every test in this project quietly depend on this machine's real application-data
+    /// directory. Called explicitly instead, exactly once, from <c>MauiProgram.RegisterVault</c>.
+    /// </para>
+    /// <para>
+    /// Resolved once, at that one call, deliberately — not re-read on every access. A person who
+    /// points the application at a different vault is told a restart is needed
+    /// (<see cref="VaultLocationModel"/>) precisely so this value never has to change under a
+    /// <c>KeyVault</c> already constructed over the old path: <c>IKeyVault</c> is a process-wide
+    /// singleton (<c>MauiProgram.RegisterVault</c>, design 3.1), and every model in the process
+    /// shares that one instance. Repointing this value mid-process would leave the singleton, and
+    /// every model built over it, still bound to the file that used to be here.
+    /// </para>
+    /// </remarks>
+    public static string Resolve(IVaultLocationStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        string? chosen = store.ReadChosenPath();
+        return chosen is null ? DefaultPath : Path.GetFullPath(chosen);
+    }
 }

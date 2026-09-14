@@ -1,14 +1,17 @@
 @implements IDisposable
 @inject DeviceUnlockModel Model
+@inject VaultLocationModel LocationModel
+@inject IFilePickerService FilePicker
 
 @* Design 6, "Settings": the vault's own path, a button that reveals it in the file manager, opening
    a different vault, and the device-unlock switch. DeviceUnlockModel.IsEnabledAsync is re-read after
    every toggle rather than cached locally -- see the model's own remarks on why a cached flag here
    would be exactly the defect VaultListModel's own history already found once.
-   "Opening a different vault" has no model behind it: IKeyVault is wired as a singleton over
-   VaultLocation.DefaultPath for the whole process (MauiProgram.RegisterVault), and nothing in this
-   plan's models can repoint it at a different file without a restart. Rather than build a control
-   that looks like it works and does not, this screen says plainly that it is not available yet. *@
+   "Opening a different vault" is VaultLocationModel: it records the chosen path through
+   IVaultLocationStore and takes effect on the next start, because IKeyVault is wired as a singleton
+   over one path for the whole process (MauiProgram.RegisterVault) and nothing here can repoint it
+   without restarting -- see that model's own remarks for why a restart, rather than a control that
+   pretends to repoint a running vault, is the honest shape for this. *@
 
 @* Both branches share this wrapper -- ChangePassword used to render outside any width- or
    padding-constrained container when reached from here, the one screen in this file (unlike
@@ -28,7 +31,7 @@
         <section class="mb-4">
             <h2 class="h5">Vault location</h2>
             <p>The vault file lives at:</p>
-            <code class="d-block p-2 bg-body-tertiary text-break">@VaultLocation.DefaultPath</code>
+            <code class="d-block p-2 bg-body-tertiary text-break">@LocationModel.CurrentPath</code>
             <button type="button" class="btn btn-outline-secondary mt-2" @onclick="RevealInFileManager">
                 Show in file manager
             </button>
@@ -37,9 +40,24 @@
         <section class="mb-4">
             <h2 class="h5">A different vault</h2>
             <p>
-                Opening a vault kept somewhere else is not available in this build. This application
-                always opens the vault at the path above.
+                Point the application at a vault file kept somewhere else — a copy on a memory
+                stick, a synced folder, a file carried over from another machine. Because the
+                vault file is portable, the copy opens exactly like the original.
             </p>
+            <p>
+                A vault opened from a different path has no device unlock of its own: "remember on
+                this device" is tied to the exact path a vault was opened from, so it always asks
+                for the master password the first time, even if this switch is on below for the
+                vault at the path above.
+            </p>
+            <button type="button" class="btn btn-outline-secondary" disabled="@_choosingVault"
+                    @onclick="ChooseVaultAsync">
+                Choose a vault file&hellip;
+            </button>
+            @if (_chooseVaultMessage is { } chooseMessage)
+            {
+                <div class="alert alert-info mt-2">@chooseMessage</div>
+            }
         </section>
 
         <section class="mb-4">
@@ -71,6 +89,8 @@
     private bool _deviceUnlockEnabled;
     private bool _busy;
     private string? _deviceUnlockProblem;
+    private bool _choosingVault;
+    private string? _chooseVaultMessage;
 
     protected override async Task OnInitializedAsync()
     {
@@ -87,7 +107,7 @@
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
                 FileName = "explorer.exe",
-                Arguments = $"/select,\"{VaultLocation.DefaultPath}\"",
+                Arguments = $"/select,\"{LocationModel.CurrentPath}\"",
                 UseShellExecute = true,
             });
         }
@@ -95,6 +115,34 @@
         {
             // Nothing this screen can do about a shell that refused to launch; the path is already
             // on screen above for the user to navigate to by hand.
+        }
+    }
+
+    private async Task ChooseVaultAsync()
+    {
+        if (_choosingVault)
+        {
+            return;
+        }
+
+        _choosingVault = true;
+        _chooseVaultMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            string? path = await FilePicker.PickExistingFilePathAsync(_cts.Token);
+            if (path is null)
+            {
+                return;
+            }
+
+            LocationModel.ChoosePath(path);
+            _chooseVaultMessage = "Saved. Restart the application to open the vault at the new location.";
+        }
+        finally
+        {
+            _choosingVault = false;
         }
     }
 
