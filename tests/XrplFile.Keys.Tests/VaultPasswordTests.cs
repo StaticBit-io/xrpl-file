@@ -5,6 +5,84 @@ namespace XrplFile.Keys.Tests;
 public class VaultPasswordTests : VaultTestHarness
 {
     [Fact]
+    public async Task A_change_over_a_mismatched_integrity_code_says_so_rather_than_reselling_it_silently()
+    {
+        // The mac is the only witness there is to an entry removed from the file or to the file
+        // rolled back (spec 11), and every write recomputes it over the record as it now stands.
+        // A password change reads the file itself and runs none of the unlock-time verification,
+        // so it used to reseal over a mismatch without a word — destroying the only evidence.
+        //
+        // Refusing the change is the worse failure: a user with a leaked password and one bad
+        // byte needs the change more than the evidence. So the change happens, and the caller is
+        // told, which is what puts the evidence in front of a person instead of over-writing it.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("old"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+        await vault.LockAsync();
+
+        MutateRecordInFile(record => record.Mac[0] ^= 0x01);
+
+        VaultPasswordChange outcome = await vault.ChangePasswordAsync(Password("old"), Password("new"), token);
+
+        Assert.True(outcome.HasFlag(VaultPasswordChange.TheRecordsIntegrityCodeDidNotMatch));
+
+        // Changed, not refused, and not WrongPassword: the new password is what the file opens
+        // with, and the entry the damaged record carried is still readable.
+        Assert.True(outcome.HasFlag(VaultPasswordChange.Changed));
+        Assert.Equal(VaultUnlockResult.WrongPassword, await vault.UnlockAsync(Password("old"), token));
+        Assert.Equal(VaultUnlockResult.Success, await vault.UnlockAsync(Password("new"), token));
+        Assert.Equal("sSecretOfone", (await vault.RevealAsync(reference, "test", token)).Secret);
+    }
+
+    [Fact]
+    public async Task A_change_over_an_intact_record_says_nothing_about_damage()
+    {
+        // The other half: the flag means something only if an undamaged record never carries it.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("old"), token);
+        await vault.StoreAsync(Entry("one"), token);
+
+        VaultPasswordChange outcome = await vault.ChangePasswordAsync(Password("old"), Password("new"), token);
+
+        Assert.Equal(VaultPasswordChange.Changed, outcome);
+        Assert.False(outcome.HasFlag(VaultPasswordChange.TheRecordsIntegrityCodeDidNotMatch));
+    }
+
+    [Fact]
+    public async Task Every_after_effect_of_one_change_can_be_reported_at_once()
+    {
+        // Three independent facts — the device wrap went, the kept copy is still there, and the
+        // record's integrity code did not match — and a caller has to be able to be told all of
+        // them. A result that could carry only some combinations would drop whichever it was not
+        // built to say, and one of these is evidence that exists nowhere else.
+        static Task PlainWrite(string path, byte[] contents, CancellationToken cancellationToken) =>
+            File.WriteAllBytesAsync(path, contents, cancellationToken);
+
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault(PlainWrite);
+        await vault.CreateAsync(Password("old"), token);
+        Assert.True(await vault.EnableDeviceUnlockAsync(token));
+        await vault.LockAsync();
+
+        MutateRecordInFile(record => record.Mac[0] ^= 0x01);
+        await Devices.DeleteAsync(token);
+        Directory.CreateDirectory(VaultBackupPath);
+
+        VaultPasswordChange outcome = await vault.ChangePasswordAsync(Password("old"), Password("new"), token);
+
+        Assert.Equal(
+            VaultPasswordChange.Changed |
+            VaultPasswordChange.DeviceUnlockDropped |
+            VaultPasswordChange.TheOldCopyRemains |
+            VaultPasswordChange.TheRecordsIntegrityCodeDidNotMatch,
+            outcome);
+
+        Directory.Delete(VaultBackupPath);
+    }
+
+    [Fact]
     public async Task A_password_change_leaves_every_entry_byte_for_byte_alone()
     {
         // The point of wrapping a data key rather than encrypting under the password directly. A
@@ -210,7 +288,7 @@ public class VaultPasswordTests : VaultTestHarness
 
         // Neither WrongPassword nor a throw: the change is on disk. The leftover is named by the
         // outcome instead, so a caller can say what is still lying beside the vault.
-        Assert.Equal(VaultPasswordChange.ChangedAndTheOldCopyRemains, outcome);
+        Assert.Equal(VaultPasswordChange.Changed | VaultPasswordChange.TheOldCopyRemains, outcome);
         Assert.True(Directory.Exists(VaultBackupPath));
 
         Directory.Delete(VaultBackupPath);
@@ -361,7 +439,7 @@ public class VaultPasswordTests : VaultTestHarness
         Directory.CreateDirectory(VaultBackupPath);
 
         Assert.Equal(
-            VaultPasswordChange.ChangedAndTheOldCopyRemains,
+            VaultPasswordChange.Changed | VaultPasswordChange.TheOldCopyRemains,
             await vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
 
         Directory.Delete(VaultBackupPath);
@@ -395,7 +473,9 @@ public class VaultPasswordTests : VaultTestHarness
         Directory.CreateDirectory(VaultBackupPath);
 
         Assert.Equal(
-            VaultPasswordChange.ChangedAndDeviceUnlockDroppedAndTheOldCopyRemains,
+            VaultPasswordChange.Changed |
+            VaultPasswordChange.DeviceUnlockDropped |
+            VaultPasswordChange.TheOldCopyRemains,
             await vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
 
         Directory.Delete(VaultBackupPath);

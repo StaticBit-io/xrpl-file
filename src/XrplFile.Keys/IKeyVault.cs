@@ -41,60 +41,84 @@ public enum VaultUnlockResult
 }
 
 /// <summary>
-/// How a master-password change ended. It is an enumeration rather than a <see langword="bool"/>
-/// because the change has two outcomes that both mean "the password is now the new one" and that a
-/// caller must show differently — and a <see langword="bool"/> leaves the second unsayable.
+/// How a master-password change ended: whether it happened, and what a caller has to be told
+/// about alongside it.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The values enumerate exactly the outcomes that can occur, so that the combinations which
-/// cannot — the password unchanged and yet device unlock dropped, or unchanged and yet a copy of
-/// the old record left behind — cannot be spelled. <see cref="WrongPassword"/> is first, and so
-/// the default, because a value nobody set must never read as success.
+/// It is a flag set rather than one value per outcome because the things worth saying are
+/// independent of each other, and three of them can be true at once. Named combinations were
+/// tried and do not scale: each new fact doubles the list, and the moment one combination is left
+/// unnamed it becomes unsayable — which, for the damage flag below, would mean quietly losing the
+/// only evidence there is.
 /// </para>
 /// <para>
-/// Every other failure throws (design 6.2). A damaged record, a refused disk and a device store
-/// that cannot answer are all conditions this type deliberately has no value for. What does not
-/// throw is a failure that happens <em>after</em> the new record is committed: the cleanup of the
-/// copy the durable write kept. A throw there would say "the password was not changed" about a
-/// change that is on disk, so it is a value here instead.
+/// <see cref="WrongPassword"/> is the empty set, and so the default, for two reasons: a value
+/// nobody set must never read as success, and "nothing was written" is exactly the absence of
+/// every flag here. <see cref="Changed"/> is set on every outcome where the new record reached the
+/// disk, so <c>result == WrongPassword</c> and <c>!result.HasFlag(Changed)</c> are the same
+/// question and either may be asked. The other three never appear without it.
+/// </para>
+/// <para>
+/// Every other failure throws (design 6.2). A record that cannot be read as a record, a refused
+/// disk and a device store that cannot answer are all conditions this type deliberately has no
+/// value for. What does not throw is anything discovered about a change that is already committed:
+/// a throw there would say "the password was not changed" about a change that is on disk, which
+/// sends the caller back to a password the vault no longer has.
 /// </para>
 /// </remarks>
+[Flags]
 public enum VaultPasswordChange
 {
     /// <summary>
     /// The old password does not unwrap the data key already on disk. Nothing was written, and
     /// this is the only outcome a caller may count against a failed-attempt limit.
     /// </summary>
-    WrongPassword,
-
-    /// <summary>The password was changed. Not one entry's bytes were touched.</summary>
-    Changed,
+    WrongPassword = 0,
 
     /// <summary>
-    /// The password was changed, and "remember on this device" went with it. A fresh salt makes a
-    /// fresh header, both wraps are bound to that header, and this machine could not re-seal the
-    /// device wrap under it — so the wrap was dropped rather than left unopenable. The setting is
-    /// off, only the user can turn it back on, and only a caller that was told can say so.
+    /// The password was changed and the new record is on disk. Not one entry's bytes were touched.
+    /// Every other flag here qualifies this one and never appears alone.
     /// </summary>
-    ChangedAndDeviceUnlockDropped,
+    Changed = 1,
 
     /// <summary>
-    /// The password was changed and the copy the durable write kept beside the vault could not be
-    /// removed — a file still open in an indexer or an antivirus is enough. The new password is
-    /// what the vault opens with; what is left behind at <c>&lt;vault&gt;.bak</c> is a whole record
-    /// that the old, and presumably leaked, password still opens, and which
-    /// <see cref="IKeyVault.UnlockAsync"/> would serve if the vault file itself ever went missing.
-    /// A caller has to say so and offer to remove it; retrying the change with the old password is
-    /// the one thing it must not do, because that password is no longer the vault's.
+    /// "Remember on this device" went with the change. A fresh salt makes a fresh header, both
+    /// wraps are bound to that header, and this machine could not re-seal the device wrap under it
+    /// — so the wrap was dropped rather than left unopenable. The setting is off, only the user
+    /// can turn it back on, and only a caller that was told can say so.
     /// </summary>
-    ChangedAndTheOldCopyRemains,
+    DeviceUnlockDropped = 1 << 1,
 
     /// <summary>
-    /// Both of the two above at once: the password was changed, the device wrap was dropped
-    /// because this machine could not re-seal it, and the kept copy could not be removed either.
+    /// The copy the durable write kept beside the vault could not be removed — a file still open
+    /// in an indexer or an antivirus is enough. The new password is what the vault opens with;
+    /// what is left behind at <c>&lt;vault&gt;.bak</c> is a whole record that the old, and
+    /// presumably leaked, password still opens, and which <see cref="IKeyVault.UnlockAsync"/>
+    /// would serve if the vault file itself ever went missing. A caller has to say so and offer to
+    /// remove it; retrying the change with the old password is the one thing it must not do,
+    /// because that password is no longer the vault's.
     /// </summary>
-    ChangedAndDeviceUnlockDroppedAndTheOldCopyRemains,
+    TheOldCopyRemains = 1 << 2,
+
+    /// <summary>
+    /// The record that was re-sealed did not match its own integrity code, and now it does: the
+    /// change recomputed the code over the record as it stood, damage and all.
+    /// </summary>
+    /// <remarks>
+    /// That code is the only witness there is to an entry removed from the file or to the file
+    /// rolled back to an earlier version (design 11), so overwriting it is not merely losing
+    /// evidence — it is the one act that destroys it. The change still goes ahead, because
+    /// refusing to replace a leaked password over one damaged byte is the worse failure; this flag
+    /// is what stops the evidence from disappearing silently when it does.
+    /// <para>
+    /// A caller must show it, and must not expect a second chance to: the record now matches the
+    /// code computed over it, so the next unlock reports <see cref="VaultUnlockResult.Success"/>
+    /// unless some entry's own tag also fails. This flag is the last moment at which anyone can
+    /// learn that the file did not add up.
+    /// </para>
+    /// </remarks>
+    TheRecordsIntegrityCodeDidNotMatch = 1 << 3,
 }
 
 /// <summary>
@@ -249,15 +273,25 @@ public interface IKeyVault
     /// entries directly under a password-derived key.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A password is usually changed because the old one leaked, so the change leaves nothing
     /// behind that the old one opens: the copy the durable write keeps beside the vault is removed
     /// once the new record is confirmed on disk.
+    /// </para>
+    /// <para>
+    /// This method reads the file itself and works on a vault that may well be locked, so it runs
+    /// none of the per-entry verification an unlock runs. It does check the record's own integrity
+    /// code, because resealing is what destroys a mismatch: it proceeds either way and reports
+    /// <see cref="VaultPasswordChange.TheRecordsIntegrityCodeDidNotMatch"/>, which is the last
+    /// moment at which that damage can be learned of at all.
+    /// </para>
     /// </remarks>
     /// <returns>
-    /// <see cref="VaultPasswordChange.WrongPassword"/> for exactly one condition:
-    /// <paramref name="oldPassword"/> does not unwrap the data key already on disk. Every other
-    /// failure throws <see cref="VaultException"/> — a damaged record reported as a wrong password
-    /// is how a disk fault becomes a user's fault.
+    /// <see cref="VaultPasswordChange.WrongPassword"/> — the empty flag set — for exactly one
+    /// condition: <paramref name="oldPassword"/> does not unwrap the data key already on disk. Any
+    /// other result carries <see cref="VaultPasswordChange.Changed"/> and whichever of the three
+    /// qualifying flags apply. Every other failure throws <see cref="VaultException"/> — a damaged
+    /// record reported as a wrong password is how a disk fault becomes a user's fault.
     /// </returns>
     Task<VaultPasswordChange> ChangePasswordAsync(
         ReadOnlyMemory<byte> oldPassword, ReadOnlyMemory<byte> newPassword, CancellationToken cancellationToken);

@@ -800,6 +800,17 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                     return VaultPasswordChange.WrongPassword;
                 }
 
+                // Asked here, before a single field moves, because it is a question about the
+                // record as the file holds it — and because the write below is what ends the only
+                // chance to ask it. Resealing recomputes the code over whatever the record now
+                // says, so a mismatch that is not read out now is gone for good, and with it the
+                // only witness to an entry removed from the file or to a rollback (11).
+                //
+                // It does not refuse the change. A user whose password has leaked needs the new
+                // password more than the evidence, and refusing over one damaged byte is the worse
+                // failure of the two. Telling them is not the same as refusing them.
+                bool integrityFailed = !MacMatches(record, dataKey);
+
                 // Not a rewrite of a single entry: the data key above is exactly what every entry
                 // is already encrypted under, and it does not change here. Only its wrapping does.
                 record.Salt = _random(SaltLength);
@@ -868,13 +879,27 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 bool deviceUnlockDropped = deviceOutcome is DeviceRewrap.ThisMachineHoldsNoSecret
                     or DeviceRewrap.TheSecretIsAnotherVaults;
 
-                return (deviceUnlockDropped, theOldCopyRemains) switch
+                // Assembled rather than chosen from a list of named combinations: the three facts
+                // are independent, and a list would have to name eight cases to leave none of them
+                // unsayable. Changed is set here and nowhere else, so it means exactly "the record
+                // below reached the disk".
+                VaultPasswordChange outcome = VaultPasswordChange.Changed;
+                if (deviceUnlockDropped)
                 {
-                    (false, false) => VaultPasswordChange.Changed,
-                    (false, true) => VaultPasswordChange.ChangedAndTheOldCopyRemains,
-                    (true, false) => VaultPasswordChange.ChangedAndDeviceUnlockDropped,
-                    (true, true) => VaultPasswordChange.ChangedAndDeviceUnlockDroppedAndTheOldCopyRemains,
-                };
+                    outcome |= VaultPasswordChange.DeviceUnlockDropped;
+                }
+
+                if (theOldCopyRemains)
+                {
+                    outcome |= VaultPasswordChange.TheOldCopyRemains;
+                }
+
+                if (integrityFailed)
+                {
+                    outcome |= VaultPasswordChange.TheRecordsIntegrityCodeDidNotMatch;
+                }
+
+                return outcome;
             }
             finally
             {

@@ -309,21 +309,32 @@ buffer for a confirmation comparison or a retry, and a callee that wipes its arg
 password is wrong. Every other failure throws. A damaged record reported as a wrong password is how
 a disk fault becomes a user's fault.
 
-The return is an enumeration rather than a `bool` because a change has a second outcome a caller
-must be able to show: a fresh salt makes a fresh header, both key wraps are bound to that header
-(4.2), and a machine that cannot re-seal the device wrap under the new one drops it rather than
-leave a wrap nothing will open. `ChangedAndDeviceUnlockDropped` says so; a `bool` whose `false`
-already means "wrong password" leaves it unsayable, and the user finds out at the next launch.
+The return is a `[Flags]` enumeration rather than a `bool` because a change has facts to report
+alongside "it happened", and they are independent of each other. `Changed` is set whenever the new
+record reached the disk; `WrongPassword` is the empty set, so a value nobody set cannot read as
+success and "nothing was written" is the absence of every flag.
 
-There is a third outcome for the same reason, and it is why "every other failure throws" stops
-where it does. Removing the kept copy (below) happens **after** the new record is committed, and
-on Windows an indexer or an antivirus holding `vault.json.bak` open is enough to refuse the
-delete. Thrown, that failure says "the password was not changed" about a change that is already on
-disk: the caller retries with the old password, is answered `WrongPassword`, and the copy that old
-password still opens is left there with nobody told. So it is reported instead —
-`ChangedAndTheOldCopyRemains`, and `ChangedAndDeviceUnlockDroppedAndTheOldCopyRemains` when both
-happened. The values enumerate the outcomes that can occur so that the ones that cannot — anything
-alongside `WrongPassword` — stay unspellable.
+`DeviceUnlockDropped` is the first of the three qualifiers: a fresh salt makes a fresh header, both
+key wraps are bound to that header (4.2), and a machine that cannot re-seal the device wrap under
+the new one drops it rather than leave a wrap nothing will open. A `bool` whose `false` already
+means "wrong password" leaves that unsayable, and the user finds out at the next launch.
+
+`TheOldCopyRemains` is the second, and it is why "every other failure throws" stops where it does.
+Removing the kept copy (below) happens **after** the new record is committed, and on Windows an
+indexer or an antivirus holding `vault.json.bak` open is enough to refuse the delete. Thrown, that
+failure says "the password was not changed" about a change that is already on disk: the caller
+retries with the old password, is answered `WrongPassword`, and the copy that old password still
+opens is left there with nobody told.
+
+`TheRecordsIntegrityCodeDidNotMatch` is the third, and the reason the shape is flags rather than one
+name per outcome. Resealing recomputes the `mac` over the record as it stands, which destroys a
+mismatch — the only witness there is to an entry removed from the file or to a rollback (11). The
+change still goes ahead, for the reason 11 gives, but silence is not part of that trade: the flag
+carries the evidence to a person instead. With three independent facts, a list of named
+combinations would need eight entries, and the moment one is left unnamed it becomes unsayable —
+which for this flag means losing evidence that exists nowhere else. Flags make every combination
+expressible by construction, and the ones that cannot occur — anything alongside `WrongPassword` —
+are ruled out by `Changed` being set in exactly one place.
 
 `AcknowledgeDamageAsync` says that the damage the last unlock reported has been seen. It exists
 for one kind: a record whose `mac` does not match its own contents (5.1). Every write recomputes
@@ -492,13 +503,17 @@ Recorded because they are real, not because they are acceptable everywhere.
   over the vault file can restore a previous password and resurrect deleted entries. Closing this
   needs a counter somewhere the rollback cannot reach, which on a single-file design is the file
   itself. The attack's precondition is write access to the user's own files.
-- **A password change still reseals over a mismatched `mac`.** `AcknowledgeDamageAsync` guards
-  every write that goes through the vault's own persist path, but `ChangePasswordAsync` reads the
-  file itself, works on a locked vault, and never runs the verification an unlock runs — so it has
-  no damage to refuse over. It is left that way deliberately: the alternative is refusing to change
-  a leaked password on a vault with one bad byte in it, and a user in that position needs the
-  change more than the evidence. A caller that cares should unlock first, which is where the
-  damage is reported.
+- **A password change reseals over a mismatched `mac`, and says so.** `AcknowledgeDamageAsync`
+  guards every write that goes through the vault's own persist path, but `ChangePasswordAsync`
+  reads the file itself and works on a vault that may be locked, so it runs none of the per-entry
+  verification an unlock runs. Refusing the change was never the answer — the alternative is
+  refusing to replace a leaked password on a vault with one bad byte in it, and a user in that
+  position needs the change more than the evidence — but neither is silence. The change goes
+  ahead, and the result carries `TheRecordsIntegrityCodeDidNotMatch`. That is the whole of the
+  remaining limitation: resealing recomputes the code over the record as it stands, so the
+  mismatch is gone afterwards and the next unlock reports `Success`. The flag is the last moment
+  at which anyone can learn the file did not add up, which is why the result says it rather than
+  leaving it to a caller that might have unlocked first.
 - **Canonical form without field lengths.** Separators join binary fields without declaring their
   lengths, so distinct field sets producing identical canonical bytes exist in principle. The
   application cannot generate such a pair — references are GUIDs of fixed shape. Recorded as debt
@@ -522,6 +537,7 @@ Recorded because they are real, not because they are acceptable everywhere.
 | Concurrency | Lock during an in-flight store: the gate serialises and no half-wiped key reaches a record |
 | Password change | Entries byte-identical before and after; the device wrap still opens afterwards |
 | A committed change whose cleanup fails | The kept copy cannot be deleted: the outcome says the password changed and the copy remains, and the new password opens the vault |
+| A change over a damaged record | The `mac` does not match: the change happens and the outcome says the code did not match, alongside every other flag that applies |
 | A cancelled write | Cancel the token mid-write: the cache holds exactly what the file holds, on export as on store |
 | Someone else's device secret | Disable, and change the password, on a machine holding a secret this vault's wrap does not open: the secret is still there afterwards |
 | A tampered KDF cost | Zero memory, and two terabytes of it: `VaultCorrupt`, with nothing derived |

@@ -280,7 +280,7 @@ public class VaultDeviceUnlockTests : VaultTestHarness
         int deletionsBefore = Devices.Deletions;
 
         Assert.Equal(
-            VaultPasswordChange.ChangedAndDeviceUnlockDropped,
+            VaultPasswordChange.Changed | VaultPasswordChange.DeviceUnlockDropped,
             await vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
 
         Assert.Null(ReadRecordFromFile().DeviceDek);
@@ -313,7 +313,7 @@ public class VaultDeviceUnlockTests : VaultTestHarness
         await Devices.CreateAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(
-            VaultPasswordChange.ChangedAndDeviceUnlockDropped,
+            VaultPasswordChange.Changed | VaultPasswordChange.DeviceUnlockDropped,
             await vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
 
         Assert.Null(ReadRecordFromFile().DeviceDek);
@@ -356,7 +356,7 @@ public class VaultDeviceUnlockTests : VaultTestHarness
         int deletionsBefore = Devices.Deletions;
 
         Assert.Equal(
-            VaultPasswordChange.ChangedAndDeviceUnlockDropped,
+            VaultPasswordChange.Changed | VaultPasswordChange.DeviceUnlockDropped,
             await vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
 
         Assert.Equal(deletionsBefore, Devices.Deletions);
