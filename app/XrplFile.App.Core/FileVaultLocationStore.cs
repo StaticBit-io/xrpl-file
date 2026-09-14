@@ -80,4 +80,15 @@ public sealed class FileVaultLocationStore : IVaultLocationStore
 
         File.WriteAllText(_settingPath, full);
     }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Lets a genuine <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/>
+    /// propagate, the same as <see cref="WriteChosenPath"/> — this is the write side of the same
+    /// setting, and a caller that asked to forget a path deserves to know when that did not actually
+    /// happen, rather than being told "forgotten" over a setting file still holding the old choice.
+    /// <see cref="File.Delete(string)"/> is already a no-op when nothing is there, which is exactly
+    /// "nothing was chosen" already answering correctly with no special case here.
+    /// </remarks>
+    public void ClearChosenPath() => File.Delete(_settingPath);
 }

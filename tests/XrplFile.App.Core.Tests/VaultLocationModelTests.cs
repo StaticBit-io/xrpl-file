@@ -28,6 +28,17 @@ public class VaultLocationModelTests
         Assert.False(model.IsDefault);
     }
 
+    // Windows paths are case-insensitive; GetFullPath does not normalise case, so the comparison
+    // itself must be case-insensitive or the default path typed with different casing reads as a
+    // chosen one. See VaultLocation.IsDefaultPath's own remarks.
+    [Fact]
+    public void IsDefault_is_true_for_the_default_path_typed_with_different_casing()
+    {
+        VaultLocationModel model = new(new FakeVaultLocationStore(null), VaultLocation.DefaultPath.ToUpperInvariant());
+
+        Assert.True(model.IsDefault);
+    }
+
     [Fact]
     public void ChoosePath_writes_through_to_the_store_and_changes_nothing_about_the_current_path()
     {
@@ -40,5 +51,18 @@ public class VaultLocationModelTests
         // Unchanged: a running process never repoints itself (see the model's own remarks).
         Assert.Equal(VaultLocation.DefaultPath, model.CurrentPath);
         Assert.True(model.IsDefault);
+    }
+
+    [Fact]
+    public void ForgetChosenPath_clears_the_store_and_changes_nothing_about_the_current_path()
+    {
+        FakeVaultLocationStore store = new("C:\\elsewhere\\vault.json");
+        VaultLocationModel model = new(store, "C:\\elsewhere\\vault.json");
+
+        model.ForgetChosenPath();
+
+        Assert.True(store.Cleared);
+        // Unchanged: a running process never repoints itself, same as ChoosePath.
+        Assert.Equal("C:\\elsewhere\\vault.json", model.CurrentPath);
     }
 }

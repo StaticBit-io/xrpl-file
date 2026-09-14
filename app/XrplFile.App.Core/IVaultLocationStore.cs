@@ -24,4 +24,13 @@ public interface IVaultLocationStore
     /// <see cref="VaultLocationModel"/> for why a running process never repoints itself.
     /// </summary>
     void WriteChosenPath(string path);
+
+    /// <summary>
+    /// Forgets whatever path <see cref="WriteChosenPath"/> last recorded. <see cref="ReadChosenPath"/>
+    /// then answers <see langword="null"/> again, the same as before anything was ever chosen, and
+    /// <see cref="VaultLocation.Resolve"/> falls back to <see cref="VaultLocation.DefaultPath"/> from
+    /// the next start onward. A no-op when nothing was chosen. Never touches a vault file — only the
+    /// setting that names one.
+    /// </summary>
+    void ClearChosenPath();
 }

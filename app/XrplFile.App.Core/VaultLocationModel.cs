@@ -62,13 +62,12 @@ public sealed class VaultLocationModel(IVaultLocationStore store, string current
 
     /// <summary>
     /// Whether the vault open right now is the one at <see cref="VaultLocation.DefaultPath"/>, as
-    /// opposed to one chosen with <see cref="ChoosePath"/>. Compared ordinally: both sides are
-    /// already normalised full paths (<see cref="VaultLocation.Resolve"/>,
-    /// <see cref="VaultLocation.DefaultPath"/>), so no further comparison semantics are needed —
-    /// see those members' own remarks on why the vault's device secret depends on that
-    /// normalisation being exact.
+    /// opposed to one chosen with <see cref="ChoosePath"/>. See <see cref="VaultLocation.IsDefaultPath"/>
+    /// for the comparison itself — case-insensitive, because this is a Windows path, while the
+    /// string every path here is actually keyed by (a device secret, a stored setting) stays exactly
+    /// as <see cref="Path.GetFullPath(string)"/> produced it, case included.
     /// </summary>
-    public bool IsDefault { get; } = string.Equals(currentPath, VaultLocation.DefaultPath, StringComparison.Ordinal);
+    public bool IsDefault { get; } = VaultLocation.IsDefaultPath(currentPath);
 
     /// <summary>
     /// Records <paramref name="path"/> as the vault file to open from the next start onward.
@@ -76,4 +75,19 @@ public sealed class VaultLocationModel(IVaultLocationStore store, string current
     /// a running process never repoints itself.
     /// </summary>
     public void ChoosePath(string path) => store.WriteChosenPath(path);
+
+    /// <summary>
+    /// Forgets whatever path <see cref="ChoosePath"/> last recorded, so <see cref="VaultLocation.Resolve"/>
+    /// falls back to <see cref="VaultLocation.DefaultPath"/> from the next start onward — the
+    /// deliberate "start fresh" a person can reach for when the vault they last chose is not
+    /// answering (<c>VaultUnreachable.razor</c>).
+    /// </summary>
+    /// <remarks>
+    /// Never touches the vault file itself, at the remembered path or anywhere else — forgetting
+    /// where this application last looked is not a claim that the file stopped existing there, only
+    /// that this application will stop looking for it on its own. Nothing about the vault this
+    /// process already has open changes either, for the same reason <see cref="ChoosePath"/> does
+    /// not: a running process never repoints itself.
+    /// </remarks>
+    public void ForgetChosenPath() => store.ClearChosenPath();
 }

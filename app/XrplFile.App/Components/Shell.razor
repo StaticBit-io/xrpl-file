@@ -12,6 +12,10 @@
             <CreateVault OnChanged="StateHasChanged" />
             break;
 
+        case UnlockStage.VaultUnreachable:
+            <VaultUnreachable OnChanged="StateHasChanged" />
+            break;
+
         case UnlockStage.Locked:
             <Unlock OnChanged="StateHasChanged" />
             break;

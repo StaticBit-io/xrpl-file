@@ -5,8 +5,21 @@ namespace XrplFile.App.Core;
 /// <summary>Where the unlock screen stands (design 6).</summary>
 public enum UnlockStage
 {
-    /// <summary>No vault file exists at this location yet. The screen offers to create one.</summary>
+    /// <summary>
+    /// No vault file exists at the default location, and nobody has ever pointed this application
+    /// at one somewhere else. An ordinary first run: the screen offers to create one.
+    /// </summary>
     NoVault,
+
+    /// <summary>
+    /// A vault file does not answer at a path somebody deliberately chose
+    /// (<see cref="VaultLocationModel.ChoosePath"/>) — not the default location nobody has ever
+    /// repointed. This is not a first run: a vault was chosen here before, and creating a new one at
+    /// this path would not recover it, only bury it under a second, different vault. See
+    /// <see cref="UnlockModel.RefreshAsync"/>'s own remarks for why this is told apart from
+    /// <see cref="NoVault"/> at all.
+    /// </summary>
+    VaultUnreachable,
 
     /// <summary>A vault exists and is not open.</summary>
     Locked,
@@ -20,7 +33,20 @@ public enum UnlockStage
 /// what it refuses, and what it says. Every branch the screen can take lives here, reachable from
 /// a test with no operating system in the loop (design E2).
 /// </summary>
-public sealed class UnlockModel(IKeyVault vault)
+/// <param name="vault">The one vault this process ever constructs (<c>MauiProgram.RegisterVault</c>).</param>
+/// <param name="vaultPathIsDefault">
+/// Whether <paramref name="vault"/> is opening from <see cref="VaultLocation.DefaultPath"/> rather
+/// than a path somebody chose with <see cref="VaultLocationModel.ChoosePath"/>
+/// (<see cref="VaultLocation.IsDefaultPath"/>, computed once at process start and handed in the
+/// same way <c>MauiProgram.RegisterVault</c> already hands other models the resolved
+/// <c>vaultPath</c> rather than letting each recompute it). Defaults to <see langword="true"/> so
+/// every existing caller — every test in this project included — keeps meaning what it always
+/// meant: nothing before this review's fix ever distinguished a chosen path from the default one,
+/// so "the default" is the correct backward-compatible default for this parameter, not an arbitrary
+/// choice. See <see cref="UnlockStage.VaultUnreachable"/> and <see cref="RefreshAsync"/> for what
+/// this one bit changes.
+/// </param>
+public sealed class UnlockModel(IKeyVault vault, bool vaultPathIsDefault = true)
 {
     /// <summary>Where the screen stands right now. Meaningful only after <see cref="RefreshAsync"/> has run at least once.</summary>
     public UnlockStage Stage { get; private set; } = UnlockStage.NoVault;
@@ -55,6 +81,18 @@ public sealed class UnlockModel(IKeyVault vault)
     /// is not already open — whether the record carries a device wrap.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>An absent file is not always "nothing to open yet".</b> When <c>vaultPathIsDefault</c> is
+    /// <see langword="false"/> — this process is opening a vault somebody deliberately pointed it at
+    /// (<see cref="VaultLocationModel.ChoosePath"/>) — an absent file sets
+    /// <see cref="UnlockStage.VaultUnreachable"/>, never <see cref="UnlockStage.NoVault"/>. The two
+    /// look identical to <see cref="IKeyVault.ExistsAsync"/>: both are "nothing answered here right
+    /// now." They are not identical to the person: a memory stick unplugged or a synced folder that
+    /// has not caught up is not a fresh install, and a screen that offered to create a vault there
+    /// anyway would write a second, different vault at the remembered path the moment the real one
+    /// reappeared behind it — the real keys left at a location this application no longer points at,
+    /// under an application that now looks correct and holds nothing.
+    /// </para>
     /// <para>
     /// <b>This never opens the vault to answer the question.</b> An earlier version of this method
     /// answered "would a device unlock work right now" by actually calling
@@ -93,7 +131,13 @@ public sealed class UnlockModel(IKeyVault vault)
         bool exists = await vault.ExistsAsync(cancellationToken).ConfigureAwait(false);
         if (!exists)
         {
-            Stage = UnlockStage.NoVault;
+            // The whole distinction this review found missing: a path nobody ever repointed away
+            // from the default is an ordinary first run (NoVault), but a path somebody deliberately
+            // chose (VaultLocationModel.ChoosePath) answering "nothing here" is not -- it means the
+            // medium is not reachable right now, not that there is nothing to open. Offering to
+            // create a vault in that case would write a second, different vault at the remembered
+            // path, leaving the real keys at a location this application no longer points at.
+            Stage = vaultPathIsDefault ? UnlockStage.NoVault : UnlockStage.VaultUnreachable;
             DeviceUnlockOffered = false;
             return;
         }

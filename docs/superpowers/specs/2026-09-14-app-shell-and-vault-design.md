@@ -59,7 +59,11 @@ is the model behind the screen, and `Settings.razor` is honest about the restart
 offering a control that pretends to repoint a vault this process already has open. The vault's own
 device unlock is unaffected either way: it is keyed by the exact path a vault was opened from
 (4.2), so a vault opened from elsewhere has none of its own and asks for the master password the
-first time — the screen says so.
+first time — the screen says so. `VaultLocation.IsDefaultPath`, the same comparison
+`VaultLocationModel.IsDefault` uses to decide whether `Settings.razor` reads "the vault file lives
+at" the default location or somewhere chosen, is also how `MauiProgram.RegisterVault` tells
+`UnlockModel` which is true for this run — see section 6's "A remembered vault that does not answer
+is not a first run" for what that one bit changes.
 
 ## 3. Projects
 
@@ -265,6 +269,22 @@ is the key list and settings. No placeholder entries for C2 to C4 — the menu g
 plainly: there is no recovery phrase, and a forgotten password loses every key that was not
 exported. Not in small print under the field — it is the condition on which someone agrees to use
 this.
+
+**A remembered vault that does not answer is not a first run.** `IKeyVault.ExistsAsync` returning
+`false` means one of two different things, and `UnlockModel.RefreshAsync` tells them apart:
+nothing has ever been chosen and the default location is genuinely empty (`UnlockStage.NoVault`,
+the screen above), or somebody deliberately pointed the application at a vault kept elsewhere
+(`VaultLocationModel.ChoosePath`) and that path is not answering right now
+(`UnlockStage.VaultUnreachable`). They look identical to a bare existence check — a memory stick
+unplugged or a synced folder that has not caught up reads exactly like a fresh install — but they
+are not identical to the person: offering to create a vault over the second case would write a
+second, different vault at the remembered path, leaving the real keys wherever the medium actually
+is. `VaultUnreachable.razor` offers retrying (re-runs the same refresh, no file touched), choosing
+a different vault (the same `IFilePickerService.PickExistingFilePathAsync` → `VaultLocationModel.ChoosePath`
+route `Settings.razor` uses), or deliberately forgetting the remembered path
+(`VaultLocationModel.ForgetChosenPath`) to fall back to the default location on the next start —
+never a button that creates a vault at the unreachable path. Forgetting never touches the vault
+file itself, at the remembered path or anywhere else, only the one-line setting that names it.
 
 **The key list.** Label, kind, network, address. For `Generated` entries, whether they have ever
 been exported, prominently. That flag exists so the application can show which throwaway accounts

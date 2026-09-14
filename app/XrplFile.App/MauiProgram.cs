@@ -157,7 +157,9 @@ public static class MauiProgram
             IdleTimeout,
             provider.GetRequiredService<TimeProvider>()));
 
-        services.AddSingleton<UnlockModel>();
+        services.AddSingleton(provider => new UnlockModel(
+            provider.GetRequiredService<IKeyVault>(),
+            VaultLocation.IsDefaultPath(vaultPath)));
         services.AddSingleton<VaultListModel>();
         services.AddSingleton<AddKeyModel>();
         services.AddSingleton<ExportModel>();

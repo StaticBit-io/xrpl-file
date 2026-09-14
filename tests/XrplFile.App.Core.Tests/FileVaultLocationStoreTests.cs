@@ -57,6 +57,28 @@ public class FileVaultLocationStoreTests : IDisposable
     }
 
     [Fact]
+    public void ClearChosenPath_removes_a_previously_written_setting()
+    {
+        FileVaultLocationStore store = new(SettingPath);
+        store.WriteChosenPath(Path.Combine(_directory, "vault.json"));
+
+        store.ClearChosenPath();
+
+        Assert.Null(store.ReadChosenPath());
+        Assert.False(File.Exists(SettingPath));
+    }
+
+    [Fact]
+    public void ClearChosenPath_is_a_no_op_when_nothing_was_ever_chosen()
+    {
+        FileVaultLocationStore store = new(SettingPath);
+
+        store.ClearChosenPath();
+
+        Assert.Null(store.ReadChosenPath());
+    }
+
+    [Fact]
     public void The_default_constructor_places_the_setting_beside_the_default_vault()
     {
         FileVaultLocationStore store = new();

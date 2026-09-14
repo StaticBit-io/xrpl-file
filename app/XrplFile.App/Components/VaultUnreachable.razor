@@ -1,0 +1,138 @@
+@implements IDisposable
+@inject UnlockModel Model
+@inject VaultLocationModel LocationModel
+@inject IFilePickerService FilePicker
+
+@* UnlockStage.VaultUnreachable (design 6 addendum, the review's Major finding): a path somebody
+   deliberately chose with VaultLocationModel.ChoosePath answered "nothing here" on this refresh.
+   That is not CreateVault.razor's "first time this application has run here" -- a vault was chosen
+   at this path before, and this screen must never let a press here create a second, different
+   vault at that same remembered path. So, unlike every other stage, there is no "create a vault"
+   button anywhere on it: the three things offered are Retry (re-runs Model.RefreshAsync -- no
+   file I/O beyond the same IKeyVault.ExistsAsync check a normal refresh already does), choosing a
+   different vault (the same IFilePickerService.PickExistingFilePathAsync -> VaultLocationModel.ChoosePath
+   route Settings.razor already uses), and forgetting the remembered path
+   (VaultLocationModel.ForgetChosenPath) to fall back to the default location. Choosing or
+   forgetting only ever writes the one-line location setting -- see VaultLocationModel's and
+   IVaultLocationStore's own remarks -- and both need a restart to take effect, the same as
+   Settings.razor's own "Choose a vault file..." already says, because IKeyVault is a process-wide
+   singleton built once at startup (MauiProgram.RegisterVault) that nothing here can repoint while
+   it runs. *@
+
+<div class="container py-4" style="max-width: 480px;">
+    <h1>Vault not found here</h1>
+
+    <p>
+        This application was pointed at a vault kept somewhere else, and nothing answered at that
+        location just now. <strong>This is not a fresh install</strong> &mdash; a vault was chosen
+        here before, and it is not offered to create a new one, because that would write a second,
+        different vault at the remembered location and leave the real one wherever it actually is.
+    </p>
+
+    <p>
+        This usually means the medium holding it is not reachable right now &mdash; a memory stick
+        not plugged in, a synced folder that has not caught up yet. Reconnect it and try again.
+    </p>
+
+    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="RetryAsync">
+        Try again
+    </button>
+    <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="ChooseDifferentAsync">
+        Choose a different vault&hellip;
+    </button>
+
+    @if (_actionMessage is { } message)
+    {
+        <div class="alert alert-info mt-3">@message</div>
+    }
+
+    <hr class="my-4" />
+
+    <h2 class="h5">Start fresh instead</h2>
+    <p>
+        Forgetting this location does not touch the vault file itself &mdash; it only stops this
+        application from looking for it here on its own. If the medium holding it reconnects later,
+        point the application at it again from Settings. After forgetting, restarting opens (or
+        offers to create) the vault at the default location instead.
+    </p>
+    <button type="button" class="btn btn-outline-danger" disabled="@_busy" @onclick="Forget">
+        Forget this location and start fresh
+    </button>
+</div>
+
+@code {
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private readonly CancellationTokenSource _cts = new();
+    private bool _busy;
+    private string? _actionMessage;
+
+    private async Task RetryAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _actionMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            await Model.RefreshAsync(_cts.Token);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task ChooseDifferentAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _actionMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            string? path = await FilePicker.PickExistingFilePathAsync(_cts.Token);
+            if (path is null)
+            {
+                return;
+            }
+
+            LocationModel.ChoosePath(path);
+            _actionMessage = "Saved. Restart the application to open the vault at the new location.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Forget()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        LocationModel.ForgetChosenPath();
+        _actionMessage = "Forgotten. Restart the application to start fresh at the default location.";
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

@@ -60,4 +60,22 @@ public static class VaultLocation
         string? chosen = store.ReadChosenPath();
         return chosen is null ? DefaultPath : Path.GetFullPath(chosen);
     }
+
+    /// <summary>
+    /// Whether <paramref name="path"/>, once normalised the same way <see cref="DefaultPath"/> and
+    /// <see cref="Resolve"/> already are, is <see cref="DefaultPath"/> itself.
+    /// </summary>
+    /// <remarks>
+    /// Compared with <see cref="StringComparison.OrdinalIgnoreCase"/>, not
+    /// <see cref="StringComparison.Ordinal"/>: <see cref="Path.GetFullPath(string)"/> resolves
+    /// <c>.</c>/<c>..</c> segments and drive-relative paths but does not normalise letter case, and
+    /// this application's one target is Windows, whose filesystem treats a path differing only in
+    /// case as the same file. An ordinal comparison here would tell "the default location, typed
+    /// with different casing" apart from itself. This is a comparison only — it does not change
+    /// what gets written anywhere; the string a caller keys a device secret or a store entry by
+    /// (<see cref="DefaultPath"/>, <see cref="Resolve"/>'s own return value) stays exactly as
+    /// <see cref="Path.GetFullPath(string)"/> produced it, case included.
+    /// </remarks>
+    public static bool IsDefaultPath(string path) =>
+        string.Equals(Path.GetFullPath(path), DefaultPath, StringComparison.OrdinalIgnoreCase);
 }
