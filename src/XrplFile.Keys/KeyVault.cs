@@ -652,12 +652,29 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
 
     /// <inheritdoc/>
     /// <remarks>
+    /// <para>
     /// Reveals under the same gate every other public method uses, so a concurrent idle-lock cannot
-    /// land between the reveal and the seal (see the type's remarks on the gate). Sealing happens
-    /// before the record is touched at all: a throw out of <see cref="BackupContainer.Pack"/>
-    /// leaves <c>Exported</c> exactly as it was, satisfying the same "not before the container
-    /// exists" rule <see cref="UpdateAsync"/> would otherwise let a caller violate by calling it
-    /// ahead of a <see cref="BackupContainer.Pack"/> that never returns.
+    /// land between the reveal and the seal (see the type's remarks on the gate).
+    /// </para>
+    /// <para>
+    /// <b>Nothing is written, and <c>Exported</c> is not set here.</b> This method used to set it
+    /// the instant the container was sealed in memory, which reads as an improvement on setting it
+    /// beforehand and is still wrong: a container that exists only in this process's heap is not a
+    /// backup. The application that calls this then had to hand the bytes to a file dialog the
+    /// person could cancel, and to a disk that could refuse them — and by then the entry already
+    /// claimed it had been exported, so the key list stopped warning that the key exists only in
+    /// this vault. <c>Exported</c> has exactly one job, which is to say that the secret survives
+    /// somewhere other than here, and this class cannot see far enough to know that. Whoever put
+    /// the bytes somewhere records it, through <see cref="UpdateAsync"/> with
+    /// <see cref="VaultEntryEdit.Exported"/> — see <c>ExportModel.RecordSavedAsync</c>, which is
+    /// the only caller that does.
+    /// </para>
+    /// <para>
+    /// Being read-only makes every failure path that used to live here unreachable: there is no
+    /// write to roll back, no cached entry left claiming an export the file does not record, and a
+    /// disk refusing writes cannot stop an export at all — which is the right direction for the one
+    /// guaranteed way back from a forgotten master password (design D10) to fail in.
+    /// </para>
     /// </remarks>
     public async Task<byte[]> ExportAsync(
         string reference, ReadOnlyMemory<byte> containerPassword, CancellationToken cancellationToken)
@@ -673,48 +690,8 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
             {
                 VaultEntry entry = ReadEntryOrThrow(dataKey, reference, FindEntry(record, reference));
 
-                // Sealed before a single byte of the record is edited. If this throws, nothing
-                // below ever runs, so the entry cannot end up claiming an export that never
-                // happened — the one lie Exported cannot afford.
                 byte[] container = BackupContainer.PackWithPassword(
                     ToBackupPayload(entry), containerPassword.Span, Pbkdf2Kdf.DefaultIterations);
-
-                byte[] previousSealedEntry = record.Entries[reference];
-                VaultEntryInfo exported = entry.Info with { Exported = true };
-                record.Entries[reference] = SealEntry(dataKey, reference, entry with { Info = exported });
-
-                try
-                {
-                    await PersistAsync(record, dataKey, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    // The container above is already sealed and correct — the only thing that
-                    // failed is recording that it happened, so the cache is rolled back to agree
-                    // with the file (Exported stays false, matching what is actually on disk).
-                    // That rollback happens whatever the failure was, exactly as it does in
-                    // StoreAsync, UpdateAsync and DeleteAsync: a cache left claiming an export the
-                    // file does not record is committed by the next write of any kind, and the
-                    // vault then permanently says a key was backed up that never left it — which
-                    // silences the very warning a design with no recovery phrase depends on.
-                    record.Entries[reference] = previousSealedEntry;
-
-                    // A cancellation is then let through unchanged (this class never swallows one,
-                    // see EnableDeviceUnlockAsync for the same rule): the caller asked to stop, and
-                    // never receives the container, so nothing was exported anywhere.
-                    if (ex is OperationCanceledException)
-                    {
-                        throw;
-                    }
-
-                    // Every other failure here is storage refusing the write, and the container is
-                    // handed back anyway rather than discarding the export's actual deliverable. A
-                    // caller who reads Exported afterwards is nagged to export this key again,
-                    // which is the safe direction to be wrong in; throwing here instead would make
-                    // the one guaranteed recovery path unreliable exactly when storage already is.
-                    EnsureStillOpen(generation);
-                    return container;
-                }
 
                 EnsureStillOpen(generation);
                 return container;

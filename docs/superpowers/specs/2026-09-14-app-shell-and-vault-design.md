@@ -303,9 +303,28 @@ export — not a menu item elsewhere. Part A requires a throwaway's key to be in
 its address is shown, and B makes export the only way back; the moment a key is born is the one
 moment the user is certainly looking.
 
-**Export and reveal** are two separate acts. Export writes a container with its own password
-through `KeyVault.ExportAsync`, which also sets the flag. Reveal shows the seed on screen, under
-section 8's rules.
+**Export and reveal** are two separate acts. Export seals a container with its own password
+through `KeyVault.ExportAsync`. Reveal shows the seed on screen, under section 8's rules.
+
+**Correction: the exported flag is set by the save, not by the seal.** This paragraph originally
+said `KeyVault.ExportAsync` "also sets the flag", and that is what shipped until the final review
+of this branch. It is wrong, because `Exported` means the secret survives somewhere other than
+this vault and a sealed container means only that bytes exist in this process. Between the seal
+and the file there is a save dialog a person can cancel and a disk that can refuse the write, and
+an entry marked across that gap silenced the key list's own "exists only here" badge — and the
+warning before deleting the key — for a key that no file held. `ExportAsync` now writes nothing at
+all; `ExportModel.RecordSavedAsync` sets the flag through `UpdateAsync`, and only after
+`IFilePickerService.SaveFileAsync` has come back `true`. A QR code shown on screen does not set it
+either: nobody can be sure a displayed code was scanned, and being sure is this flag's only job.
+
+**The backup password has a minimum, and so does the master password.** Nothing refused an empty
+one before — not the component, not `ExportModel`, not `KeyVault.ExportAsync`, not
+`BackupContainer.PackWithPassword` — so a container could be sealed under PBKDF2 of the empty
+string and a vault created under nothing at all. `PasswordPolicy` sets the floor at eight
+characters (NIST SP 800-63B's own floor for a subscriber-chosen memorized secret, with no
+composition rule alongside it), counted as characters rather than bytes, and it is applied
+wherever a password is *chosen* — creating a vault, changing the master password, sealing a
+container — and never where one is merely entered, so a vault made before the rule still opens.
 
 **Changing the password.** `VaultPasswordChange` is a flag set, and the screen reads all of it:
 the password changed; device unlock was dropped with it; the old copy of the file survived and

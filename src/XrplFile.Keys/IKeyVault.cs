@@ -246,30 +246,32 @@ public interface IKeyVault
     Task<VaultEntry> RevealAsync(string reference, string reason, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Reveals one entry, seals it into a portable <see cref="BackupContainer"/> under
-    /// <paramref name="containerPassword"/>, and marks the entry <c>Exported</c> — the guaranteed
-    /// path design section 8 and D10 require: per-key export is the only way back from a forgotten
-    /// master password, so nothing may reveal a secret for export without also recording that it
-    /// happened. <see cref="BackupContainer.Pack"/> and <see cref="BackupContainer.TryUnpack"/> remain
-    /// usable on their own for a caller that already holds an entry from <see cref="RevealAsync"/>;
-    /// this method exists so that the common case — export, then mark — cannot be split into two
-    /// calls a caller might forget the second half of.
+    /// Reveals one entry and seals it into a portable <see cref="BackupContainer"/> under
+    /// <paramref name="containerPassword"/> — the guaranteed path design section 8 and D10
+    /// require, since per-key export is the only way back from a forgotten master password.
+    /// <see cref="BackupContainer.Pack"/> and <see cref="BackupContainer.TryUnpack"/> remain usable
+    /// on their own for a caller that already holds an entry from <see cref="RevealAsync"/>; this
+    /// method exists so that revealing a secret in order to export it needs no second call that
+    /// could hand the same secret out for anything else.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>Exported</c> is set only after the container has been sealed: if
-    /// <see cref="BackupContainer.Pack"/> throws, the entry is untouched — marking an entry
-    /// exported before the container that proves it exists on disk would be a lie the vault told
-    /// about itself.
+    /// <b>This does not mark the entry <c>Exported</c>, and writes nothing at all.</b> It used to
+    /// set the flag the moment the container was sealed in memory, which is not what the flag
+    /// means: <c>Exported</c> says the secret survives somewhere other than this vault, and a
+    /// container that exists only in the caller's heap survives nothing. Between this method
+    /// returning and those bytes reaching a file there is a save dialog a person can cancel and a
+    /// disk that can refuse them — and an entry that already claimed to be exported across that
+    /// gap silences the key list's "exists only here" warning for a key where it is still true.
     /// </para>
     /// <para>
-    /// The reverse failure — the container is sealed but the write that records <c>Exported</c>
-    /// fails — still returns the container. The container is the operation's actual deliverable and
-    /// is already correct and complete; discarding it because a one-bit metadata flag could not be
-    /// persisted would make the one guaranteed recovery path unreliable exactly when storage is
-    /// already misbehaving. The entry is left exactly as it was on disk (<c>Exported</c> unset), so
-    /// a caller that lists entries afterwards is nagged to export again — a false negative, which is
-    /// the safe direction for this flag to be wrong in.
+    /// The flag is therefore recorded by whoever actually put the bytes somewhere, through
+    /// <see cref="UpdateAsync"/> and <see cref="VaultEntryEdit.Exported"/>. There is one such
+    /// caller in this repository, <c>ExportModel.RecordSavedAsync</c>, and a caller that forgets it
+    /// errs toward nagging someone to export a key that is already backed up — the safe direction
+    /// for this flag to be wrong in. The unsafe direction is claiming an export nobody kept, and no
+    /// amount of care inside this method could have avoided that: the vault cannot see where its
+    /// caller put the bytes.
     /// </para>
     /// </remarks>
     /// <exception cref="VaultException">
@@ -277,7 +279,8 @@ public interface IKeyVault
     /// unknown reference, <see cref="VaultError.EntryDamaged"/> for an entry that fails its own
     /// authentication tag — the same three conditions <see cref="RevealAsync"/> reports, since this
     /// method reveals the same way. Whatever <see cref="BackupContainer.Pack"/> itself throws
-    /// propagates unchanged when it throws before the container exists.
+    /// propagates unchanged. <see cref="VaultError.StorageFailed"/> is not among them: nothing
+    /// here writes.
     /// </exception>
     Task<byte[]> ExportAsync(
         string reference, ReadOnlyMemory<byte> containerPassword, CancellationToken cancellationToken);

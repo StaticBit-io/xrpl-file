@@ -29,6 +29,10 @@ public class DeleteKeyModelTests : VaultHarness
         await vault.CreateAsync(Password("p"), token);
         string reference = await vault.StoreAsync(Entry("mine"), token);
         await vault.ExportAsync(reference, Password("container password"), token);
+
+        // Sealing a container no longer marks the entry: only a caller that actually saved
+        // the bytes records it, through the same edit ExportModel.RecordSavedAsync makes.
+        await vault.UpdateAsync(reference, new VaultEntryEdit(Exported: true), token);
         DeleteKeyModel model = new(vault);
 
         DeleteWarning warning = await model.PrepareAsync(reference, token);

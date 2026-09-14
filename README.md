@@ -169,10 +169,14 @@ the one-factor design — nothing about the file depends on the machine that wro
 
 The other side of that portability is that a forgotten master password loses every key that was
 never taken out of the vault another way. `IKeyVault.ExportAsync` is that other way: it reveals
-one entry, seals it into a password-protected container (bytes an application can write to a file
-or turn into a QR code), and marks the entry `Exported` — all in the same call, so an application
-can warn "these keys exist nowhere else" before the day the password is actually forgotten,
-instead of after.
+one entry and seals it into a password-protected container — bytes an application can write to a
+file or turn into a QR code. It writes nothing itself, and deliberately does not mark the entry
+`Exported`: that flag means the secret survives somewhere other than this vault, and only the
+caller that actually put the bytes somewhere knows whether it does. Record it with
+`UpdateAsync(reference, new VaultEntryEdit(Exported: true), ...)` once the write has succeeded,
+and the vault can then warn "these keys exist nowhere else" before the day the password is
+actually forgotten instead of after. Erring the other way — marking a container nobody kept —
+silences that warning exactly where it was needed.
 
 A vault that opens with `VaultUnlockResult.VaultDegraded` is open — listing, revealing and
 exporting all keep working, which is how the keys that are still intact get rescued. What it will

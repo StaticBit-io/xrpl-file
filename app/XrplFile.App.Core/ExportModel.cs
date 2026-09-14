@@ -71,7 +71,8 @@ public sealed class ExportModel(IKeyVault vault)
     /// <returns>
     /// The sealed container, or <see langword="null"/> with <see cref="Problem"/> set when nothing
     /// was sealed. A refused password never reaches the vault at all: nothing is revealed, and
-    /// nothing about the entry changes.
+    /// nothing about the entry changes. Nothing about the entry changes on the success path
+    /// either — see <see cref="RecordSavedAsync"/>.
     /// </returns>
     public async Task<byte[]?> ToContainerAsync(
         string reference, ReadOnlyMemory<byte> containerPassword, CancellationToken cancellationToken)
@@ -99,6 +100,66 @@ public sealed class ExportModel(IKeyVault vault)
             return null;
         }
     }
+
+    /// <summary>
+    /// Records that a container for <paramref name="reference"/> reached a file the person chose,
+    /// by marking the entry <c>Exported</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Called only after a save has actually succeeded, and nowhere else.</b> The flag exists so
+    /// the key list can say which keys exist nowhere but this vault (design section 6, "The key
+    /// list"), and the warning before deleting one rests on the same bit. Sealing a container does
+    /// not make that bit true: <see cref="IKeyVault.ExportAsync"/> deliberately records nothing,
+    /// because between it returning and the bytes landing there is a save dialog a person can
+    /// cancel and a disk that can refuse them.
+    /// </para>
+    /// <para>
+    /// <b>A QR code on screen does not count either.</b> It is a way to move a key to a device
+    /// standing in front of this one, not a copy this application can claim exists afterwards —
+    /// nobody can be sure a code that was displayed was ever scanned, and this flag's only job is
+    /// to be sure.
+    /// </para>
+    /// <para>
+    /// A failure to record it is reported through <see cref="Problem"/> rather than thrown. The
+    /// bytes are already on disk at that point, so the export itself succeeded; what failed is
+    /// remembering it, and the consequence is a key that keeps being flagged as unexported — the
+    /// safe direction to be wrong in, and one the person can correct by exporting again.
+    /// </para>
+    /// </remarks>
+    public async Task RecordSavedAsync(string reference, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await vault
+                .UpdateAsync(reference, new VaultEntryEdit(Exported: true), cancellationToken)
+                .ConfigureAwait(false);
+            Problem = null;
+        }
+        catch (VaultException exception)
+        {
+            Problem =
+                "The backup was saved, but the vault could not record that it was: " +
+                VaultErrorMessages.For(exception.Error);
+        }
+    }
+
+    /// <summary>
+    /// Records that the platform refused to write the container where the person asked for it, so
+    /// the screen has words for it and the entry stays unexported.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart to <see cref="RecordSavedAsync"/> for a save that threw rather than one that
+    /// came back <see langword="false"/>. A caller that cancels the dialog is not a failure and must
+    /// not call this: nothing went wrong, the person simply chose not to save yet. The sentence is
+    /// composed here rather than in the component for the same reason every other sentence in this
+    /// model is, and it names nothing about where the file was going -- a path on screen is exactly
+    /// what <see cref="CreateMessages"/> exists to prevent elsewhere.
+    /// </remarks>
+    public void ReportSaveFailed() =>
+        Problem =
+            "The backup could not be written where you chose. Nothing was saved, and this key " +
+            "still exists only in this vault. Try somewhere with room to write.";
 
     /// <summary>
     /// Encodes <paramref name="container"/> as the text a QR code would carry, and says whether

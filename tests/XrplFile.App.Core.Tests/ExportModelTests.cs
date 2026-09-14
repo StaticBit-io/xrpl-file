@@ -29,6 +29,83 @@ public class ExportModelTests : VaultHarness
     }
 
     [Fact]
+    public async Task Sealing_a_container_does_not_mark_the_entry_exported()
+    {
+        // The defect: the flag was set the instant the container existed in memory, before the
+        // save dialog the person can cancel and before the disk that can refuse the bytes. Press
+        // "Create backup", then "Back to keys", and the badge saying the key exists only here was
+        // gone for a key that no file holds.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one", VaultEntryKind.Generated), token);
+        ExportModel model = new(vault);
+
+        Assert.NotNull(await model.ToContainerAsync(reference, Password(ContainerPassword), token));
+
+        VaultListModel list = new(vault);
+        await list.RefreshAsync(token);
+        Assert.True(list.Rows.Single().NeedsExporting);
+    }
+
+    [Fact]
+    public async Task Recording_a_saved_backup_is_what_marks_the_entry_exported()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one", VaultEntryKind.Generated), token);
+        ExportModel model = new(vault);
+
+        await model.ToContainerAsync(reference, Password(ContainerPassword), token);
+        await model.RecordSavedAsync(reference, token);
+
+        Assert.Null(model.Problem);
+
+        VaultListModel list = new(vault);
+        await list.RefreshAsync(token);
+        Assert.False(list.Rows.Single().NeedsExporting);
+    }
+
+    [Fact]
+    public async Task A_save_the_platform_refused_leaves_the_key_flagged_as_existing_only_here()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one", VaultEntryKind.Generated), token);
+        ExportModel model = new(vault);
+
+        await model.ToContainerAsync(reference, Password(ContainerPassword), token);
+        model.ReportSaveFailed();
+
+        Assert.NotNull(model.Problem);
+
+        VaultListModel list = new(vault);
+        await list.RefreshAsync(token);
+        Assert.True(list.Rows.Single().NeedsExporting);
+    }
+
+    [Fact]
+    public async Task Recording_a_save_against_a_locked_vault_says_so_rather_than_throwing()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+        ExportModel model = new(vault);
+
+        await model.ToContainerAsync(reference, Password(ContainerPassword), token);
+        await vault.LockAsync();
+        await model.RecordSavedAsync(reference, token);
+
+        // The bytes are already on disk by then, so the export itself succeeded; what failed is
+        // remembering it, and the screen has to be able to say that without the component catching
+        // an exception and composing the sentence itself.
+        Assert.NotNull(model.Problem);
+    }
+
+    [Fact]
     public async Task An_empty_backup_password_is_refused_and_nothing_is_sealed()
     {
         CancellationToken token = TestContext.Current.CancellationToken;

@@ -5,16 +5,22 @@ using Xunit;
 namespace XrplFile.Keys.Tests;
 
 /// <summary>
-/// What a vault does around a container: reveal, seal, mark, and roll back when the mark cannot be
-/// written. The container's own format is <see cref="BackupContainerTests"/>.
+/// What a vault does around a container: reveal and seal, and nothing else. The container's own
+/// format is <see cref="BackupContainerTests"/>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The class keeps its name and file from the <c>XFK1</c> container it was written for, and so do
-/// the tests that pinned behaviour rather than layout -- the rollback paths and <c>Exported</c>
-/// being set only on success are the same guarantees over a different container, and a test that
-/// still passes untouched is the evidence that replacing the format moved none of them. The tests
-/// that pinned the old header byte for byte are gone; each is named in the task report against what
-/// replaced it.
+/// the tests that pinned behaviour rather than layout. The tests that pinned the old header byte
+/// for byte are gone; each is named in the task report against what replaced it.
+/// </para>
+/// <para>
+/// The rollback tests that used to live here are gone too, for a better reason than a format
+/// change: <see cref="IKeyVault.ExportAsync"/> no longer marks the entry <c>Exported</c>, so there
+/// is no write left for it to roll back. Only a caller that actually put the container somewhere
+/// can honestly set that flag -- see that method's own remarks, and <c>ExportModelTests</c> for the
+/// tests that moved with the decision.
+/// </para>
 /// </remarks>
 public class ExportContainerTests : VaultTestHarness
 {
@@ -155,7 +161,7 @@ public class ExportContainerTests : VaultTestHarness
     }
 
     [Fact]
-    public async Task ExportAsync_seals_the_entry_and_marks_only_it_Exported()
+    public async Task ExportAsync_seals_the_entry_and_marks_nothing_at_all()
     {
         CancellationToken token = TestContext.Current.CancellationToken;
         KeyVault vault = NewVault();
@@ -167,9 +173,35 @@ public class ExportContainerTests : VaultTestHarness
 
         Assert.Equal("sSecretOfexported", Open(container).Wallets.Single().KeyValue);
 
+        // Exported says the secret survives somewhere other than this vault. A container sitting in
+        // the caller's heap survives nothing, and the vault cannot see where the caller puts it --
+        // so it does not guess. Recording it is the job of whoever wrote the bytes down.
         IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(token);
-        Assert.True(listed.Single(entry => entry.Reference == exportedReference).Exported);
+        Assert.False(listed.Single(entry => entry.Reference == exportedReference).Exported);
         Assert.False(listed.Single(entry => entry.Reference == otherReference).Exported);
+
+        // And the file agrees with the cache, because no write happened at all.
+        Assert.False(await ExportedOnDiskAsync(exportedReference));
+    }
+
+    [Fact]
+    public async Task Marking_an_entry_exported_is_an_ordinary_edit_the_file_keeps()
+    {
+        // The other half of the decision above: the flag is still reachable, through the one edit
+        // surface that already existed, and it is still durable. ExportModel.RecordSavedAsync is
+        // the only caller in this repository, and it calls it only once a save came back true.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+
+        await vault.ExportAsync(reference, Password(ContainerPassword), token);
+        Assert.False((await vault.ListAsync(token)).Single().Exported);
+
+        await vault.UpdateAsync(reference, new VaultEntryEdit(Exported: true), token);
+
+        Assert.True((await vault.ListAsync(token)).Single().Exported);
+        Assert.True(await ExportedOnDiskAsync(reference));
     }
 
     [Fact]
@@ -195,17 +227,16 @@ public class ExportContainerTests : VaultTestHarness
         byte[] container = await vault.ExportAsync(reference, Password(ContainerPassword), token);
 
         Assert.Equal("sSecretOfone", Open(container).Wallets.Single().KeyValue);
-        Assert.True((await vault.ListAsync(token)).Single().Exported);
     }
 
     [Fact]
-    public async Task A_failure_recording_Exported_still_returns_the_sealed_container()
+    public async Task A_disk_refusing_every_write_cannot_stop_an_export()
     {
-        // The seal already succeeded before the write is attempted; only the flag's persistence
-        // fails. Losing the container here would make the one guaranteed recovery path (D10)
-        // unreliable exactly when storage already is, so the container comes back regardless —
-        // and the entry is left exactly as the file has it, unexported, so the caller is nagged to
-        // export it again rather than told a backup exists that the disk never actually received.
+        // This replaces A_failure_recording_Exported_still_returns_the_sealed_container, which
+        // pinned the old shape: the flag's own write could fail and the container came back
+        // anyway. The flag is not written here at all any more, so there is no write left to
+        // refuse, and the one guaranteed way back from a forgotten master password (D10) no longer
+        // depends on storage working -- a stronger version of the same guarantee, not a weaker one.
         CancellationToken token = TestContext.Current.CancellationToken;
         FailableWrites disk = new();
         KeyVault vault = NewVault(disk.WriteAsync);
@@ -225,13 +256,12 @@ public class ExportContainerTests : VaultTestHarness
     }
 
     [Fact]
-    public async Task A_cancelled_export_leaves_the_entry_saying_what_the_file_says()
+    public async Task A_cancelled_mark_leaves_the_entry_saying_what_the_file_says()
     {
-        // The container never reaches the caller when the token is cancelled, so nothing was
-        // backed up anywhere — and the cache must not be left claiming otherwise, behind a file
-        // that says Exported is false. A vault claiming a key was backed up when it never left is
-        // the one lie this flag cannot afford: the warning the whole no-recovery-phrase decision
-        // rests on stops firing for exactly that key.
+        // The guarantee the cancelled-export test used to make, over the call that now carries the
+        // flag. A vault claiming a key was backed up when it never left is the one lie this flag
+        // cannot afford: the warning the whole no-recovery-phrase decision rests on stops firing
+        // for exactly that key.
         CancellationToken token = TestContext.Current.CancellationToken;
         CancelDuringWrite disk = new();
         KeyVault vault = NewVault(disk.WriteAsync);
@@ -240,7 +270,7 @@ public class ExportContainerTests : VaultTestHarness
 
         disk.CancelTheNextWrite = true;
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => vault.ExportAsync(reference, Password(ContainerPassword), disk.Cancellation.Token));
+            () => vault.UpdateAsync(reference, new VaultEntryEdit(Exported: true), disk.Cancellation.Token));
 
         disk.CancelTheNextWrite = false;
         Assert.False((await vault.ListAsync(token)).Single().Exported);
