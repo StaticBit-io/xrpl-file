@@ -1,0 +1,56 @@
+@implements IDisposable
+@inject UnlockModel Model
+
+@* One window, no router (design section 6). What renders is entirely the model's own Stage —
+   this component switches on it but never sets it, and never composes a word of its own. *@
+
+@if (_ready)
+{
+    @switch (Model.Stage)
+    {
+        case UnlockStage.NoVault:
+            <CreateVault OnChanged="StateHasChanged" />
+            break;
+
+        case UnlockStage.Locked:
+            <Unlock OnChanged="StateHasChanged" />
+            break;
+
+        case UnlockStage.Unlocked:
+            <div class="container py-4" style="max-width: 480px;">
+                <h1>Vault unlocked</h1>
+                <p>The key list arrives in a later task.</p>
+                <button type="button" class="btn btn-outline-secondary" @onclick="LockAsync">Lock</button>
+            </div>
+            break;
+    }
+}
+else
+{
+    <div class="container py-4">
+        <p>Loading&hellip;</p>
+    </div>
+}
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private bool _ready;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Model.RefreshAsync(_cts.Token);
+        _ready = true;
+    }
+
+    private async Task LockAsync()
+    {
+        await Model.LockAsync();
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

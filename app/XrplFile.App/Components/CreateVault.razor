@@ -1,0 +1,84 @@
+@implements IDisposable
+@inject UnlockModel Model
+
+@* The one screen design section 6 says "must state the consequence plainly" — not a footnote under
+   the field, the second paragraph of the page itself, ahead of the form. *@
+
+<div class="container py-4" style="max-width: 480px;">
+    <h1>Create your vault</h1>
+
+    <p>
+        This is the first time this application has run here, and there is nothing to open yet.
+    </p>
+
+    <p>
+        <strong>There is no recovery phrase.</strong> The master password you choose below is the
+        only way this vault will ever open. If it is forgotten, every key inside that was not
+        individually exported is gone for good &mdash; there is no support process, no reset link
+        and no backdoor that gets it back.
+    </p>
+
+    @if (_error is { } error)
+    {
+        <div class="alert alert-danger" role="alert">@error</div>
+    }
+
+    <form @onsubmit="SubmitAsync" @onsubmit:preventDefault="true">
+        <div class="mb-3">
+            <label for="new-password" class="form-label">Master password</label>
+            <input id="new-password" type="password" class="form-control" autofocus
+                   @bind="_password" @bind:event="oninput" disabled="@_busy" />
+        </div>
+
+        <button type="submit" class="btn btn-primary" disabled="@_busy">Create vault</button>
+    </form>
+</div>
+
+@code {
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private readonly CancellationTokenSource _cts = new();
+    private string _password = string.Empty;
+    private string? _error;
+    private bool _busy;
+
+    private async Task SubmitAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        StateHasChanged();
+
+        byte[] passwordBytes = Encoding.UTF8.GetBytes(_password);
+        _password = string.Empty;
+        try
+        {
+            await Model.CreateAsync(passwordBytes, _cts.Token);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Relayed verbatim, not composed here: KeyVault.CreateAsync already wrote the one
+            // sentence this refusal has (today, only "a vault already exists at this path"). This
+            // component never branches on what the exception is, only that one happened.
+            _error = ex.Message;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(passwordBytes);
+            _busy = false;
+        }
+
+        await OnChanged.InvokeAsync();
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}
