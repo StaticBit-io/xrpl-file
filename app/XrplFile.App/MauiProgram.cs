@@ -76,6 +76,36 @@ public static class MauiProgram
     /// <see cref="VaultListModel.Rows"/> after a refresh rather than two independent copies that
     /// can silently disagree about what the vault currently holds.
     /// </para>
+    /// <para>
+    /// <b>Teardown is the other half of the singleton decision, and it does not happen by itself.</b>
+    /// Nothing in this process calls <see cref="IAsyncDisposable.DisposeAsync"/> on
+    /// <see cref="VaultAutoLock"/> or <see cref="IKeyVault.LockAsync"/> when a window closes — a
+    /// singleton lives for the process, not for the window, so MAUI's own container disposal (which
+    /// only runs when the whole <c>MauiApp</c> is disposed) never reaches it either. In a
+    /// single-window desktop build that is always killed outright, that is harmless: the data key
+    /// dies with the process either way. It stops being harmless the first time a window closes
+    /// while the process lives on — ordinary on desktop (closing the window without quitting is a
+    /// window manager away) and the normal case on every other platform MAUI can target, where the
+    /// OS backgrounds an app instead of killing its process. <c>App.xaml.cs</c> is where this is
+    /// closed: its constructor takes <see cref="IKeyVault"/> and <see cref="VaultAutoLock"/> from
+    /// this same DI container (MAUI resolves <c>App</c> through it, exactly like every service
+    /// registered here), and its <see cref="Window.Destroying"/> handler calls
+    /// <see cref="IKeyVault.LockAsync"/> and then <see cref="VaultAutoLock.DisposeAsync"/>.
+    /// <see cref="Window.Destroying"/> is .NET MAUI's own cross-platform window-lifecycle event —
+    /// not a Windows-specific hook reached for because it was the one available — and on this
+    /// project's Windows target it corresponds to the native window's <c>Closed</c> event: an
+    /// ordinary window close reaches it, and so does the application shutting down through any
+    /// other in-process path that closes its one window.
+    /// </para>
+    /// <para>
+    /// What it does not cover, stated rather than left implied: a process ended outright — killed
+    /// from the task manager, crashed, or the machine losing power — runs no hook at all, on any
+    /// platform; the resident data key is reclaimed only because the process's memory is. That gap
+    /// is exactly what <see cref="VaultAutoLock"/>'s idle timer already exists to bound from the
+    /// other direction — a key nobody explicitly locked is still gone within
+    /// <see cref="IdleTimeout"/> — so <see cref="Window.Destroying"/> is an improvement on top of
+    /// that bound for the ordinary case, not a replacement for it.
+    /// </para>
     /// </remarks>
     private static void RegisterVault(IServiceCollection services)
     {

@@ -2,7 +2,11 @@
 @inject UnlockModel Model
 
 @* The one screen design section 6 says "must state the consequence plainly" — not a footnote under
-   the field, the second paragraph of the page itself, ahead of the form. *@
+   the field, the second paragraph of the page itself, ahead of the form.
+   Every word in the message panel below is the model's: UnlockModel.CreateAsync already turned any
+   failure into a CreateMessage's headline and detail (CreateMessages.For), so this component only
+   ever binds to Model.LastCreateMessage. It never reads an exception, and never composes a sentence
+   of its own — the same rule Unlock.razor follows for Model.LastMessage. *@
 
 <div class="container py-4" style="max-width: 480px;">
     <h1>Create your vault</h1>
@@ -18,9 +22,12 @@
         and no backdoor that gets it back.
     </p>
 
-    @if (_error is { } error)
+    @if (Model.LastCreateMessage is { } message)
     {
-        <div class="alert alert-danger" role="alert">@error</div>
+        <div class="alert alert-danger" role="alert">
+            <strong>@message.Headline</strong>
+            <div>@message.Detail</div>
+        </div>
     }
 
     <form @onsubmit="SubmitAsync" @onsubmit:preventDefault="true">
@@ -40,7 +47,6 @@
 
     private readonly CancellationTokenSource _cts = new();
     private string _password = string.Empty;
-    private string? _error;
     private bool _busy;
 
     private async Task SubmitAsync()
@@ -51,7 +57,6 @@
         }
 
         _busy = true;
-        _error = null;
         StateHasChanged();
 
         byte[] passwordBytes = Encoding.UTF8.GetBytes(_password);
@@ -59,13 +64,6 @@
         try
         {
             await Model.CreateAsync(passwordBytes, _cts.Token);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            // Relayed verbatim, not composed here: KeyVault.CreateAsync already wrote the one
-            // sentence this refusal has (today, only "a vault already exists at this path"). This
-            // component never branches on what the exception is, only that one happened.
-            _error = ex.Message;
         }
         finally
         {
