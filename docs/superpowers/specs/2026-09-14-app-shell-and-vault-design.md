@@ -305,15 +305,34 @@ its container carries `-webkit-touch-callout: none`. Otherwise a long press in a
 restriction the service layer applies. Windows does not have this trap; the rule is kept because
 the markup is shared and the day it runs on iOS must not be the day it is discovered.
 
-## 9. What must be measured
+## 9. What was measured
 
-1. **The container's iteration count for a desktop machine**, within the Wallet's 600,000 to
-   1,000,000 range, on the same basis as its own calibration: the slowest import a person will
-   accept once.
+1. **The container's iteration count for a desktop machine.** Measured with
+   `tools/XrplFile.KeyBench` (`TimePbkdf2`, `dotnet run -c Release`), PBKDF2-HMAC-SHA256 over the
+   Wallet's 600,000–1,000,000 range, two runs to rule out a fluke:
+
+   | Iterations | Run 1 | Run 2 |
+   |---|---|---|
+   | 600,000 | 79 ms | 73 ms |
+   | 700,000 | 89 ms | 86 ms |
+   | 800,000 | 113 ms | 102 ms |
+   | 900,000 | 109 ms | 109 ms |
+   | 1,000,000 | 122 ms | 126 ms |
+
+   Both runs are monotonic within noise and every point sits far under the 500 ms budget — even
+   the floor of the range costs nowhere near a slow import. `Pbkdf2Kdf` is written at
+   **1,000,000 iterations** (the largest value in the Wallet's range), measured at **122–126 ms**.
 2. **That a MAUI Blazor Hybrid application on `net10.0-windows` builds and starts in this
-   repository**, with `XrplFile.Keys` referenced, before any screen is written. The workload is
-   installed here (`maui-windows` 10.0.20, SDK 10.0.303), but a project that will not start is
-   worth discovering on the first task rather than the fifth.
+   repository**, with `XrplFile.Keys` referenced, before any screen is written. Confirmed outside
+   the repository with `dotnet new maui-blazor -n ShellProbe -f net10.0`
+   (`maui-windows` 10.0.20, SDK 10.0.303): trimming `<TargetFrameworks>` to only
+   `net10.0-windows10.0.19041.0`, adding a `ProjectReference` to `XrplFile.Keys.csproj`, and
+   constructing a `KeyVault` from `MauiProgram.CreateMauiApp` were the only changes needed —
+   `dotnet build -c Debug` and `dotnet run -c Debug` produced a window (`MainWindowTitle`
+   `ShellProbe`, responding) with no other adjustment to the template, no package-version
+   conflict with the repository's central package management, and no warning from
+   `TreatWarningsAsErrors`. Task 5 can start the real shell from this template and target string
+   as recorded.
 
 ## 10. Known limitations
 

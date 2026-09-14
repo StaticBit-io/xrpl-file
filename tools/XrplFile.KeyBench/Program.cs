@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using Konscious.Security.Cryptography;
 
@@ -47,6 +48,23 @@ static void TimeWalletDerivation()
     Console.WriteLine($"FromSeed x1000 -> {watch.ElapsedMilliseconds} ms total, {watch.Elapsed.TotalMilliseconds / 1000:F3} ms each");
 }
 
+static void TimePbkdf2()
+{
+    byte[] password = System.Text.Encoding.UTF8.GetBytes("correct horse battery staple");
+    byte[] salt = new byte[16];
+    Random.Shared.NextBytes(salt);
+
+    Rfc2898DeriveBytes.Pbkdf2(password, salt, 1000, HashAlgorithmName.SHA256, 32);   // untimed, for JIT
+
+    foreach (int iterations in new[] { 600_000, 700_000, 800_000, 900_000, 1_000_000 })
+    {
+        Stopwatch watch = Stopwatch.StartNew();
+        Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, 32);
+        watch.Stop();
+        Console.WriteLine($"PBKDF2-SHA256 t={iterations} -> {watch.ElapsedMilliseconds} ms");
+    }
+}
+
 foreach (int memoryKib in new[] { 65_536, 131_072, 262_144, 524_288 })
 {
     foreach (int iterations in new[] { 1, 2, 3, 4 })
@@ -56,3 +74,4 @@ foreach (int memoryKib in new[] { 65_536, 131_072, 262_144, 524_288 })
 }
 
 TimeWalletDerivation();
+TimePbkdf2();
