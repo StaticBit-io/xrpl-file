@@ -67,7 +67,7 @@ public class VaultPasswordTests : VaultTestHarness
         await vault.LockAsync();
 
         MutateRecordInFile(record => record.Mac[0] ^= 0x01);
-        await Devices.DeleteAsync(token);
+        await Devices.DeleteAsync(VaultDeviceId, token);
         Directory.CreateDirectory(VaultBackupPath);
 
         VaultPasswordChange outcome = await vault.ChangePasswordAsync(Password("old"), Password("new"), token);
@@ -469,7 +469,7 @@ public class VaultPasswordTests : VaultTestHarness
         await vault.CreateAsync(Password("old"), TestContext.Current.CancellationToken);
         Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
 
-        await Devices.DeleteAsync(TestContext.Current.CancellationToken);
+        await Devices.DeleteAsync(VaultDeviceId, TestContext.Current.CancellationToken);
         Directory.CreateDirectory(VaultBackupPath);
 
         Assert.Equal(

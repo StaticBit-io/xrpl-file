@@ -154,6 +154,22 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     /// </summary>
     internal IDeviceSecretStore DeviceSecrets { get; }
 
+    /// <summary>
+    /// Which vault the store is being asked about (4.2). It is this vault's full path: the store
+    /// holds one secret per identity, so two vaults on one machine cannot see, seal under, or
+    /// delete each other's — and the setting being turned off on one cannot quietly take it from
+    /// the other.
+    /// </summary>
+    /// <remarks>
+    /// The path is the identity because it needs no field in the record, and so no bump of the
+    /// format version to introduce. What that costs is one case: a vault file moved or renamed
+    /// asks for a secret nobody stored, so device unlock on that machine is gone and the user
+    /// turns it back on. That is the same convenience a vault loses when it is copied to another
+    /// machine, and it is the password wrap — never removable, never machine-bound — that carries
+    /// a moved file.
+    /// </remarks>
+    private string DeviceSecretId => _path;
+
     /// <inheritdoc/>
     public bool IsUnlocked => _isUnlocked;
 
@@ -366,7 +382,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
             byte[]? deviceSecret;
             try
             {
-                deviceSecret = await DeviceSecrets.GetAsync(cancellationToken).ConfigureAwait(false);
+                deviceSecret = await DeviceSecrets.GetAsync(DeviceSecretId, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -831,8 +847,8 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 // opening its own wrap the moment the password changes. Re-seal it under the new
                 // header when this machine holds the secret it was sealed under; drop it, rather
                 // than leave a wrap no header will ever match again, when it does not. A vault that
-                // never carried a device wrap gains none here: the platform secret is machine-wide
-                // rather than per-vault, so "this machine holds one" is not consent.
+                // never carried a device wrap gains none here: a secret stored under this vault's
+                // identity is not consent either, because the file at a path can be replaced.
                 DeviceRewrap deviceOutcome = DeviceRewrap.NothingToRewrap;
                 if (deviceDekBeforeTheChange is not null)
                 {
@@ -868,16 +884,16 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 bool theOldCopyRemains = !DurableFile.TryDiscardBackup(_path);
 
                 // Only a secret this vault has established is its own may be dropped. The store
-                // said it holds nothing, so this asks it to stay that way and destroys no key
-                // material — the case where the secret is present but opens some other vault's
-                // wrap deliberately leaves it exactly where it is (see RewrapDeviceKeyAsync).
+                // said it holds nothing for this vault, so this asks it to stay that way and
+                // destroys no key material — the case where a secret is present but opens no wrap
+                // of ours deliberately leaves it where it is (see RewrapDeviceKeyAsync).
                 if (deviceOutcome == DeviceRewrap.ThisMachineHoldsNoSecret)
                 {
                     await ForgetTheOrphanedDeviceSecretAsync(cancellationToken).ConfigureAwait(false);
                 }
 
                 bool deviceUnlockDropped = deviceOutcome is DeviceRewrap.ThisMachineHoldsNoSecret
-                    or DeviceRewrap.TheSecretIsAnotherVaults;
+                    or DeviceRewrap.TheSecretWasEnrolledForAnotherFile;
 
                 // Assembled rather than chosen from a list of named combinations: the three facts
                 // are independent, and a list would have to name eight cases to leave none of them
@@ -948,8 +964,8 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 byte[] deviceSecret;
                 try
                 {
-                    deviceSecret = await DeviceSecrets.GetAsync(cancellationToken).ConfigureAwait(false)
-                        ?? await DeviceSecrets.CreateAsync(cancellationToken).ConfigureAwait(false);
+                    deviceSecret = await DeviceSecrets.GetAsync(DeviceSecretId, cancellationToken).ConfigureAwait(false)
+                        ?? await DeviceSecrets.CreateAsync(DeviceSecretId, cancellationToken).ConfigureAwait(false);
                 }
                 catch (NotSupportedException)
                 {
@@ -1026,9 +1042,10 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 if (record.DeviceDek is not null)
                 {
                     // Asked before the wrap is cleared, because the wrap is the only proof there
-                    // is of whose the machine's secret is. A vault that never had a wrap, or one
-                    // carried to a machine that enrolled a secret for something else, reaches the
-                    // deletion below with this still false — and the other vault keeps its setting.
+                    // is that the secret stored under this path was enrolled for the file that is
+                    // here now. A vault that never had a wrap, or one copied over a path where
+                    // something else enrolled a secret, reaches the deletion below with this still
+                    // false — and whatever enrolled that secret keeps its setting.
                     theSecretIsThisVaultsOwn = await ThisMachinesSecretOpensAsync(
                         record, record.DeviceDek, cancellationToken).ConfigureAwait(false);
 
@@ -1060,7 +1077,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
             // put back.
             if (theSecretIsThisVaultsOwn)
             {
-                await DeviceSecrets.DeleteAsync(cancellationToken).ConfigureAwait(false);
+                await DeviceSecrets.DeleteAsync(DeviceSecretId, cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -1070,15 +1087,22 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     }
 
     /// <summary>
-    /// Whether the secret this machine holds is the one <paramref name="deviceDek"/> was sealed
-    /// under — the only evidence available that the machine's secret belongs to this vault rather
-    /// than to another the same user keeps on the same machine (the secret is machine-wide, 4.2).
+    /// Whether the secret stored for this vault is the one <paramref name="deviceDek"/> was sealed
+    /// under — the only evidence available that it was enrolled for the file that is here now.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The store answers per vault (4.2), so the secret it returns was at least stored under this
+    /// vault's identity. That is not the same as belonging to this record: a file is replaceable
+    /// at a path, and a vault copied over another leaves a secret enrolled for the file that used
+    /// to be there. Asking the wrap is what tells the two apart.
+    /// </para>
+    /// <para>
     /// A store that cannot answer counts as "not proved", and so leaves the secret alone: the two
     /// outcomes of being wrong are not symmetrical. A secret left behind that opens nothing is
-    /// litter; a secret deleted that was not ours costs another vault its device unlock, and only
-    /// the user can put that back.
+    /// litter; a secret deleted that was not ours costs whatever enrolled it its device unlock,
+    /// and only the user can put that back.
+    /// </para>
     /// </remarks>
     private async Task<bool> ThisMachinesSecretOpensAsync(
         VaultRecord record, byte[] deviceDek, CancellationToken cancellationToken)
@@ -1086,7 +1110,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         byte[]? deviceSecret;
         try
         {
-            deviceSecret = await DeviceSecrets.GetAsync(cancellationToken).ConfigureAwait(false);
+            deviceSecret = await DeviceSecrets.GetAsync(DeviceSecretId, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1135,10 +1159,10 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     /// </para>
     /// <para>
     /// The existing wrap is opened under the header it was sealed under before this change, as the
-    /// proof that the secret this machine holds is the one device unlock was enabled with. Without
-    /// that step a machine holding a secret for some other vault would re-seal this one under it
-    /// and hand itself passwordless unlock nobody enabled — the secret is machine-wide (4.2), so
-    /// its mere presence says nothing about this vault.
+    /// proof that the secret stored for this vault is the one device unlock was enabled with.
+    /// Without that step, a secret left over from a different file at this same path would be
+    /// re-sealed against, handing out passwordless unlock nobody enabled: the store answers per
+    /// vault (4.2), but a path outlives the file that was at it.
     /// </para>
     /// </remarks>
     private async Task<(DeviceRewrap Outcome, byte[]? Wrap)> RewrapDeviceKeyAsync(
@@ -1151,7 +1175,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         byte[]? deviceSecret;
         try
         {
-            deviceSecret = await DeviceSecrets.GetAsync(cancellationToken).ConfigureAwait(false);
+            deviceSecret = await DeviceSecrets.GetAsync(DeviceSecretId, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1173,10 +1197,10 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         {
             if (!TryOpen(devicePasswordKey, deviceDekBeforeTheChange, headerBeforeTheChange, out byte[]? enrolled))
             {
-                // Reported separately from absence, and the difference matters to the store: this
-                // machine's secret is demonstrably not the one this wrap was sealed under, so it
-                // belongs to something else that is still using it. The wrap goes; the secret stays.
-                return (DeviceRewrap.TheSecretIsAnotherVaults, null);
+                // Reported separately from absence, and the difference matters to the store: the
+                // secret stored here is demonstrably not the one this wrap was sealed under, so it
+                // was enrolled for something else that may still be using it. The wrap goes; it stays.
+                return (DeviceRewrap.TheSecretWasEnrolledForAnotherFile, null);
             }
 
             CryptographicOperations.ZeroMemory(enrolled);
@@ -1209,11 +1233,11 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         ThisMachineHoldsNoSecret,
 
         /// <summary>
-        /// The store holds a secret and the wrap does not open under it. The wrap is dropped and
-        /// the secret is left strictly alone: it is another vault's, and this is a vault that was
-        /// copied to a machine whose owner enrolled something else.
+        /// A secret is stored for this vault's identity and the wrap does not open under it, so it
+        /// was enrolled for a different file at this same path. The wrap is dropped and the secret
+        /// is left strictly alone: whatever enrolled it may still be using it.
         /// </summary>
-        TheSecretIsAnotherVaults,
+        TheSecretWasEnrolledForAnotherFile,
     }
 
     /// <summary>
@@ -1224,10 +1248,10 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     /// <remarks>
     /// <para>
     /// Called on exactly one outcome — <see cref="DeviceRewrap.ThisMachineHoldsNoSecret"/>, where
-    /// the store has just said it holds nothing, so this asks it to stay that way and no key
-    /// material is destroyed by asking. It is deliberately not called when the machine's secret is
-    /// present but opens some other vault's wrap: that secret is still in use, and this vault
-    /// having failed to open it is the proof that it is not ours to delete.
+    /// the store has just said it holds nothing for this vault, so this asks it to stay that way
+    /// and no key material is destroyed by asking. It is deliberately not called when a secret is
+    /// present but does not open this record's wrap: it was enrolled for a different file at this
+    /// path, may still be in use, and the failure to open it is the proof that it is not ours.
     /// </para>
     /// <para>
     /// A failure here is swallowed on purpose, and it is the one place in this type where that is
@@ -1241,7 +1265,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     {
         try
         {
-            await DeviceSecrets.DeleteAsync(cancellationToken).ConfigureAwait(false);
+            await DeviceSecrets.DeleteAsync(DeviceSecretId, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

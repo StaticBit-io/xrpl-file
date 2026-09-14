@@ -43,6 +43,13 @@ public abstract class VaultTestHarness : IAsyncDisposable
     protected InMemoryDeviceSecretStore Devices { get; } = new();
 
     /// <summary>
+    /// The identity a vault over <see cref="VaultPath"/> asks the device store about: the file's
+    /// full path (4.2). A test that puts a secret there by hand has to use the same one, or it is
+    /// enrolling a secret for a vault that does not exist.
+    /// </summary>
+    protected string VaultDeviceId => Path.GetFullPath(VaultPath);
+
+    /// <summary>
     /// A cost high enough that a derivation is unmistakably still running when another call
     /// arrives — the width a test needs to say something about what happens during one.
     /// </summary>
@@ -123,6 +130,20 @@ public abstract class VaultTestHarness : IAsyncDisposable
         {
             (record.Entries[first], record.Entries[second]) = (record.Entries[second], record.Entries[first]);
         });
+
+    /// <summary>
+    /// The path of a second vault file in the same directory — two vaults on one machine, which is
+    /// a different situation from one vault on two machines and has to be testable separately.
+    /// </summary>
+    protected string AnotherVaultPath(string name) => Path.Combine(_directory, name + ".json");
+
+    /// <summary>A vault over a path of the caller's choosing, disposed with the rest.</summary>
+    protected KeyVault NewVaultAt(string path, IDeviceSecretStore devices, KdfParameters? parameters = null)
+    {
+        KeyVault vault = new(path, new Argon2idKdf(), devices, parameters ?? FastParameters);
+        _vaults.Add(vault);
+        return vault;
+    }
 
     /// <summary>
     /// Copies the vault file into a directory of its own and returns the copy's path — a vault
@@ -224,51 +245,53 @@ internal sealed class FailableWrites
 public sealed class FailingDeviceSecretStore : IDeviceSecretStore
 {
     /// <inheritdoc/>
-    public Task<byte[]?> GetAsync(CancellationToken cancellationToken) =>
+    public Task<byte[]?> GetAsync(string vaultId, CancellationToken cancellationToken) =>
         Task.FromException<byte[]?>(new IOException("The platform secret store is unavailable."));
 
     /// <inheritdoc/>
-    public Task<byte[]> CreateAsync(CancellationToken cancellationToken) =>
+    public Task<byte[]> CreateAsync(string vaultId, CancellationToken cancellationToken) =>
         Task.FromException<byte[]>(new IOException("The platform secret store is unavailable."));
 
     /// <inheritdoc/>
-    public Task DeleteAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task DeleteAsync(string vaultId, CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 /// <summary>
-/// A device secret store that keeps its secret in a field. It is what lets the unit suite exercise
-/// "remember on this device" without a platform secret store — and therefore without the operating
-/// system having any say in whether the suite passes.
+/// A device secret store that keeps its secrets in a dictionary — one machine, one secret per
+/// vault. It is what lets the unit suite exercise "remember on this device" without a platform
+/// secret store, and therefore without the operating system having any say in whether the suite
+/// passes.
 /// </summary>
 public sealed class InMemoryDeviceSecretStore : IDeviceSecretStore
 {
-    private byte[]? _secret;
+    private readonly Dictionary<string, byte[]> _secrets = new(StringComparer.Ordinal);
 
-    /// <summary>How many times a secret has been created. A test can assert a device was enrolled once.</summary>
+    /// <summary>How many secrets have been created. A test can assert two vaults enrolled two.</summary>
     public int Creations { get; private set; }
 
     /// <summary>
-    /// How many times the vault asked for the secret to be dropped. A test can assert that a vault
-    /// which stopped pointing at the machine's secret also stopped leaving it behind.
+    /// How many times a vault asked for its secret to be dropped. A test can assert that a vault
+    /// which stopped pointing at a secret also stopped leaving it behind.
     /// </summary>
     public int Deletions { get; private set; }
 
     /// <inheritdoc/>
-    public Task<byte[]?> GetAsync(CancellationToken cancellationToken) =>
-        Task.FromResult(_secret is null ? null : (byte[])_secret.Clone());
+    public Task<byte[]?> GetAsync(string vaultId, CancellationToken cancellationToken) =>
+        Task.FromResult(_secrets.TryGetValue(vaultId, out byte[]? secret) ? (byte[])secret.Clone() : null);
 
     /// <inheritdoc/>
-    public Task<byte[]> CreateAsync(CancellationToken cancellationToken)
+    public Task<byte[]> CreateAsync(string vaultId, CancellationToken cancellationToken)
     {
-        _secret = RandomNumberGenerator.GetBytes(32);
+        byte[] secret = RandomNumberGenerator.GetBytes(32);
+        _secrets[vaultId] = secret;
         Creations++;
-        return Task.FromResult((byte[])_secret.Clone());
+        return Task.FromResult((byte[])secret.Clone());
     }
 
     /// <inheritdoc/>
-    public Task DeleteAsync(CancellationToken cancellationToken)
+    public Task DeleteAsync(string vaultId, CancellationToken cancellationToken)
     {
-        _secret = null;
+        _secrets.Remove(vaultId);
         Deletions++;
         return Task.CompletedTask;
     }

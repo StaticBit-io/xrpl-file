@@ -104,20 +104,34 @@ forgotten.
 same `DEK`. Turning the option off removes the field from the record and asks the store to drop
 its secret; the password wrap is never removable, so the vault stays openable either way.
 
+The secret is **per vault, not per machine**. Every call into the store carries the identity of the
+vault asking, and the store keeps one secret for each: a throwaway vault beside the real one is the
+ordinary case, and with a single machine-wide secret each would be sealing under the other's, while
+turning the setting off on either would take device unlock away from both. A vault must never be
+handed, seal under, or delete a secret that is not its own, and separate identities are what makes
+that structural rather than a rule to remember.
+
+The identity is the vault file's full path, compared ordinally, and a store treats it as an opaque
+key — hashing it where a platform wants a tamer item name than a path. A path needs no field in the
+record, and so no bump of `v` to introduce. What it costs is one case, and it is accepted: a vault
+file that is **moved or renamed** asks for a secret nobody stored, so device unlock on that machine
+is gone and the user turns it back on. That is the same convenience a vault loses when it is copied
+to another machine, and the wrap that carries a moved file was always the password one.
+
 A vault file carried to another machine keeps the field and it is inert there — the key that
 opens it stayed behind. This is stated rather than cleaned up: removing it on copy would require
 knowing a copy happened, and nothing can know that.
 
-Because the secret is machine-wide rather than per-vault, no vault may ask the store to drop one
-it has not established is its own, and the only proof available is that this record's own device
-wrap opens under it. `DisableDeviceUnlockAsync` asks for that proof before it clears the field, and
-skips the deletion without it — a vault that never had a wrap, or a copy of one on a machine that
-enrolled a secret for something else, clears its own field and stops there. A password change that
-drops the wrap tells the two reasons apart for the same purpose: a store that says it holds nothing
-is asked to stay that way, and a store holding a secret that does not open this wrap is left
-strictly alone. Being wrong in the two directions is not symmetrical — a secret left behind that
-opens nothing is litter, while a secret deleted that was not ours takes device unlock away from
-whatever vault is still using it, and only the user can put that back.
+A path outlives the file that was at it, so no vault may ask the store to drop a secret it has not
+established is its own, and the only proof available is that this record's own device wrap opens
+under it. `DisableDeviceUnlockAsync` asks for that proof before it clears the field, and skips the
+deletion without it — a vault that never had a wrap, or one copied over a path where something else
+enrolled a secret, clears its own field and stops there. A password change that drops the wrap tells
+the two reasons apart for the same purpose: a store that says it holds nothing for this vault is
+asked to stay that way, and a stored secret that does not open this wrap is left strictly alone.
+Being wrong in the two directions is not symmetrical — a secret left behind that opens nothing is
+litter, while a secret deleted that was not ours takes device unlock away from whatever is still
+using it, and only the user can put that back.
 
 ### 4.3 Argon2id parameters
 
@@ -540,6 +554,7 @@ Recorded because they are real, not because they are acceptable everywhere.
 | A change over a damaged record | The `mac` does not match: the change happens and the outcome says the code did not match, alongside every other flag that applies |
 | A cancelled write | Cancel the token mid-write: the cache holds exactly what the file holds, on export as on store |
 | Someone else's device secret | Disable, and change the password, on a machine holding a secret this vault's wrap does not open: the secret is still there afterwards |
+| Two vaults on one machine | One store, two vault files: two secrets, and disabling or changing the password on one leaves the other's device unlock working |
 | A tampered KDF cost | Zero memory, and two terabytes of it: `VaultCorrupt`, with nothing derived |
 | A cost no reader would accept | The same costs refused where they are named: no vault can be created at one |
 | Writing while degraded | A write over a mismatched `mac` is refused until acknowledged, and the mismatch survives the refusal |

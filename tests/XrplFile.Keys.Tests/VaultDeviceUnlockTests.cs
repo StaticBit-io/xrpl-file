@@ -37,6 +37,66 @@ public class VaultDeviceUnlockTests : VaultTestHarness
     }
 
     [Fact]
+    public async Task Two_vaults_on_one_machine_do_not_take_each_others_device_unlock()
+    {
+        // One machine, one store, two vaults — a throwaway vault beside the real one is the
+        // obvious case. The secret is asked for per vault, so neither can see, seal under, or
+        // delete the other's: turning the setting off on one used to take the machine's only
+        // secret away, and the other vault silently stopped opening without its password.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        InMemoryDeviceSecretStore machine = new();
+
+        KeyVault first = NewVaultAt(VaultPath, machine);
+        await first.CreateAsync(Password("first"), token);
+        Assert.True(await first.EnableDeviceUnlockAsync(token));
+
+        KeyVault second = NewVaultAt(AnotherVaultPath("second"), machine);
+        await second.CreateAsync(Password("second"), token);
+        string reference = await second.StoreAsync(Entry("kept"), token);
+        Assert.True(await second.EnableDeviceUnlockAsync(token));
+
+        // Two vaults, two secrets: neither wrap can have been sealed under the other's.
+        Assert.Equal(2, machine.Creations);
+
+        await first.DisableDeviceUnlockAsync(token);
+        await second.LockAsync();
+
+        Assert.Equal(VaultUnlockResult.Success, await second.UnlockWithDeviceAsync(token));
+        Assert.Equal("sSecretOfkept", (await second.RevealAsync(reference, "test", token)).Secret);
+
+        // And the one that was turned off stays off, rather than opening on the other's secret.
+        await first.LockAsync();
+        Assert.Equal(VaultUnlockResult.VaultMissing, await first.UnlockWithDeviceAsync(token));
+    }
+
+    [Fact]
+    public async Task A_password_change_on_one_vault_leaves_the_other_vaults_secret_alone()
+    {
+        // The other half of the same separation: a change re-seals the device wrap under the new
+        // header, and it must reach for this vault's own secret to do it — never the one beside it.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        InMemoryDeviceSecretStore machine = new();
+
+        KeyVault first = NewVaultAt(VaultPath, machine);
+        await first.CreateAsync(Password("old"), token);
+        Assert.True(await first.EnableDeviceUnlockAsync(token));
+
+        KeyVault second = NewVaultAt(AnotherVaultPath("second"), machine);
+        await second.CreateAsync(Password("second"), token);
+        Assert.True(await second.EnableDeviceUnlockAsync(token));
+
+        Assert.Equal(
+            VaultPasswordChange.Changed,
+            await first.ChangePasswordAsync(Password("old"), Password("new"), token));
+
+        await second.LockAsync();
+        Assert.Equal(VaultUnlockResult.Success, await second.UnlockWithDeviceAsync(token));
+
+        await first.LockAsync();
+        Assert.Equal(VaultUnlockResult.Success, await first.UnlockWithDeviceAsync(token));
+    }
+
+    [Fact]
     public async Task Enabling_device_unlock_on_a_locked_vault_refuses()
     {
         KeyVault vault = NewVault();
@@ -71,7 +131,7 @@ public class VaultDeviceUnlockTests : VaultTestHarness
         await vault.DisableDeviceUnlockAsync(TestContext.Current.CancellationToken);
 
         Assert.Null(ReadRecordFromFile().DeviceDek);
-        Assert.Null(await Devices.GetAsync(TestContext.Current.CancellationToken));
+        Assert.Null(await Devices.GetAsync(VaultDeviceId, TestContext.Current.CancellationToken));
 
         await vault.LockAsync();
         Assert.Equal(
@@ -130,7 +190,7 @@ public class VaultDeviceUnlockTests : VaultTestHarness
         await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken);
         await vault.LockAsync();
 
-        await Devices.CreateAsync(TestContext.Current.CancellationToken);
+        await Devices.CreateAsync(VaultDeviceId, TestContext.Current.CancellationToken);
 
         Assert.Equal(
             VaultUnlockResult.VaultMissing,
@@ -257,12 +317,12 @@ public class VaultDeviceUnlockTests : VaultTestHarness
         // The rollback undid the record write, so the store must still hold what the record
         // still points at — dropping it here would strand a wrap nothing could ever open.
         Assert.NotNull(ReadRecordFromFile().DeviceDek);
-        Assert.NotNull(await Devices.GetAsync(TestContext.Current.CancellationToken));
+        Assert.NotNull(await Devices.GetAsync(VaultDeviceId, TestContext.Current.CancellationToken));
 
         disk.Fail = false;
         await vault.DisableDeviceUnlockAsync(TestContext.Current.CancellationToken);
         Assert.Null(ReadRecordFromFile().DeviceDek);
-        Assert.Null(await Devices.GetAsync(TestContext.Current.CancellationToken));
+        Assert.Null(await Devices.GetAsync(VaultDeviceId, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -276,7 +336,7 @@ public class VaultDeviceUnlockTests : VaultTestHarness
         string reference = await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
         Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
 
-        await Devices.DeleteAsync(TestContext.Current.CancellationToken);
+        await Devices.DeleteAsync(VaultDeviceId, TestContext.Current.CancellationToken);
         int deletionsBefore = Devices.Deletions;
 
         Assert.Equal(
@@ -302,15 +362,17 @@ public class VaultDeviceUnlockTests : VaultTestHarness
     [Fact]
     public async Task A_password_change_on_a_machine_the_wrap_was_not_sealed_for_does_not_re_seal_it_there()
     {
-        // The device secret is machine-wide, not per-vault. Re-sealing under whatever secret the
-        // machine happens to hold hands passwordless unlock to a machine whose owner never enabled
-        // it for this vault — off the back of a password change, of all things.
+        // The store answers per vault, but a path outlives the file that was at it: a secret
+        // stored for this path may have been enrolled for a vault that is no longer here.
+        // Re-sealing under whatever secret is found hands passwordless unlock to a machine whose
+        // owner never enabled it for this file — off the back of a password change, of all things.
         KeyVault vault = NewVault();
         await vault.CreateAsync(Password("old"), TestContext.Current.CancellationToken);
         Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
 
-        // The machine now holds a different secret — one this vault's wrap was never sealed under.
-        await Devices.CreateAsync(TestContext.Current.CancellationToken);
+        // A different secret is now stored for this path — one this vault's wrap was never
+        // sealed under, which is what a vault replaced at a path leaves behind.
+        await Devices.CreateAsync(VaultDeviceId, TestContext.Current.CancellationToken);
 
         Assert.Equal(
             VaultPasswordChange.Changed | VaultPasswordChange.DeviceUnlockDropped,
@@ -326,11 +388,11 @@ public class VaultDeviceUnlockTests : VaultTestHarness
     [Fact]
     public async Task A_password_change_gives_device_unlock_to_no_vault_that_never_asked_for_it()
     {
-        // The machine holds a secret, for some other vault. This one never enabled the setting,
-        // and a password change is not where it gets turned on.
+        // A secret is stored for this path, left by whatever was here before. This vault never
+        // enabled the setting, and a password change is not where it gets turned on.
         KeyVault vault = NewVault();
         await vault.CreateAsync(Password("old"), TestContext.Current.CancellationToken);
-        await Devices.CreateAsync(TestContext.Current.CancellationToken);
+        await Devices.CreateAsync(VaultDeviceId, TestContext.Current.CancellationToken);
 
         Assert.Equal(
             VaultPasswordChange.Changed,
@@ -340,19 +402,19 @@ public class VaultDeviceUnlockTests : VaultTestHarness
     }
 
     [Fact]
-    public async Task A_password_change_that_cannot_open_the_wrap_leaves_this_machines_secret_where_it_is()
+    public async Task A_password_change_that_cannot_open_the_wrap_leaves_the_stored_secret_where_it_is()
     {
-        // The wrap did not open under the secret this machine holds, which is the proof that the
-        // secret is somebody else's — another vault's, on the machine this one was copied to.
-        // Dropping our own dead wrap is right; dropping their live secret is not ours to do, and
-        // it costs that other vault its device unlock.
+        // The wrap did not open under the secret stored for this path, which is the proof that it
+        // was enrolled for a different file — a vault copied over the one that was here. Dropping
+        // our own dead wrap is right; dropping that live secret is not ours to do, and it costs
+        // whatever enrolled it its device unlock.
         KeyVault vault = NewVault();
         await vault.CreateAsync(Password("old"), TestContext.Current.CancellationToken);
         Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
 
-        // The machine now holds a different secret — this vault's wrap was never sealed under it.
-        await Devices.CreateAsync(TestContext.Current.CancellationToken);
-        byte[]? theOtherVaultsSecret = await Devices.GetAsync(TestContext.Current.CancellationToken);
+        // A different secret is stored for this path — this vault's wrap was never sealed under it.
+        await Devices.CreateAsync(VaultDeviceId, TestContext.Current.CancellationToken);
+        byte[]? theOtherFilesSecret = await Devices.GetAsync(VaultDeviceId, TestContext.Current.CancellationToken);
         int deletionsBefore = Devices.Deletions;
 
         Assert.Equal(
@@ -360,22 +422,22 @@ public class VaultDeviceUnlockTests : VaultTestHarness
             await vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
 
         Assert.Equal(deletionsBefore, Devices.Deletions);
-        Assert.Equal(theOtherVaultsSecret, await Devices.GetAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(theOtherFilesSecret, await Devices.GetAsync(VaultDeviceId, TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public async Task Disabling_device_unlock_that_was_never_enabled_leaves_another_vaults_secret_alone()
+    public async Task Disabling_device_unlock_that_was_never_enabled_leaves_the_stored_secret_alone()
     {
-        // Nothing in this record ever pointed at the machine's secret, so there is nothing here
-        // to clean up — and the secret that is there belongs to whatever did enrol it.
+        // Nothing in this record ever pointed at a stored secret, so there is nothing here to
+        // clean up — and the secret that is there belongs to whatever did enrol it.
         KeyVault vault = NewVault();
         await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
-        await Devices.CreateAsync(TestContext.Current.CancellationToken);
-        byte[]? theOtherVaultsSecret = await Devices.GetAsync(TestContext.Current.CancellationToken);
+        await Devices.CreateAsync(VaultDeviceId, TestContext.Current.CancellationToken);
+        byte[]? theOtherFilesSecret = await Devices.GetAsync(VaultDeviceId, TestContext.Current.CancellationToken);
 
         await vault.DisableDeviceUnlockAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(theOtherVaultsSecret, await Devices.GetAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(theOtherFilesSecret, await Devices.GetAsync(VaultDeviceId, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -391,8 +453,8 @@ public class VaultDeviceUnlockTests : VaultTestHarness
 
         string elsewhere = CopyVaultFileToAnotherDirectory();
         InMemoryDeviceSecretStore machineB = new();
-        await machineB.CreateAsync(TestContext.Current.CancellationToken);
-        byte[]? machineBsSecret = await machineB.GetAsync(TestContext.Current.CancellationToken);
+        await machineB.CreateAsync(Path.GetFullPath(elsewhere), TestContext.Current.CancellationToken);
+        byte[]? machineBsSecret = await machineB.GetAsync(Path.GetFullPath(elsewhere), TestContext.Current.CancellationToken);
 
         KeyVault onB = new(elsewhere, new Argon2idKdf(), machineB, FastParameters);
         try
@@ -403,7 +465,7 @@ public class VaultDeviceUnlockTests : VaultTestHarness
 
             await onB.DisableDeviceUnlockAsync(TestContext.Current.CancellationToken);
 
-            Assert.Equal(machineBsSecret, await machineB.GetAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(machineBsSecret, await machineB.GetAsync(Path.GetFullPath(elsewhere), TestContext.Current.CancellationToken));
         }
         finally
         {

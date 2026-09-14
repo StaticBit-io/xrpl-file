@@ -311,11 +311,11 @@ public interface IKeyVault
     /// either way. Succeeds silently when the option was already off.
     /// </summary>
     /// <remarks>
-    /// The store is asked only for a secret this vault has established is its own — the wrap in
-    /// the record opens under it. The platform secret is machine-wide rather than per-vault (4.2),
-    /// so a vault that never had a wrap, or a copy of one carried to a machine that enrolled a
-    /// secret for something else, clears its own field and leaves that secret exactly where it is;
-    /// deleting it would take device unlock away from whatever vault is still using it.
+    /// The store keeps one secret per vault and is asked about this one only (4.2), so turning the
+    /// setting off here can never reach the secret of another vault on the same machine. Even that
+    /// secret is dropped only once this record's own wrap has opened under it: a path outlives the
+    /// file that was at it, so a vault copied over one where something else enrolled a secret
+    /// clears its own field and leaves that secret exactly where it is.
     /// </remarks>
     Task DisableDeviceUnlockAsync(CancellationToken cancellationToken);
 }
