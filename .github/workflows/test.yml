@@ -17,7 +17,14 @@ jobs:
         with:
           node-version: 24
       - run: dotnet build XrplFile.Libraries.slnf --configuration Release
+      # Every test project in this repository is run by a job: XrplFile.Core.Tests and
+      # XrplFile.Keys.Tests and XrplFile.App.Core.Tests here, the Core suite's Integration-trait
+      # half in the "integration" job below, and web/test/*.test.mjs by the node step. A project
+      # the solution filter merely builds proves nothing: XrplFile.Keys.Tests was built and never
+      # run from the day it was created, so the 217 tests behind this branch's interoperability
+      # claim -- WalletCompatibilityTests above all -- could not fail CI.
       - run: dotnet run --project tests/XrplFile.Core.Tests --configuration Release --no-build -- -trait- "Category=Integration"
+      - run: dotnet run --project tests/XrplFile.Keys.Tests --configuration Release --no-build -- -trait- "Category=Integration"
       - run: dotnet run --project tests/XrplFile.App.Core.Tests --configuration Release --no-build -- -trait- "Category=Integration"
       - run: node --test test/*.test.mjs
         working-directory: web
