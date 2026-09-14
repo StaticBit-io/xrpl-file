@@ -1,0 +1,174 @@
+@implements IDisposable
+@inject ExportModel Model
+@inject IFilePickerService FilePicker
+@inject IJSRuntime JS
+
+@* Design section 8: a container sealed under its own password, offered as a file or as a QR code.
+   ExportModel.ToContainerAsync and ToQr do every byte of the work and every decision about whether a
+   code fits; this component only calls them and draws what QrPayload.FitsOneCode already said. *@
+
+@if (_container is null)
+{
+    <h1 class="h3">Export key</h1>
+    <p>
+        Exporting writes a portable backup file, protected by its own password &mdash; separate from
+        the vault's master password. Anyone who has both the file (or the code below) and this
+        password can spend from this account.
+    </p>
+
+    @if (_problem is { } problem)
+    {
+        <div class="alert alert-danger">@problem</div>
+    }
+
+    <div class="mb-3">
+        <label class="form-label">Backup password</label>
+        <input type="password" class="form-control" @bind="_password" @bind:event="oninput" disabled="@_busy" />
+    </div>
+
+    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="CreateAsync">Create backup</button>
+    <button type="button" class="btn btn-link" @onclick="BackAsync">Skip for now</button>
+}
+else
+{
+    <div class="alert alert-success">Backup created.</div>
+
+    <button type="button" class="btn btn-outline-primary" disabled="@_busy" @onclick="SaveToFileAsync">
+        Save to file&hellip;
+    </button>
+    <button type="button" class="btn btn-outline-primary ms-2" @onclick="ShowQr">Show as QR code</button>
+
+    @if (_showQr)
+    {
+        @if (_qr is { FitsOneCode: true })
+        {
+            @* A long press on an <img> in a WKWebView offers "Add to Photos", and an unencrypted
+               code would go to the photo gallery and iCloud around every restriction ExportModel
+               applies. Drawn into a <canvas>, never an <img src="data:...">, and its container
+               carries -webkit-touch-callout: none for the same reason. Windows has no such gesture
+               today, but this markup is shared with a future mobile target and the day it runs there
+               must not be the day this is discovered. *@
+            <div class="mt-3" style="-webkit-touch-callout: none; display: inline-block;">
+                <canvas @ref="_qrCanvas"></canvas>
+            </div>
+        }
+        else if (_qr is not null)
+        {
+            <div class="alert alert-warning mt-3">
+                This key's backup is too large for a single QR code. Use the file instead &mdash;
+                splitting a backup across several codes is not supported.
+            </div>
+        }
+    }
+
+    <div class="mt-3">
+        <button type="button" class="btn btn-link" @onclick="BackAsync">Back to keys</button>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public string Reference { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback OnBack { get; set; }
+
+    private readonly CancellationTokenSource _cts = new();
+    private string _password = string.Empty;
+    private byte[]? _container;
+    private QrPayload? _qr;
+    private bool[][]? _pendingMatrix;
+    private bool _showQr;
+    private bool _busy;
+    private string? _problem;
+    private ElementReference _qrCanvas;
+
+    private async Task CreateAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _problem = null;
+        StateHasChanged();
+
+        byte[] passwordBytes = Encoding.UTF8.GetBytes(_password);
+        _password = string.Empty;
+        try
+        {
+            _container = await Model.ToContainerAsync(Reference, passwordBytes, _cts.Token);
+        }
+        catch (VaultException ex)
+        {
+            _problem = VaultErrorMessages.For(ex.Error);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(passwordBytes);
+            _busy = false;
+        }
+    }
+
+    private async Task SaveToFileAsync()
+    {
+        if (_container is null || _busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            await FilePicker.SaveFileAsync($"{Reference}.xrplkey", _container, _cts.Token);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void ShowQr()
+    {
+        if (_container is null)
+        {
+            return;
+        }
+
+        _qr = Model.ToQr(_container);
+        _showQr = true;
+
+        // The error correction level is fixed at H inside QrMatrix.Build; there is no parameter
+        // here to lower it, matching design section 8's "never quietly lowered". Only computed when
+        // it fits one code -- QrPayload.FitsOneCode already answered whether a code should be drawn
+        // at all, before any encoder ran on the mobile side.
+        _pendingMatrix = _qr.FitsOneCode ? QrMatrix.Build(_qr.Text) : null;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingMatrix is { } matrix)
+        {
+            _pendingMatrix = null;
+            await JS.InvokeVoidAsync("drawQrMatrix", _cts.Token, _qrCanvas, matrix);
+        }
+    }
+
+    private async Task BackAsync()
+    {
+        if (_showQr && _qr is { FitsOneCode: true })
+        {
+            await JS.InvokeVoidAsync("clearQrCanvas", _cts.Token, _qrCanvas);
+        }
+
+        await OnBack.InvokeAsync();
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

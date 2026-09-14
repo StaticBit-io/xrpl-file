@@ -1,0 +1,299 @@
+@implements IDisposable
+@inject AddKeyModel Model
+@inject IFilePickerService FilePicker
+
+@* Design 8: generate a key, import a typed seed, or open a backup container and choose keys out of
+   it. Every validation and every derivation lives in AddKeyModel; this component only routes the
+   three input shapes to Generate / Import / SelectContainerKey and shows whatever Model.Preview or
+   Model.Problem already says. The one exception design 6 calls for explicitly -- offering export
+   immediately after a generated key is stored, not as a menu item elsewhere -- is handled by
+   embedding ExportKey directly below rather than returning to the key list first. *@
+
+@if (_justGeneratedReference is { } reference)
+{
+    <div class="alert alert-success">
+        This key was generated here, so this vault is the only place it exists until it is exported.
+    </div>
+    <ExportKey Reference="@reference" OnBack="FinishAsync" />
+}
+else
+{
+    <h1 class="h3">Add a key</h1>
+
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+            <button type="button" class="nav-link @(_mode == Mode.Generate ? "active" : "")" @onclick="() => _mode = Mode.Generate">Generate</button>
+        </li>
+        <li class="nav-item">
+            <button type="button" class="nav-link @(_mode == Mode.Import ? "active" : "")" @onclick="() => _mode = Mode.Import">Import a seed</button>
+        </li>
+        <li class="nav-item">
+            <button type="button" class="nav-link @(_mode == Mode.Container ? "active" : "")" @onclick="() => _mode = Mode.Container">Open a backup file</button>
+        </li>
+    </ul>
+
+    @if (Model.Problem is { } problem)
+    {
+        <div class="alert alert-danger">@problem</div>
+    }
+
+    @switch (_mode)
+    {
+        case Mode.Generate:
+            <div class="mb-3">
+                <label class="form-label">Label</label>
+                <input class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Network</label>
+                <input class="form-control" @bind="_network" @bind:event="oninput" disabled="@_busy" />
+            </div>
+            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoGenerate">Generate</button>
+            break;
+
+        case Mode.Import:
+            <div class="mb-3">
+                <label class="form-label">Label</label>
+                <input class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Network</label>
+                <input class="form-control" @bind="_network" @bind:event="oninput" disabled="@_busy" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Seed</label>
+                <input type="password" class="form-control" @bind="_seed" @bind:event="oninput" disabled="@_busy" />
+            </div>
+            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoImport">Preview</button>
+            break;
+
+        case Mode.Container:
+            @if (Model.ContainerKeys.Count == 0)
+            {
+                <div class="mb-3">
+                    <label class="form-label">Backup password (leave blank if it has none)</label>
+                    <input type="password" class="form-control" @bind="_containerPassword" @bind:event="oninput" disabled="@_busy" />
+                </div>
+                <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="PickFileAsync">
+                    Choose file&hellip;
+                </button>
+            }
+            else
+            {
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Address</th>
+                            <th>Algorithm</th>
+                            <th>Backup's label</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (int index = 0; index < Model.ContainerKeys.Count; index++)
+                        {
+                            ContainerKeyOption key = Model.ContainerKeys[index];
+                            int capturedIndex = index;
+                            <tr>
+                                <td><code>@key.Address</code></td>
+                                <td>@key.Algorithm</td>
+                                <td>@(key.Label ?? "—")</td>
+                                <td>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_busy"
+                                            @onclick="() => BeginSelect(capturedIndex, key)">
+                                        Import&hellip;
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+
+                @if (_selectingIndex >= 0)
+                {
+                    <div class="border rounded p-3 mb-3">
+                        <p>Importing <code>@Model.ContainerKeys[_selectingIndex].Address</code>.</p>
+                        <div class="mb-3">
+                            <label class="form-label">Label</label>
+                            <input class="form-control" @bind="_selectLabel" @bind:event="oninput" disabled="@_busy" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Network</label>
+                            <input class="form-control" @bind="_selectNetwork" @bind:event="oninput" disabled="@_busy" />
+                        </div>
+                        <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoSelect">Preview</button>
+                        <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="() => _selectingIndex = -1">
+                            Cancel
+                        </button>
+                    </div>
+                }
+
+                <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="DoCloseContainer">
+                    Close this backup
+                </button>
+            }
+            break;
+    }
+
+    @if (Model.Preview is { } preview)
+    {
+        <div class="alert alert-info mt-3">
+            <p>This will be stored as <code>@preview.Address</code> (@preview.Algorithm).</p>
+            <button type="button" class="btn btn-success" disabled="@_busy" @onclick="StoreAsync">Add to vault</button>
+        </div>
+    }
+
+    @if (_stored is { } storedAddress)
+    {
+        <div class="alert alert-success mt-3">Added <code>@storedAddress</code> to the vault.</div>
+    }
+
+    <div class="mt-3">
+        <button type="button" class="btn btn-link" @onclick="FinishAsync">Back to keys</button>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public EventCallback OnDone { get; set; }
+
+    private enum Mode
+    {
+        Generate,
+        Import,
+        Container,
+    }
+
+    private readonly CancellationTokenSource _cts = new();
+    private Mode _mode = Mode.Generate;
+
+    private string _label = string.Empty;
+    private string _network = string.Empty;
+    private string _seed = string.Empty;
+
+    private string _containerPassword = string.Empty;
+    private int _selectingIndex = -1;
+    private string _selectLabel = string.Empty;
+    private string _selectNetwork = string.Empty;
+
+    private string? _justGeneratedReference;
+    private string? _stored;
+    private bool _busy;
+
+    private void DoGenerate() => Model.Generate(_label, _network);
+
+    private void DoImport()
+    {
+        Model.Import(new AddKeyDraft(_label, _network, _seed, null));
+        _seed = string.Empty;
+    }
+
+    private async Task PickFileAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            byte[]? bytes = await FilePicker.PickFileAsync(_cts.Token);
+            if (bytes is null)
+            {
+                return;
+            }
+
+            string? password = string.IsNullOrEmpty(_containerPassword) ? null : _containerPassword;
+            Model.OpenContainer(bytes, password);
+            _containerPassword = string.Empty;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void BeginSelect(int index, ContainerKeyOption key)
+    {
+        _selectingIndex = index;
+        _selectLabel = key.Label ?? string.Empty;
+        _selectNetwork = key.Network ?? string.Empty;
+    }
+
+    private void DoSelect()
+    {
+        if (Model.SelectContainerKey(_selectingIndex, _selectLabel, _selectNetwork))
+        {
+            _selectingIndex = -1;
+        }
+    }
+
+    private void DoCloseContainer()
+    {
+        Model.CloseContainer();
+        _selectingIndex = -1;
+        _containerPassword = string.Empty;
+    }
+
+    private async Task StoreAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _stored = null;
+        StateHasChanged();
+
+        // Captured before the call: a successful StoreAsync clears Model.Preview as part of
+        // marking nothing pending any more, so reading the address afterwards would always find it
+        // gone.
+        string? previewAddress = Model.Preview?.Address;
+        try
+        {
+            string reference = await Model.StoreAsync(_cts.Token);
+            if (reference == string.Empty)
+            {
+                return;
+            }
+
+            if (_mode == Mode.Generate)
+            {
+                _justGeneratedReference = reference;
+                return;
+            }
+
+            _stored = previewAddress;
+            _label = string.Empty;
+            _network = string.Empty;
+            _selectLabel = string.Empty;
+            _selectNetwork = string.Empty;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task FinishAsync()
+    {
+        _justGeneratedReference = null;
+        await OnDone.InvokeAsync();
+    }
+
+    public void Dispose()
+    {
+        // Design's own rule for this screen (task-12 brief): a multi-key backup's decrypted seeds,
+        // and whatever SelectContainerKey most recently prepared from them, must not simply wait on
+        // the garbage collector once the add-key screen is dismissed -- whichever way it is dismissed,
+        // since Dispose runs regardless of which button sent it away. CloseContainer also resets any
+        // stray Preview or Problem left from the Generate or Import routes (see its own remarks), so
+        // this is a clean slate for the next time the screen opens, not just the container route.
+        Model.CloseContainer();
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

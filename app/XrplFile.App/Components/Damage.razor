@@ -1,0 +1,71 @@
+@implements IDisposable
+@inject VaultListModel Model
+
+@* Design 6, "Damage": names the entries, keeps the intact ones visible elsewhere, and only offers
+   the acknowledgement while WritesAreRefused is true. Both facts are read straight from the model on
+   every render, never cached here -- showing a panel because the model says damage exists is
+   displaying; deciding that damage exists already happened in VaultListModel.RefreshAsync. The
+   acknowledge button is the one human act design 6 asks for: a press with the list in front of the
+   person, never anything that calls AcknowledgeDamageAsync on its own. *@
+
+<div class="alert alert-warning" role="alert">
+    <h2 class="h5">Damage found</h2>
+    <p>
+        These entries failed their own integrity check the last time the vault was opened. Everything
+        else in the vault is unaffected and still works.
+    </p>
+    <ul class="mb-2">
+        @foreach (KeyRow row in Model.Rows.Where(row => row.IsDamaged))
+        {
+            <li><code>@row.Reference</code></li>
+        }
+    </ul>
+
+    @if (Model.WritesAreRefused)
+    {
+        <p>
+            Adding, exporting or deleting keys is refused until this has been acknowledged. The
+            record above is the only witness there is to what was lost &mdash; look at it before
+            pressing the button below, because acknowledging clears the block, not the fact that it
+            happened.
+        </p>
+        <button type="button" class="btn btn-outline-warning" disabled="@_busy" @onclick="AcknowledgeAsync">
+            I've seen it
+        </button>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private readonly CancellationTokenSource _cts = new();
+    private bool _busy;
+
+    private async Task AcknowledgeAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            await Model.AcknowledgeDamageAsync(_cts.Token);
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await OnChanged.InvokeAsync();
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

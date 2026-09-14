@@ -1,0 +1,125 @@
+@implements IDisposable
+@inject RevealModel Model
+@inject IClipboardService Clipboard
+
+@* Design section 8: hidden by default, shown on a deliberate press, hidden again on its own after
+   sixty seconds or the instant the vault locks. RevealModel.Shown already carries both rules -- it
+   re-reads IKeyVault.IsUnlocked on every access and its own idle timer clears the same field -- but
+   neither event tells this component to redraw on its own (see the model's own remarks on why).
+   The timer below is this component's answer: a plain periodic re-render so the next read of
+   Model.Shown, after either has happened, actually reaches the screen instead of a stale value
+   sitting in markup nothing repainted. *@
+
+<h1 class="h3">Reveal seed</h1>
+
+@if (_problem is { } problem)
+{
+    <div class="alert alert-danger">@problem</div>
+}
+
+@if (Model.Shown is { } secret)
+{
+    <div class="alert alert-warning">
+        <p>
+            Anyone who sees this can spend from this account. It hides itself automatically after a
+            minute, or the instant the vault locks.
+        </p>
+        <code class="d-block p-2 bg-body-tertiary user-select-all">@secret</code>
+        <button type="button" class="btn btn-outline-secondary mt-2" @onclick="Hide">Hide now</button>
+        <button type="button" class="btn btn-outline-secondary mt-2 ms-2" disabled="@_copying" @onclick="CopyAsync">
+            Copy
+        </button>
+    </div>
+}
+else
+{
+    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="ShowAsync">Reveal seed</button>
+}
+
+<div class="mt-3">
+    <button type="button" class="btn btn-link" @onclick="BackAsync">Back to keys</button>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Reference { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback OnBack { get; set; }
+
+    private readonly CancellationTokenSource _cts = new();
+    private Timer? _pollTimer;
+    private bool _busy;
+    private bool _copying;
+    private string? _problem;
+
+    protected override void OnInitialized()
+    {
+        _pollTimer = new Timer(
+            _ => InvokeAsync(StateHasChanged), state: null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private async Task ShowAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _problem = null;
+        StateHasChanged();
+        try
+        {
+            await Model.ShowAsync(Reference, _cts.Token);
+        }
+        catch (VaultException ex)
+        {
+            _problem = VaultErrorMessages.For(ex.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Hide() => Model.Hide();
+
+    private async Task CopyAsync()
+    {
+        if (_copying)
+        {
+            return;
+        }
+
+        _copying = true;
+        StateHasChanged();
+        try
+        {
+            await Model.CopyAsync(Clipboard, _cts.Token);
+        }
+        catch (InvalidOperationException)
+        {
+            // Nothing was shown to copy: the poll above already caught the vault locking or the
+            // sixty-second window elapsing and blanked the button that would have called this.
+        }
+        finally
+        {
+            _copying = false;
+        }
+    }
+
+    private async Task BackAsync()
+    {
+        Model.Hide();
+        await OnBack.InvokeAsync();
+    }
+
+    public void Dispose()
+    {
+        _pollTimer?.Dispose();
+        Model.Hide();
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

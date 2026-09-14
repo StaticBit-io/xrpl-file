@@ -17,11 +17,30 @@
             break;
 
         case UnlockStage.Unlocked:
-            <div class="container py-4" style="max-width: 480px;">
-                <h1>Vault unlocked</h1>
-                <p>The key list arrives in a later task.</p>
+            <div class="d-flex justify-content-between align-items-center border-bottom px-3 py-2">
+                <div class="btn-group">
+                    <button type="button"
+                            class="btn btn-outline-primary @(_unlockedView == UnlockedView.KeyList ? "active" : "")"
+                            @onclick="() => _unlockedView = UnlockedView.KeyList">
+                        Keys
+                    </button>
+                    <button type="button"
+                            class="btn btn-outline-primary @(_unlockedView == UnlockedView.Settings ? "active" : "")"
+                            @onclick="() => _unlockedView = UnlockedView.Settings">
+                        Settings
+                    </button>
+                </div>
                 <button type="button" class="btn btn-outline-secondary" @onclick="LockAsync">Lock</button>
             </div>
+
+            @if (_unlockedView == UnlockedView.KeyList)
+            {
+                <KeyList />
+            }
+            else
+            {
+                <Settings />
+            }
             break;
     }
 }
@@ -33,8 +52,15 @@ else
 }
 
 @code {
+    private enum UnlockedView
+    {
+        KeyList,
+        Settings,
+    }
+
     private readonly CancellationTokenSource _cts = new();
     private bool _ready;
+    private UnlockedView _unlockedView = UnlockedView.KeyList;
 
     protected override async Task OnInitializedAsync()
     {
@@ -45,6 +71,7 @@ else
     private async Task LockAsync()
     {
         await Model.LockAsync();
+        _unlockedView = UnlockedView.KeyList;
         StateHasChanged();
     }
 

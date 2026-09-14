@@ -1,0 +1,144 @@
+@implements IDisposable
+@inject DeviceUnlockModel Model
+
+@* Design 6, "Settings": the vault's own path, a button that reveals it in the file manager, opening
+   a different vault, and the device-unlock switch. DeviceUnlockModel.IsEnabledAsync is re-read after
+   every toggle rather than cached locally -- see the model's own remarks on why a cached flag here
+   would be exactly the defect VaultListModel's own history already found once.
+   "Opening a different vault" has no model behind it: IKeyVault is wired as a singleton over
+   VaultLocation.DefaultPath for the whole process (MauiProgram.RegisterVault), and nothing in this
+   plan's models can repoint it at a different file without a restart. Rather than build a control
+   that looks like it works and does not, this screen says plainly that it is not available yet. *@
+
+@* Both branches share this wrapper -- ChangePassword used to render outside any width- or
+   padding-constrained container when reached from here, the one screen in this file (unlike
+   KeyList, which wraps its own AddKey / ExportKey / RevealSeed sub-views the same way) that had
+   its own top-level container instead of relying on a parent's. Wrapping both branches in the
+   same div is what KeyList already does for its own children; this brings Settings in line with
+   it rather than leaving ChangePassword to full-bleed edge to edge. *@
+<div class="container py-3" style="max-width: 560px;">
+    @if (_showChangePassword)
+    {
+        <ChangePassword OnBack="() => _showChangePassword = false" />
+    }
+    else
+    {
+        <h1 class="h3">Settings</h1>
+
+        <section class="mb-4">
+            <h2 class="h5">Vault location</h2>
+            <p>The vault file lives at:</p>
+            <code class="d-block p-2 bg-body-tertiary text-break">@VaultLocation.DefaultPath</code>
+            <button type="button" class="btn btn-outline-secondary mt-2" @onclick="RevealInFileManager">
+                Show in file manager
+            </button>
+        </section>
+
+        <section class="mb-4">
+            <h2 class="h5">A different vault</h2>
+            <p>
+                Opening a vault kept somewhere else is not available in this build. This application
+                always opens the vault at the path above.
+            </p>
+        </section>
+
+        <section class="mb-4">
+            <h2 class="h5">Remember on this device</h2>
+            <p>
+                Tied to the path above: renaming or moving the vault file asks for the master
+                password once, even with this switched on.
+            </p>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch" id="device-unlock-switch"
+                       checked="@_deviceUnlockEnabled" disabled="@_busy" @onchange="ToggleDeviceUnlockAsync" />
+                <label class="form-check-label" for="device-unlock-switch">Unlock with this device</label>
+            </div>
+            @if (_deviceUnlockProblem is { } problem)
+            {
+                <div class="alert alert-warning mt-2">@problem</div>
+            }
+        </section>
+
+        <button type="button" class="btn btn-outline-primary" @onclick="() => _showChangePassword = true">
+            Change master password
+        </button>
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private bool _showChangePassword;
+    private bool _deviceUnlockEnabled;
+    private bool _busy;
+    private string? _deviceUnlockProblem;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _deviceUnlockEnabled = await Model.IsEnabledAsync(_cts.Token);
+    }
+
+    private void RevealInFileManager()
+    {
+        // A plain OS action, not a vault decision: this project's Windows target only, the same way
+        // MauiFilePickerService already reaches for a Windows-specific API directly rather than
+        // through a seam in App.Core.
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"/select,\"{VaultLocation.DefaultPath}\"",
+                UseShellExecute = true,
+            });
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Nothing this screen can do about a shell that refused to launch; the path is already
+            // on screen above for the user to navigate to by hand.
+        }
+    }
+
+    private async Task ToggleDeviceUnlockAsync(ChangeEventArgs args)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _deviceUnlockProblem = null;
+        StateHasChanged();
+
+        bool turnOn = args.Value is true;
+        try
+        {
+            if (turnOn)
+            {
+                bool created = await Model.EnableAsync(_cts.Token);
+                if (!created)
+                {
+                    _deviceUnlockProblem = "This device could not create a secret to remember the vault with.";
+                }
+            }
+            else
+            {
+                await Model.DisableAsync(_cts.Token);
+            }
+        }
+        catch (VaultException ex)
+        {
+            _deviceUnlockProblem = VaultErrorMessages.For(ex.Error);
+        }
+        finally
+        {
+            _deviceUnlockEnabled = await Model.IsEnabledAsync(_cts.Token);
+            _busy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}
