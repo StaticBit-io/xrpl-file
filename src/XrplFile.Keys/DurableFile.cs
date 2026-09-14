@@ -1,6 +1,14 @@
 namespace XrplFile.Keys;
 
 /// <summary>
+/// How the bytes of one file are read. Production passes
+/// <see cref="File.ReadAllBytesAsync(string, CancellationToken)"/>; the seam exists so that a test
+/// can make a file vanish between two statements — the one thing a reader has to survive and the
+/// one thing no test can arrange on a real filesystem without racing it.
+/// </summary>
+internal delegate Task<byte[]> VaultFileContents(string path, CancellationToken cancellationToken);
+
+/// <summary>
 /// Crash-safe single-file storage: a write either lands whole or does not land at all, and the
 /// previous good contents are never the bytes being overwritten.
 /// </summary>
@@ -112,25 +120,52 @@ internal static class DurableFile
     /// Returns <see langword="null"/> when neither exists — a missing vault is not a failure.
     /// A leftover <c>.tmp</c> from an interrupted write is never considered.
     /// </summary>
-    internal static async Task<byte[]?> ReadAsync(string path, CancellationToken cancellationToken)
+    internal static Task<byte[]?> ReadAsync(string path, CancellationToken cancellationToken) =>
+        ReadAsync(path, File.ReadAllBytesAsync, cancellationToken);
+
+    /// <summary>
+    /// The same read with the filesystem handed in. Production passes
+    /// <see cref="File.ReadAllBytesAsync(string, CancellationToken)"/>; the seam exists so that a
+    /// test can make a file vanish between two statements, which nothing can do to a real
+    /// filesystem without racing it.
+    /// </summary>
+    internal static async Task<byte[]?> ReadAsync(
+        string path, VaultFileContents read, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(path);
-
-        string backupPath = path + BackupSuffix;
-
-        string? readablePath = File.Exists(path) ? path : File.Exists(backupPath) ? backupPath : null;
-        if (readablePath is null)
-        {
-            return null;
-        }
+        ArgumentNullException.ThrowIfNull(read);
 
         try
         {
-            return await File.ReadAllBytesAsync(readablePath, cancellationToken).ConfigureAwait(false);
+            // Each file is read rather than asked about. Asking first and then reading leaves a
+            // window between the two, and a file that goes in that window is answered by the read
+            // with "not found" — which, trusted as a failure, became StorageFailed while the whole
+            // good copy beside it went unread. Absence found by reading is still absence.
+            return await ContentsOrAbsent(path, read, cancellationToken).ConfigureAwait(false)
+                ?? await ContentsOrAbsent(path + BackupSuffix, read, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // Everything that is not absence. A refused disk must never read as "there is no
+            // vault here", which is what a caller acts on by offering to create one over the top.
             throw new VaultException(VaultError.StorageFailed, $"Reading the vault file at '{path}' failed.", ex);
+        }
+    }
+
+    /// <summary>
+    /// One file's contents, or <see langword="null"/> where it is not there. Only the two
+    /// not-found failures are absence; every other one is left to the caller above to report.
+    /// </summary>
+    private static async Task<byte[]?> ContentsOrAbsent(
+        string path, VaultFileContents read, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await read(path, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
         }
     }
 }

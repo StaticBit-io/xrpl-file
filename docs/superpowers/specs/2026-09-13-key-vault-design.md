@@ -548,6 +548,7 @@ Recorded because they are real, not because they are acceptable everywhere.
 | A damaged entry | Flip a byte: that reference reports damaged, the others still open |
 | A deleted entry | Remove one: `mac` fails, and the caller can name what is missing |
 | Durability | Kill between write and rename: the previous good file opens |
+| A file that goes mid-read | The vault file is gone by the time it is opened: the kept copy is read, not `StorageFailed` |
 | Concurrency | Lock during an in-flight store: the gate serialises and no half-wiped key reaches a record |
 | Password change | Entries byte-identical before and after; the device wrap still opens afterwards |
 | A committed change whose cleanup fails | The kept copy cannot be deleted: the outcome says the password changed and the copy remains, and the new password opens the vault |
