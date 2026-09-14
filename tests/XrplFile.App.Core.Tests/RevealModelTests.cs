@@ -115,6 +115,28 @@ public class RevealModelTests : VaultHarness
     }
 
     [Fact]
+    public async Task Shown_goes_null_the_instant_the_vault_locks_itself_with_no_reads_and_before_the_idle_window()
+    {
+        // Design section 8: "cleared immediately when the vault locks." The vault locks on its own
+        // here (VaultAutoLock's idle timer would do the same via LockAsync) with no call into
+        // RevealModel and well before its own 60-second window — the exact sequence the rule exists
+        // to cover: reveal, step away, the vault locks itself, and the plaintext must not still be
+        // handed out by a stale Shown.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+        RevealModel model = new(vault, TimeProvider.System);
+
+        await model.ShowAsync(reference, token);
+        Assert.NotNull(model.Shown);
+
+        await vault.LockAsync();
+
+        Assert.Null(model.Shown);
+    }
+
+    [Fact]
     public async Task Revealing_from_a_locked_vault_surfaces_Locked_rather_than_returning_null_silently()
     {
         CancellationToken token = TestContext.Current.CancellationToken;

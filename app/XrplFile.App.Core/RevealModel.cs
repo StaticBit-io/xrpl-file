@@ -11,16 +11,20 @@ namespace XrplFile.App.Core;
 /// <remarks>
 /// <para>
 /// <b>Locking the vault is not this model's job.</b> It neither listens for the vault locking nor
-/// polls <see cref="IKeyVault.IsUnlocked"/>. <see cref="ShowAsync"/> already surfaces
-/// <see cref="VaultError.Locked"/> from <see cref="IKeyVault.RevealAsync"/> when the vault turns out
-/// to be locked at the moment of the call — see that method's remarks for why that must propagate
-/// rather than collapse into a quiet <see langword="null"/>. Design section 8 also asks for the
-/// secret to clear the instant the vault locks while it is already on screen; <see cref="IKeyVault"/>
-/// exposes no event a model could react to for that, and inventing one for this single caller is a
-/// bigger seam than this task needs. The screen that owns both an unlock control and this model is
-/// where that wiring belongs — calling <see cref="Hide"/> the moment it learns the vault locked — and
-/// it is recorded as a decision left open for the task that writes that screen, not silently assumed
-/// away here.
+/// polls <see cref="IKeyVault.IsUnlocked"/> to decide when to act. <see cref="ShowAsync"/> already
+/// surfaces <see cref="VaultError.Locked"/> from <see cref="IKeyVault.RevealAsync"/> when the vault
+/// turns out to be locked at the moment of the call — see that method's remarks for why that must
+/// propagate rather than collapse into a quiet <see langword="null"/>.
+/// </para>
+/// <para>
+/// Design section 8 also asks for a shown secret to clear the instant the vault locks.
+/// <see cref="IKeyVault"/> exposes no event a model could react to when that happens, and inventing
+/// one for this single caller is a bigger seam than this task needs — so <see cref="Shown"/> is
+/// computed from <see cref="IKeyVault.IsUnlocked"/> on every read instead of being pushed to by a
+/// notification. That closes the rule for anyone who reads <see cref="Shown"/> after the vault has
+/// locked, including its own idle timer's lock (<c>VaultAutoLock</c> calls <c>LockAsync</c> without
+/// asking this model first), with no wiring beyond what this type already owns. See
+/// <see cref="Shown"/>'s own remarks for exactly what that guarantees and what it does not.
 /// </para>
 /// </remarks>
 /// <param name="vault">The vault a reference is revealed from.</param>
@@ -35,13 +39,26 @@ public sealed class RevealModel(IKeyVault vault, TimeProvider time)
     private static readonly TimeSpan HideAfter = TimeSpan.FromSeconds(60);
 
     private ITimer? _hideTimer;
+    private string? _shown;
 
     /// <summary>
     /// The entry's secret while it is on screen, or <see langword="null"/> before
-    /// <see cref="ShowAsync"/> has run, after <see cref="Hide"/>, or once the idle window above has
-    /// passed with no further <see cref="ShowAsync"/> call.
+    /// <see cref="ShowAsync"/> has run, after <see cref="Hide"/>, once the idle window above has
+    /// passed with no further <see cref="ShowAsync"/> call, or once <see cref="IKeyVault.IsUnlocked"/>
+    /// is <see langword="false"/> — design section 8's "cleared immediately when the vault locks",
+    /// which the vault can trigger on its own (its idle timer, or any other caller of
+    /// <c>LockAsync</c>) without this model being told.
     /// </summary>
-    public string? Shown { get; private set; }
+    /// <remarks>
+    /// This guarantees that no read of <see cref="Shown"/> after the vault has locked returns the
+    /// secret — the strongest guarantee a model with no lock notification from <see cref="IKeyVault"/>
+    /// can make on its own. It does <b>not</b> guarantee the secret has been erased from whatever a
+    /// screen already painted with the earlier value: a label, a text field, a copy made before the
+    /// lock. Nothing here reaches into the UI. A screen that wants the display itself to go blank on
+    /// a lock must re-read or re-bind <see cref="Shown"/> when it learns the vault locked, not assume
+    /// this property pushes that change to it.
+    /// </remarks>
+    public string? Shown => vault.IsUnlocked ? _shown : null;
 
     /// <summary>
     /// Reveals <paramref name="reference"/> and shows its secret as <see cref="Shown"/>, arming the
@@ -68,7 +85,7 @@ public sealed class RevealModel(IKeyVault vault, TimeProvider time)
         VaultEntry entry = await vault.RevealAsync(reference, "Shown on screen", cancellationToken).ConfigureAwait(false);
 
         Hide();
-        Shown = entry.Secret;
+        _shown = entry.Secret;
         _hideTimer = time.CreateTimer(_ => Hide(), state: null, HideAfter, Timeout.InfiniteTimeSpan);
     }
 
@@ -78,7 +95,7 @@ public sealed class RevealModel(IKeyVault vault, TimeProvider time)
     /// </summary>
     public void Hide()
     {
-        Shown = null;
+        _shown = null;
         _hideTimer?.Dispose();
         _hideTimer = null;
     }
