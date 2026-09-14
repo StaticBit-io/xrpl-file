@@ -23,10 +23,8 @@ the packaging and the test story before anything can go wrong expensively.
 password or by device, locking it, and the idle lock. Listing keys. Adding a key by import, by
 generation, or from an opened backup container. Exporting a key to an encrypted container and
 revealing a seed on screen. Changing the master password and turning device unlock on and off.
-Deleting a key. Reporting damage. Settings: where the vault file is.
-
-**Shipped narrower than planned.** Opening a different vault file was in scope above and is not
-in this build: see the correction to E5 and to section 6's "Settings" below.
+Deleting a key. Reporting damage. Settings: where the vault file is, and pointing the application
+at a vault file kept somewhere else.
 
 Also in, because the screens cannot be honest without it: replacing the export container with the
 Wallet project's format (section 5), and giving an entry the algorithm its key was derived with
@@ -43,20 +41,25 @@ Windows: the code must not be gratuitously Windows-only, but nothing else is bui
 | E2 | Razor components hold no decisions | A component with an `if` in it is a decision nothing can test. It moves to the model |
 | E3 | CI builds a solution filter on Linux and the app on Windows | A `net10.0-windows` project cannot build on `ubuntu-latest`, and the current job builds the whole solution. The filter keeps the libraries and the app models tested cheaply on every push; a second job compiles the UI so it cannot rot unnoticed |
 | E4 | C1 contacts no node | Addresses derive from a seed locally. A part that needs no network needs no connection settings, no reachability handling and no second moving piece while the shell is being stood up |
-| E5 | The vault lives in the application's data directory, at a fixed path, and that path is shown | A backup is a copy of the file, so the file must be findable |
+| E5 | The vault lives in the application's data directory by default, at a fixed path that is shown; a person can point the application at a vault file kept somewhere else instead, and that choice is remembered | A backup is a copy of the file, so the file must be findable — and a findable, portable file is only worth having if the application can actually be pointed at a copy of it |
 | E6 | The export container becomes the Wallet project's format, byte for byte | Owner's decision. A key that cannot move between the two products is a key locked in whichever one made it, and inventing a third format serves nobody |
 | E7 | The container is therefore PBKDF2 (`kdfId = 1`), not Argon2id | The Wallet's header carries an iteration count and nothing else; Argon2id's three parameters do not fit. The vault file keeps Argon2id — see 5.2 |
 | E8 | An entry records the algorithm its key uses | Not for correct derivation: an XRPL family seed carries its own curve in its prefix, and `XrplKeypairs.DeriveKeypair` (`Base/Xrpl.Keypairs/XrplKeypairs.cs`) reads it from there, ignoring the `algorithm` argument entirely — the vault already holds a secp256k1 key correctly with no field at all. It exists for interoperability and display: the shared container format carries an algorithm per key, a Wallet backup arrives with one, and dropping it on the way through would lose what that backup said. Absent still means ed25519 for anything already stored. An earlier revision of this decision claimed the vault could not hold a secp256k1 key; that was wrong — see 5.4 |
 | E9 | No component-test framework | Components are thin by E2, and testing a binding tests Blazor. The obligation E2 creates is what replaces it |
 
-**Correction to E5.** An earlier revision of this row said "another file can be opened." That did
-not ship: `IKeyVault` is wired as a process-wide singleton over `VaultLocation.DefaultPath` in
-`MauiProgram.RegisterVault` (3.1), and nothing built for this task can repoint it at a different
-file without restarting the process. `Settings.razor` says so plainly rather than offering a
-control that looks like it works and does not — see the correction to section 6 below. The intent
-behind the original reasoning is not withdrawn, only deferred: "opening another is how it arrives
-on a new machine" is still the eventual point of a findable, portable file, and section 10 now
-carries this as a known limitation.
+**How E5 is built.** `IKeyVault` is wired as a process-wide singleton over one path, for the whole
+process (`MauiProgram.RegisterVault`, 3.1), and nothing in this plan repoints an instance already
+constructed — see that method's own remarks on why singleton is the only lifetime under which "the
+vault is unlocked" means the same thing to every model that asks. So opening a vault kept elsewhere
+does not repoint the running singleton; it records the choice and takes effect at the next start.
+`IVaultLocationStore` (`FileVaultLocationStore` in production: one small text file, beside the
+default vault) holds the chosen path; `VaultLocation.Resolve(store)` reads it once, at
+`MauiProgram.RegisterVault`'s own first line, before the singleton is built; `VaultLocationModel`
+is the model behind the screen, and `Settings.razor` is honest about the restart rather than
+offering a control that pretends to repoint a vault this process already has open. The vault's own
+device unlock is unaffected either way: it is keyed by the exact path a vault was opened from
+(4.2), so a vault opened from elsewhere has none of its own and asks for the master password the
+first time — the screen says so.
 
 ## 3. Projects
 
@@ -300,13 +303,14 @@ witness that an entry was deleted or the file rolled back, and a loop that ackno
 looking destroys the evidence exactly as the code did before it was fixed.
 
 **Settings.** The vault file's path with a button to show it in the file manager, because a backup
-is a copy and a copy must be findable. And the device-unlock switch, which says plainly that it is
-tied to this path: rename the file and the password is needed once.
-
-**Correction.** An earlier revision of this paragraph also listed "opening a different vault" as a
-Settings capability. It is not one: `Settings.razor` names the vault's path and, under its own
-heading, says plainly that opening one kept elsewhere is not available in this build and that the
-application always opens the vault at the path shown — see the correction to E5 and section 10.
+is a copy and a copy must be findable. A button to point the application at a vault file kept
+somewhere else — a memory stick, a synced folder, a copy carried over from another machine — which
+saves the choice and takes effect the next time the application starts, because `IKeyVault` is a
+process-wide singleton nothing here can repoint while it runs (E5). A vault opened from a different
+path has no device unlock of its own, and the screen says so: "remember on this device" is keyed by
+the exact path a vault was opened from (4.2), so it always asks for the master password the first
+time. And the device-unlock switch itself, which says plainly that it is tied to this path: rename
+the file and the password is needed once.
 
 ## 7. Failures on screen
 
@@ -417,13 +421,6 @@ the markup is shared and the day it runs on iOS must not be the day it is discov
   password once. Inherited from B, where the alternative was a record-format change.
 - **Existing vault entries have no algorithm.** Absent means ed25519, which is what they were
   derived as, so nothing already stored changes meaning.
-- **Opening a different vault file is not available.** `IKeyVault` is wired as a process-wide
-  singleton over the fixed default path (`MauiProgram.RegisterVault`, 3.1), and nothing built for
-  this task can repoint it without restarting the process. This was in scope (section 1) and in an
-  earlier revision of E5 and of section 6's "Settings" paragraph; `Settings.razor` says plainly
-  that it is not available rather than offering a control that looks like it works. Moving a vault
-  onto a new machine today means placing the file at that machine's own default path before the
-  application first runs there, not opening it from within the application.
 - **A revealed seed clears from the model within about a second of a lock, not instantly, and the
   screen does not erase what it already painted.** `RevealModel.Shown` reads `IKeyVault.IsUnlocked`
   on every access, so no read after a lock ever returns the secret, but `RevealSeed.razor` only
