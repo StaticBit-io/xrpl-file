@@ -7,7 +7,7 @@ surface it can put behind a screen.
 | Part | What it is | State |
 |---|---|---|
 | A | tickets and the publication session | shipped |
-| B | the key vault — this document | designed |
+| B | the key vault — this document | shipped |
 | C | the MAUI Blazor Hybrid application over A and B | not started |
 
 ## 1. The task
@@ -191,7 +191,7 @@ Reference             GUID assigned by the vault — see below
 Kind                  Generated | Imported
 Label                 what the user calls it
 Network               which ledger this key is for
-Address               classic address, stored rather than derived so listing costs nothing
+Address               classic address, stored rather than re-derived from the seed on every list
 CreatedAt
 Secret                the seed
 Generated only:
@@ -204,8 +204,9 @@ Generated only:
 able to see which throwaway accounts exist nowhere else and say so, rather than discovering it
 the day a password is forgotten.
 
-`Address` is stored because every field here is encrypted anyway: deriving it would mean touching
-key material to draw a list.
+`Address` is stored rather than derived from the seed on every list — listing already touches the
+data key to decrypt each entry (6.2), and deriving an address from a seed on top of that would be
+an elliptic-curve operation this design has no need to pay for.
 
 The reference is the string part A's `PublicationState.KeyReference` carries. Part A treats it as
 opaque — it neither generates it nor constrains its shape — so the vault is what makes it a GUID,
@@ -230,6 +231,8 @@ public interface IKeyVault
     Task<IReadOnlyList<VaultEntryInfo>> ListAsync(CancellationToken cancellationToken);
     Task<string> StoreAsync(NewVaultEntry entry, CancellationToken cancellationToken);
     Task<VaultEntry> RevealAsync(string reference, string reason, CancellationToken cancellationToken);
+    Task<byte[]> ExportAsync(
+        string reference, ReadOnlyMemory<byte> containerPassword, CancellationToken cancellationToken);
     Task UpdateAsync(string reference, VaultEntryEdit edit, CancellationToken cancellationToken);
     Task DeleteAsync(string reference, CancellationToken cancellationToken);
 
@@ -242,11 +245,20 @@ public interface IKeyVault
 
 Three shapes of the same entry, and the split is load-bearing. `NewVaultEntry` is everything in
 6.1 except the reference, which the vault assigns. `VaultEntryInfo` is everything except the
-secret, and it is what `ListAsync` returns — drawing a list of keys must not decrypt a single
-seed, or the whole vault's plaintext would pass through memory every time a screen opened.
+secret, and it is what `ListAsync` returns. D7 puts an entry's metadata inside the same encrypted
+blob as its secret, so `ListAsync` cannot avoid the decrypt — it still needs the data key to open
+every entry and read a label. What `VaultEntryInfo` actually guarantees is narrower, and it is
+still the guarantee that matters: the secret never escapes into caller code, into a binding, or
+into a log, because the shape callers are handed simply has no field to carry it in.
 `VaultEntry`, the only shape carrying the secret, comes back from `RevealAsync` alone.
 `VaultEntryEdit` carries the mutable metadata — label, `LastKnownSequence`,
 `DeletableFromLedger`, `Exported` — and can reach neither the secret, the kind, nor the address.
+
+`ExportAsync` reveals one entry, seals it into an `ExportContainer` under a password the caller
+supplies, and marks the entry `Exported` — all three in the one call, because the guaranteed
+recovery path D10 requires cannot depend on a caller remembering, separately, to record that it
+used it. The write that sets `Exported` happens only after the container is confirmed sealed: a
+throw out of the sealing step leaves the entry exactly as it was.
 
 Password buffers belong to the caller throughout. The vault reads them, derives from them, and
 never stores them — and does not zero them either, because the caller usually still needs the
@@ -282,9 +294,13 @@ is discarded.
 
 ### 6.4 Auto-lock
 
-A sliding idle timeout, 15 minutes by default, reset by every operation including a signature. A
-publication therefore does not lock itself out while it is working, and a machine left alone
-does lock. Explicit `LockAsync` is always available.
+A sliding idle timeout: `VaultAutoLock` takes the window as a constructor argument and has no
+built-in default of its own — the caller picks it, and every caller so far (tests, `VaultSigner`)
+picks 15 minutes. Nothing in `KeyVault` touches the timer; only whatever holds the `VaultAutoLock`
+does, by calling `Touch()`. `VaultSigner` is the one caller that does today, once after every
+signature, so a publication signing continuously does not lock itself out mid-run, while a
+machine left alone — nothing left calling `Touch()` — still locks once the window passes.
+Explicit `LockAsync` is always available.
 
 ## 7. The seam into part A
 
@@ -297,20 +313,32 @@ public sealed record SignedTransaction(string TxBlob, string Hash);
 public interface ITransactionSigner
 {
     string Account { get; }
+    string PublicKey { get; }
     Task<SignedTransaction> SignAsync(
         IDictionary<string, object> transaction, CancellationToken cancellationToken);
 }
 ```
 
+`PublicKey` carries what every transaction's `SigningPubKey` must be. It is on the interface,
+not derived from `Account` on demand, because `SequenceStrategy`, `TicketStrategy` and
+`ThrowawayAccount` all read `signer.PublicKey` to build that field — a signer that could answer
+only `Account` would not compile against any of them.
+
 The refactor:
 
 - `ILedgerSink.SubmitAsync` takes an `ITransactionSigner` where it took an `XrplWallet`.
 - `SequenceStrategy`, `TicketStrategy` and `ThrowawayAccount` take one too; their `Account`
-  reads `signer.Account` instead of `wallet.ClassicAddress`.
+  reads `signer.Account` instead of `wallet.ClassicAddress`, and their `SigningPubKey` reads
+  `signer.PublicKey` instead of `wallet.PublicKey`.
 - `XrplFile.Core` gains the interface and a `WalletSigner` adapter over `XrplWallet`, so callers
   that hold a wallet — including every existing test — keep working.
 - `XrplFile.Keys` provides `VaultSigner`, which holds a reference and asks the vault per
-  signature, and refuses with a typed error when the vault is locked.
+  signature, and refuses with a typed error when the vault is locked. `VaultSigner.CreateAsync`
+  reveals the entry once, at construction, to learn the public key behind it — an entry records
+  an address but not the key itself — and refuses `VaultError.AddressMismatch` when the two
+  disagree, since `StoreAsync` itself never checks a stored address against the key behind it.
+  An optional `VaultAutoLock`, passed to either the constructor or `CreateAsync`, is touched
+  after every signature (6.4); a signer built with none touches nothing.
 
 A lock in the middle of a publication fails the run. That is survivable and was the point of D8:
 part A resumes by asking the ledger what landed, so the money already spent is not lost and the
@@ -319,16 +347,27 @@ chunks already on the ledger are not sent twice.
 ## 8. Export and import
 
 Per-key export is the only path back, so it is a first-class operation rather than a setting.
+`IKeyVault.ExportAsync` is the one call that does the whole thing: reveal the entry, seal it into
+a container under the password the caller supplies, and mark the entry `Exported` — never before
+the container is confirmed sealed, so a throw out of `ExportContainer.Protect` leaves the entry
+untouched. `ExportContainer.Protect` and `.Open` also stand on their own, for a caller that
+already holds a `VaultEntry` from `RevealAsync` and wants to seal it without going through the
+vault a second time.
 
 - **Reveal one secret on screen**, for a user copying it into another wallet.
 - **An encrypted container**, for a file or a QR code, with its own password. Header:
   `"XFK1" | version | kdfId | kdfParams | salt | nonce | ciphertext | tag`, header as associated
   data, deflate before encryption.
 - The container's key derivation is its own; it never reuses the vault's `DEK`.
-- Import accepts a container or a bare seed and creates an `Imported` entry, refusing a duplicate
-  address on the same network rather than silently holding the same key twice.
+- Import creates an `Imported` entry via `StoreAsync`, refusing a duplicate address on the same
+  network rather than silently holding the same key twice. There is no separate `ImportAsync`:
+  the caller decrypts a container with `ExportContainer.Open` or already holds a bare seed, and
+  passes what it finds straight to `StoreAsync`.
 
-Export sets `Exported` on the entry. Nothing else in the system writes that field.
+`ExportAsync` is what sets `Exported` on the guaranteed recovery path. `VaultEntryEdit` also
+carries an `Exported` field that `UpdateAsync` writes directly when a caller sets it, so
+`ExportAsync` is not the field's only writer — it is the only writer coupled to an export having
+actually happened.
 
 ## 9. Failures
 
