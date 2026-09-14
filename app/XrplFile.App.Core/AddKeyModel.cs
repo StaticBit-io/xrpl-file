@@ -90,6 +90,22 @@ public sealed class AddKeyModel(IKeyVault vault)
     public string? Problem { get; private set; }
 
     /// <summary>
+    /// Whether the entry the most recent successful <see cref="StoreAsync"/> wrote is one this
+    /// application must offer to export before letting the screen move on — <see langword="false"/>
+    /// before any store has succeeded, and unchanged by one that failed.
+    /// </summary>
+    /// <remarks>
+    /// The rule is <see cref="ExportNeed"/>'s, the same one <see cref="VaultListModel"/> already
+    /// applies to decide whether a row wears the red badge. The add-key screen used to decide this
+    /// for itself, from which tab it was on: a container written by this application for a
+    /// generated key re-imported through the "Open a backup file" tab produced an entry whose kind
+    /// is <see cref="VaultEntryKind.Generated"/>, so the list showed the badge while the import
+    /// route never offered the export step. A tab is not a fact about a key; the entry's own kind
+    /// is, and it is the same fact the list reads.
+    /// </remarks>
+    public bool LastStoredNeedsExporting { get; private set; }
+
+    /// <summary>
     /// The keys inside the container most recently opened by <see cref="OpenContainer"/> — empty
     /// before that has succeeded, and empty again after a call to it that failed. Stays populated
     /// across a call to <see cref="SelectContainerKey"/> and <see cref="StoreAsync"/>, so a caller
@@ -347,7 +363,8 @@ public sealed class AddKeyModel(IKeyVault vault)
     /// <returns>
     /// The reference the vault assigned, on success. On failure, the empty string, with
     /// <see cref="Problem"/> set — never a valid reference, since every reference the vault hands
-    /// out is a non-empty identifier.
+    /// out is a non-empty identifier. <see cref="LastStoredNeedsExporting"/> says whether the
+    /// entry that was just stored is one the screen must offer to export.
     /// </returns>
     /// <exception cref="InvalidOperationException">
     /// Nothing has been prepared: none of <see cref="Generate"/>, <see cref="Import"/> or
@@ -364,7 +381,9 @@ public sealed class AddKeyModel(IKeyVault vault)
 
         try
         {
+            VaultEntryKind stored = _pending.Kind;
             string reference = await vault.StoreAsync(_pending, cancellationToken).ConfigureAwait(false);
+            LastStoredNeedsExporting = ExportNeed.ForKind(stored);
             Preview = null;
             _pending = null;
             Problem = null;
@@ -410,8 +429,19 @@ public sealed class AddKeyModel(IKeyVault vault)
     /// afterwards" — is true of every key arriving through a container, regardless of what it was
     /// called wherever it came from.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Enum.IsDefined{TEnum}(TEnum)"/> is what makes "does not recognise" mean what it
+    /// says. <see cref="Enum.TryParse{TEnum}(string, bool, out TEnum)"/> alone accepts numeric text
+    /// and hands back the number cast to the enum, so a container carrying <c>"kind": "7"</c> —
+    /// which nothing stops an attacker, or a future version of the other product, from writing —
+    /// stored <c>(VaultEntryKind)7</c>. The key list then rendered it as the bare text "7" and it
+    /// matched no arm of any switch anywhere. A container's field is untrusted input; only a name
+    /// this build actually declares is a kind.
+    /// </remarks>
     private static VaultEntryKind ContainerEntryKind(string? kind) =>
-        Enum.TryParse(kind, ignoreCase: false, out VaultEntryKind parsed) ? parsed : VaultEntryKind.Imported;
+        Enum.TryParse(kind, ignoreCase: false, out VaultEntryKind parsed) && Enum.IsDefined(parsed)
+            ? parsed
+            : VaultEntryKind.Imported;
 
     private static string ContainerProblem(BackupUnpackError error) => error switch
     {

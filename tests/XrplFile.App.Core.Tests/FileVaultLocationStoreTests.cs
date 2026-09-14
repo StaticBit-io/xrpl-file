@@ -48,6 +48,46 @@ public class FileVaultLocationStoreTests : IDisposable
         Assert.Null(store.ReadChosenPath());
     }
 
+
+    [Fact]
+    public void ReadChosenPath_returns_null_for_a_setting_file_no_path_can_be_read_out_of()
+    {
+        // A power cut mid-write is the ordinary way here: NTFS can expose the tail of a file whose
+        // length was already extended as zero bytes, and Path.GetFullPath throws ArgumentException
+        // on a NUL. Until this was caught, that throw travelled out of VaultLocation.Resolve, out
+        // of MauiProgram.RegisterVault and out of CreateMauiApp -- the application never started
+        // again, with no message and no way back, over a one-line setting whose fallback was
+        // already correct.
+        Directory.CreateDirectory(_directory);
+        File.WriteAllBytes(SettingPath, "C:\\vault.json\0\0\0"u8.ToArray());
+        FileVaultLocationStore store = new(SettingPath);
+
+        Assert.Null(store.ReadChosenPath());
+    }
+
+    [Fact]
+    public void An_unreadable_setting_resolves_to_the_default_path_rather_than_failing_a_start()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllBytes(SettingPath, "\0\0\0\0"u8.ToArray());
+        FileVaultLocationStore store = new(SettingPath);
+
+        Assert.Equal(VaultLocation.DefaultPath, VaultLocation.Resolve(store));
+    }
+
+    [Fact]
+    public void An_unreadable_setting_is_left_on_disk_rather_than_quietly_deleted()
+    {
+        // Forgetting where somebody keeps their vault is not this method's decision to make: the
+        // bytes may still be recoverable by hand, and the settings screen can overwrite them.
+        Directory.CreateDirectory(_directory);
+        File.WriteAllBytes(SettingPath, "C:\\vault.json\0"u8.ToArray());
+        FileVaultLocationStore store = new(SettingPath);
+
+        Assert.Null(store.ReadChosenPath());
+        Assert.True(File.Exists(SettingPath));
+    }
+
     [Fact]
     public void WriteChosenPath_throws_for_a_null_or_empty_path()
     {

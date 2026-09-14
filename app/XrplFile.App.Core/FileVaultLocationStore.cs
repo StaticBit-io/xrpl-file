@@ -57,6 +57,25 @@ public sealed class FileVaultLocationStore : IVaultLocationStore
         {
             return null;
         }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            // Path.GetFullPath's own refusals, for contents this method cannot treat as a path at
+            // all: NUL bytes or other invalid characters (ArgumentException), a colon where a
+            // drive letter cannot be (NotSupportedException). A setting file left half-written by
+            // a power cut is the ordinary way there -- NTFS can expose the tail of an extended file
+            // as zeroes -- and until this catch existed the throw travelled out of
+            // VaultLocation.Resolve, out of MauiProgram.RegisterVault, and out of CreateMauiApp:
+            // the application never started again, with no message and no way back, over a
+            // one-line setting whose fallback was already correct.
+            //
+            // Treated exactly as "nothing has ever been chosen", which is what this method's own
+            // contract already says a store that cannot answer must report, so
+            // VaultLocation.Resolve falls back to VaultLocation.DefaultPath and the application
+            // opens. The unreadable setting is left on disk rather than deleted: forgetting where
+            // somebody's vault is kept is not this method's decision to make, and the settings
+            // screen can still overwrite it.
+            return null;
+        }
     }
 
     /// <inheritdoc/>

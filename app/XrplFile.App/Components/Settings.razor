@@ -54,9 +54,11 @@
                     @onclick="ChooseVaultAsync">
                 Choose a vault file&hellip;
             </button>
-            @if (_chooseVaultMessage is { } chooseMessage)
+            @if (_chooseVaultOutcome is { } chooseOutcome)
             {
-                <div class="alert alert-info mt-2">@chooseMessage</div>
+                <div class="alert mt-2 @(chooseOutcome.Succeeded ? "alert-info" : "alert-danger")">
+                    @chooseOutcome.Message
+                </div>
             }
         </section>
 
@@ -71,7 +73,7 @@
                        checked="@_deviceUnlockEnabled" disabled="@_busy" @onchange="ToggleDeviceUnlockAsync" />
                 <label class="form-check-label" for="device-unlock-switch">Unlock with this device</label>
             </div>
-            @if (_deviceUnlockProblem is { } problem)
+            @if (Model.Problem is { } problem)
             {
                 <div class="alert alert-warning mt-2">@problem</div>
             }
@@ -88,9 +90,8 @@
     private bool _showChangePassword;
     private bool _deviceUnlockEnabled;
     private bool _busy;
-    private string? _deviceUnlockProblem;
     private bool _choosingVault;
-    private string? _chooseVaultMessage;
+    private VaultLocationModel.Outcome? _chooseVaultOutcome;
 
     protected override async Task OnInitializedAsync()
     {
@@ -126,7 +127,7 @@
         }
 
         _choosingVault = true;
-        _chooseVaultMessage = null;
+        _chooseVaultOutcome = null;
         StateHasChanged();
 
         try
@@ -137,8 +138,10 @@
                 return;
             }
 
-            LocationModel.ChoosePath(path);
-            _chooseVaultMessage = "Saved. Restart the application to open the vault at the new location.";
+            // Every word, success or failure, is the model's. A read-only or full profile
+            // directory used to throw straight out of the store and past this handler into the
+            // framework's own "An unhandled error has occurred."
+            _chooseVaultOutcome = LocationModel.ChoosePath(path);
         }
         finally
         {
@@ -154,28 +157,22 @@
         }
 
         _busy = true;
-        _deviceUnlockProblem = null;
         StateHasChanged();
 
         bool turnOn = args.Value is true;
         try
         {
+            // Both outcomes carry their own words now: a store that refused and a vault that threw
+            // both reach Model.Problem, so this handler no longer composes a sentence for one of
+            // them while routing the other through VaultErrorMessages two lines below.
             if (turnOn)
             {
-                bool created = await Model.EnableAsync(_cts.Token);
-                if (!created)
-                {
-                    _deviceUnlockProblem = "This device could not create a secret to remember the vault with.";
-                }
+                await Model.EnableAsync(_cts.Token);
             }
             else
             {
                 await Model.DisableAsync(_cts.Token);
             }
-        }
-        catch (VaultException ex)
-        {
-            _deviceUnlockProblem = VaultErrorMessages.For(ex.Error);
         }
         finally
         {

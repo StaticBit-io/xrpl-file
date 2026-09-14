@@ -12,7 +12,7 @@
 @if (_justGeneratedReference is { } reference)
 {
     <div class="alert alert-success">
-        This key was generated here, so this vault is the only place it exists until it is exported.
+        This key exists nowhere but this vault until it is exported.
     </div>
     <ExportKey Reference="@reference" OnBack="FinishAsync" />
 }
@@ -276,7 +276,11 @@ else
                 return;
             }
 
-            if (_mode == Mode.Generate)
+            // The entry's own kind, through the model, not the tab this screen happens to be on:
+            // a container this application wrote for a generated key, re-imported through the
+            // "Open a backup file" tab, is a Generated entry that the key list flags and that the
+            // import route used to walk past without ever offering the export step.
+            if (Model.LastStoredNeedsExporting)
             {
                 _justGeneratedReference = reference;
                 return;

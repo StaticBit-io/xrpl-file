@@ -57,6 +57,30 @@ namespace XrplFile.App.Core;
 /// </param>
 public sealed class VaultLocationModel(IVaultLocationStore store, string currentPath)
 {
+    /// <summary>
+    /// Whether a change to the remembered vault location happened, and the sentence to show
+    /// about it.
+    /// </summary>
+    /// <remarks>
+    /// The two screens that call this model are the settings screen and
+    /// <c>VaultUnreachable.razor</c> — and the second of those is the one a person reaches when
+    /// their vault is already missing. Until this review, both called straight into
+    /// <see cref="IVaultLocationStore"/>, which deliberately lets an <see cref="IOException"/> or
+    /// an <see cref="UnauthorizedAccessException"/> escape, and neither caught it: a read-only or
+    /// full profile directory turned "Choose a vault file…" into the framework's "An unhandled
+    /// error has occurred." on the one screen that exists to get somebody out of trouble. The
+    /// exception is caught here rather than there because deciding what a failure means is a
+    /// model's job — the same rule <see cref="CreateMessages"/> and <see cref="VaultErrorMessages"/>
+    /// already apply to the vault's own failures.
+    /// </remarks>
+    /// <param name="Succeeded">Whether the setting was actually written or cleared.</param>
+    /// <param name="Message">
+    /// What to tell the person, whichever way it went. Names no path: a failure message here would
+    /// otherwise carry the location of the application's own setting file, which is exactly what
+    /// <see cref="CreateMessages"/>'s own remarks forbid.
+    /// </param>
+    public sealed record Outcome(bool Succeeded, string Message);
+
     /// <summary>Where this process is opening the vault from right now.</summary>
     public string CurrentPath { get; } = currentPath;
 
@@ -74,7 +98,31 @@ public sealed class VaultLocationModel(IVaultLocationStore store, string current
     /// Nothing about the vault this process already has open changes: see the type remarks for why
     /// a running process never repoints itself.
     /// </summary>
-    public void ChoosePath(string path) => store.WriteChosenPath(path);
+    /// <remarks>
+    /// A storage failure is reported, never thrown: see <see cref="Outcome"/>. Only the two the
+    /// store can actually produce for a refused write are caught — everything else, including a
+    /// caller passing an empty path, is a bug rather than a condition a screen should have words
+    /// for, and propagates unchanged.
+    /// </remarks>
+    public Outcome ChoosePath(string path)
+    {
+        try
+        {
+            store.WriteChosenPath(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new Outcome(
+                Succeeded: false,
+                Message:
+                    "This choice could not be saved, so the application will still open the vault " +
+                    "it opens now. The folder holding its settings may be read-only or full.");
+        }
+
+        return new Outcome(
+            Succeeded: true,
+            Message: "Saved. Restart the application to open the vault at the new location.");
+    }
 
     /// <summary>
     /// Forgets whatever path <see cref="ChoosePath"/> last recorded, so <see cref="VaultLocation.Resolve"/>
@@ -89,5 +137,24 @@ public sealed class VaultLocationModel(IVaultLocationStore store, string current
     /// process already has open changes either, for the same reason <see cref="ChoosePath"/> does
     /// not: a running process never repoints itself.
     /// </remarks>
-    public void ForgetChosenPath() => store.ClearChosenPath();
+    public Outcome ForgetChosenPath()
+    {
+        try
+        {
+            store.ClearChosenPath();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new Outcome(
+                Succeeded: false,
+                Message:
+                    "This location could not be forgotten, so the application will still look for " +
+                    "the vault here. The folder holding its settings may be read-only. The vault " +
+                    "file itself has not been touched.");
+        }
+
+        return new Outcome(
+            Succeeded: true,
+            Message: "Forgotten. Restart the application to start fresh at the default location.");
+    }
 }

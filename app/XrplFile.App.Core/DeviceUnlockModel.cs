@@ -34,30 +34,71 @@ public sealed class DeviceUnlockModel(IKeyVault vault)
         vault.HasDeviceWrapAsync(cancellationToken);
 
     /// <summary>
-    /// Turns "remember on this device" on for the data key already resident in this vault. A thin
-    /// pass-through to <see cref="IKeyVault.EnableDeviceUnlockAsync"/>: no password is asked here,
-    /// because the vault needs none for this.
+    /// What went wrong with the most recent <see cref="EnableAsync"/> or <see cref="DisableAsync"/>
+    /// call, in words a screen shows as-is — or <see langword="null"/> after one that worked.
+    /// </summary>
+    /// <remarks>
+    /// Both failures a screen can see arrive here as sentences, and neither is composed in markup.
+    /// <see cref="IKeyVault.EnableDeviceUnlockAsync"/> reports a device store that <i>refused</i> as
+    /// a bare <see langword="false"/> and one that <i>failed</i> as a <see cref="VaultException"/>,
+    /// and the settings screen used to compose words for the first itself while routing the second
+    /// through <see cref="VaultErrorMessages"/> two lines above — the same decision made in two
+    /// places, one of them markup. A <see langword="bool"/> is not a sentence, and turning it into
+    /// one is this model's job.
+    /// </remarks>
+    public string? Problem { get; private set; }
+
+    /// <summary>
+    /// Turns "remember on this device" on for the data key already resident in this vault.
     /// </summary>
     /// <returns>
     /// <see langword="true"/> when the device store could create or return a secret.
-    /// <see langword="false"/> when the store refused — <see cref="IKeyVault.EnableDeviceUnlockAsync"/>
-    /// writes nothing on that path.
+    /// <see langword="false"/> when it refused or failed, with <see cref="Problem"/> set to what
+    /// the screen should say — <see cref="IKeyVault.EnableDeviceUnlockAsync"/> writes nothing on
+    /// either path.
     /// </returns>
-    /// <exception cref="VaultException">
-    /// Whatever <see cref="IKeyVault.EnableDeviceUnlockAsync"/> itself throws — a locked vault, a
-    /// device store that failed rather than refused — propagates unchanged.
-    /// </exception>
-    public Task<bool> EnableAsync(CancellationToken cancellationToken) =>
-        vault.EnableDeviceUnlockAsync(cancellationToken);
+    public async Task<bool> EnableAsync(CancellationToken cancellationToken)
+    {
+        bool created;
+        try
+        {
+            created = await vault.EnableDeviceUnlockAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (VaultException exception)
+        {
+            Problem = VaultErrorMessages.For(exception.Error);
+            return false;
+        }
+
+        Problem = created
+            ? null
+            : "This device could not create a secret to remember the vault with, so it will keep " +
+              "asking for the master password. Nothing about the vault has changed.";
+
+        return created;
+    }
 
     /// <summary>
     /// Turns "remember on this device" off. Safe to call when it was never on:
     /// <see cref="IKeyVault.DisableDeviceUnlockAsync"/> itself succeeds silently in that case.
     /// </summary>
-    /// <exception cref="VaultException">
-    /// Whatever <see cref="IKeyVault.DisableDeviceUnlockAsync"/> itself throws propagates
-    /// unchanged.
-    /// </exception>
-    public Task DisableAsync(CancellationToken cancellationToken) =>
-        vault.DisableDeviceUnlockAsync(cancellationToken);
+    /// <returns>
+    /// <see langword="true"/> when it is off afterwards; <see langword="false"/> with
+    /// <see cref="Problem"/> set when the vault refused.
+    /// </returns>
+    public async Task<bool> DisableAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await vault.DisableDeviceUnlockAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (VaultException exception)
+        {
+            Problem = VaultErrorMessages.For(exception.Error);
+            return false;
+        }
+
+        Problem = null;
+        return true;
+    }
 }

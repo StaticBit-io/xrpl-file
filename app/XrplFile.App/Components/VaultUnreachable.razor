@@ -41,9 +41,9 @@
         Choose a different vault&hellip;
     </button>
 
-    @if (_actionMessage is { } message)
+    @if (_actionOutcome is { } outcome)
     {
-        <div class="alert alert-info mt-3">@message</div>
+        <div class="alert mt-3 @(outcome.Succeeded ? "alert-info" : "alert-danger")">@outcome.Message</div>
     }
 
     <hr class="my-4" />
@@ -66,7 +66,7 @@
 
     private readonly CancellationTokenSource _cts = new();
     private bool _busy;
-    private string? _actionMessage;
+    private VaultLocationModel.Outcome? _actionOutcome;
 
     private async Task RetryAsync()
     {
@@ -76,7 +76,7 @@
         }
 
         _busy = true;
-        _actionMessage = null;
+        _actionOutcome = null;
         StateHasChanged();
 
         try
@@ -99,7 +99,7 @@
         }
 
         _busy = true;
-        _actionMessage = null;
+        _actionOutcome = null;
         StateHasChanged();
 
         try
@@ -110,8 +110,7 @@
                 return;
             }
 
-            LocationModel.ChoosePath(path);
-            _actionMessage = "Saved. Restart the application to open the vault at the new location.";
+            _actionOutcome = LocationModel.ChoosePath(path);
         }
         finally
         {
@@ -126,8 +125,11 @@
             return;
         }
 
-        LocationModel.ForgetChosenPath();
-        _actionMessage = "Forgotten. Restart the application to start fresh at the default location.";
+        // On the one screen a person reaches when their vault is already missing, a read-only
+        // profile directory used to turn this button into the framework's unhandled-error page.
+        // VaultLocationModel now reports it, and this markup only picks which alert colour to
+        // paint it in.
+        _actionOutcome = LocationModel.ForgetChosenPath();
     }
 
     public void Dispose()

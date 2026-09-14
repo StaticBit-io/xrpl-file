@@ -381,6 +381,92 @@ public class AddKeyModelTests : VaultHarness
         Assert.Equal(VaultEntryKind.Imported, info.Kind);
     }
 
+    // ---- what the screen must offer next --------------------------------------------------------
+
+    [Fact]
+    public async Task A_generated_key_is_reported_as_one_that_still_needs_exporting()
+    {
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        AddKeyModel model = new(vault);
+
+        Assert.True(model.Generate("fresh", "testnet"));
+        await model.StoreAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(model.LastStoredNeedsExporting);
+    }
+
+    [Fact]
+    public async Task An_imported_seed_is_not_reported_as_one_that_needs_exporting()
+    {
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        AddKeyModel model = new(vault);
+
+        Assert.True(model.Import(new AddKeyDraft("theirs", "testnet", XrplWallet.Generate().Seed, null)));
+        await model.StoreAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(model.LastStoredNeedsExporting);
+    }
+
+    // The defect this replaces: AddKey.razor decided whether to offer the export step from which
+    // tab it was on, so a container this application wrote for a generated key, opened again
+    // through "Open a backup file", produced a Generated entry that the key list flagged with the
+    // red badge while the import route walked straight past the export step. The stored entry's
+    // kind is the fact; the tab is not, and the answer here has to be the one the list gives.
+    [Fact]
+    public async Task A_generated_key_arriving_through_a_container_still_needs_exporting()
+    {
+        XrplWallet wallet = XrplWallet.Generate();
+        byte[] container = BackupContainer.Pack(
+            PayloadOf(EntryFor(wallet, "born elsewhere", kind: nameof(VaultEntryKind.Generated))),
+            "p",
+            iterations: 1000);
+
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        AddKeyModel model = new(vault);
+
+        Assert.Equal(BackupUnpackError.None, model.OpenContainer(container, "p"));
+        Assert.True(model.SelectContainerKey(0, "back again", "testnet"));
+        await model.StoreAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(model.LastStoredNeedsExporting);
+
+        VaultListModel list = new(vault);
+        await list.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(list.Rows.Single().NeedsExporting, model.LastStoredNeedsExporting);
+    }
+
+    // ---- a kind that is not one -----------------------------------------------------------------
+
+    // Enum.TryParse accepts numeric text and hands back the number cast to the enum, so a container
+    // carrying "kind": "7" stored (VaultEntryKind)7 -- which the key list rendered as the bare text
+    // "7" and which matched no arm of any switch anywhere. A container's fields are untrusted
+    // input; only a name this build actually declares is a kind.
+    [Theory]
+    [InlineData("7")]
+    [InlineData("-1")]
+    [InlineData("99999")]
+    public async Task A_container_whose_kind_is_a_number_is_stored_as_Imported(string kind)
+    {
+        XrplWallet wallet = XrplWallet.Generate();
+        byte[] container = BackupContainer.Pack(
+            PayloadOf(EntryFor(wallet, "numbered", kind: kind)), "p", iterations: 1000);
+
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        AddKeyModel model = new(vault);
+        Assert.Equal(BackupUnpackError.None, model.OpenContainer(container, "p"));
+        Assert.True(model.SelectContainerKey(0, "mine", "testnet"));
+
+        await model.StoreAsync(TestContext.Current.CancellationToken);
+
+        VaultEntryInfo info = Assert.Single(await vault.ListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(VaultEntryKind.Imported, info.Kind);
+        Assert.True(Enum.IsDefined(info.Kind));
+    }
+
     // ---- closing a container --------------------------------------------------------------------
 
     // The whole point of CloseContainer: every seed OpenContainer decrypted, and the one

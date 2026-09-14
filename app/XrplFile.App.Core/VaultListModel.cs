@@ -92,7 +92,7 @@ public sealed class VaultListModel(IKeyVault vault)
         {
             if (byReference.TryGetValue(reference, out VaultEntryInfo? info))
             {
-                bool needsExporting = info.Kind == VaultEntryKind.Generated && !info.Exported;
+                bool needsExporting = ExportNeed.For(info);
                 rows.Add(new KeyRow(reference, info, IsDamaged: false, NeedsExporting: needsExporting));
             }
             else if (damagedSet.Contains(reference))
