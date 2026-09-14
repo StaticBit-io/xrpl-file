@@ -157,6 +157,49 @@ public class VaultSignerTests : VaultTestHarness
     }
 
     [Fact]
+    public async Task Every_signature_touches_the_idle_lock_so_a_publication_does_not_lock_itself_out()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (KeyVault vault, string reference, XrplWallet wallet) = await VaultHoldingAKeyAsync(token);
+
+        ManualTimeProvider time = new();
+        TimeSpan idle = TimeSpan.FromMinutes(15);
+        await using VaultAutoLock autoLock = new(vault, idle, time);
+
+        VaultSigner signer = new(vault, reference, wallet.ClassicAddress, wallet.PublicKey, autoLock);
+
+        // Ten simulated minutes between each signature — inside the idle window every time — over
+        // four rounds: forty minutes of continuous signing that a fifteen-minute idle timeout
+        // must not interrupt, exactly the scenario design section 6.4 exists for.
+        for (uint sequence = 1; sequence <= 4; sequence++)
+        {
+            time.Advance(TimeSpan.FromMinutes(10));
+            await signer.SignAsync(Transaction(wallet, sequence), token);
+        }
+
+        Assert.True(vault.IsUnlocked);
+
+        // The other half of the same behaviour: with no further signature to touch it, the same
+        // window the run kept postponing finally elapses, and the vault the run left alone locks.
+        time.Advance(idle);
+        Assert.False(vault.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task A_signer_built_with_no_idle_lock_never_touches_one()
+    {
+        // Optional, not required (task 10's brief): a caller with no idle lock configured, and
+        // every other test in this file, builds a signer with none and must keep signing fine.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (KeyVault vault, string reference, XrplWallet wallet) = await VaultHoldingAKeyAsync(token);
+
+        VaultSigner signer = new(vault, reference, wallet.ClassicAddress, wallet.PublicKey);
+        await signer.SignAsync(Transaction(wallet, 1u), token);
+
+        Assert.True(vault.IsUnlocked);
+    }
+
+    [Fact]
     public async Task Every_signature_asks_the_vault_again()
     {
         CancellationToken token = TestContext.Current.CancellationToken;

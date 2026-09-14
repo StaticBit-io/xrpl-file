@@ -24,6 +24,13 @@ namespace XrplFile.Keys;
 /// That failure is survivable by design: part A resumes by asking the ledger what landed, so the
 /// transactions already paid for are not sent a second time.
 /// </para>
+/// <para>
+/// <see cref="VaultAutoLock"/> is optional, not required: a caller that wants no idle lock — every
+/// existing test included — builds a signer with none, and nothing here asks for one. When one is
+/// given, <see cref="SignAsync"/> touches it after every signature, exactly as design section 6.4
+/// requires, so a publication signing continuously for tens of minutes does not lock itself out
+/// mid-run while a machine left alone still shuts.
+/// </para>
 /// </remarks>
 public sealed class VaultSigner : ITransactionSigner
 {
@@ -35,12 +42,18 @@ public sealed class VaultSigner : ITransactionSigner
 
     private readonly IKeyVault _vault;
     private readonly string _reference;
+    private readonly VaultAutoLock? _autoLock;
 
     /// <param name="vault">The vault holding the key. Its lock state decides whether a signature is possible.</param>
     /// <param name="reference">The entry to sign with. A signer never falls back on another one.</param>
     /// <param name="account">The classic address of that entry, from its <see cref="VaultEntryInfo"/>.</param>
     /// <param name="publicKey">The public key every transaction's <c>SigningPubKey</c> must carry.</param>
-    public VaultSigner(IKeyVault vault, string reference, string account, string publicKey)
+    /// <param name="autoLock">
+    /// The idle lock to touch on every signature, or <see langword="null"/> for a signer that never
+    /// touches one. Optional: a caller with no idle lock configured passes nothing, and every
+    /// existing caller of this constructor keeps compiling unchanged.
+    /// </param>
+    public VaultSigner(IKeyVault vault, string reference, string account, string publicKey, VaultAutoLock? autoLock = null)
     {
         ArgumentNullException.ThrowIfNull(vault);
         ArgumentException.ThrowIfNullOrWhiteSpace(reference);
@@ -49,6 +62,7 @@ public sealed class VaultSigner : ITransactionSigner
 
         _vault = vault;
         _reference = reference;
+        _autoLock = autoLock;
         Account = account;
         PublicKey = publicKey;
     }
@@ -67,8 +81,12 @@ public sealed class VaultSigner : ITransactionSigner
     /// The one reveal happens here, at construction, and the wallet it derives is dropped before
     /// the signer exists. Everything afterwards follows the same rule every signature does.
     /// </remarks>
+    /// <param name="autoLock">
+    /// The idle lock the created signer touches on every signature, or <see langword="null"/> for
+    /// none. See the type's remarks.
+    /// </param>
     public static async Task<VaultSigner> CreateAsync(
-        IKeyVault vault, string reference, CancellationToken cancellationToken)
+        IKeyVault vault, string reference, CancellationToken cancellationToken, VaultAutoLock? autoLock = null)
     {
         ArgumentNullException.ThrowIfNull(vault);
 
@@ -87,7 +105,7 @@ public sealed class VaultSigner : ITransactionSigner
                 $"The entry at reference '{reference}' records an address that does not match its key.");
         }
 
-        return new VaultSigner(vault, reference, entry.Info.Address, wallet.PublicKey);
+        return new VaultSigner(vault, reference, entry.Info.Address, wallet.PublicKey, autoLock);
     }
 
     /// <inheritdoc/>
@@ -106,6 +124,11 @@ public sealed class VaultSigner : ITransactionSigner
         // A copy, because the SDK writes the signature back into the dictionary it is handed and
         // the caller's transaction is not this method's to change.
         SignatureResult signed = wallet.Sign(new Dictionary<string, object>(transaction));
+
+        // Every signature counts as activity: design section 6.4 resets the idle window here so a
+        // publication signing continuously does not lock itself out mid-run. A no-op when this
+        // signer was built with no idle lock at all.
+        _autoLock?.Touch();
 
         // Upper case, exactly as WalletSigner returns it: a hash whose case differs is a hash no
         // comparison against an account_tx answer will match.
