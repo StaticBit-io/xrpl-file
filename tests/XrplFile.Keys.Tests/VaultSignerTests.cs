@@ -1,4 +1,4 @@
-using Xrpl.Wallet;
+﻿using Xrpl.Wallet;
 using Xunit;
 
 namespace XrplFile.Keys.Tests;
@@ -234,6 +234,9 @@ public class VaultSignerTests : VaultTestHarness
         public IReadOnlyCollection<string> References => inner.References;
 
         public IReadOnlyList<string> DamagedReferences => inner.DamagedReferences;
+
+        public Task AcknowledgeDamageAsync(CancellationToken cancellationToken) =>
+            inner.AcknowledgeDamageAsync(cancellationToken);
 
         public Task<bool> ExistsAsync(CancellationToken cancellationToken) => inner.ExistsAsync(cancellationToken);
 

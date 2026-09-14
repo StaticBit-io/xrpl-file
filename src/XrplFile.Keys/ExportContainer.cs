@@ -181,6 +181,16 @@ public static class ExportContainer
             throw new VaultException(VaultError.Corrupt, "The export container's header is malformed.", ex);
         }
 
+        if (!KdfParameterBounds.CouldHaveBeenWritten(parameters))
+        {
+            // The same refusal the vault record makes, and for the same reason: the catch below
+            // covers only what the KDF itself rejects outright, which leaves every cost that is
+            // merely unpayable — a header asking for two terabytes is answered here rather than by
+            // the allocator.
+            throw new VaultException(
+                VaultError.Corrupt, "The export container's KDF cost is not one any build could have written.");
+        }
+
         ReadOnlySpan<byte> nonce = container.Slice(HeaderLength, NonceLength);
         ReadOnlySpan<byte> ciphertext = container[(HeaderLength + NonceLength)..^TagLength];
         ReadOnlySpan<byte> tag = container[^TagLength..];

@@ -204,6 +204,127 @@ public class VaultDamageTests : VaultTestHarness
     }
 
     [Fact]
+    public async Task A_write_does_not_quietly_recompute_the_integrity_code_over_a_damaged_record()
+    {
+        // The mac is the only witness there is to an entry removed from the file or to a record
+        // whose bytes were edited under it: nothing else in the design can see either (11). A
+        // write that reseals over the damage answers the next unlock with Success, and the
+        // evidence is gone for good.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+
+        MutateRecordInFile(record => record.Mac[0] ^= 0x01);
+        Assert.Equal(
+            VaultUnlockResult.VaultDegraded,
+            await vault.UnlockAsync(Password("right"), TestContext.Current.CancellationToken));
+
+        VaultException error = await Assert.ThrowsAsync<VaultException>(
+            () => vault.StoreAsync(Entry("two"), TestContext.Current.CancellationToken));
+        Assert.Equal(VaultError.Degraded, error.Error);
+
+        // The refusal is worth having only because of what it preserves: the next unlock still
+        // finds the disagreement, rather than a record freshly resealed over it.
+        await vault.LockAsync();
+        Assert.Equal(
+            VaultUnlockResult.VaultDegraded,
+            await vault.UnlockAsync(Password("right"), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Acknowledging_the_damage_is_what_lets_a_degraded_vault_be_written_again()
+    {
+        // Erasing the only evidence there is has to be a decision somebody takes, but it does
+        // have to be takeable: a vault that could never be written again after one bad byte would
+        // be a vault the user cannot repair, delete an entry from, or add a key to.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+
+        MutateRecordInFile(record => record.Mac[0] ^= 0x01);
+        Assert.Equal(
+            VaultUnlockResult.VaultDegraded,
+            await vault.UnlockAsync(Password("right"), TestContext.Current.CancellationToken));
+
+        await vault.AcknowledgeDamageAsync(TestContext.Current.CancellationToken);
+        string second = await vault.StoreAsync(Entry("two"), TestContext.Current.CancellationToken);
+
+        await vault.LockAsync();
+        Assert.Equal(
+            VaultUnlockResult.Success,
+            await vault.UnlockAsync(Password("right"), TestContext.Current.CancellationToken));
+        Assert.Equal(
+            "sSecretOftwo",
+            (await vault.RevealAsync(second, "test", TestContext.Current.CancellationToken)).Secret);
+    }
+
+    [Fact]
+    public async Task An_acknowledgement_lasts_as_long_as_the_session_that_gave_it()
+    {
+        // Nothing is written when the damage is acknowledged, so the file still carries the
+        // disagreement — and a vault opened again is a user who has not been told yet.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+
+        MutateRecordInFile(record => record.Mac[0] ^= 0x01);
+        await vault.UnlockAsync(Password("right"), TestContext.Current.CancellationToken);
+        await vault.AcknowledgeDamageAsync(TestContext.Current.CancellationToken);
+
+        await vault.LockAsync();
+        Assert.Equal(
+            VaultUnlockResult.VaultDegraded,
+            await vault.UnlockAsync(Password("right"), TestContext.Current.CancellationToken));
+
+        VaultException error = await Assert.ThrowsAsync<VaultException>(
+            () => vault.StoreAsync(Entry("two"), TestContext.Current.CancellationToken));
+        Assert.Equal(VaultError.Degraded, error.Error);
+    }
+
+    [Fact]
+    public async Task Acknowledging_damage_on_a_locked_vault_refuses()
+    {
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+
+        VaultException error = await Assert.ThrowsAsync<VaultException>(
+            () => vault.AcknowledgeDamageAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(VaultError.Locked, error.Error);
+    }
+
+    [Fact]
+    public async Task A_degraded_vault_still_reads_everything_that_is_intact()
+    {
+        // The point of VaultDegraded is that the user is in. Whatever the record's integrity code
+        // says, listing, revealing and exporting the entries that still open must ask nothing of
+        // the caller first — a degraded vault is how the keys get rescued.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        string reference = await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+
+        MutateRecordInFile(record => record.Mac[0] ^= 0x01);
+        Assert.Equal(
+            VaultUnlockResult.VaultDegraded,
+            await vault.UnlockAsync(Password("right"), TestContext.Current.CancellationToken));
+
+        Assert.Single(await vault.ListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(
+            "sSecretOfone",
+            (await vault.RevealAsync(reference, "test", TestContext.Current.CancellationToken)).Secret);
+
+        byte[] container = await vault.ExportAsync(
+            reference, Password("export password"), TestContext.Current.CancellationToken);
+        Assert.Equal(
+            "sSecretOfone",
+            ExportContainer.Open(container, Password("export password").Span).Single().Secret);
+    }
+
+    [Fact]
     public async Task A_device_unlock_with_mac_mismatch_but_no_entry_damage_opens_degraded()
     {
         // Every entry stays byte-for-byte intact; only the record's own integrity code disagrees

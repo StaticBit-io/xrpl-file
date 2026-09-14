@@ -1,4 +1,4 @@
-using XrplFile.Keys;
+﻿using XrplFile.Keys;
 using Xunit;
 
 namespace XrplFile.Tests;
@@ -86,6 +86,8 @@ public class LockingSignerTests
         public IReadOnlyCollection<string> References => [];
 
         public IReadOnlyList<string> DamagedReferences => [];
+
+        public Task AcknowledgeDamageAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task<bool> ExistsAsync(CancellationToken cancellationToken) => Task.FromResult(true);
 

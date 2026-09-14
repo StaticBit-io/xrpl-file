@@ -189,11 +189,13 @@ public class VaultPasswordTests : VaultTestHarness
     }
 
     [Fact]
-    public async Task A_copy_that_cannot_be_removed_is_reported_rather_than_passed_over()
+    public async Task A_copy_that_cannot_be_removed_is_reported_without_disowning_the_change()
     {
-        // The removal is the security half of the change, so a failure to carry it out is a
-        // failure of the change and says so. What it must not do is leave this instance's cached
-        // record behind the file: the write has landed, and a later store reseals from that cache.
+        // The removal is the security half of the change and a failure to carry it out has to be
+        // said out loud — but it runs after the new record is committed, so it must not be said
+        // in a way that reads as "your password was not changed". A caller told that retries with
+        // the old password, is answered WrongPassword, and is left with a leftover copy that the
+        // old — and presumably leaked — password still opens.
         static Task PlainWrite(string path, byte[] contents, CancellationToken cancellationToken) =>
             File.WriteAllBytesAsync(path, contents, cancellationToken);
 
@@ -203,9 +205,13 @@ public class VaultPasswordTests : VaultTestHarness
         // A directory where the kept copy would be: a path File.Delete refuses, on every platform.
         Directory.CreateDirectory(VaultBackupPath);
 
-        VaultException error = await Assert.ThrowsAsync<VaultException>(
-            () => vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
-        Assert.Equal(VaultError.StorageFailed, error.Error);
+        VaultPasswordChange outcome = await vault.ChangePasswordAsync(
+            Password("old"), Password("new"), TestContext.Current.CancellationToken);
+
+        // Neither WrongPassword nor a throw: the change is on disk. The leftover is named by the
+        // outcome instead, so a caller can say what is still lying beside the vault.
+        Assert.Equal(VaultPasswordChange.ChangedAndTheOldCopyRemains, outcome);
+        Assert.True(Directory.Exists(VaultBackupPath));
 
         Directory.Delete(VaultBackupPath);
 
@@ -338,5 +344,78 @@ public class VaultPasswordTests : VaultTestHarness
         Assert.Equal(
             VaultUnlockResult.Success,
             await creator.UnlockAsync(Password("old"), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task A_change_whose_copy_could_not_be_removed_is_still_the_change_that_is_on_disk()
+    {
+        // The half of the same failure that decides what the user should do next: retrying with
+        // the old password is the wrong move, because the old password is no longer the vault's.
+        static Task PlainWrite(string path, byte[] contents, CancellationToken cancellationToken) =>
+            File.WriteAllBytesAsync(path, contents, cancellationToken);
+
+        KeyVault vault = NewVault(PlainWrite);
+        await vault.CreateAsync(Password("old"), TestContext.Current.CancellationToken);
+        string reference = await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+
+        Directory.CreateDirectory(VaultBackupPath);
+
+        Assert.Equal(
+            VaultPasswordChange.ChangedAndTheOldCopyRemains,
+            await vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
+
+        Directory.Delete(VaultBackupPath);
+        await vault.LockAsync();
+
+        Assert.Equal(
+            VaultUnlockResult.WrongPassword,
+            await vault.UnlockAsync(Password("old"), TestContext.Current.CancellationToken));
+        Assert.Equal(
+            VaultUnlockResult.Success,
+            await vault.UnlockAsync(Password("new"), TestContext.Current.CancellationToken));
+        Assert.Equal(
+            "sSecretOfone",
+            (await vault.RevealAsync(reference, "test", TestContext.Current.CancellationToken)).Secret);
+    }
+
+    [Fact]
+    public async Task Both_after_effects_of_one_change_are_reported_together()
+    {
+        // The two are independent, so a caller must be able to be told both at once: the device
+        // wrap went, and a copy of the old record is still there. A result that could only carry
+        // one of them would drop whichever it was not built to say.
+        static Task PlainWrite(string path, byte[] contents, CancellationToken cancellationToken) =>
+            File.WriteAllBytesAsync(path, contents, cancellationToken);
+
+        KeyVault vault = NewVault(PlainWrite);
+        await vault.CreateAsync(Password("old"), TestContext.Current.CancellationToken);
+        Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
+
+        await Devices.DeleteAsync(TestContext.Current.CancellationToken);
+        Directory.CreateDirectory(VaultBackupPath);
+
+        Assert.Equal(
+            VaultPasswordChange.ChangedAndDeviceUnlockDroppedAndTheOldCopyRemains,
+            await vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
+
+        Directory.Delete(VaultBackupPath);
+        Assert.Null(ReadRecordFromFile().DeviceDek);
+    }
+
+    [Fact]
+    public async Task Changing_the_password_of_a_record_whose_kdf_cost_is_impossible_throws_corrupt()
+    {
+        // The same tampering the unlock path refuses, on the other method that feeds a recorded
+        // cost to Argon2id. Unvalidated it is a raw ArgumentOutOfRangeException out of a method
+        // whose failures are all meant to be VaultExceptions a caller can switch on.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("old"), TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+
+        MutateRecordInFile(record => record.KdfParams = record.KdfParams with { MemoryKib = 0 });
+
+        VaultException error = await Assert.ThrowsAsync<VaultException>(
+            () => vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
+        Assert.Equal(VaultError.Corrupt, error.Error);
     }
 }

@@ -389,6 +389,42 @@ public class KeyVaultTests : VaultTestHarness
     }
 
     [Fact]
+    public async Task A_kdf_cost_edited_below_what_argon2id_accepts_reports_the_record_corrupt()
+    {
+        // Zero memory is not a cost — it is a value no build ever wrote. Handed straight to the
+        // KDF it comes back as a raw ArgumentOutOfRangeException, out of a method whose whole
+        // contract is an enumeration the caller switches on.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+
+        MutateRecordInFile(record => record.KdfParams = record.KdfParams with { MemoryKib = 0 });
+
+        Assert.Equal(
+            VaultUnlockResult.VaultCorrupt,
+            await vault.UnlockAsync(Password("right"), TestContext.Current.CancellationToken));
+        Assert.False(vault.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task A_kdf_cost_edited_beyond_what_any_machine_could_pay_reports_the_record_corrupt()
+    {
+        // Two terabytes of Argon2id memory. Unchecked, every unlock attempt on this record pays
+        // for the derivation before the header binding is ever consulted — and it does not
+        // survive paying for it.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+
+        MutateRecordInFile(record => record.KdfParams = record.KdfParams with { MemoryKib = 2_000_000_000 });
+
+        Assert.Equal(
+            VaultUnlockResult.VaultCorrupt,
+            await vault.UnlockAsync(Password("right"), TestContext.Current.CancellationToken));
+        Assert.False(vault.IsUnlocked);
+    }
+
+    [Fact]
     public async Task A_header_field_the_derivation_never_sees_is_still_bound_to_the_wrap()
     {
         // The record's header is the associated data of the key wrap, so an attacker who edits the
@@ -565,6 +601,57 @@ public class KeyVaultTests : VaultTestHarness
 
         // And disposing twice is still a no-op.
         await vault.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task A_disposed_vault_does_not_open_again_for_a_password()
+    {
+        // Disposal is the end of the vault, not a lock it can be talked out of. Sign-out disposes
+        // the vault and the idle lock together; a lingering caller that could still unlock would
+        // hold a resident data key with no timer left to take it away, and a further disposal
+        // could not reach it either.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+
+        await vault.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(
+            () => vault.UnlockAsync(Password("right"), TestContext.Current.CancellationToken));
+        Assert.False(vault.IsUnlocked);
+
+        // A second disposal is still a no-op, and still leaves nothing resident.
+        await vault.DisposeAsync();
+        Assert.False(vault.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task A_disposed_vault_does_not_open_again_for_the_device_secret()
+    {
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
+
+        await vault.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(
+            () => vault.UnlockWithDeviceAsync(TestContext.Current.CancellationToken));
+        Assert.False(vault.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task A_disposed_vault_does_not_create_one_either()
+    {
+        // The same instance, pointed at a path with nothing on it: creating would leave the
+        // disposed vault holding a fresh data key, which is the same failure by another door.
+        KeyVault vault = NewVault();
+
+        await vault.DisposeAsync();
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(
+            () => vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken));
+        Assert.False(vault.IsUnlocked);
+        Assert.False(File.Exists(VaultPath));
     }
 
     private static async Task AssertLocked(Func<Task> operation)

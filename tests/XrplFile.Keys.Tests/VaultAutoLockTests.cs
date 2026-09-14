@@ -1,4 +1,4 @@
-using Xunit;
+﻿using Xunit;
 
 namespace XrplFile.Keys.Tests;
 
@@ -314,6 +314,9 @@ internal sealed class RecordingVault : IKeyVault
 
     /// <inheritdoc/>
     public IReadOnlyList<string> DamagedReferences => throw new NotSupportedException();
+
+    /// <inheritdoc/>
+    public Task AcknowledgeDamageAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
 
     /// <inheritdoc/>
     public Task<bool> ExistsAsync(CancellationToken cancellationToken) => throw new NotSupportedException();

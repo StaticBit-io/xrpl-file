@@ -326,6 +326,84 @@ public class ExportContainerTests : VaultTestHarness
         disk.Fail = false;
     }
 
+    [Fact]
+    public async Task A_cancelled_export_leaves_the_entry_saying_what_the_file_says()
+    {
+        // The container never reaches the caller when the token is cancelled, so nothing was
+        // backed up anywhere — and the cache must not be left claiming otherwise, behind a file
+        // that says Exported is false. A vault claiming a key was backed up when it never left is
+        // the one lie this flag cannot afford: the warning the whole no-recovery-phrase decision
+        // rests on stops firing for exactly that key.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        CancelDuringWrite disk = new();
+        KeyVault vault = NewVault(disk.WriteAsync);
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+
+        disk.CancelTheNextWrite = true;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => vault.ExportAsync(reference, Password("export password"), disk.Cancellation.Token));
+
+        disk.CancelTheNextWrite = false;
+        Assert.False((await vault.ListAsync(token)).Single().Exported);
+
+        // And the next ordinary write is what would commit a cache left lying, permanently.
+        await vault.UpdateAsync(reference, new VaultEntryEdit(Label: "renamed"), token);
+        Assert.False(await ExportedOnDiskAsync(reference));
+    }
+
+    [Fact]
+    public async Task A_cancelled_store_leaves_no_entry_the_file_does_not_hold()
+    {
+        // The sibling rule the export above has to match: a cancelled write rolls the cache back
+        // exactly as a refused one does, because neither of the two landed.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        CancelDuringWrite disk = new();
+        KeyVault vault = NewVault(disk.WriteAsync);
+        await vault.CreateAsync(Password("open sesame"), token);
+
+        disk.CancelTheNextWrite = true;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => vault.StoreAsync(Entry("one"), disk.Cancellation.Token));
+
+        disk.CancelTheNextWrite = false;
+        Assert.Empty(vault.References);
+        Assert.Empty(await vault.ListAsync(token));
+    }
+
+    /// <summary>Whether the file — rather than the cache of the vault under test — says this entry was exported.</summary>
+    private async Task<bool> ExportedOnDiskAsync(string reference)
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault reader = NewVault();
+        Assert.Equal(VaultUnlockResult.Success, await reader.UnlockAsync(Password("open sesame"), token));
+
+        IReadOnlyList<VaultEntryInfo> listed = await reader.ListAsync(token);
+        return listed.Single(entry => entry.Reference == reference).Exported;
+    }
+
+    /// <summary>
+    /// The disk with a cancellation in it: the write the vault is midway through observes a
+    /// cancelled token. It is the one write failure no test in this suite reached before.
+    /// </summary>
+    private sealed class CancelDuringWrite
+    {
+        internal CancellationTokenSource Cancellation { get; } = new();
+
+        internal bool CancelTheNextWrite { get; set; }
+
+        internal Task WriteAsync(string path, byte[] contents, CancellationToken cancellationToken)
+        {
+            if (!CancelTheNextWrite)
+            {
+                return DurableFile.WriteAsync(path, contents, cancellationToken);
+            }
+
+            Cancellation.Cancel();
+            return Task.FromCanceled(Cancellation.Token);
+        }
+    }
+
     /// <summary>
     /// Delegates to a real <see cref="Argon2idKdf"/> when the parameters are within its own
     /// checks, and otherwise fabricates deterministic output rather than throw — the seam

@@ -66,18 +66,28 @@ internal static class DurableFile
     }
 
     /// <summary>
-    /// Removes the copy a previous write kept, if there is one. Succeeds when there is none: the
-    /// caller is asking for an end state, not for an event.
+    /// Removes the copy a previous write kept, if there is one, and reports whether the copy is
+    /// gone afterwards. Returns <see langword="true"/> when there was none: the caller is asking
+    /// for an end state, not for an event.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The backup is what makes an interrupted write survivable, so this is not something an
     /// ordinary write does. It exists for the one operation whose backup is a liability rather
     /// than a safety net — a password change, after which the kept copy is a whole vault that the
     /// password the user just replaced still opens. Called only once the new record is confirmed
     /// on disk, so a crash between the two leaves the previous file, which is what the write
     /// already guarantees; what it must not leave is a permanent one.
+    /// </para>
+    /// <para>
+    /// It answers with a <see langword="bool"/> rather than a throw because of exactly when it
+    /// runs. The change it belongs to is already committed by then, and a failure thrown out of
+    /// the method that committed it reads as "the change did not happen" — which sends the caller
+    /// back to the old password and leaves the copy that password opens lying there unmentioned.
+    /// Whoever calls this has to carry the answer into its own result instead.
+    /// </para>
     /// </remarks>
-    internal static void DiscardBackup(string path)
+    internal static bool TryDiscardBackup(string path)
     {
         ArgumentNullException.ThrowIfNull(path);
 
@@ -86,11 +96,14 @@ internal static class DurableFile
         try
         {
             File.Delete(backupPath);
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            throw new VaultException(
-                VaultError.StorageFailed, $"The kept copy of the vault at '{backupPath}' could not be removed.", ex);
+            // An indexer or an antivirus holding the file open is enough, and on Windows it is
+            // routine. The exception is deliberately not carried anywhere: what the caller needs
+            // is the fact, and the path is one it already knows.
+            return false;
         }
     }
 

@@ -340,6 +340,78 @@ public class VaultDeviceUnlockTests : VaultTestHarness
     }
 
     [Fact]
+    public async Task A_password_change_that_cannot_open_the_wrap_leaves_this_machines_secret_where_it_is()
+    {
+        // The wrap did not open under the secret this machine holds, which is the proof that the
+        // secret is somebody else's — another vault's, on the machine this one was copied to.
+        // Dropping our own dead wrap is right; dropping their live secret is not ours to do, and
+        // it costs that other vault its device unlock.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("old"), TestContext.Current.CancellationToken);
+        Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
+
+        // The machine now holds a different secret — this vault's wrap was never sealed under it.
+        await Devices.CreateAsync(TestContext.Current.CancellationToken);
+        byte[]? theOtherVaultsSecret = await Devices.GetAsync(TestContext.Current.CancellationToken);
+        int deletionsBefore = Devices.Deletions;
+
+        Assert.Equal(
+            VaultPasswordChange.ChangedAndDeviceUnlockDropped,
+            await vault.ChangePasswordAsync(Password("old"), Password("new"), TestContext.Current.CancellationToken));
+
+        Assert.Equal(deletionsBefore, Devices.Deletions);
+        Assert.Equal(theOtherVaultsSecret, await Devices.GetAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Disabling_device_unlock_that_was_never_enabled_leaves_another_vaults_secret_alone()
+    {
+        // Nothing in this record ever pointed at the machine's secret, so there is nothing here
+        // to clean up — and the secret that is there belongs to whatever did enrol it.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        await Devices.CreateAsync(TestContext.Current.CancellationToken);
+        byte[]? theOtherVaultsSecret = await Devices.GetAsync(TestContext.Current.CancellationToken);
+
+        await vault.DisableDeviceUnlockAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(theOtherVaultsSecret, await Devices.GetAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Disabling_device_unlock_on_a_wrap_this_machine_cannot_open_leaves_its_secret_alone()
+    {
+        // A vault carried to another machine keeps its device wrap, and the wrap is inert there
+        // (4.2). Turning the setting off on the copy must clear that inert wrap and stop — the
+        // secret on this machine was sealed for some other vault, and it is still opening it.
+        InMemoryDeviceSecretStore machineA = new();
+        KeyVault onA = NewVault(machineA);
+        await onA.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        Assert.True(await onA.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
+
+        string elsewhere = CopyVaultFileToAnotherDirectory();
+        InMemoryDeviceSecretStore machineB = new();
+        await machineB.CreateAsync(TestContext.Current.CancellationToken);
+        byte[]? machineBsSecret = await machineB.GetAsync(TestContext.Current.CancellationToken);
+
+        KeyVault onB = new(elsewhere, new Argon2idKdf(), machineB, FastParameters);
+        try
+        {
+            Assert.Equal(
+                VaultUnlockResult.Success,
+                await onB.UnlockAsync(Password("right"), TestContext.Current.CancellationToken));
+
+            await onB.DisableDeviceUnlockAsync(TestContext.Current.CancellationToken);
+
+            Assert.Equal(machineBsSecret, await machineB.GetAsync(TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            await onB.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task Enabling_device_unlock_over_a_store_that_fails_reports_a_typed_vault_failure()
     {
         // Every other failure on this type is a VaultException a caller can switch on. A raw

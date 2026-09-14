@@ -171,6 +171,14 @@ or turn into a QR code), and marks the entry `Exported` — all in the same call
 can warn "these keys exist nowhere else" before the day the password is actually forgotten,
 instead of after.
 
+A vault that opens with `VaultUnlockResult.VaultDegraded` is open — listing, revealing and
+exporting all keep working, which is how the keys that are still intact get rescued. What it will
+not do is write. The record's integrity code disagreeing with its own contents is the only evidence
+there is that an entry was removed from the file or that its bytes were edited under it, and every
+write recomputes that code, so the first write is refused with `VaultError.Degraded` until the
+application has told the user and called `AcknowledgeDamageAsync`. Nothing is written by the
+acknowledgement itself, so a vault locked and opened again reports `VaultDegraded` once more.
+
 Signing goes through the vault rather than through a wallet held in memory. `VaultSigner`
 implements the same `ITransactionSigner` seam `WalletSigner` does in the samples above: it asks
 the vault to reveal its entry for exactly one signature and lets the derived wallet go immediately

@@ -108,6 +108,17 @@ A vault file carried to another machine keeps the field and it is inert there �
 opens it stayed behind. This is stated rather than cleaned up: removing it on copy would require
 knowing a copy happened, and nothing can know that.
 
+Because the secret is machine-wide rather than per-vault, no vault may ask the store to drop one
+it has not established is its own, and the only proof available is that this record's own device
+wrap opens under it. `DisableDeviceUnlockAsync` asks for that proof before it clears the field, and
+skips the deletion without it — a vault that never had a wrap, or a copy of one on a machine that
+enrolled a secret for something else, clears its own field and stops there. A password change that
+drops the wrap tells the two reasons apart for the same purpose: a store that says it holds nothing
+is asked to stay that way, and a store holding a secret that does not open this wrap is left
+strictly alone. Being wrong in the two directions is not symmetrical — a secret left behind that
+opens nothing is litter, while a secret deleted that was not ours takes device unlock away from
+whatever vault is still using it, and only the user can put that back.
+
 ### 4.3 Argon2id parameters
 
 Parameters are constants measured on a desktop machine, not calibrated at run time — calibration
@@ -135,6 +146,19 @@ for a password-wrapped secret, so the factor-of-two loss in brute-force cost aga
 cheap, and it buys back a platform that 512 MiB would quietly foreclose. Raising these numbers
 later is not only a decision about how hard the vault is to attack — it is a decision about which
 devices can still open one, and it should be made with a phone in hand, not only a desktop.
+
+Because the parameters travel inside the file, they are also an input an attacker can edit, and
+the header binding that catches such an edit only speaks **after** the derivation it describes has
+been paid for. So a cost read back from a vault record or an export container is checked against
+`KdfParameterBounds` before anything derives from it, and one outside them is `VaultError.Corrupt`
+— the word the export container already used — rather than a raw `ArgumentOutOfRangeException` out
+of a method whose contract is an enumeration, or an attempt to allocate two terabytes because a
+four-byte field said so. The bounds are deliberately far wider than anything this software chooses,
+because the failure they must never produce is refusing a real vault: memory 8 KiB to 4 GiB
+(sixteen times the measured figure), iterations 1 to 1024, lanes 1 to 255 — which is what the
+export container's one-byte lane field can carry (8) — and at least 4 KiB of memory per lane, which
+is the floor the Argon2 implementation itself enforces and therefore the floor below which no vault
+could have been written in the first place.
 
 ## 5. The record
 
@@ -223,6 +247,7 @@ public interface IKeyVault
     IReadOnlyList<string> DamagedReferences { get; }
 
     Task<bool> ExistsAsync(CancellationToken cancellationToken);
+    Task AcknowledgeDamageAsync(CancellationToken cancellationToken);
     Task CreateAsync(ReadOnlyMemory<byte> password, CancellationToken cancellationToken);
     Task<VaultUnlockResult> UnlockAsync(ReadOnlyMemory<byte> password, CancellationToken cancellationToken);
     Task<VaultUnlockResult> UnlockWithDeviceAsync(CancellationToken cancellationToken);
@@ -258,7 +283,13 @@ into a log, because the shape callers are handed simply has no field to carry it
 supplies, and marks the entry `Exported` — all three in the one call, because the guaranteed
 recovery path D10 requires cannot depend on a caller remembering, separately, to record that it
 used it. The write that sets `Exported` happens only after the container is confirmed sealed: a
-throw out of the sealing step leaves the entry exactly as it was.
+throw out of the sealing step leaves the entry exactly as it was. A write that fails after the
+container is sealed rolls the flag back to what the file holds and hands the container over
+anyway; a write that is **cancelled** rolls the flag back and propagates the cancellation, because
+the caller never receives the container and nothing was exported. Both cases are the same rule as
+`StoreAsync`, `UpdateAsync` and `DeleteAsync`: a cache left ahead of the file is committed by the
+next write of any kind, and an entry that permanently claims a backup nobody holds silences the
+one warning D10 depends on.
 
 Password buffers belong to the caller throughout. The vault reads them, derives from them, and
 never stores them — and does not zero them either, because the caller usually still needs the
@@ -273,6 +304,26 @@ must be able to show: a fresh salt makes a fresh header, both key wraps are boun
 (4.2), and a machine that cannot re-seal the device wrap under the new one drops it rather than
 leave a wrap nothing will open. `ChangedAndDeviceUnlockDropped` says so; a `bool` whose `false`
 already means "wrong password" leaves it unsayable, and the user finds out at the next launch.
+
+There is a third outcome for the same reason, and it is why "every other failure throws" stops
+where it does. Removing the kept copy (below) happens **after** the new record is committed, and
+on Windows an indexer or an antivirus holding `vault.json.bak` open is enough to refuse the
+delete. Thrown, that failure says "the password was not changed" about a change that is already on
+disk: the caller retries with the old password, is answered `WrongPassword`, and the copy that old
+password still opens is left there with nobody told. So it is reported instead —
+`ChangedAndTheOldCopyRemains`, and `ChangedAndDeviceUnlockDroppedAndTheOldCopyRemains` when both
+happened. The values enumerate the outcomes that can occur so that the ones that cannot — anything
+alongside `WrongPassword` — stay unspellable.
+
+`AcknowledgeDamageAsync` says that the damage the last unlock reported has been seen. It exists
+for one kind: a record whose `mac` does not match its own contents (5.1). Every write recomputes
+that code, so the first write after such an unlock would erase the only witness there is to an
+entry removed from the file or to bytes edited under it — a per-entry tag proves nothing about an
+entry that is no longer there. Writes are therefore refused with `VaultError.Degraded` until this
+is called, and reads are not: `ListAsync`, `RevealAsync` and `ExportAsync` all work untouched,
+because rescuing the keys that are still intact is exactly what `VaultDegraded` is for. Nothing is
+written by the acknowledgement itself, so the file keeps the mismatch until a write genuinely
+needs to happen and a vault opened again reports `VaultDegraded` once more.
 
 The change also removes the copy the durable write keeps beside the vault. Everywhere else that
 copy is what makes an interrupted write survivable; here it is a whole record that the password the
@@ -403,6 +454,7 @@ its own storage refusing — reports through `VaultError` on a thrown `VaultExce
 | `DuplicateAddress` | Another entry already holds this address on this network; `StoreAsync` refuses rather than silently holding the same key twice |
 | `EntryDamaged` | An entry failed its authentication tag: damaged bytes, or moved between references |
 | `StorageFailed` | Reading or writing the vault file failed |
+| `Degraded` | A write was asked of a vault whose record failed its own integrity code when it was opened, and the damage has not been acknowledged. Reading is never refused for this |
 | `AddressMismatch` | An entry's recorded address does not match the address its own key derives to — caught here, before anything is built or signed for the wrong account |
 
 ## 10. What must be measured before it is believed
@@ -430,6 +482,13 @@ Recorded because they are real, not because they are acceptable everywhere.
   over the vault file can restore a previous password and resurrect deleted entries. Closing this
   needs a counter somewhere the rollback cannot reach, which on a single-file design is the file
   itself. The attack's precondition is write access to the user's own files.
+- **A password change still reseals over a mismatched `mac`.** `AcknowledgeDamageAsync` guards
+  every write that goes through the vault's own persist path, but `ChangePasswordAsync` reads the
+  file itself, works on a locked vault, and never runs the verification an unlock runs — so it has
+  no damage to refuse over. It is left that way deliberately: the alternative is refusing to change
+  a leaked password on a vault with one bad byte in it, and a user in that position needs the
+  change more than the evidence. A caller that cares should unlock first, which is where the
+  damage is reported.
 - **Canonical form without field lengths.** Separators join binary fields without declaring their
   lengths, so distinct field sets producing identical canonical bytes exist in principle. The
   application cannot generate such a pair — references are GUIDs of fixed shape. Recorded as debt
@@ -452,6 +511,11 @@ Recorded because they are real, not because they are acceptable everywhere.
 | Durability | Kill between write and rename: the previous good file opens |
 | Concurrency | Lock during an in-flight store: the gate serialises and no half-wiped key reaches a record |
 | Password change | Entries byte-identical before and after; the device wrap still opens afterwards |
+| A committed change whose cleanup fails | The kept copy cannot be deleted: the outcome says the password changed and the copy remains, and the new password opens the vault |
+| A cancelled write | Cancel the token mid-write: the cache holds exactly what the file holds, on export as on store |
+| Someone else's device secret | Disable, and change the password, on a machine holding a secret this vault's wrap does not open: the secret is still there afterwards |
+| A tampered KDF cost | Zero memory, and two terabytes of it: `VaultCorrupt`, with nothing derived |
+| Writing while degraded | A write over a mismatched `mac` is refused until acknowledged, and the mismatch survives the refusal |
 | Portability | A vault written on one path opens from another with the password, and its device wrap is inert |
 | The seam | At least one part A integration publication driven through `VaultSigner` against a standalone node |
 

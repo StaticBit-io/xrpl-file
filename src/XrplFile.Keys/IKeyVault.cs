@@ -47,13 +47,17 @@ public enum VaultUnlockResult
 /// </summary>
 /// <remarks>
 /// <para>
-/// Three values rather than two flags, so that the combination which cannot occur — the password
-/// unchanged and yet device unlock dropped — cannot be spelled. <see cref="WrongPassword"/> is
-/// first, and so the default, because a value nobody set must never read as success.
+/// The values enumerate exactly the outcomes that can occur, so that the combinations which
+/// cannot — the password unchanged and yet device unlock dropped, or unchanged and yet a copy of
+/// the old record left behind — cannot be spelled. <see cref="WrongPassword"/> is first, and so
+/// the default, because a value nobody set must never read as success.
 /// </para>
 /// <para>
 /// Every other failure throws (design 6.2). A damaged record, a refused disk and a device store
-/// that cannot answer are all conditions this type deliberately has no value for.
+/// that cannot answer are all conditions this type deliberately has no value for. What does not
+/// throw is a failure that happens <em>after</em> the new record is committed: the cleanup of the
+/// copy the durable write kept. A throw there would say "the password was not changed" about a
+/// change that is on disk, so it is a value here instead.
 /// </para>
 /// </remarks>
 public enum VaultPasswordChange
@@ -70,11 +74,27 @@ public enum VaultPasswordChange
     /// <summary>
     /// The password was changed, and "remember on this device" went with it. A fresh salt makes a
     /// fresh header, both wraps are bound to that header, and this machine could not re-seal the
-    /// device wrap under it — so the wrap was dropped rather than left unopenable, and the store
-    /// was asked to forget the secret behind it. The setting is off, only the user can turn it
-    /// back on, and only a caller that was told can say so.
+    /// device wrap under it — so the wrap was dropped rather than left unopenable. The setting is
+    /// off, only the user can turn it back on, and only a caller that was told can say so.
     /// </summary>
     ChangedAndDeviceUnlockDropped,
+
+    /// <summary>
+    /// The password was changed and the copy the durable write kept beside the vault could not be
+    /// removed — a file still open in an indexer or an antivirus is enough. The new password is
+    /// what the vault opens with; what is left behind at <c>&lt;vault&gt;.bak</c> is a whole record
+    /// that the old, and presumably leaked, password still opens, and which
+    /// <see cref="IKeyVault.UnlockAsync"/> would serve if the vault file itself ever went missing.
+    /// A caller has to say so and offer to remove it; retrying the change with the old password is
+    /// the one thing it must not do, because that password is no longer the vault's.
+    /// </summary>
+    ChangedAndTheOldCopyRemains,
+
+    /// <summary>
+    /// Both of the two above at once: the password was changed, the device wrap was dropped
+    /// because this machine could not re-seal it, and the kept copy could not be removed either.
+    /// </summary>
+    ChangedAndDeviceUnlockDroppedAndTheOldCopyRemains,
 }
 
 /// <summary>
@@ -103,6 +123,32 @@ public interface IKeyVault
     /// Empty while the vault is locked.
     /// </summary>
     IReadOnlyList<string> DamagedReferences { get; }
+
+    /// <summary>
+    /// Says that the damage reported by the unlock which opened this vault has been seen, and
+    /// releases the writes that are refused until it is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It is needed for one kind of damage only: a record whose integrity code does not match its
+    /// own contents. Every write recomputes that code, and the mismatch is the only witness there
+    /// is to an entry removed from the file or to bytes edited under the code that covers them —
+    /// a per-entry tag proves nothing about an entry that is no longer there. So the first write
+    /// after such an unlock is refused with <see cref="VaultError.Degraded"/> rather than allowed
+    /// to erase the evidence, and this is the call that says the user has been told and the vault
+    /// may carry on.
+    /// </para>
+    /// <para>
+    /// Reading needs none of this: <see cref="ListAsync"/>, <see cref="RevealAsync"/> and
+    /// <see cref="ExportAsync"/> all work on a degraded vault untouched, because rescuing the keys
+    /// that are still intact is exactly what <see cref="VaultUnlockResult.VaultDegraded"/> exists
+    /// to allow. Nothing is written here either, so the file keeps the mismatch until a write
+    /// genuinely needs to happen: a vault locked and opened again reports
+    /// <see cref="VaultUnlockResult.VaultDegraded"/> once more.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="VaultException"><see cref="VaultError.Locked"/> on a locked vault.</exception>
+    Task AcknowledgeDamageAsync(CancellationToken cancellationToken);
 
     /// <summary>Whether a vault file is present at this vault's path.</summary>
     Task<bool> ExistsAsync(CancellationToken cancellationToken);
@@ -230,5 +276,12 @@ public interface IKeyVault
     /// store to drop its secret. The password wrap is never touched, so the vault stays openable
     /// either way. Succeeds silently when the option was already off.
     /// </summary>
+    /// <remarks>
+    /// The store is asked only for a secret this vault has established is its own — the wrap in
+    /// the record opens under it. The platform secret is machine-wide rather than per-vault (4.2),
+    /// so a vault that never had a wrap, or a copy of one carried to a machine that enrolled a
+    /// secret for something else, clears its own field and leaves that secret exactly where it is;
+    /// deleting it would take device unlock away from whatever vault is still using it.
+    /// </remarks>
     Task DisableDeviceUnlockAsync(CancellationToken cancellationToken);
 }

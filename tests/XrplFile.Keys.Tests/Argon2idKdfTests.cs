@@ -1,4 +1,4 @@
-using Konscious.Security.Cryptography;
+﻿using Konscious.Security.Cryptography;
 using Xunit;
 
 namespace XrplFile.Keys.Tests;
@@ -55,6 +55,31 @@ public class Argon2idKdfTests
         byte[] second = kdf.Derive(password, Enumerable.Repeat((byte)0x08, 16).ToArray(), parameters, 32);
 
         Assert.NotEqual(first, second);
+    }
+
+    [Theory]
+    [InlineData(KdfParameterBounds.MinimumMemoryKib, KdfParameterBounds.MinimumIterations, KdfParameterBounds.MinimumParallelism)]
+    [InlineData(
+        KdfParameterBounds.MinimumMemoryKibPerLane * KdfParameterBounds.MaximumParallelism,
+        KdfParameterBounds.MinimumIterations,
+        KdfParameterBounds.MaximumParallelism)]
+    [InlineData(2048, KdfParameterBounds.MaximumIterations, KdfParameterBounds.MinimumParallelism)]
+    public void Every_corner_of_the_accepted_cost_range_is_one_argon2id_can_actually_run(
+        int memoryKib, int iterations, int parallelism)
+    {
+        // The bounds a record's cost is checked against are only honest if every cost they admit
+        // is one the KDF will accept — otherwise a header edited to a value inside the range
+        // still reaches Argon2id and still comes back as something other than VaultCorrupt. The
+        // memory ceiling is left out on purpose: allocating four gibibytes is not something a
+        // unit suite should do, and it is the one bound whose failure would be the allocator's
+        // rather than the KDF's.
+        Argon2idKdf kdf = new();
+        KdfParameters parameters = new(memoryKib, iterations, parallelism);
+
+        byte[] derived = kdf.Derive(
+            "correct horse battery staple"u8, Enumerable.Repeat((byte)0x07, 16).ToArray(), parameters, 32);
+
+        Assert.Equal(32, derived.Length);
     }
 
     [Fact]

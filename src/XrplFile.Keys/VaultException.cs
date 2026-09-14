@@ -30,6 +30,15 @@ public enum VaultError
     StorageFailed,
 
     /// <summary>
+    /// A write was asked of a vault whose record failed its own integrity code when it was opened,
+    /// and the damage has not been acknowledged. Every write recomputes that code, and the
+    /// mismatch is the only witness there is to an entry removed from the file or to bytes edited
+    /// under it — so erasing it is the user's decision, taken through
+    /// <see cref="IKeyVault.AcknowledgeDamageAsync"/>. Reading a degraded vault is never refused.
+    /// </summary>
+    Degraded,
+
+    /// <summary>
     /// An entry's recorded address does not match the address its own key derives to. Nothing on
     /// <see cref="IKeyVault.StoreAsync"/> checks the two against each other, so a mistyped or
     /// foreign address survives storage; this is where it is finally caught, before anything is

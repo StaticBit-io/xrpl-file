@@ -94,6 +94,14 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     private volatile string[] _damagedReferences = [];
     private volatile bool _disposed;
 
+    /// <summary>
+    /// Whether the record this vault is holding open failed its own integrity code at the unlock
+    /// that opened it, and the caller has not yet said it has seen that. While it is set, every
+    /// write is refused — see <see cref="RequireTheDamageAcknowledged"/> for why the first write
+    /// would otherwise be the end of the only evidence there is.
+    /// </summary>
+    private volatile bool _recordIntegrityFailed;
+
     /// <param name="path">The vault file. Its directory must exist.</param>
     /// <param name="kdf">Password stretching. Its identifier is written into the record.</param>
     /// <param name="devices">
@@ -196,6 +204,8 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            RequireNotDisposed();
+
             if (FileIsThere())
             {
                 throw new InvalidOperationException(
@@ -253,6 +263,8 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            RequireNotDisposed();
+
             byte[]? bytes = await DurableFile.ReadAsync(_path, cancellationToken).ConfigureAwait(false);
             if (bytes is null)
             {
@@ -320,6 +332,8 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            RequireNotDisposed();
+
             byte[]? bytes = await DurableFile.ReadAsync(_path, cancellationToken).ConfigureAwait(false);
             if (bytes is null)
             {
@@ -588,20 +602,31 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 {
                     await PersistAsync(record, dataKey, cancellationToken).ConfigureAwait(false);
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex)
                 {
                     // The container above is already sealed and correct — the only thing that
-                    // failed is recording that it happened. A cancellation is let through unchanged
-                    // (this class never swallows one, see EnableDeviceUnlockAsync for the same
-                    // rule) because the caller asked to stop, not to have the write's outcome
-                    // reinterpreted; every other failure here is storage refusing the write, and for
-                    // that one the cache is rolled back so it agrees with the file (Exported stays
-                    // false, matching what is actually on disk), and the container is handed back
-                    // anyway rather than discarding the export's actual deliverable. A caller who
-                    // reads Exported afterwards is nagged to export this key again, which is the
-                    // safe direction to be wrong in; throwing here instead would make
-                    // the one guaranteed recovery path unreliable exactly when storage already is.
+                    // failed is recording that it happened, so the cache is rolled back to agree
+                    // with the file (Exported stays false, matching what is actually on disk).
+                    // That rollback happens whatever the failure was, exactly as it does in
+                    // StoreAsync, UpdateAsync and DeleteAsync: a cache left claiming an export the
+                    // file does not record is committed by the next write of any kind, and the
+                    // vault then permanently says a key was backed up that never left it — which
+                    // silences the very warning a design with no recovery phrase depends on.
                     record.Entries[reference] = previousSealedEntry;
+
+                    // A cancellation is then let through unchanged (this class never swallows one,
+                    // see EnableDeviceUnlockAsync for the same rule): the caller asked to stop, and
+                    // never receives the container, so nothing was exported anywhere.
+                    if (ex is OperationCanceledException)
+                    {
+                        throw;
+                    }
+
+                    // Every other failure here is storage refusing the write, and the container is
+                    // handed back anyway rather than discarding the export's actual deliverable. A
+                    // caller who reads Exported afterwards is nagged to export this key again,
+                    // which is the safe direction to be wrong in; throwing here instead would make
+                    // the one guaranteed recovery path unreliable exactly when storage already is.
                     EnsureStillOpen(generation);
                     return container;
                 }
@@ -797,13 +822,13 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 // than leave a wrap no header will ever match again, when it does not. A vault that
                 // never carried a device wrap gains none here: the platform secret is machine-wide
                 // rather than per-vault, so "this machine holds one" is not consent.
-                bool deviceUnlockDropped = false;
+                DeviceRewrap deviceOutcome = DeviceRewrap.NothingToRewrap;
                 if (deviceDekBeforeTheChange is not null)
                 {
-                    record.DeviceDek = await RewrapDeviceKeyAsync(
+                    (deviceOutcome, byte[]? rewrapped) = await RewrapDeviceKeyAsync(
                             record, deviceDekBeforeTheChange, headerBeforeTheChange, dataKey, cancellationToken)
                         .ConfigureAwait(false);
-                    deviceUnlockDropped = record.DeviceDek is null;
+                    record.DeviceDek = rewrapped;
                 }
 
                 Reseal(record, dataKey);
@@ -824,15 +849,32 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 // record that the password just replaced still opens — reachable with no attacker
                 // at all, since ReadAsync serves the copy when the main file is gone. Removed only
                 // now, so that the durability of the write itself is unchanged.
-                DurableFile.DiscardBackup(_path);
+                //
+                // A failure here is carried in the result rather than thrown. The record above is
+                // already committed: a throw would tell the caller the password was not changed,
+                // which sends it back to a password the vault no longer has — and leaves the copy
+                // that password does open lying there with nobody told about it.
+                bool theOldCopyRemains = !DurableFile.TryDiscardBackup(_path);
 
-                if (!deviceUnlockDropped)
+                // Only a secret this vault has established is its own may be dropped. The store
+                // said it holds nothing, so this asks it to stay that way and destroys no key
+                // material — the case where the secret is present but opens some other vault's
+                // wrap deliberately leaves it exactly where it is (see RewrapDeviceKeyAsync).
+                if (deviceOutcome == DeviceRewrap.ThisMachineHoldsNoSecret)
                 {
-                    return VaultPasswordChange.Changed;
+                    await ForgetTheOrphanedDeviceSecretAsync(cancellationToken).ConfigureAwait(false);
                 }
 
-                await ForgetTheOrphanedDeviceSecretAsync(cancellationToken).ConfigureAwait(false);
-                return VaultPasswordChange.ChangedAndDeviceUnlockDropped;
+                bool deviceUnlockDropped = deviceOutcome is DeviceRewrap.ThisMachineHoldsNoSecret
+                    or DeviceRewrap.TheSecretIsAnotherVaults;
+
+                return (deviceUnlockDropped, theOldCopyRemains) switch
+                {
+                    (false, false) => VaultPasswordChange.Changed,
+                    (false, true) => VaultPasswordChange.ChangedAndTheOldCopyRemains,
+                    (true, false) => VaultPasswordChange.ChangedAndDeviceUnlockDropped,
+                    (true, true) => VaultPasswordChange.ChangedAndDeviceUnlockDroppedAndTheOldCopyRemains,
+                };
             }
             finally
             {
@@ -842,6 +884,25 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                     CryptographicOperations.ZeroMemory(dataKey);
                 }
             }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task AcknowledgeDamageAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Requires an open vault, so that acknowledging is always about the damage this
+            // session was actually told of. Nothing is written here: the file keeps the mismatch
+            // until a write genuinely needs to happen, so a vault locked and opened again reports
+            // VaultDegraded once more and the user is told again rather than quietly forgotten.
+            RequireUnlocked();
+            _recordIntegrityFailed = false;
         }
         finally
         {
@@ -934,10 +995,18 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         {
             VaultRecord record = RequireUnlocked();
             byte[] dataKey = BorrowDataKey(out long generation);
+            bool theSecretIsThisVaultsOwn = false;
             try
             {
                 if (record.DeviceDek is not null)
                 {
+                    // Asked before the wrap is cleared, because the wrap is the only proof there
+                    // is of whose the machine's secret is. A vault that never had a wrap, or one
+                    // carried to a machine that enrolled a secret for something else, reaches the
+                    // deletion below with this still false — and the other vault keeps its setting.
+                    theSecretIsThisVaultsOwn = await ThisMachinesSecretOpensAsync(
+                        record, record.DeviceDek, cancellationToken).ConfigureAwait(false);
+
                     byte[] previousDeviceDek = record.DeviceDek;
                     record.DeviceDek = null;
 
@@ -959,11 +1028,15 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 CryptographicOperations.ZeroMemory(dataKey);
             }
 
-            // The vault owns the record above; the store owns its own item here. Asked for
-            // unconditionally, and after the record write lands, so that a store failure above
-            // leaves the platform secret in place rather than dropping it out from under a wrap
-            // that a rolled-back write just put back.
-            await DeviceSecrets.DeleteAsync(cancellationToken).ConfigureAwait(false);
+            // The vault owns the record above; the store owns its own item here. Asked for only
+            // once this vault's own wrap has opened under the machine's secret, and after the
+            // record write lands, so that a store failure above leaves the platform secret in
+            // place rather than dropping it out from under a wrap that a rolled-back write just
+            // put back.
+            if (theSecretIsThisVaultsOwn)
+            {
+                await DeviceSecrets.DeleteAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
         finally
         {
@@ -972,11 +1045,60 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     }
 
     /// <summary>
+    /// Whether the secret this machine holds is the one <paramref name="deviceDek"/> was sealed
+    /// under — the only evidence available that the machine's secret belongs to this vault rather
+    /// than to another the same user keeps on the same machine (the secret is machine-wide, 4.2).
+    /// </summary>
+    /// <remarks>
+    /// A store that cannot answer counts as "not proved", and so leaves the secret alone: the two
+    /// outcomes of being wrong are not symmetrical. A secret left behind that opens nothing is
+    /// litter; a secret deleted that was not ours costs another vault its device unlock, and only
+    /// the user can put that back.
+    /// </remarks>
+    private async Task<bool> ThisMachinesSecretOpensAsync(
+        VaultRecord record, byte[] deviceDek, CancellationToken cancellationToken)
+    {
+        byte[]? deviceSecret;
+        try
+        {
+            deviceSecret = await DeviceSecrets.GetAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return false;
+        }
+
+        if (deviceSecret is null)
+        {
+            return false;
+        }
+
+        byte[] devicePasswordKey = HKDF.DeriveKey(
+            HashAlgorithmName.SHA256, deviceSecret, DataKeyLength, salt: null, info: DeviceInfo);
+        try
+        {
+            if (!TryOpen(devicePasswordKey, deviceDek, VaultRecordCodec.Header(record), out byte[]? enrolled))
+            {
+                return false;
+            }
+
+            CryptographicOperations.ZeroMemory(enrolled);
+            return true;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(devicePasswordKey);
+            CryptographicOperations.ZeroMemory(deviceSecret);
+        }
+    }
+
+    /// <summary>
     /// Re-wraps the data key for "remember on this device" under a header that just changed
-    /// because the password did. Returns <see langword="null"/> — dropping the device wrap rather
-    /// than leaving one bound to a header nothing will ever present again — when this machine
-    /// genuinely holds no secret, or holds one that is not the secret
-    /// <paramref name="deviceDekBeforeTheChange"/> was sealed under.
+    /// because the password did. Hands back no wrap — dropping the device wrap rather than
+    /// leaving one bound to a header nothing will ever present again — when this machine genuinely
+    /// holds no secret, or holds one that is not the secret
+    /// <paramref name="deviceDekBeforeTheChange"/> was sealed under, and says which of the two it
+    /// was, because only the first of them may cost the machine its stored secret.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -994,7 +1116,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     /// its mere presence says nothing about this vault.
     /// </para>
     /// </remarks>
-    private async Task<byte[]?> RewrapDeviceKeyAsync(
+    private async Task<(DeviceRewrap Outcome, byte[]? Wrap)> RewrapDeviceKeyAsync(
         VaultRecord record,
         byte[] deviceDekBeforeTheChange,
         byte[] headerBeforeTheChange,
@@ -1017,7 +1139,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
 
         if (deviceSecret is null)
         {
-            return null;
+            return (DeviceRewrap.ThisMachineHoldsNoSecret, null);
         }
 
         byte[] devicePasswordKey = HKDF.DeriveKey(
@@ -1026,11 +1148,14 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         {
             if (!TryOpen(devicePasswordKey, deviceDekBeforeTheChange, headerBeforeTheChange, out byte[]? enrolled))
             {
-                return null;
+                // Reported separately from absence, and the difference matters to the store: this
+                // machine's secret is demonstrably not the one this wrap was sealed under, so it
+                // belongs to something else that is still using it. The wrap goes; the secret stays.
+                return (DeviceRewrap.TheSecretIsAnotherVaults, null);
             }
 
             CryptographicOperations.ZeroMemory(enrolled);
-            return Seal(devicePasswordKey, dataKey, VaultRecordCodec.Header(record));
+            return (DeviceRewrap.Resealed, Seal(devicePasswordKey, dataKey, VaultRecordCodec.Header(record)));
         }
         finally
         {
@@ -1040,16 +1165,52 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     }
 
     /// <summary>
+    /// What became of the device wrap across a password change, and — the part a caller cannot
+    /// infer from the wrap alone — what that says about the secret on this machine.
+    /// </summary>
+    private enum DeviceRewrap
+    {
+        /// <summary>The record carried no device wrap, so there was nothing to re-seal or drop.</summary>
+        NothingToRewrap,
+
+        /// <summary>Re-sealed under the new header. The setting survives the change.</summary>
+        Resealed,
+
+        /// <summary>
+        /// The store holds nothing. The wrap is dropped rather than left bound to a header nobody
+        /// will present again, and the store may be asked to stay empty — there is no key material
+        /// to destroy in doing so.
+        /// </summary>
+        ThisMachineHoldsNoSecret,
+
+        /// <summary>
+        /// The store holds a secret and the wrap does not open under it. The wrap is dropped and
+        /// the secret is left strictly alone: it is another vault's, and this is a vault that was
+        /// copied to a machine whose owner enrolled something else.
+        /// </summary>
+        TheSecretIsAnotherVaults,
+    }
+
+    /// <summary>
     /// Asks the store to drop a secret the vault has just stopped pointing at, the way
     /// <see cref="DisableDeviceUnlockAsync"/> does: the vault owns the record, the store owns its
     /// item, and neither should leave the other holding something dead.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// Called on exactly one outcome — <see cref="DeviceRewrap.ThisMachineHoldsNoSecret"/>, where
+    /// the store has just said it holds nothing, so this asks it to stay that way and no key
+    /// material is destroyed by asking. It is deliberately not called when the machine's secret is
+    /// present but opens some other vault's wrap: that secret is still in use, and this vault
+    /// having failed to open it is the proof that it is not ours to delete.
+    /// </para>
+    /// <para>
     /// A failure here is swallowed on purpose, and it is the one place in this type where that is
     /// the right answer. The password change is already committed to disk; what is left behind is
     /// key material that opens nothing, while discarding the outcome of a committed change would
     /// leave the caller unable to say what happened — or, worse, retrying with a password that is
     /// no longer the vault's.
+    /// </para>
     /// </remarks>
     private async Task ForgetTheOrphanedDeviceSecretAsync(CancellationToken cancellationToken)
     {
@@ -1065,23 +1226,28 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
 
     /// <summary>Locks the vault for good. Disposing twice is a no-op.</summary>
     /// <remarks>
+    /// <para>
     /// Disposal takes the gate like every other operation, so it cannot land in the middle of one
     /// — the same rule, and for the same reason, as <see cref="LockAsync"/>. The gate itself is
     /// deliberately not disposed: <see cref="SemaphoreSlim.Dispose()"/> only releases a wait
     /// handle this class never asks for, and disposing it would turn the typed refusal an
     /// operation arriving afterwards gets today into an <see cref="ObjectDisposedException"/>
     /// thrown out of the gate it happened to race.
+    /// </para>
+    /// <para>
+    /// "For good" is enforced rather than described: <see cref="CreateAsync"/>,
+    /// <see cref="UnlockAsync"/> and <see cref="UnlockWithDeviceAsync"/> refuse a disposed vault,
+    /// so nothing can put a data key back into one. <see cref="Forget"/> runs on every disposal
+    /// rather than only the first, so that the second call cannot be the one that returns with key
+    /// material still resident — the failure a first-one-wins early return would make permanent,
+    /// since disposal is also what takes the idle lock away.
+    /// </para>
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (_disposed)
-            {
-                return;
-            }
-
             Forget();
             _disposed = true;
         }
@@ -1094,6 +1260,39 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     // ---- state, touched only under the gate ----------------------------------------------------
 
     private bool FileIsThere() => File.Exists(_path) || File.Exists(_path + BackupSuffix);
+
+    /// <summary>
+    /// Refuses to hand a disposed vault a data key. Disposal is documented as locking the vault
+    /// for good, and it is what sign-out calls — together with disposing the idle lock, so a vault
+    /// that opened again afterwards would hold a resident key with no timer left to take it away.
+    /// </summary>
+    private void RequireNotDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
+
+    /// <summary>
+    /// Refuses to write over a record whose integrity code did not match when it was opened, until
+    /// <see cref="AcknowledgeDamageAsync"/> has said the damage has been seen.
+    /// </summary>
+    /// <remarks>
+    /// Every write reseals, and resealing computes a fresh <c>mac</c> over the record as it now
+    /// stands — including whatever was done to it. The mismatch is the only witness there is to an
+    /// entry removed from the file or to bytes edited under the code that covers them: a per-entry
+    /// tag says nothing about an entry that is no longer there, and the design concedes it cannot
+    /// see a whole-file rollback at all (11). Writing over it is therefore not merely losing
+    /// evidence, it is the one action that destroys it permanently, so it is the user's to take
+    /// and not the application's to take silently. Reading is untouched: listing, revealing and
+    /// exporting a degraded vault need no acknowledgement, because rescuing the keys is what a
+    /// degraded vault is for.
+    /// </remarks>
+    private void RequireTheDamageAcknowledged()
+    {
+        if (_recordIntegrityFailed)
+        {
+            throw new VaultException(
+                VaultError.Degraded,
+                "The vault's integrity code did not match its contents when it was opened. Writing would " +
+                "recompute it over the damaged record, so the damage must be acknowledged first.");
+        }
+    }
 
     private VaultRecord RequireUnlocked() =>
         _record is not null && _dataKey is not null
@@ -1148,6 +1347,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
         _isUnlocked = false;
         _references = [];
         _damagedReferences = [];
+        _recordIntegrityFailed = false;
         _generation++;
     }
 
@@ -1155,6 +1355,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
 
     private async Task PersistAsync(VaultRecord record, byte[] dataKey, CancellationToken cancellationToken)
     {
+        RequireTheDamageAcknowledged();
         Reseal(record, dataKey);
         await _write(_path, VaultRecordCodec.Serialise(record), cancellationToken).ConfigureAwait(false);
         _references = [.. record.Entries.Keys];
@@ -1224,6 +1425,11 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
 
         Install(record, dataKey);
         _damagedReferences = damaged.ToArray();
+
+        // Set after Install, which clears it along with the rest of the previous session's state.
+        // It stays set until the caller acknowledges the damage, and is what stops the next write
+        // from recomputing the code over the record it disagrees with.
+        _recordIntegrityFailed = !macMatches;
 
         return macMatches && damaged.Count == 0 ? VaultUnlockResult.Success : VaultUnlockResult.VaultDegraded;
     }

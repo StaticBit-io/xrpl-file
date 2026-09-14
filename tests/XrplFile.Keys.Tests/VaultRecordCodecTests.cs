@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using Xunit;
 
@@ -199,6 +199,52 @@ public class VaultRecordCodecTests
         Assert.False(root.TryGetProperty("KdfId", out _));
         Assert.False(root.TryGetProperty("MemoryKib", out _));
         Assert.False(root.TryGetProperty("DeviceDek", out _));
+    }
+
+    [Theory]
+    [InlineData(0, 3, 4)]
+    [InlineData(7, 3, 4)]
+    [InlineData(65536, 0, 4)]
+    [InlineData(65536, 3, 0)]
+    [InlineData(2_000_000_000, 3, 4)]
+    [InlineData(65536, 2_000_000_000, 4)]
+    [InlineData(65536, 3, 256)]
+    [InlineData(8, 1, 3)]
+    public void A_kdf_cost_outside_what_this_format_can_carry_is_refused_as_corrupt(
+        int memoryKib, int iterations, int parallelism)
+    {
+        // Unchecked, these reach Argon2id: the low end comes back as a raw
+        // ArgumentOutOfRangeException out of a method whose contract is an enumeration, and the
+        // high end tries to allocate the machine out of existence — both of them before the
+        // header binding that would have rejected the tampering has had any chance to speak. The
+        // export container already calls a cost like this corruption; this is the vault saying
+        // the same word.
+        VaultRecord record = Sample();
+        record.KdfParams = new KdfParameters(memoryKib, iterations, parallelism);
+
+        VaultException error = Assert.Throws<VaultException>(
+            () => VaultRecordCodec.Parse(VaultRecordCodec.Serialise(record)));
+
+        Assert.Equal(VaultError.Corrupt, error.Error);
+    }
+
+    [Theory]
+    [InlineData(262144, 3, 4)]
+    [InlineData(8, 1, 1)]
+    [InlineData(65536, 2, 1)]
+    [InlineData(4_194_304, 1024, 255)]
+    public void Every_cost_a_legitimate_build_could_have_written_still_parses(
+        int memoryKib, int iterations, int parallelism)
+    {
+        // The measured production triple, the two the suite writes, and the widest corner of the
+        // accepted range. A bound that refused any of these would be refusing a vault rather than
+        // an attack — the failure that costs a user their keys outright.
+        VaultRecord record = Sample();
+        record.KdfParams = new KdfParameters(memoryKib, iterations, parallelism);
+
+        VaultRecord parsed = VaultRecordCodec.Parse(VaultRecordCodec.Serialise(record));
+
+        Assert.Equal(record.KdfParams, parsed.KdfParams);
     }
 
     [Fact]
