@@ -397,10 +397,25 @@ timer in the application can fire:
   timer undoes that — the process may even be suspended by then.
 - Android 13 and later: `ClipDescription.EXTRA_IS_SENSITIVE`, or the secret appears in the system
   clipboard preview and in the cross-device clipboard.
+- Windows: `Clipboard.SetContentWithOptions` with `ClipboardContentOptions.IsAllowedInHistory` and
+  `IsRoamable` both false, or the secret stays in the Win+V clipboard history after the reveal
+  screen has hidden it and after the vault has locked, and Cloud Clipboard roams it to the person's
+  other machines.
 
 `IClipboardService` is declared in `App.Core` with those options as parameters and implemented in
-`XrplFile.App`. On Windows today neither applies, and the Windows implementation says so rather
-than pretending the options were honoured.
+`XrplFile.App`.
+
+**Correction.** This section originally said "On Windows today neither applies, and the Windows
+implementation says so rather than pretending the options were honoured", and that implementation
+dropped the expiry on the strength of it. It was false in the direction that mattered: the two
+options above are exactly the Windows counterparts of the iOS and Android ones, and without them a
+revealed seed outlived both the sixty-second hide and the vault's own lock. What Windows genuinely
+does not offer is an expiry the system itself honours, so `MauiClipboardService` enforces the one it
+is given — a timer that clears the clipboard when the window elapses, and only if the clipboard
+still holds exactly what was copied, so that something the person copied in the meantime is not
+wiped along with it. A process killed before the timer fires still leaves the text in the one local
+clipboard slot; it does not roam, it does not enter the history, and the content is deliberately not
+`Flush()`ed, so it dies with the process on an ordinary close.
 
 **QR codes.** A container is encoded with Base45 (RFC 9285) before it becomes a QR code. The reason
 is established from the Wallet's own scanner code rather than assumed: the scanners on both mobile

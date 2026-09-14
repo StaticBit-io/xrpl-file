@@ -15,7 +15,7 @@ namespace XrplFile.App.Core;
 /// <see cref="VaultUnlockResult"/> and <see cref="VaultCreateResult"/>).
 /// </summary>
 /// <remarks>
-/// Never built from a path: <see cref="VaultException.Message"/> is not used here, because
+/// Never built from a path: <c>VaultException.Message</c> is not used here, because
 /// <c>KeyVault</c>'s own exception text is written for a developer reading a stack trace, not a
 /// screen — see <see cref="CreateMessages"/>'s own tests on why an exception's message must never
 /// reach a screen verbatim.

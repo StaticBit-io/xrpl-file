@@ -8,7 +8,7 @@ namespace XrplFile.App.Core;
 /// throws — so this is <see cref="UnlockModel.CreateAsync"/>'s own translation of the two failures
 /// that call can actually produce: <see cref="KeyVault.CreateAsync"/>'s <see cref="InvalidOperationException"/>
 /// for a path that already holds a vault, and the <see cref="VaultException"/> with
-/// <see cref="VaultError.StorageFailed"/> that <see cref="DurableFile.WriteAsync"/> wraps a refused
+/// <see cref="VaultError.StorageFailed"/> that <c>DurableFile.WriteAsync</c> wraps a refused
 /// write in. Every other exception — including <see cref="OperationCanceledException"/> — has no
 /// value here and is left to propagate: this type exists to give words to failures a screen must
 /// show, not to catch everything a bug could throw.
@@ -47,7 +47,7 @@ public sealed record CreateMessage(string Headline, string Detail);
 /// </summary>
 /// <remarks>
 /// No message here may carry a file path, an internal exception detail, or anything derived from a
-/// password. That is the whole point of this type existing: <see cref="DurableFile.WriteAsync"/>'s
+/// password. That is the whole point of this type existing: <c>DurableFile.WriteAsync</c>'s
 /// own exception message for a refused write names the full local vault path
 /// ("Writing the vault file at '{path}' failed."), and a screen that relayed that verbatim — as
 /// <c>CreateVault.razor</c> once did — put the Windows profile path on screen. This class is the

@@ -2,7 +2,7 @@ namespace XrplFile.App.Core;
 
 /// <summary>
 /// Where the chosen-vault-location setting is kept: the path a person pointed the application at
-/// with <see cref="VaultLocationModel.ChooseAsync"/>, if any (design E5's correction). Behind an
+/// with <see cref="VaultLocationModel.ChoosePath"/>, if any (design E5's correction). Behind an
 /// interface, separate from <see cref="VaultLocation"/> itself, so a test can substitute a store
 /// that never touches this machine's real application-data directory.
 /// </summary>

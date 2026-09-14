@@ -5,5 +5,24 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!--
+      Turned on so that the compiler checks the documentation this repository is full of, rather
+      than only storing it. The review that prompted this found three cref attributes pointing at a
+      member that does not exist, and nothing had caught them, because CS1574 is raised only when
+      the compiler is asked to produce a documentation file. Enabling it found four more.
+
+      The two suppressions are what make it usable. Measured on this repository with the property
+      on and nothing suppressed: 1,654 CS1591 ("missing XML comment for a publicly visible type or
+      member") and 60 CS1573 ("parameter has no matching param tag"), against 6 CS1574 and 2
+      CS1734. The first two amount to a demand that every public member everywhere carry a comment,
+      every test class included: a house style this project has never had and does not want, and
+      one that under TreatWarningsAsErrors would simply stop the build. What is worth having are
+      the checks that catch documentation which is wrong rather than absent, and those stay armed:
+      CS1574 (a cref resolving to nothing), CS1734 (a paramref naming no such parameter), CS1570
+      (malformed XML) and CS1572 (a param tag for no such parameter).
+    -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
   </PropertyGroup>
 </Project>

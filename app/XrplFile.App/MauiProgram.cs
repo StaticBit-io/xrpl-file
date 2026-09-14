@@ -45,7 +45,7 @@ public static class MauiProgram
     /// Wires the one vault this application ever constructs (design section 3.1: "nothing
     /// constructs a vault anywhere else") and everything that reads it, over whichever path
     /// <see cref="VaultLocation.Resolve"/> reports for this start — <see cref="VaultLocation.DefaultPath"/>
-    /// until a person has chosen a different vault through <see cref="VaultLocationModel.ChooseAsync"/>.
+    /// until a person has chosen a different vault through <see cref="VaultLocationModel.ChoosePath"/>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -118,7 +118,7 @@ public static class MauiProgram
         // documents the directory as a precondition). VaultLocation.DefaultPath is under the
         // platform's application-data directory, which is not guaranteed to already contain an
         // "XrplFile" folder on a machine that has never run this application before. A chosen path
-        // (VaultLocationModel.ChooseAsync) was picked from an existing file, so its directory
+        // (VaultLocationModel.ChoosePath) was picked from an existing file, so its directory
         // existed at pick time -- but removable media unplugged, or a synced folder not mounted yet
         // by the time this process starts, can make it gone again. Creating it is therefore
         // attempted and, unlike the default path, allowed to fail quietly: nothing here can tell

@@ -299,7 +299,6 @@ git commit -m "feat(keys): the derivation the shared container format fixes"
       internal static string Encode(ReadOnlySpan<byte> data);
       internal static bool TryDecode(string text, out byte[] data);
       internal static int GetEncodedLength(int byteCount);
-      internal static int GetMaxDecodedLength(int encodedLength);
   }
   ```
 

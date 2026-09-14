@@ -27,7 +27,7 @@ public static class VaultLocation
 
     /// <summary>
     /// The vault a process should actually open (design E5's correction): whatever
-    /// <paramref name="store"/> last had chosen with <see cref="VaultLocationModel.ChooseAsync"/>,
+    /// <paramref name="store"/> last had chosen with <see cref="VaultLocationModel.ChoosePath"/>,
     /// normalised the same way <see cref="DefaultPath"/> is, or <see cref="DefaultPath"/> itself
     /// when nothing has ever been chosen.
     /// </summary>

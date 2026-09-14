@@ -112,21 +112,4 @@ public static class Base45
         return ((byteCount / 2) * 3) + ((byteCount % 2) * 2);
     }
 
-    /// <summary>
-    /// The largest byte count whose <see cref="Encode"/> output still fits into
-    /// <paramref name="encodedLength"/> characters — the inverse of
-    /// <see cref="GetEncodedLength"/>, rounded down.
-    /// </summary>
-    /// <remarks>
-    /// The remainder matters: three left-over characters are one more full pair, two are one odd
-    /// byte, and a single left-over character is not a valid Base45 tail at all and buys nothing.
-    /// </remarks>
-    public static int GetMaxDecodedLength(int encodedLength)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegative(encodedLength);
-
-        int bytes = (encodedLength / 3) * 2;
-
-        return (encodedLength % 3) >= 2 ? bytes + 1 : bytes;
-    }
 }
