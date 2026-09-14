@@ -444,6 +444,40 @@ public class AddKeyModelTests : VaultHarness
         Assert.Equal(imported.ClassicAddress, model.Preview!.Address);
     }
 
+    // ---- clearing a preview -----------------------------------------------------------------------
+
+    // AddKey.razor's own fix for a stale preview surviving a tab switch: clearing the preview must
+    // not also force the container route closed, unlike CloseContainer -- a container already opened
+    // stays reachable so a different key can be chosen out of it without reopening the file.
+    [Fact]
+    public void Clearing_the_preview_drops_it_without_closing_an_open_container()
+    {
+        byte[] container = BackupContainer.Pack(
+            PayloadOf(EntryFor(XrplWallet.Generate(), "a key")), "p", iterations: 1000);
+        AddKeyModel model = new(NewVault());
+        model.OpenContainer(container, "p");
+        Assert.True(model.SelectContainerKey(0, "mine", "testnet"));
+        Assert.NotNull(model.Preview);
+
+        model.ClearPreview();
+
+        Assert.Null(model.Preview);
+        Assert.Single(model.ContainerKeys);
+    }
+
+    [Fact]
+    public async Task Clearing_the_preview_leaves_nothing_prepared_to_store()
+    {
+        AddKeyModel model = new(NewVault());
+        Assert.True(model.Generate("mine", "testnet"));
+
+        model.ClearPreview();
+
+        Assert.Null(model.Preview);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => model.StoreAsync(TestContext.Current.CancellationToken));
+    }
+
     [Fact]
     public void Selecting_a_malformed_key_out_of_a_container_sets_problem()
     {

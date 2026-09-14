@@ -319,6 +319,21 @@ public sealed class AddKeyModel(IKeyVault vault)
     }
 
     /// <summary>
+    /// Drops whatever <see cref="Generate"/>, <see cref="Import"/> or <see cref="SelectContainerKey"/>
+    /// most recently prepared, without touching <see cref="ContainerKeys"/> or the container route's
+    /// open state — unlike <see cref="CloseContainer"/>, which resets both. The add-key screen calls
+    /// this when it switches away from whichever input route prepared the current <see cref="Preview"/>,
+    /// so a person who switches tabs before storing or discarding what was prepared is never shown an
+    /// address that belongs to a route they have left; a container already opened stays open so
+    /// choosing a different key out of it afterwards does not require reopening the file.
+    /// </summary>
+    public void ClearPreview()
+    {
+        Preview = null;
+        _pending = null;
+    }
+
+    /// <summary>
     /// Writes whatever <see cref="Generate"/>, <see cref="Import"/> or
     /// <see cref="SelectContainerKey"/> most recently prepared.
     /// </summary>

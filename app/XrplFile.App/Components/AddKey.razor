@@ -22,13 +22,13 @@ else
 
     <ul class="nav nav-tabs mb-3">
         <li class="nav-item">
-            <button type="button" class="nav-link @(_mode == Mode.Generate ? "active" : "")" @onclick="() => _mode = Mode.Generate">Generate</button>
+            <button type="button" class="nav-link @(_mode == Mode.Generate ? "active" : "")" @onclick="() => SwitchMode(Mode.Generate)">Generate</button>
         </li>
         <li class="nav-item">
-            <button type="button" class="nav-link @(_mode == Mode.Import ? "active" : "")" @onclick="() => _mode = Mode.Import">Import a seed</button>
+            <button type="button" class="nav-link @(_mode == Mode.Import ? "active" : "")" @onclick="() => SwitchMode(Mode.Import)">Import a seed</button>
         </li>
         <li class="nav-item">
-            <button type="button" class="nav-link @(_mode == Mode.Container ? "active" : "")" @onclick="() => _mode = Mode.Container">Open a backup file</button>
+            <button type="button" class="nav-link @(_mode == Mode.Container ? "active" : "")" @onclick="() => SwitchMode(Mode.Container)">Open a backup file</button>
         </li>
     </ul>
 
@@ -179,6 +179,22 @@ else
     private string? _justGeneratedReference;
     private string? _stored;
     private bool _busy;
+
+    private void SwitchMode(Mode mode)
+    {
+        if (_mode == mode)
+        {
+            return;
+        }
+
+        _mode = mode;
+
+        // A Preview left over from the tab just left belongs to input this screen is no longer
+        // showing; clearing it here is what keeps the address in "Add to vault" always matching the
+        // tab currently on screen. The container route's own open state (ContainerKeys) is untouched
+        // -- switching away from it and back should not force reopening the file.
+        Model.ClearPreview();
+    }
 
     private void DoGenerate() => Model.Generate(_label, _network);
 

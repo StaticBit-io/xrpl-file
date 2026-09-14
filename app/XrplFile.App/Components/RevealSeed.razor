@@ -52,11 +52,32 @@ else
     private bool _busy;
     private bool _copying;
     private string? _problem;
+    private bool _disposed;
 
     protected override void OnInitialized()
     {
-        _pollTimer = new Timer(
-            _ => InvokeAsync(StateHasChanged), state: null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        // This is the honest limit of the poll below: a lock (or the model's own sixty-second
+        // window) reaches this screen within about a second, not the instant it happens, because
+        // nothing tells this component about either event directly -- see the file-level remark
+        // above. That is a gap against design section 8's wording, not a match for it.
+        _pollTimer = new Timer(OnPollTick, state: null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private void OnPollTick(object? state)
+    {
+        // The timer callback runs on a thread-pool thread that Timer.Dispose() does not wait for,
+        // so it can still be in flight after Dispose() below has already run. Checking _disposed
+        // here, on that thread, would only narrow the race, not close it. Checking it instead inside
+        // the delegate passed to InvokeAsync closes it: that delegate and Dispose() both run on the
+        // renderer's own single-threaded dispatcher, so one of them fully happens before the other
+        // every time, and a render can never land on a component Dispose() has already run against.
+        _ = InvokeAsync(() =>
+        {
+            if (!_disposed)
+            {
+                StateHasChanged();
+            }
+        });
     }
 
     private async Task ShowAsync()
@@ -117,6 +138,12 @@ else
 
     public void Dispose()
     {
+        // Set before disposing the timer: OnPollTick's dispatched check reads this on the same
+        // dispatcher thread Dispose() runs on, so setting it first guarantees a tick already queued
+        // ahead of this Dispose() call still renders (harmless -- the component is still attached at
+        // that point), while any tick whose dispatch is only queued after this line sees _disposed
+        // already true and skips StateHasChanged.
+        _disposed = true;
         _pollTimer?.Dispose();
         Model.Hide();
         _cts.Cancel();

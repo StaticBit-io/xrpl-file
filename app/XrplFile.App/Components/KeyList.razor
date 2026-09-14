@@ -42,24 +42,18 @@
                         @foreach (KeyRow row in Model.Rows)
                         {
                             <tr>
-                                @if (row.IsDamaged)
-                                {
-                                    <td colspan="5">
-                                        <span class="text-danger">Damaged &mdash; <code>@row.Reference</code></span>
-                                    </td>
-                                }
-                                else
+                                @if (row.Info is { } info)
                                 {
                                     <td>
-                                        @row.Info!.Label
+                                        @info.Label
                                         @if (row.NeedsExporting)
                                         {
                                             <span class="badge text-bg-danger ms-2">Exists only here &mdash; not exported</span>
                                         }
                                     </td>
-                                    <td>@row.Info.Kind</td>
-                                    <td>@row.Info.Network</td>
-                                    <td><code>@row.Info.Address</code></td>
+                                    <td>@info.Kind</td>
+                                    <td>@info.Network</td>
+                                    <td><code>@info.Address</code></td>
                                     <td class="text-end">
                                         <div class="btn-group btn-group-sm">
                                             <button type="button" class="btn btn-outline-secondary"
@@ -73,17 +67,23 @@
                                         </div>
                                     </td>
                                 }
+                                else
+                                {
+                                    <td colspan="5">
+                                        <span class="text-danger">Damaged &mdash; <code>@row.Reference</code></span>
+                                    </td>
+                                }
                             </tr>
                         }
                     </tbody>
                 </table>
             }
 
-            @if (_pendingDeleteRow is { } pending)
+            @if (_pendingDeleteRow is { Info: { } pendingInfo })
             {
                 <div class="alert alert-danger">
                     <p>
-                        Delete <code>@pending.Info!.Address</code> (@pending.Info.Label)?
+                        Delete <code>@pendingInfo.Address</code> (@pendingInfo.Label)?
                         @if (_deleteWarning is { NeverExported: true })
                         {
                             <strong>
