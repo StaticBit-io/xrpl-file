@@ -319,9 +319,10 @@ public class VaultDamageTests : VaultTestHarness
 
         byte[] container = await vault.ExportAsync(
             reference, Password("export password"), TestContext.Current.CancellationToken);
-        Assert.Equal(
-            "sSecretOfone",
-            ExportContainer.Open(container, Password("export password").Span).Single().Secret);
+        Assert.True(BackupContainer.TryUnpack(
+            container, "export password", fromFile: true, out BackupPayload? payload, out BackupUnpackError error));
+        Assert.Equal(BackupUnpackError.None, error);
+        Assert.Equal("sSecretOfone", payload!.Wallets.Single().KeyValue);
     }
 
     [Fact]

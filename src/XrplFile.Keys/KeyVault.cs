@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
+using Xrpl.Wallet;
+
 namespace XrplFile.Keys;
 
 /// <summary>
@@ -59,6 +61,15 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     private const int NonceLength = 12;
     private const int TagLength = 16;
     private const string BackupSuffix = ".bak";
+
+    /// <summary>
+    /// The container's <c>keyType</c> for an entry of this application's: the value the Wallet's own
+    /// seed-derived wallets carry (<c>AccountKeyType.Seed</c>). A raw number rather than an enum
+    /// because the format carries it as one, and the enum it names lives in the Wallet's domain
+    /// project, which is deliberately not referenced. Every entry here is a seed; nothing in this
+    /// vault holds a mnemonic or a bare secret key.
+    /// </summary>
+    private const int SeedKeyType = 1;
 
     /// <summary>
     /// Domain separation for the integrity key, so that it and the data key never coincide and so
@@ -585,10 +596,10 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     /// <remarks>
     /// Reveals under the same gate every other public method uses, so a concurrent idle-lock cannot
     /// land between the reveal and the seal (see the type's remarks on the gate). Sealing happens
-    /// before the record is touched at all: a throw out of <see cref="ExportContainer.Protect"/>
+    /// before the record is touched at all: a throw out of <see cref="BackupContainer.Pack"/>
     /// leaves <c>Exported</c> exactly as it was, satisfying the same "not before the container
     /// exists" rule <see cref="UpdateAsync"/> would otherwise let a caller violate by calling it
-    /// ahead of a <see cref="ExportContainer.Protect"/> that never returns.
+    /// ahead of a <see cref="BackupContainer.Pack"/> that never returns.
     /// </remarks>
     public async Task<byte[]> ExportAsync(
         string reference, ReadOnlyMemory<byte> containerPassword, CancellationToken cancellationToken)
@@ -607,8 +618,8 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 // Sealed before a single byte of the record is edited. If this throws, nothing
                 // below ever runs, so the entry cannot end up claiming an export that never
                 // happened — the one lie Exported cannot afford.
-                byte[] container = ExportContainer.Protect(
-                    [entry], containerPassword.Span, _parameters);
+                byte[] container = BackupContainer.PackWithPassword(
+                    ToBackupPayload(entry), containerPassword.Span, Pbkdf2Kdf.DefaultIterations);
 
                 byte[] previousSealedEntry = record.Entries[reference];
                 VaultEntryInfo exported = entry.Info with { Exported = true };
@@ -660,6 +671,46 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
             _gate.Release();
         }
     }
+
+    /// <summary>
+    /// One revealed entry as the container's payload. The mapping is the design's table: the secret
+    /// is the key value, the address is the classic address, the label is the description, and the
+    /// four fields this application added carry what a <see cref="VaultEntryInfo"/> holds and the
+    /// Wallet's record has no place for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Reference</c>, <c>CreatedAt</c> and <c>Exported</c> do not travel. A reference names an
+    /// entry in one vault file and means nothing in another; a creation time and an export flag are
+    /// facts about this vault's copy of the key, not about the key. The importer mints all three.
+    /// </para>
+    /// <para>
+    /// The algorithm is written as ed25519 rather than read off the entry because an entry has no
+    /// algorithm yet -- <see cref="VaultSigner"/> derives every key through
+    /// <c>XrplWallet.FromSeed</c> with no algorithm, which is that default. So this is true of every
+    /// entry that can exist today, and it is the same statement the next task records as "absent
+    /// means ed25519" when the field arrives on the entry itself.
+    /// </para>
+    /// </remarks>
+    private static BackupPayload ToBackupPayload(VaultEntry entry) => new()
+    {
+        Wallets =
+        [
+            new BackupWalletEntry(
+                KeyValue: entry.Secret,
+                MnemonicPassphrase: null,
+                ClassicAddress: entry.Info.Address,
+                KeyType: SeedKeyType,
+                Algorithm: XrplWallet.Ed25519,
+                DerivationPath: null,
+                MasterAddress: null,
+                Description: entry.Info.Label,
+                Network: entry.Info.Network,
+                Kind: entry.Info.Kind.ToString(),
+                LastKnownSequence: entry.Info.LastKnownSequence,
+                DeletableFromLedger: entry.Info.DeletableFromLedger),
+        ],
+    };
 
     /// <inheritdoc/>
     public async Task UpdateAsync(string reference, VaultEntryEdit edit, CancellationToken cancellationToken)

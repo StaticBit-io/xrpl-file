@@ -10,4 +10,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\XrplFile.Keys\XrplFile.Keys.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Written once by the Wallet's own BackupContainer.Pack; see WalletCompatibilityTests. -->
+    <None Include="fixtures\wallet-container.bin" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
