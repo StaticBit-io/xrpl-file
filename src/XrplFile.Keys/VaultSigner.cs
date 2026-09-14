@@ -91,7 +91,7 @@ public sealed class VaultSigner : ITransactionSigner
         ArgumentNullException.ThrowIfNull(vault);
 
         VaultEntry entry = await vault.RevealAsync(reference, "read a public key", cancellationToken).ConfigureAwait(false);
-        XrplWallet wallet = XrplWallet.FromSeed(entry.Secret);
+        XrplWallet wallet = XrplWallet.FromSeed(entry.Secret, masterAddress: null, algorithm: entry.Info.Algorithm);
 
         // StoreAsync never checks an entry's recorded address against the key behind it, so a
         // mistyped or foreign address can sit in the vault indefinitely. Left unchecked here,
@@ -119,7 +119,7 @@ public sealed class VaultSigner : ITransactionSigner
         // again" from "this run's key no longer exists" can only do it from the typed error.
         VaultEntry entry = await _vault.RevealAsync(_reference, Reason, cancellationToken).ConfigureAwait(false);
 
-        XrplWallet wallet = XrplWallet.FromSeed(entry.Secret);
+        XrplWallet wallet = XrplWallet.FromSeed(entry.Secret, masterAddress: null, algorithm: entry.Info.Algorithm);
 
         // A copy, because the SDK writes the signature back into the dictionary it is handed and
         // the caller's transaction is not this method's to change.

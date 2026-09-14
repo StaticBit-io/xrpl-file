@@ -62,8 +62,8 @@ public class ExportContainerTests : VaultTestHarness
         Assert.Equal(42u, exported.LastKnownSequence);
         Assert.Equal(1_000L, exported.DeletableFromLedger);
 
-        // Every entry this vault can hold today was derived as ed25519, which is what the container
-        // records until an entry carries its own algorithm.
+        // This entry recorded no algorithm, which the container reads as ed25519 -- the same
+        // meaning "absent" has always had.
         Assert.Equal("ed25519", exported.Algorithm);
 
         // Not ours, and written as null -- so, under WhenWritingNull, not written at all.
@@ -72,6 +72,23 @@ public class ExportContainerTests : VaultTestHarness
         Assert.Null(exported.MasterAddress);
         Assert.Null(exported.Folder);
         Assert.Null(exported.DestinationTag);
+    }
+
+    [Fact]
+    public async Task An_entrys_own_algorithm_travels_to_the_container_instead_of_the_ed25519_default()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(
+            new NewVaultEntry(
+                VaultEntryKind.Imported, "a label", "testnet", "rAddressOfone", "sSecretOfone", "secp256k1"),
+            token);
+
+        BackupWalletEntry exported = Open(
+            await vault.ExportAsync(reference, Password(ContainerPassword), token)).Wallets.Single();
+
+        Assert.Equal("secp256k1", exported.Algorithm);
     }
 
     [Fact]
@@ -301,7 +318,7 @@ public class ExportContainerTests : VaultTestHarness
                     MnemonicPassphrase: null,
                     ClassicAddress: "rImportMe",
                     KeyType: 1,
-                    Algorithm: "ed25519",
+                    Algorithm: "secp256k1",
                     DerivationPath: null,
                     MasterAddress: null,
                     Description: "original",
@@ -314,20 +331,24 @@ public class ExportContainerTests : VaultTestHarness
         BackupWalletEntry recovered = Open(container).Wallets.Single();
 
         // The kind the container carries is where the key came from in the vault that wrote it, not
-        // what it is here: arriving from outside makes it Imported whatever it used to be.
+        // what it is here: arriving from outside makes it Imported whatever it used to be. The
+        // algorithm travels unchanged — not secp256k1 by coincidence, but because the importer reads
+        // the field the container actually carries rather than assuming the SDK's ed25519 default.
         string reference = await vault.StoreAsync(
             new NewVaultEntry(
                 VaultEntryKind.Imported,
                 recovered.Description!,
                 recovered.Network!,
                 recovered.ClassicAddress,
-                recovered.KeyValue),
+                recovered.KeyValue,
+                recovered.Algorithm),
             token);
 
         VaultEntry stored = await vault.RevealAsync(reference, "import", token);
         Assert.Equal(VaultEntryKind.Imported, stored.Info.Kind);
         Assert.Equal("rImportMe", stored.Info.Address);
         Assert.Equal("sSecretOforiginal", stored.Secret);
+        Assert.Equal("secp256k1", stored.Info.Algorithm);
     }
 
     [Fact]

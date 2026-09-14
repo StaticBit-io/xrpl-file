@@ -11,8 +11,13 @@ public enum VaultEntryKind
 }
 
 /// <summary>An entry on its way in. The vault assigns the reference and the creation time.</summary>
+/// <param name="Algorithm">
+/// The signing algorithm the seed was derived with (<c>XrplWallet.Ed25519</c> or
+/// <c>XrplWallet.Secp256k1</c>), or <see langword="null"/> to mean the SDK's own default —
+/// ed25519. Trailing and optional so every existing construction site keeps compiling.
+/// </param>
 public sealed record NewVaultEntry(
-    VaultEntryKind Kind, string Label, string Network, string Address, string Secret);
+    VaultEntryKind Kind, string Label, string Network, string Address, string Secret, string? Algorithm = null);
 
 /// <summary>
 /// Everything about an entry except its secret. This is what listing returns: <see cref="IKeyVault.ListAsync"/>
@@ -21,6 +26,12 @@ public sealed record NewVaultEntry(
 /// escapes into caller code, into a binding, or into a log, because this shape simply has no
 /// field to carry it in.
 /// </summary>
+/// <param name="Algorithm">
+/// The signing algorithm the entry's key was derived with, or <see langword="null"/> when none was
+/// recorded — which means ed25519, because every entry ever stored without this field was derived
+/// that way. There is no migration: absence keeps meaning exactly what it always meant. Trailing
+/// and optional so every existing construction site keeps compiling.
+/// </param>
 public sealed record VaultEntryInfo(
     string Reference,
     VaultEntryKind Kind,
@@ -30,7 +41,8 @@ public sealed record VaultEntryInfo(
     DateTimeOffset CreatedAt,
     uint? LastKnownSequence,
     long? DeletableFromLedger,
-    bool Exported);
+    bool Exported,
+    string? Algorithm = null);
 
 /// <summary>An entry with its secret. Only <see cref="IKeyVault.RevealAsync"/> produces one.</summary>
 public sealed record VaultEntry(VaultEntryInfo Info, string Secret);

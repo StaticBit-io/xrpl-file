@@ -103,8 +103,9 @@ public abstract class VaultTestHarness : IAsyncDisposable
         VaultEntryKind kind = VaultEntryKind.Generated,
         string network = "standalone",
         string? address = null,
-        string? secret = null) =>
-        new(kind, label, network, address ?? "rAddressOf" + label, secret ?? "sSecretOf" + label);
+        string? secret = null,
+        string? algorithm = null) =>
+        new(kind, label, network, address ?? "rAddressOf" + label, secret ?? "sSecretOf" + label, algorithm);
 
     /// <summary>The sealed bytes of one entry, straight out of the file.</summary>
     protected byte[] EntryCiphertextFromFile(string reference) => ReadRecordFromFile().Entries[reference];

@@ -529,7 +529,8 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                     DateTimeOffset.UtcNow,
                     LastKnownSequence: null,
                     DeletableFromLedger: null,
-                    Exported: false);
+                    Exported: false,
+                    Algorithm: entry.Algorithm);
 
                 record.Entries[reference] = SealEntry(dataKey, reference, new VaultEntry(info, entry.Secret));
 
@@ -685,11 +686,9 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     /// facts about this vault's copy of the key, not about the key. The importer mints all three.
     /// </para>
     /// <para>
-    /// The algorithm is written as ed25519 rather than read off the entry because an entry has no
-    /// algorithm yet -- <see cref="VaultSigner"/> derives every key through
-    /// <c>XrplWallet.FromSeed</c> with no algorithm, which is that default. So this is true of every
-    /// entry that can exist today, and it is the same statement the next task records as "absent
-    /// means ed25519" when the field arrives on the entry itself.
+    /// The algorithm is read off the entry, falling back to ed25519 when it recorded none — the
+    /// same meaning "absent" has always had: an entry with no algorithm was derived through
+    /// <c>XrplWallet.FromSeed</c> with no algorithm, which is that default.
     /// </para>
     /// </remarks>
     private static BackupPayload ToBackupPayload(VaultEntry entry) => new()
@@ -701,7 +700,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 MnemonicPassphrase: null,
                 ClassicAddress: entry.Info.Address,
                 KeyType: SeedKeyType,
-                Algorithm: XrplWallet.Ed25519,
+                Algorithm: entry.Info.Algorithm ?? XrplWallet.Ed25519,
                 DerivationPath: null,
                 MasterAddress: null,
                 Description: entry.Info.Label,
@@ -1723,6 +1722,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 writer.WriteString("label", info.Label);
                 writer.WriteString("network", info.Network);
                 writer.WriteString("address", info.Address);
+                writer.WriteString("algorithm", info.Algorithm);
                 writer.WriteString("createdAt", info.CreatedAt);
                 writer.WriteString("secret", entry.Secret);
 
@@ -1767,7 +1767,8 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                     root.GetProperty("createdAt").GetDateTimeOffset(),
                     Number(root, "lastKnownSequence") is long sequence ? (uint)sequence : null,
                     Number(root, "deletableFromLedger"),
-                    root.GetProperty("exported").GetBoolean());
+                    root.GetProperty("exported").GetBoolean(),
+                    Algorithm: OptionalString(root, "algorithm"));
 
                 return new VaultEntry(info, root.GetProperty("secret").GetString()!);
             }
@@ -1788,5 +1789,17 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
             JsonElement value = root.GetProperty(name);
             return value.ValueKind == JsonValueKind.Null ? null : value.GetInt64();
         }
+
+        /// <summary>
+        /// An optional string field, tolerant of the property being missing entirely rather than
+        /// merely null. Every field above this build always writes, so <see cref="Number"/> can
+        /// insist on <c>GetProperty</c>; "algorithm" was not always written, and an entry sealed
+        /// before this field existed has no such property at all. Missing and explicit null read
+        /// the same way -- absent means ed25519, not "damaged".
+        /// </summary>
+        private static string? OptionalString(JsonElement root, string name) =>
+            root.TryGetProperty(name, out JsonElement value) && value.ValueKind != JsonValueKind.Null
+                ? value.GetString()
+                : null;
     }
 }
