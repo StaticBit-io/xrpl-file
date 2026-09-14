@@ -223,9 +223,12 @@ public sealed class AddKeyModel(IKeyVault vault)
     /// </summary>
     /// <param name="index">
     /// The position of the chosen key in <see cref="ContainerKeys"/> (and, equivalently, in the
-    /// container that was opened). Out of range only when the caller offers an index
-    /// <see cref="ContainerKeys"/> itself did not — a programmer error, not a user one, so it
-    /// throws rather than setting <see cref="Problem"/>.
+    /// container that was opened). Out of range whenever the caller offers an index
+    /// <see cref="ContainerKeys"/> itself did not — including every index once
+    /// <see cref="CloseContainer"/> has emptied the list — which is reported through
+    /// <see cref="Problem"/> like any other failure here rather than thrown, so a screen that keeps
+    /// a stale index around past a container being closed fails the same clean way any other
+    /// mistaken selection does.
     /// </param>
     /// <param name="network">
     /// The network to record the key under. Required, and never defaulted from
@@ -246,11 +249,14 @@ public sealed class AddKeyModel(IKeyVault vault)
     /// </returns>
     public bool SelectContainerKey(int index, string label, string network)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(index);
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, _containerWallets.Count);
-
         Preview = null;
         _pending = null;
+
+        if (index < 0 || index >= _containerWallets.Count)
+        {
+            Problem = "That key is no longer available. Open the backup again.";
+            return false;
+        }
 
         if (!ValidateLabelAndNetwork(label, network))
         {
@@ -274,6 +280,42 @@ public sealed class AddKeyModel(IKeyVault vault)
 
         Prepare(ContainerEntryKind(entry.Kind), label, network, derived.ClassicAddress, entry.KeyValue, algorithm);
         return true;
+    }
+
+    /// <summary>
+    /// Drops every secret <see cref="OpenContainer"/> decrypted, along with whatever
+    /// <see cref="SelectContainerKey"/> most recently prepared from them, and clears
+    /// <see cref="ContainerKeys"/> and <see cref="Preview"/> to match. The add-key screen calls this
+    /// when it is dismissed, so a multi-key backup's seeds do not simply wait on the garbage
+    /// collector to end their residency — see the type remarks on why a container is kept resident
+    /// at all, and this is the deliberate end of that.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the extent of what a managed <see cref="string"/> allows: dropping every reference to
+    /// it is all a caller can ask, and the bytes it held remain wherever the runtime already copied
+    /// them — the managed heap, possibly relocated by a compacting collection — until something
+    /// overwrites that memory or the process exits. Nothing here scrubs them; this clears
+    /// reachability, not the bytes themselves, the same limitation every seed held as a
+    /// <see cref="string"/> elsewhere in this model already has.
+    /// </para>
+    /// <para>
+    /// Closing is scoped to the container route: <see cref="Generate"/> and <see cref="Import"/>
+    /// remain callable afterwards, and a later <see cref="OpenContainer"/> call opens a fresh
+    /// container as if this one had never been opened. A key <see cref="SelectContainerKey"/>
+    /// prepared but that was never passed to <see cref="StoreAsync"/> is discarded along with it —
+    /// an index into <see cref="ContainerKeys"/> obtained before this call is no longer valid
+    /// afterwards, and <see cref="SelectContainerKey"/> reports that through <see cref="Problem"/>
+    /// rather than throwing, the same as any other index it does not recognise.
+    /// </para>
+    /// </remarks>
+    public void CloseContainer()
+    {
+        _containerWallets = [];
+        ContainerKeys = [];
+        Preview = null;
+        _pending = null;
+        Problem = null;
     }
 
     /// <summary>

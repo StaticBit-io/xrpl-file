@@ -319,6 +319,131 @@ public class AddKeyModelTests : VaultHarness
         Assert.Single(await vault.ListAsync(TestContext.Current.CancellationToken));
     }
 
+    // The container route trusts BackupWalletEntry.Kind for the stored VaultEntryKind, falling back
+    // to Imported when it is absent or unrecognised (ContainerEntryKind). Every other test in this
+    // file builds its containers with kind: null, so only the fallback is actually exercised. This
+    // is the round trip that matters: a Generated throwaway, exported through the vault (which is
+    // what stamps Kind: "Generated" into the container -- see KeyVault.ToBackupPayload) and
+    // reimported through this model, has to come back as Generated, because that is what keeps its
+    // "this key exists nowhere else" warning alive across a backup and restore.
+    [Fact]
+    public async Task A_generated_key_exported_and_reimported_keeps_its_generated_kind()
+    {
+        KeyVault sourceVault = NewVault();
+        await sourceVault.CreateAsync(Password("source password"), TestContext.Current.CancellationToken);
+        AddKeyModel sourceModel = new(sourceVault);
+        Assert.True(sourceModel.Generate("throwaway", "testnet"));
+        string reference = await sourceModel.StoreAsync(TestContext.Current.CancellationToken);
+        Assert.NotEqual(string.Empty, reference);
+
+        byte[] container = await sourceVault.ExportAsync(
+            reference, Password("container password"), TestContext.Current.CancellationToken);
+
+        // A separate vault file: the exported address already lives in sourceVault, and a second
+        // import of the same address on the same network into the same vault would be refused as a
+        // duplicate rather than testing what this is here to test.
+        KeyVault destinationVault = NewVault(Path.Combine(Path.GetDirectoryName(VaultPath)!, "reimport.json"));
+        await destinationVault.CreateAsync(Password("destination password"), TestContext.Current.CancellationToken);
+        AddKeyModel destinationModel = new(destinationVault);
+
+        BackupUnpackError outcome = destinationModel.OpenContainer(container, "container password");
+
+        Assert.Equal(BackupUnpackError.None, outcome);
+        Assert.True(destinationModel.SelectContainerKey(0, "reimported", "testnet"));
+
+        string reimportedReference = await destinationModel.StoreAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(string.Empty, reimportedReference);
+        VaultEntryInfo info = Assert.Single(await destinationVault.ListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(VaultEntryKind.Generated, info.Kind);
+    }
+
+    // The other side of the same fallback: a container the Wallet application wrote never sets
+    // Kind at all (BackupPayload's own remarks -- that field is this application's addition), and
+    // that absence has to keep meaning Imported rather than throwing or defaulting to something
+    // that would hide "an account they had before" behind a throwaway's warning.
+    [Fact]
+    public async Task A_container_with_no_kind_field_still_imports_as_imported()
+    {
+        XrplWallet wallet = XrplWallet.Generate();
+        byte[] container = BackupContainer.Pack(
+            PayloadOf(EntryFor(wallet, "from a wallet-shaped backup", kind: null)), "p", iterations: 1000);
+
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        AddKeyModel model = new(vault);
+        model.OpenContainer(container, "p");
+        Assert.True(model.SelectContainerKey(0, "mine", "testnet"));
+
+        await model.StoreAsync(TestContext.Current.CancellationToken);
+
+        VaultEntryInfo info = Assert.Single(await vault.ListAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(VaultEntryKind.Imported, info.Kind);
+    }
+
+    // ---- closing a container --------------------------------------------------------------------
+
+    // The whole point of CloseContainer: every seed OpenContainer decrypted, and the one
+    // SelectContainerKey most recently prepared, stop being reachable through this model. A
+    // selection attempted afterwards has to fail the same clean way an out-of-range one always did
+    // -- Problem set, false returned -- rather than an ArgumentOutOfRangeException escaping because
+    // the list it used to index into is now empty.
+    [Fact]
+    public void Closing_a_container_drops_its_keys_and_a_later_selection_fails_cleanly()
+    {
+        byte[] container = BackupContainer.Pack(
+            PayloadOf(EntryFor(XrplWallet.Generate(), "a key")), "p", iterations: 1000);
+        AddKeyModel model = new(NewVault());
+        model.OpenContainer(container, "p");
+        Assert.Single(model.ContainerKeys);
+
+        model.CloseContainer();
+
+        Assert.Empty(model.ContainerKeys);
+        Assert.False(model.SelectContainerKey(0, "mine", "testnet"));
+        Assert.NotNull(model.Problem);
+    }
+
+    // A key already chosen out of the container -- Preview set, an entry pending -- must not survive
+    // closing either: StoreAsync throwing InvalidOperationException afterwards is how the model says
+    // "nothing is prepared", the same as before OpenContainer was ever called.
+    [Fact]
+    public async Task Closing_a_container_clears_a_key_selected_but_not_yet_stored()
+    {
+        byte[] container = BackupContainer.Pack(
+            PayloadOf(EntryFor(XrplWallet.Generate(), "a key")), "p", iterations: 1000);
+        AddKeyModel model = new(NewVault());
+        model.OpenContainer(container, "p");
+        Assert.True(model.SelectContainerKey(0, "mine", "testnet"));
+        Assert.NotNull(model.Preview);
+
+        model.CloseContainer();
+
+        Assert.Null(model.Preview);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => model.StoreAsync(TestContext.Current.CancellationToken));
+    }
+
+    // Closing is scoped to the container route: the model itself stays alive, and the two other
+    // routes in still work afterwards -- this is what "leaves the model usable" means in practice.
+    [Fact]
+    public void Closing_a_container_leaves_the_other_two_routes_usable()
+    {
+        byte[] container = BackupContainer.Pack(
+            PayloadOf(EntryFor(XrplWallet.Generate(), "a key")), "p", iterations: 1000);
+        AddKeyModel model = new(NewVault());
+        model.OpenContainer(container, "p");
+
+        model.CloseContainer();
+
+        Assert.True(model.Generate("mine", "testnet"));
+        Assert.NotNull(model.Preview);
+
+        XrplWallet imported = XrplWallet.Generate();
+        Assert.True(model.Import(new AddKeyDraft("typed", "testnet", imported.Seed, XrplWallet.Ed25519)));
+        Assert.Equal(imported.ClassicAddress, model.Preview!.Address);
+    }
+
     [Fact]
     public void Selecting_a_malformed_key_out_of_a_container_sets_problem()
     {
