@@ -235,4 +235,65 @@ public class BackupContainerTests
 
         return BackupContainer.Pack(new BackupPayload { Wallets = wallets }, password, iterations: 1000);
     }
+
+    [Fact]
+    public void An_oversized_container_is_refused_before_anything_proportional_to_it_is_allocated()
+    {
+        // A header this build recognises, padded one byte past MaxContainerSize. Without the size
+        // check in TryUnpack, this reaches TryUnpackWithPassword, which copies the tail into a
+        // ciphertext buffer and a plaintext buffer each sized off data.Length and runs a full
+        // PBKDF2 derivation, before the GCM tag ever gets a say -- the cost a phishing "backup"
+        // would impose on whoever opens it. GC.GetAllocatedBytesForCurrentThread proves the
+        // refusal happens before any of that: this array is the only large allocation in the
+        // test, and it happens before the measurement below starts.
+        byte[] data = new byte[BackupContainer.MaxContainerSize + 1];
+        "SBW1"u8.CopyTo(data);
+        data[4] = (byte)BackupContainer.CurrentVersion;
+        data[5] = 1; // kdfId = Pbkdf2Kdf.KdfId
+        BinaryPrimitives.WriteUInt32BigEndian(data.AsSpan(6, 4), 600_000); // a valid iteration count
+
+        // Warms up the JIT and any lazy static state first, so the measurement below reflects
+        // only what this specific call allocates.
+        byte[] warmup = BackupContainer.Pack(OneEntry(), "warm-up", iterations: 1000);
+        BackupContainer.TryUnpack(warmup, "warm-up", fromFile: true, out _, out _);
+
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        bool opened = BackupContainer.TryUnpack(
+            data, "irrelevant", fromFile: true, out BackupPayload? payload, out BackupUnpackError error);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        Assert.False(opened);
+        Assert.Null(payload);
+        Assert.Equal(BackupUnpackError.NotOurContainer, error);
+        Assert.True(allocated < 4096,
+            $"expected the container to be refused before allocating anything proportional to its " +
+            $"length, but the call allocated {allocated} bytes");
+    }
+
+    /// <summary>
+    /// Fix round 1, item 2 (<c>BackupContainer.cs</c>, <c>TryUnpackWithPassword</c>): the review
+    /// found <c>passwordBytes</c> allocated and handed to <see cref="Pbkdf2Kdf.Derive"/> outside
+    /// the <c>try</c> that zeroes it, so a throw out of <c>Derive</c> would leak it. The fix moves
+    /// both statements inside the <c>try</c>, mirroring how <see cref="BackupContainer.Pack"/>
+    /// already protects its own password buffer around <c>PackWithPassword</c>.
+    /// </summary>
+    /// <remarks>
+    /// There is no byte array this test can hand <see cref="BackupContainer.TryUnpack"/> that
+    /// reaches <c>Derive</c> with an input <c>Derive</c> refuses: the iteration count is read
+    /// unsigned and rejected as <see cref="BackupUnpackError.IterationsOutOfRange"/> for anything
+    /// outside <c>[1, Pbkdf2Kdf.IterationsCeiling]</c> before <c>Derive</c> is ever called, and
+    /// that range is a subset of what <c>Derive</c> itself requires (<c>iterations &gt;= 1</c>,
+    /// with no ceiling of its own); the output length is the fixed 32-byte key size, never
+    /// attacker-supplied. So this cannot be a test that fails against the unfixed method and
+    /// passes against the fixed one -- the window the fix closes is not reachable through
+    /// <c>TryUnpack</c> today, exactly as the review says. What is left to pin is the contract the
+    /// fix defends against: that <c>Derive</c> does throw for the one input that guard exists to
+    /// keep away from it.
+    /// </remarks>
+    [Fact]
+    public void Derive_refuses_the_one_input_the_iteration_range_check_keeps_away_from_it()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => Pbkdf2Kdf.Derive("password"u8, "0123456789abcdef"u8, iterations: 0, outputLength: 32));
+    }
 }

@@ -79,8 +79,10 @@ public sealed record KdfParameters(int MemoryKib, int Iterations, int Parallelis
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(parallelism, KdfParameterBounds.MinimumParallelism);
 
-        // The export container carries lanes in a single byte (8), and export is the only way back
-        // from a forgotten password (D10): a vault written above this could never be exported from.
+        // Not a format limit -- nothing in either container constrains lanes to a byte any more
+        // (see KdfParameterBounds). Argon2id still needs an upper bound so a vault cannot ask for
+        // an unbounded number of lanes; 255 is chosen generously, far past any cost a legitimate
+        // vault would carry, rather than derived from anything that could be written.
         ArgumentOutOfRangeException.ThrowIfGreaterThan(parallelism, KdfParameterBounds.MaximumParallelism);
         return parallelism;
     }

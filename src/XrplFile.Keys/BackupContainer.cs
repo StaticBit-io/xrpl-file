@@ -182,6 +182,55 @@ public static class BackupContainer
     public const int MaxInflatedSize =
         (AssumedMaxWallets * AssumedMaxEntrySize) + PayloadEnvelopeAllowance;
 
+    /// <summary>
+    /// Slack over <see cref="MaxInflatedSize"/> for the compressed form, in bytes.
+    /// </summary>
+    /// <remarks>
+    /// Deflate is not obliged to make anything smaller: on incompressible input it falls back to
+    /// stored blocks, which cost five bytes of framing per 64 KiB plus a couple for the stream, so
+    /// the worst case is a shade over the input, not under it. A backup's plaintext is JSON and
+    /// compresses well in practice, but nothing enforces that. 64 KiB is far more than the roughly
+    /// 350 bytes the arithmetic actually calls for, deliberately: this is the slack in a bound, and
+    /// a bound that is a little loose costs nothing while one that is a little tight rejects a real
+    /// backup.
+    /// </remarks>
+    private const int DeflateExpansionAllowance = 64 * 1024;
+
+    /// <summary>
+    /// The largest a container of ours can legitimately be on the wire, in bytes -- the bound
+    /// <see cref="TryUnpack"/> refuses a container's length by before anything proportional to it
+    /// is allocated.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Lifted from the Wallet, where it is the bound a caller applies to a file's length before
+    /// reading it into memory at all -- the file picker refuses anything past it, so their
+    /// container code never sees an oversized array in the first place. Task 3's first pass left
+    /// this unlifted, reasoning that nothing here read a container from a file yet; that stopped
+    /// being true once container import entered scope (design 5.1, 5.3), so the bound now guards
+    /// <see cref="TryUnpack"/> itself instead of a caller this library does not have yet. Without
+    /// it, a container declaring the right six header bytes and an arbitrary tail is taken exactly
+    /// as far as <see cref="TryUnpackWithPassword"/>'s ciphertext and plaintext buffers, each sized
+    /// off the input length, before the GCM tag gets a say -- the shape of an ordinary phishing
+    /// backup, not a theoretical one.
+    /// </para>
+    /// <para>
+    /// It is derived from the format rather than named separately, for the same reason
+    /// <see cref="MaxInflatedSize"/> is: two independent ceilings agree on the day they are written
+    /// and drift apart at the first change to the container, in the direction nobody notices -- a
+    /// backup this code itself produced and then refuses to read back. The wire overhead is the
+    /// password header, nonce and tag; the body is <see cref="MaxInflatedSize"/> plus
+    /// <see cref="DeflateExpansionAllowance"/>. The password-less form is smaller by construction
+    /// (no iterations, salt, nonce or tag), so this covers it too.
+    /// </para>
+    /// </remarks>
+    public const int MaxContainerSize =
+        PasswordHeaderLength
+        + NonceSize
+        + TagSize
+        + MaxInflatedSize
+        + DeflateExpansionAllowance;
+
     private const int InflateBufferSize = 8 * 1024;
 
     /// <summary>
@@ -380,6 +429,18 @@ public static class BackupContainer
             return false;
         }
 
+        // Refused here, before either branch below allocates a buffer sized off data.Length: a
+        // container announcing nothing but a valid six-byte header can otherwise carry an
+        // arbitrary tail, and TryUnpackWithPassword copies that tail into ciphertext and
+        // plaintext buffers of its own size before the GCM tag gets a chance to say no. The
+        // password was never the question for a container this large, so it is reported the same
+        // way any other header this build does not recognise is.
+        if (data.Length > MaxContainerSize)
+        {
+            error = BackupUnpackError.NotOurContainer;
+            return false;
+        }
+
         if (kdfId == NoPasswordKdfId)
         {
             if (fromFile)
@@ -484,73 +545,82 @@ public static class BackupContainer
         byte[] ciphertext = data.AsSpan(cipherStart, cipherLength).ToArray();
         byte[] tag = data.AsSpan(cipherStart + cipherLength, TagSize).ToArray();
 
-        // Same reasoning as Pack: erased in the finally below alongside the derived key.
+        // Same reasoning as Pack: erased in the finally below. Allocated and handed to Derive
+        // inside its own try, unlike Pack's outer allocation of the same buffer, because here it is
+        // Derive -- not the encoding call before it -- that can fail: nothing here may leave a
+        // password on the heap for a throw out of the derivation to skip past.
         byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
-        byte[] key = Pbkdf2Kdf.Derive(passwordBytes, salt, iterations, KeySize);
         try
         {
-            byte[] compressed = new byte[cipherLength];
+            byte[] key = Pbkdf2Kdf.Derive(passwordBytes, salt, iterations, KeySize);
             try
             {
-                using AesGcm aes = new(key, TagSize);
+                byte[] compressed = new byte[cipherLength];
                 try
                 {
-                    aes.Decrypt(nonce, ciphertext, tag, compressed, header);
-                }
-                catch (Exception exception) when (exception is CryptographicException or ArgumentException)
-                {
-                    error = BackupUnpackError.WrongPassword;
-                    return false;
-                }
+                    using AesGcm aes = new(key, TagSize);
+                    try
+                    {
+                        aes.Decrypt(nonce, ciphertext, tag, compressed, header);
+                    }
+                    catch (Exception exception) when (exception is CryptographicException or ArgumentException)
+                    {
+                        error = BackupUnpackError.WrongPassword;
+                        return false;
+                    }
 
-                byte[] plaintext;
-                try
-                {
-                    plaintext = Inflate(compressed);
-                }
-                catch (InflatedPayloadTooLargeException)
-                {
-                    // Ahead of the wrong-password catch below on purpose: the bytes did decrypt, so
-                    // the password was right, and reporting it as wrong would send the user retyping
-                    // a correct password against a container that will never open. Reported the same
-                    // way as any other container that could not be taken apart.
-                    error = BackupUnpackError.NotOurContainer;
-                    return false;
-                }
-                catch (Exception exception) when (IsMalformedPayloadException(exception))
-                {
-                    // The GCM tag already authenticated these exact bytes, so reaching here means
-                    // they are not what Pack ever produces -- practically unreachable, but classified
-                    // the same as a wrong password rather than crashing the caller.
-                    error = BackupUnpackError.WrongPassword;
-                    return false;
-                }
+                    byte[] plaintext;
+                    try
+                    {
+                        plaintext = Inflate(compressed);
+                    }
+                    catch (InflatedPayloadTooLargeException)
+                    {
+                        // Ahead of the wrong-password catch below on purpose: the bytes did decrypt,
+                        // so the password was right, and reporting it as wrong would send the user
+                        // retyping a correct password against a container that will never open.
+                        // Reported the same way as any other container that could not be taken apart.
+                        error = BackupUnpackError.NotOurContainer;
+                        return false;
+                    }
+                    catch (Exception exception) when (IsMalformedPayloadException(exception))
+                    {
+                        // The GCM tag already authenticated these exact bytes, so reaching here means
+                        // they are not what Pack ever produces -- practically unreachable, but
+                        // classified the same as a wrong password rather than crashing the caller.
+                        error = BackupUnpackError.WrongPassword;
+                        return false;
+                    }
 
-                try
-                {
-                    payload = DeserializePayload(plaintext);
-                }
-                catch (Exception exception) when (IsMalformedPayloadException(exception))
-                {
-                    error = BackupUnpackError.WrongPassword;
-                    return false;
+                    try
+                    {
+                        payload = DeserializePayload(plaintext);
+                    }
+                    catch (Exception exception) when (IsMalformedPayloadException(exception))
+                    {
+                        error = BackupUnpackError.WrongPassword;
+                        return false;
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(plaintext);
+                    }
                 }
                 finally
                 {
-                    CryptographicOperations.ZeroMemory(plaintext);
+                    CryptographicOperations.ZeroMemory(compressed);
                 }
+
+                error = BackupUnpackError.None;
+                return true;
             }
             finally
             {
-                CryptographicOperations.ZeroMemory(compressed);
+                CryptographicOperations.ZeroMemory(key);
             }
-
-            error = BackupUnpackError.None;
-            return true;
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(key);
             CryptographicOperations.ZeroMemory(passwordBytes);
         }
     }

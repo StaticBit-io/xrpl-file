@@ -30,6 +30,16 @@ internal static class Pbkdf2Kdf
     /// this count, with every point from 600,000 upward far under budget. The ceiling bounds this
     /// value, not the clock.
     /// </summary>
+    /// <remarks>
+    /// Equal to <see cref="IterationsCeiling"/> deliberately, and <see cref="IterationsCeiling"/> is
+    /// itself the Wallet's own ceiling (<c>VaultParameters.ExportIterationsCeiling</c>) under
+    /// another name -- sitting exactly on the other product's number, rather than a safety margin
+    /// below it, so every export this build writes uses all the headroom their reader allows. That
+    /// also means there is no headroom in the one direction nothing here can test: if the Wallet
+    /// ever lowers their ceiling, every container this build writes from that day on opens on their
+    /// side as <c>IterationsOutOfRange</c>, and no fixture in this repository would notice until
+    /// someone hits it.
+    /// </remarks>
     internal static int DefaultIterations => IterationsCeiling;
 
     internal static byte[] Derive(

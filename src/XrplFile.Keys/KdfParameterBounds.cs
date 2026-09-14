@@ -29,9 +29,12 @@ namespace XrplFile.Keys;
 /// what the unit suite writes. The memory ceiling is sixteen times the measured production figure
 /// of 256 MiB (4.3) and still an allocation a real machine could attempt, unlike the two terabytes
 /// a four-byte field can otherwise ask for. The iteration ceiling is three orders of magnitude
-/// above the measured three passes. The parallelism ceiling is the format's own: the export
-/// container carries lanes in a single byte (8), so a vault written above it could never be
-/// exported from, and export is the only way back from a forgotten password (D10).
+/// above the measured three passes. The parallelism ceiling is not derived from a format constraint
+/// the way the other two are -- nothing in this format, or the Wallet's, bounds lanes to a byte any
+/// more (the export container that once did is gone; see <see cref="BackupContainer"/>). It exists
+/// because Argon2id still needs an upper bound on lanes regardless -- an unbounded count is an
+/// unbounded allocation request -- and 255 is picked generously: no cost this software, or a
+/// plausible future one, would ever choose comes anywhere close to it.
 /// </para>
 /// </remarks>
 internal static class KdfParameterBounds
@@ -49,7 +52,10 @@ internal static class KdfParameterBounds
 
     internal const int MinimumParallelism = 1;
 
-    /// <summary>What the export container's one-byte lane field can carry.</summary>
+    /// <summary>
+    /// Not a format constraint -- see the class remarks. A generous upper bound Argon2id needs
+    /// regardless, far past any lane count a legitimate cost would ever ask for.
+    /// </summary>
     internal const int MaximumParallelism = byte.MaxValue;
 
     /// <summary>
