@@ -26,6 +26,15 @@ public enum VaultCreateResult
 
     /// <summary>Storage refused the write. Transient; nothing can be concluded about the password.</summary>
     StorageUnavailable,
+
+    /// <summary>
+    /// The chosen master password is shorter than <see cref="PasswordPolicy.MinimumLength"/>.
+    /// Nothing was written and <see cref="IKeyVault.CreateAsync"/> was never called: this is
+    /// <see cref="UnlockModel.CreateAsync"/>'s own refusal, not something the vault reported — see
+    /// <see cref="PasswordPolicy"/> for why a vault with no recovery phrase cannot be sealed under
+    /// a password of any length at all.
+    /// </summary>
+    PasswordTooShort,
 }
 
 /// <summary>What a screen says about one outcome of trying to create a vault.</summary>
@@ -72,6 +81,12 @@ public static class CreateMessages
         VaultCreateResult.StorageUnavailable => new CreateMessage(
             "Storage unavailable",
             "The vault could not be written. Check that the location is writable and try again."),
+
+        VaultCreateResult.PasswordTooShort => new CreateMessage(
+            "Choose a longer password",
+            $"The master password must be at least {PasswordPolicy.MinimumLength} characters. It " +
+            "is the only thing that will ever open this vault, and there is no recovery phrase " +
+            "behind it."),
     };
 #pragma warning restore CS8524
 }

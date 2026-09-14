@@ -68,7 +68,7 @@ public class UnlockModelVaultUnreachableTests : VaultHarness
         // The medium reconnected, or the sync caught up: the same file, at the same path, now
         // answers. A retry must reach the ordinary Locked/NoVault split exactly as it would have on
         // a first refresh -- VaultUnreachable is not a trap a vault can never leave once entered.
-        await model.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        await model.CreateAsync(Password("passphrase"), TestContext.Current.CancellationToken);
         await model.LockAsync();
 
         await model.RefreshAsync(TestContext.Current.CancellationToken);

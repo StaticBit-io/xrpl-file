@@ -25,7 +25,7 @@ public class UnlockModelCreateFailureTests : VaultHarness
         await vault.CreateAsync(Password("already-here"), TestContext.Current.CancellationToken);
         UnlockModel model = new(vault);
 
-        VaultCreateResult result = await model.CreateAsync(Password("new"), TestContext.Current.CancellationToken);
+        VaultCreateResult result = await model.CreateAsync(Password("new passphrase"), TestContext.Current.CancellationToken);
 
         Assert.Equal(VaultCreateResult.VaultAlreadyExists, result);
         Assert.NotNull(model.LastCreateMessage);
@@ -46,7 +46,7 @@ public class UnlockModelCreateFailureTests : VaultHarness
         StorageFailingCreateVault vault = new(NewVault());
         UnlockModel model = new(vault);
 
-        VaultCreateResult result = await model.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        VaultCreateResult result = await model.CreateAsync(Password("passphrase"), TestContext.Current.CancellationToken);
 
         Assert.Equal(VaultCreateResult.StorageUnavailable, result);
         Assert.NotNull(model.LastCreateMessage);
@@ -68,7 +68,7 @@ public class UnlockModelCreateFailureTests : VaultHarness
 
         // Not a realistic screen path on its own (the screen only offers "create" from NoVault),
         // but the model must not claim success by moving Stage when the underlying vault refused.
-        await model.CreateAsync(Password("new"), TestContext.Current.CancellationToken);
+        await model.CreateAsync(Password("new passphrase"), TestContext.Current.CancellationToken);
 
         Assert.Equal(UnlockStage.Locked, model.Stage);
         Assert.False(vault.IsUnlocked);

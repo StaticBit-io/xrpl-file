@@ -9,7 +9,7 @@ public class ExportModelTests : VaultHarness
     private const string ContainerPassword = "export password";
 
     [Fact]
-    public async Task Exporting_produces_a_container_the_same_password_opens_and_marks_the_entry_exported()
+    public async Task Exporting_produces_a_container_the_same_password_opens()
     {
         CancellationToken token = TestContext.Current.CancellationToken;
         KeyVault vault = NewVault();
@@ -17,16 +17,93 @@ public class ExportModelTests : VaultHarness
         string reference = await vault.StoreAsync(Entry("one"), token);
         ExportModel model = new(vault);
 
-        byte[] container = await model.ToContainerAsync(reference, Password(ContainerPassword), token);
+        byte[]? container = await model.ToContainerAsync(reference, Password(ContainerPassword), token);
 
+        Assert.Null(model.Problem);
+        Assert.NotNull(container);
         Assert.True(
             BackupContainer.TryUnpack(
                 container, ContainerPassword, fromFile: true, out BackupPayload? payload, out BackupUnpackError error),
             $"The container did not open: {error}.");
         Assert.Equal("sSecretOfone", payload!.Wallets.Single().KeyValue);
+    }
 
-        VaultEntryInfo info = (await vault.ListAsync(token)).Single(entry => entry.Reference == reference);
-        Assert.True(info.Exported);
+    [Fact]
+    public async Task An_empty_backup_password_is_refused_and_nothing_is_sealed()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one", VaultEntryKind.Generated), token);
+        ExportModel model = new(vault);
+
+        // Pressing "Create backup" without touching the password field. Nothing in this
+        // application refused it before: the container was sealed under PBKDF2 of the empty string
+        // and the entry was marked Exported, so the key list stopped warning that the key exists
+        // only in this vault -- for a key whose only copy outside it anybody can open.
+        byte[]? container = await model.ToContainerAsync(reference, Password(string.Empty), token);
+
+        Assert.Null(container);
+        Assert.NotNull(model.Problem);
+        Assert.False((await vault.ListAsync(token)).Single(entry => entry.Reference == reference).Exported);
+    }
+
+    [Fact]
+    public async Task A_backup_password_one_character_short_of_the_minimum_is_refused()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+        ExportModel model = new(vault);
+
+        string tooShort = new('x', PasswordPolicy.MinimumLength - 1);
+
+        Assert.Null(await model.ToContainerAsync(reference, Password(tooShort), token));
+        Assert.NotNull(model.Problem);
+    }
+
+    [Fact]
+    public async Task A_backup_password_exactly_at_the_minimum_is_accepted()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+        ExportModel model = new(vault);
+
+        string justLongEnough = new('x', PasswordPolicy.MinimumLength);
+
+        Assert.NotNull(await model.ToContainerAsync(reference, Password(justLongEnough), token));
+        Assert.Null(model.Problem);
+    }
+
+    [Fact]
+    public async Task A_refusal_is_cleared_by_the_export_that_follows_it()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+        ExportModel model = new(vault);
+
+        await model.ToContainerAsync(reference, Password(string.Empty), token);
+        Assert.NotNull(model.Problem);
+
+        await model.ToContainerAsync(reference, Password(ContainerPassword), token);
+        Assert.Null(model.Problem);
+    }
+
+    [Fact]
+    public async Task A_vault_failure_becomes_a_sentence_rather_than_an_exception_for_a_component_to_map()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        ExportModel model = new(vault);
+
+        Assert.Null(await model.ToContainerAsync("no-such-reference", Password(ContainerPassword), token));
+        Assert.Equal(VaultErrorMessages.For(VaultError.NoSuchEntry), model.Problem);
     }
 
     [Fact]

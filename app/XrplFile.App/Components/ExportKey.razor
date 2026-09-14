@@ -5,7 +5,11 @@
 
 @* Design section 8: a container sealed under its own password, offered as a file or as a QR code.
    ExportModel.ToContainerAsync and ToQr do every byte of the work and every decision about whether a
-   code fits; this component only calls them and draws what QrPayload.FitsOneCode already said. *@
+   code fits; this component only calls them and draws what QrPayload.FitsOneCode already said.
+   Every word of failure on this screen is Model.Problem, including the refusal of a backup password
+   that is too short -- the minimum, and whether a given password meets it, is PasswordPolicy's and
+   ExportModel's decision, never this markup's. The button stays live so a press explains itself
+   rather than going inert with nothing said. *@
 
 @if (_container is null)
 {
@@ -16,7 +20,7 @@
         password can spend from this account.
     </p>
 
-    @if (_problem is { } problem)
+    @if (Model.Problem is { } problem)
     {
         <div class="alert alert-danger">@problem</div>
     }
@@ -80,7 +84,6 @@ else
     private bool[][]? _pendingMatrix;
     private bool _showQr;
     private bool _busy;
-    private string? _problem;
     private ElementReference _qrCanvas;
 
     private async Task CreateAsync()
@@ -91,23 +94,25 @@ else
         }
 
         _busy = true;
-        _problem = null;
         StateHasChanged();
 
         byte[] passwordBytes = Encoding.UTF8.GetBytes(_password);
-        _password = string.Empty;
         try
         {
             _container = await Model.ToContainerAsync(Reference, passwordBytes, _cts.Token);
-        }
-        catch (VaultException ex)
-        {
-            _problem = VaultErrorMessages.For(ex.Error);
         }
         finally
         {
             CryptographicOperations.ZeroMemory(passwordBytes);
             _busy = false;
+        }
+
+        // Cleared only once a container actually exists. A refused password has to stay in the
+        // field: blanking it would leave the person retyping from scratch against a rule they have
+        // only just been told about.
+        if (_container is not null)
+        {
+            _password = string.Empty;
         }
     }
 

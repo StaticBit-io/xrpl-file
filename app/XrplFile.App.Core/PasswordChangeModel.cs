@@ -25,7 +25,18 @@ namespace XrplFile.App.Core;
 /// <see cref="VaultPasswordChange.TheOldCopyRemains"/> was reported; otherwise
 /// <see langword="null"/>.
 /// </param>
-public sealed record PasswordChangeReport(bool Changed, IReadOnlyList<string> ThingsToTell, string? SurvivingCopyPath);
+/// <param name="Refusal">
+/// Why the change was not attempted at all, or <see langword="null"/> when it was. Set only by
+/// <see cref="PasswordChangeModel.ChangeAsync"/>, and only for a new password shorter than
+/// <see cref="PasswordPolicy.MinimumLength"/>: the vault was never called, so this is not the
+/// wrong-password outcome, which <see cref="Changed"/> being <see langword="false"/> otherwise
+/// means. A screen has to tell the two apart — "the password you typed is wrong" and "the password
+/// you chose is too short" send a person to opposite fields — and a component that decided which
+/// of them a bare <see langword="false"/> meant would be deciding exactly what this model exists
+/// to decide. Trailing and optional so every existing construction site keeps compiling.
+/// </param>
+public sealed record PasswordChangeReport(
+    bool Changed, IReadOnlyList<string> ThingsToTell, string? SurvivingCopyPath, string? Refusal = null);
 
 /// <summary>
 /// The model behind changing the vault's master password (design 6). Every flag
@@ -64,6 +75,21 @@ public sealed class PasswordChangeModel(IKeyVault vault, string vaultPath)
     public async Task<PasswordChangeReport> ChangeAsync(
         ReadOnlyMemory<byte> oldPassword, ReadOnlyMemory<byte> newPassword, CancellationToken cancellationToken)
     {
+        // The new password is chosen here, so PasswordPolicy applies to it; the old one is merely
+        // entered, so it does not -- a vault created before this rule existed must still open, and
+        // measuring the current password against the rule would lock its owner out of their own
+        // keys to enforce it retroactively. See PasswordPolicy's own remarks.
+        if (!PasswordPolicy.IsLongEnough(newPassword.Span))
+        {
+            return new PasswordChangeReport(
+                Changed: false,
+                ThingsToTell: [],
+                SurvivingCopyPath: null,
+                Refusal:
+                    $"Choose a new password of at least {PasswordPolicy.MinimumLength} characters. " +
+                    "Nothing was changed, and the current password still opens the vault.");
+        }
+
         VaultPasswordChange outcome = await vault
             .ChangePasswordAsync(oldPassword, newPassword, cancellationToken)
             .ConfigureAwait(false);

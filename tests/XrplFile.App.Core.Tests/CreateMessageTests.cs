@@ -8,6 +8,7 @@ public class CreateMessageTests
     [InlineData(VaultCreateResult.Success)]
     [InlineData(VaultCreateResult.VaultAlreadyExists)]
     [InlineData(VaultCreateResult.StorageUnavailable)]
+    [InlineData(VaultCreateResult.PasswordTooShort)]
     public void Every_outcome_has_its_own_words(VaultCreateResult result)
     {
         CreateMessage message = CreateMessages.For(result);

@@ -22,7 +22,7 @@ public class UnlockModelTests : VaultHarness
         UnlockModel model = new(NewVault());
         await model.RefreshAsync(TestContext.Current.CancellationToken);
 
-        await model.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        await model.CreateAsync(Password("passphrase"), TestContext.Current.CancellationToken);
 
         Assert.Equal(UnlockStage.Unlocked, model.Stage);
     }
@@ -33,10 +33,10 @@ public class UnlockModelTests : VaultHarness
         KeyVault vault = NewVault();
         UnlockModel model = new(vault);
         await model.RefreshAsync(TestContext.Current.CancellationToken);
-        await model.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        await model.CreateAsync(Password("right passphrase"), TestContext.Current.CancellationToken);
         await model.LockAsync();
 
-        VaultUnlockResult result = await model.UnlockAsync(Password("wrong"), TestContext.Current.CancellationToken);
+        VaultUnlockResult result = await model.UnlockAsync(Password("wrong passphrase"), TestContext.Current.CancellationToken);
 
         Assert.Equal(VaultUnlockResult.WrongPassword, result);
         Assert.Equal(UnlockStage.Locked, model.Stage);
@@ -50,12 +50,12 @@ public class UnlockModelTests : VaultHarness
         KeyVault vault = NewVault();
         UnlockModel model = new(vault);
         await model.RefreshAsync(TestContext.Current.CancellationToken);
-        await model.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        await model.CreateAsync(Password("passphrase"), TestContext.Current.CancellationToken);
         string reference = await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
         await model.LockAsync();
         FlipOneByteOfEntry(reference);
 
-        VaultUnlockResult result = await model.UnlockAsync(Password("p"), TestContext.Current.CancellationToken);
+        VaultUnlockResult result = await model.UnlockAsync(Password("passphrase"), TestContext.Current.CancellationToken);
 
         Assert.Equal(VaultUnlockResult.VaultDegraded, result);
         Assert.Equal(UnlockStage.Unlocked, model.Stage);
@@ -67,10 +67,10 @@ public class UnlockModelTests : VaultHarness
         KeyVault vault = NewVault();
         UnlockModel model = new(vault);
         await model.RefreshAsync(TestContext.Current.CancellationToken);
-        await model.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        await model.CreateAsync(Password("right passphrase"), TestContext.Current.CancellationToken);
         await model.LockAsync();
 
-        VaultUnlockResult result = await model.UnlockAsync(Password("right"), TestContext.Current.CancellationToken);
+        VaultUnlockResult result = await model.UnlockAsync(Password("right passphrase"), TestContext.Current.CancellationToken);
 
         Assert.Equal(VaultUnlockResult.Success, result);
         Assert.Equal(UnlockStage.Unlocked, model.Stage);
@@ -97,7 +97,7 @@ public class UnlockModelDeviceUnlockTests : VaultHarness
         KeyVault vault = NewVault();
         UnlockModel model = new(vault);
         await model.RefreshAsync(TestContext.Current.CancellationToken);
-        await model.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        await model.CreateAsync(Password("passphrase"), TestContext.Current.CancellationToken);
         await model.LockAsync();
 
         await model.RefreshAsync(TestContext.Current.CancellationToken);
@@ -112,7 +112,7 @@ public class UnlockModelDeviceUnlockTests : VaultHarness
         KeyVault vault = NewVault();
         UnlockModel model = new(vault);
         await model.RefreshAsync(TestContext.Current.CancellationToken);
-        await model.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        await model.CreateAsync(Password("passphrase"), TestContext.Current.CancellationToken);
         Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
         await model.LockAsync();
 

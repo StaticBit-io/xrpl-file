@@ -151,15 +151,33 @@ public sealed class UnlockModel(IKeyVault vault, bool vaultPathIsDefault = true)
     /// could not be written.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Catches exactly the two failures <see cref="IKeyVault.CreateAsync"/> can produce for a
     /// screen to react to — see <see cref="VaultCreateResult"/> for why those are the only two —
     /// and turns each into a <see cref="CreateMessage"/> with no path, no internal exception
     /// detail, and nothing derived from the password. Every other exception, cancellation
     /// included, is let through unchanged: this method translates what a screen may show, it does
     /// not catch everything a bug could throw.
+    /// </para>
+    /// <para>
+    /// The third outcome, <see cref="VaultCreateResult.PasswordTooShort"/>, is this method's own
+    /// and never the vault's: <see cref="IKeyVault.CreateAsync"/> accepts a password of any
+    /// length, including none, and has no business deciding otherwise — how much protection is
+    /// enough is a judgement about this application's promise, which is a model's to make. See
+    /// <see cref="PasswordPolicy"/>.
+    /// </para>
     /// </remarks>
     public async Task<VaultCreateResult> CreateAsync(ReadOnlyMemory<byte> password, CancellationToken cancellationToken)
     {
+        // Refused before the vault is asked anything. A vault sealed under an empty master
+        // password has no protection at all, and this design has no recovery phrase behind that
+        // one factor (design E5).
+        if (!PasswordPolicy.IsLongEnough(password.Span))
+        {
+            LastCreateMessage = CreateMessages.For(VaultCreateResult.PasswordTooShort);
+            return VaultCreateResult.PasswordTooShort;
+        }
+
         VaultCreateResult result;
         try
         {

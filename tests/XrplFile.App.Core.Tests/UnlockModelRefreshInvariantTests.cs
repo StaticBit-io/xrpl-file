@@ -22,7 +22,7 @@ public class UnlockModelRefreshInvariantTests : VaultHarness
         KeyVault vault = NewVault();
         UnlockModel model = new(vault);
         await model.RefreshAsync(TestContext.Current.CancellationToken);
-        await model.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        await model.CreateAsync(Password("passphrase"), TestContext.Current.CancellationToken);
         Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
         await model.LockAsync();
 
@@ -37,7 +37,7 @@ public class UnlockModelRefreshInvariantTests : VaultHarness
         KeyVault vault = NewVault();
         UnlockModel model = new(vault);
         await model.RefreshAsync(TestContext.Current.CancellationToken);
-        await model.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        await model.CreateAsync(Password("passphrase"), TestContext.Current.CancellationToken);
 
         await model.RefreshAsync(TestContext.Current.CancellationToken);
 
@@ -75,7 +75,7 @@ public class UnlockModelRefreshInvariantTests : VaultHarness
         RaceWindowVault vault = new(innerVault);
         UnlockModel model = new(vault);
         await model.RefreshAsync(TestContext.Current.CancellationToken);
-        await model.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        await model.CreateAsync(Password("passphrase"), TestContext.Current.CancellationToken);
         Assert.True(await innerVault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
         await model.LockAsync();
 
@@ -222,7 +222,7 @@ public class UnlockModelRefreshCostTests : VaultHarness
         CallCountingVault vault = new(innerVault);
         UnlockModel model = new(vault);
         await model.RefreshAsync(TestContext.Current.CancellationToken);
-        await model.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        await model.CreateAsync(Password("passphrase"), TestContext.Current.CancellationToken);
         Assert.True(await innerVault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
         await model.LockAsync();
         vault.ResetCounts();
@@ -241,7 +241,7 @@ public class UnlockModelRefreshCostTests : VaultHarness
         CallCountingVault vault = new(innerVault);
         UnlockModel model = new(vault);
         await model.RefreshAsync(TestContext.Current.CancellationToken);
-        await model.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        await model.CreateAsync(Password("passphrase"), TestContext.Current.CancellationToken);
         await model.LockAsync();
         vault.ResetCounts();
 

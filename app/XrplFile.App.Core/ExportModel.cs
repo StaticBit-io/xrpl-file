@@ -38,19 +38,67 @@ public sealed class ExportModel(IKeyVault vault)
     private const int MaxAlphanumericCharacters = 1852;
 
     /// <summary>
+    /// What went wrong with the most recent <see cref="ToContainerAsync"/> call, in words a screen
+    /// can show as-is — or <see langword="null"/> after a call that produced a container. Never
+    /// built from the backup password or from anything derived from it.
+    /// </summary>
+    public string? Problem { get; private set; }
+
+    /// <summary>
     /// Reveals <paramref name="reference"/>'s secret and seals it into a container under
-    /// <paramref name="containerPassword"/>, marking the entry exported.
+    /// <paramref name="containerPassword"/>.
     /// </summary>
     /// <remarks>
-    /// A thin pass-through to <see cref="IKeyVault.ExportAsync"/>: the guarantee that an entry is
-    /// never marked exported before the container that proves it actually holds the secret exists
-    /// — reveal first, mark only after, roll back on a failed write — belongs to the vault, not to
-    /// this model. Duplicating any of that logic here would only give the two a chance to drift
-    /// apart; whatever <see cref="IKeyVault.ExportAsync"/> throws propagates unchanged.
+    /// <para>
+    /// <b>A backup password shorter than <see cref="PasswordPolicy.MinimumLength"/> is refused
+    /// here, and this is the only layer that refuses it.</b> A component holds no decisions, and
+    /// neither <see cref="IKeyVault.ExportAsync"/> nor <see cref="BackupContainer"/> can make this
+    /// one: the container format admits any password, including none at all, because it also has
+    /// to be readable by another product whose own rules are not ours to impose. Whether a password
+    /// is strong enough for the file to be worth calling a backup is a judgement about this
+    /// application's promise to its user — there is no recovery phrase, so this file is the only
+    /// way back — and that judgement belongs in a model. See <see cref="PasswordPolicy"/> for the
+    /// number and why it is that number.
+    /// </para>
+    /// <para>
+    /// Whatever <see cref="IKeyVault.ExportAsync"/> reports as a <see cref="VaultException"/> — a
+    /// locked vault, an unknown reference, a damaged entry — becomes <see cref="Problem"/> here,
+    /// through <see cref="VaultErrorMessages"/>, rather than being left for a component to catch
+    /// and map: this model then answers a caller the same way for every failure it can have.
+    /// Everything else, cancellation included, propagates unchanged.
+    /// </para>
     /// </remarks>
-    public async Task<byte[]> ToContainerAsync(
-        string reference, ReadOnlyMemory<byte> containerPassword, CancellationToken cancellationToken) =>
-        await vault.ExportAsync(reference, containerPassword, cancellationToken).ConfigureAwait(false);
+    /// <returns>
+    /// The sealed container, or <see langword="null"/> with <see cref="Problem"/> set when nothing
+    /// was sealed. A refused password never reaches the vault at all: nothing is revealed, and
+    /// nothing about the entry changes.
+    /// </returns>
+    public async Task<byte[]?> ToContainerAsync(
+        string reference, ReadOnlyMemory<byte> containerPassword, CancellationToken cancellationToken)
+    {
+        if (!PasswordPolicy.IsLongEnough(containerPassword.Span))
+        {
+            Problem =
+                $"Choose a backup password of at least {PasswordPolicy.MinimumLength} characters. " +
+                "This file is the only way back to this key if the master password is ever " +
+                "forgotten, and anyone who finds it can guess at it for as long as they like.";
+            return null;
+        }
+
+        try
+        {
+            byte[] container = await vault
+                .ExportAsync(reference, containerPassword, cancellationToken)
+                .ConfigureAwait(false);
+            Problem = null;
+            return container;
+        }
+        catch (VaultException exception)
+        {
+            Problem = VaultErrorMessages.For(exception.Error);
+            return null;
+        }
+    }
 
     /// <summary>
     /// Encodes <paramref name="container"/> as the text a QR code would carry, and says whether
