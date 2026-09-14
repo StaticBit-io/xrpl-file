@@ -83,6 +83,29 @@ public class VaultAutoLockTests
     }
 
     [Fact]
+    public async Task The_idle_window_starts_again_after_a_lock_that_nothing_touched()
+    {
+        ManualTimeProvider time = new();
+        RecordingVault vault = new();
+        await using VaultAutoLock autoLock = new(vault, Idle, time);
+
+        // The first window fires and locks, exactly as it always did.
+        time.Advance(Idle);
+        Assert.Equal(1, vault.LockCalls);
+
+        // The failure this test exists for: with Timeout.InfiniteTimeSpan as the timer's period,
+        // the first fire was also the last one, and only VaultAutoLock.Touch could ever arm it
+        // again. Nothing in the application this lock protects calls Touch on a schedule, so a
+        // vault unlocked again after this point would have sat resident with no idle bound at all
+        // for the rest of the process. A window that has fired must start the next one by itself.
+        vault.Unlock();
+        time.Advance(Idle);
+
+        Assert.Equal(2, vault.LockCalls);
+        Assert.False(vault.IsUnlocked);
+    }
+
+    [Fact]
     public async Task Disposing_stops_the_timer_without_locking()
     {
         ManualTimeProvider time = new();
@@ -205,7 +228,7 @@ internal sealed class ManualTimeProvider : TimeProvider
 
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
     {
-        ManualTimer timer = new(this, callback, state, dueTime);
+        ManualTimer timer = new(this, callback, state, dueTime, period);
         _timers.Add(timer);
         return timer;
     }
@@ -227,15 +250,18 @@ internal sealed class ManualTimeProvider : TimeProvider
     private void Forget(ManualTimer timer) => _timers.Remove(timer);
 
     /// <summary>
-    /// The one-shot shape <see cref="VaultAutoLock"/> actually uses: a due time relative to "now"
-    /// at construction or at the last <see cref="Change"/>, and no periodic re-arming — firing does
-    /// not reschedule it, matching <see cref="Timeout.InfiniteTimeSpan"/> always being the period
-    /// <see cref="VaultAutoLock"/> passes. Only an explicit <see cref="Change"/> (a
-    /// <see cref="VaultAutoLock.Touch"/>) arms it again.
+    /// A due time relative to "now" at construction or at the last <see cref="Change"/>, plus the
+    /// period <see cref="ITimer"/> itself defines: firing re-arms the timer one period later, and
+    /// only <see cref="Timeout.InfiniteTimeSpan"/> as the period makes it one-shot. The period is
+    /// honoured rather than ignored because <see cref="VaultAutoLock"/> now passes a real one —
+    /// a double that silently dropped it would let a one-shot implementation pass a test written
+    /// for a repeating window.
     /// </summary>
-    private sealed class ManualTimer(ManualTimeProvider owner, TimerCallback callback, object? state, TimeSpan dueTime) : ITimer
+    private sealed class ManualTimer(
+        ManualTimeProvider owner, TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) : ITimer
     {
         private DateTimeOffset _dueAt = owner.GetUtcNow() + dueTime;
+        private TimeSpan _period = period;
         private bool _disposed;
         private bool _fired;
 
@@ -247,6 +273,7 @@ internal sealed class ManualTimeProvider : TimeProvider
             }
 
             _dueAt = owner.GetUtcNow() + dueTime;
+            _period = period;
             _fired = false;
             return true;
         }
@@ -258,7 +285,15 @@ internal sealed class ManualTimeProvider : TimeProvider
                 return;
             }
 
-            _fired = true;
+            if (_period == Timeout.InfiniteTimeSpan)
+            {
+                _fired = true;
+            }
+            else
+            {
+                _dueAt = now + _period;
+            }
+
             callback(state);
         }
 
@@ -297,6 +332,13 @@ internal sealed class RecordingVault : IKeyVault
 
     /// <inheritdoc/>
     public bool IsUnlocked { get; private set; } = true;
+
+    /// <summary>
+    /// Puts this double back into the unlocked state, standing in for a person opening the vault
+    /// again after an idle lock. There is no <c>UnlockAsync</c> here to do it with: the auto-lock
+    /// never unlocks anything, so that member stays unsupported like every other one.
+    /// </summary>
+    public void Unlock() => IsUnlocked = true;
 
     /// <inheritdoc/>
     public Task LockAsync()

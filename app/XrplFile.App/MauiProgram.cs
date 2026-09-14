@@ -34,15 +34,11 @@ public static class MauiProgram
 
         RegisterVault(builder.Services);
 
-        MauiApp app = builder.Build();
-
-        // Resolved here, eagerly, rather than left for whichever component first asks for it: the
-        // idle lock has to be armed for the whole process lifetime, including the time before
-        // anything unlocks the vault, and a singleton nobody has resolved yet has not been
-        // constructed at all.
-        _ = app.Services.GetRequiredService<VaultAutoLock>();
-
-        return app;
+        // The idle lock is armed for the whole process lifetime, including the time before
+        // anything unlocks the vault. It needs no eager resolve here to achieve that any more:
+        // RegisterVault constructs it outright and registers the instance, so it is already
+        // running by the time this method returns, whether or not anything ever asks for it.
+        return builder.Build();
     }
 
     /// <summary>
@@ -140,22 +136,33 @@ public static class MauiProgram
         {
         }
 
+        // IPasswordKdf and IDeviceSecretStore are no longer registered: the one vault this process
+        // builds is constructed below rather than resolved, so nothing would ever ask the
+        // container for either, and a registration nobody resolves only invites a second vault to
+        // be built from them one day. TimeProvider stays -- RevealModel takes one.
         services.AddSingleton(TimeProvider.System);
-        services.AddSingleton<IPasswordKdf, Argon2idKdf>();
-        services.AddSingleton<IDeviceSecretStore, SecureStorageDeviceSecretStore>();
         services.AddSingleton<IClipboardService, MauiClipboardService>();
         services.AddSingleton<IFilePickerService, MauiFilePickerService>();
         services.AddSingleton(locationStore);
 
-        services.AddSingleton<IKeyVault>(provider => new KeyVault(
+        // The vault, its idle lock, and the wrapper that feeds that lock are built here as one
+        // unit, rather than as three independent registrations, because they cannot be resolved
+        // independently: VaultAutoLock has to hold the *undecorated* vault, so that its own
+        // LockAsync never travels back through the wrapper and resets the very window it is
+        // firing, while every model has to hold the *decorated* one, so that each operation a
+        // person's action causes resets that window (see TouchingVault for what does and does not
+        // count as use). Registering a bare KeyVault as IKeyVault, as this method did before, left
+        // VaultSigner as the only caller of VaultAutoLock.Touch anywhere -- and this application
+        // never constructs one, so the idle window fired once, fifteen minutes into the process,
+        // and the vault was left with no idle bound at all from the next unlock onward.
+        KeyVault vault = new(
             vaultPath,
-            provider.GetRequiredService<IPasswordKdf>(),
-            provider.GetRequiredService<IDeviceSecretStore>()));
+            new Argon2idKdf(),
+            new SecureStorageDeviceSecretStore());
+        VaultAutoLock autoLock = new(vault, IdleTimeout, TimeProvider.System);
 
-        services.AddSingleton(provider => new VaultAutoLock(
-            provider.GetRequiredService<IKeyVault>(),
-            IdleTimeout,
-            provider.GetRequiredService<TimeProvider>()));
+        services.AddSingleton(autoLock);
+        services.AddSingleton<IKeyVault>(new TouchingVault(vault, autoLock));
 
         services.AddSingleton(provider => new UnlockModel(
             provider.GetRequiredService<IKeyVault>(),

@@ -5,6 +5,10 @@ namespace XrplFile.Keys;
 /// <paramref name="idle"/> (design section 6.4). A publication that calls <see cref="Touch"/> on
 /// every signature keeps itself open for as long as it is actually working; a machine left alone
 /// with the vault open does not stay that way.
+///
+/// The window repeats for the life of this instance rather than firing once: a vault unlocked
+/// again after an idle lock is bounded by the next window exactly as the first one was, with no
+/// <see cref="Touch"/> needed to arm it. See <see cref="CreateIdleTimer"/> for what that costs.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -61,7 +65,17 @@ public sealed class VaultAutoLock(IKeyVault vault, TimeSpan idle, TimeProvider t
         ArgumentNullException.ThrowIfNull(vault);
         ArgumentNullException.ThrowIfNull(time);
 
-        return time.CreateTimer(_ => FireAndForgetLock(vault), state: null, idle, Timeout.InfiniteTimeSpan);
+        // Periodic, not one-shot. An idle window that fired once and never armed itself again
+        // bounds only the first session in a process: the vault locks at the fifteen-minute mark,
+        // the person unlocks it again, and from then on the data key stays resident for as long as
+        // the process lives -- which is exactly the bound MauiProgram's own remarks lean on for a
+        // process nobody kills. A period equal to the window starts the next one automatically.
+        //
+        // The cost of that is a LockAsync call every window against a vault that is already shut.
+        // IKeyVault.LockAsync is a no-op on a locked vault (it takes the gate, finds no data key,
+        // and returns), so the repeated call is cheap and cannot unlock anything -- see
+        // Touch's own remarks for the same point from the other direction.
+        return time.CreateTimer(_ => FireAndForgetLock(vault), state: null, idle, idle);
     }
 
     /// <summary>
@@ -86,7 +100,10 @@ public sealed class VaultAutoLock(IKeyVault vault, TimeSpan idle, TimeProvider t
 
         try
         {
-            _timer.Change(_idle, Timeout.InfiniteTimeSpan);
+            // The period is restated here, not dropped: ITimer.Change replaces both halves, and
+            // passing Timeout.InfiniteTimeSpan would quietly turn the repeating window built above
+            // back into a one-shot from the first touch onward.
+            _timer.Change(_idle, _idle);
         }
         catch (ObjectDisposedException)
         {
