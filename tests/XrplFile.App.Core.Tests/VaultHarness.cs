@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 
 using XrplFile.Keys;
 
@@ -52,6 +53,31 @@ public abstract class VaultHarness : IAsyncDisposable
     /// </summary>
     protected static NewVaultEntry Entry(string label, VaultEntryKind kind = VaultEntryKind.Imported) =>
         new(kind, label, "standalone", "rAddressOf" + label, "sSecretOf" + label);
+
+    /// <summary>
+    /// Flips one bit in the ciphertext of one entry, past the nonce, so what is damaged is the
+    /// entry's contents rather than the parameters it was sealed with. Mirrors the effect of
+    /// <c>VaultTestHarness.FlipOneByteOfEntry</c> in <c>tests/XrplFile.Keys.Tests</c>, but reaches
+    /// the bytes through the file's JSON rather than through <c>VaultRecordCodec</c>: that type is
+    /// <c>internal</c> to <c>XrplFile.Keys</c> and visible only to <c>XrplFile.Keys.Tests</c> — not
+    /// to this project — so the same nonce-relative offset is applied at the wire encoding instead.
+    /// </summary>
+    protected void FlipOneByteOfEntry(string reference)
+    {
+        JsonNode root = JsonNode.Parse(File.ReadAllBytes(VaultPath))
+            ?? throw new InvalidOperationException("The vault file to damage is not JSON.");
+        JsonObject entries = root["entries"]?.AsObject()
+            ?? throw new InvalidOperationException("The vault file to damage carries no entries.");
+        string base64 = entries[reference]?.GetValue<string>()
+            ?? throw new InvalidOperationException($"The vault file has no entry '{reference}' to damage.");
+
+        byte[] ciphertext = Convert.FromBase64String(base64);
+        const int pastTheNonce = 12;
+        ciphertext[pastTheNonce] ^= 0x01;
+        entries[reference] = Convert.ToBase64String(ciphertext);
+
+        File.WriteAllBytes(VaultPath, Encoding.UTF8.GetBytes(root.ToJsonString()));
+    }
 
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
