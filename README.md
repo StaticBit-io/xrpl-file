@@ -66,8 +66,8 @@ XrplClientLedgerSink sink = new(client);
 SessionOptions options = new() { StateDirectory = "runs", BudgetDrops = 5_000_000 };
 
 // What it will cost, before any of it is spent.
-PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
-    source, wallet.ClassicAddress, new FileInfo("cover.png").Length, 100, CancellationToken.None);
+PublicationEstimate estimate = await PublicationSession.EstimateAsync(
+    source, wallet.ClassicAddress, new FileInfo("cover.png").Length, options, CancellationToken.None);
 
 Console.WriteLine($"{estimate.Transactions} transactions, {estimate.RequiredDrops} drops needed, {estimate.SpendableDrops} spendable");
 
@@ -119,8 +119,8 @@ XrplWallet throwaway = XrplWallet.Generate();
 ThrowawayAccount account = new(sink, source, new WalletSigner(throwaway));
 long startedIn = await source.CurrentLedgerAsync(CancellationToken.None);
 
-PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
-    source, throwaway.ClassicAddress, new FileInfo("cover.png").Length, 100, CancellationToken.None);
+PublicationEstimate estimate = await PublicationSession.EstimateAsync(
+    source, throwaway.ClassicAddress, new FileInfo("cover.png").Length, options, CancellationToken.None);
 
 // account.Address (== request.QrPayload) goes on screen next to estimate.RequiredDrops, as text
 // to copy and as a QR code to scan. The money may arrive from a phone a minute from now or an
@@ -219,8 +219,8 @@ XrplClientLedgerSource source = new(client);
 XrplClientLedgerSink sink = new(client);
 SessionOptions options = new() { StateDirectory = "runs", BudgetDrops = 5_000_000 };
 
-PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
-    source, signer.Account, new FileInfo("cover.png").Length, 100, CancellationToken.None);
+PublicationEstimate estimate = await PublicationSession.EstimateAsync(
+    source, signer.Account, new FileInfo("cover.png").Length, options, CancellationToken.None);
 
 await using TicketStrategy strategy = new(sink, source, signer,
     new TicketStrategyOptions { FeeDrops = (int)estimate.FeeDropsPerTransaction });

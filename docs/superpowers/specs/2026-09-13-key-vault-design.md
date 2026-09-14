@@ -391,6 +391,20 @@ than showing a corrupt vault with no victims.
 A failed unlock leaves an already-open vault open: confirming a password and opening a vault are
 the same call, and a mistyped confirmation must not end the session it was meant to re-check.
 
+`VaultUnlockResult` is what unlocking itself can report. Everything a vault does once open — or
+its own storage refusing — reports through `VaultError` on a thrown `VaultException` instead:
+
+| Value | Meaning |
+|---|---|
+| `Corrupt` | The record could not be read as a record at all |
+| `Unsupported` | The record's format version or KDF identifier is not one this build can open |
+| `Locked` | An operation needing the data key was asked of a locked vault |
+| `NoSuchEntry` | No entry with that reference |
+| `DuplicateAddress` | Another entry already holds this address on this network; `StoreAsync` refuses rather than silently holding the same key twice |
+| `EntryDamaged` | An entry failed its authentication tag: damaged bytes, or moved between references |
+| `StorageFailed` | Reading or writing the vault file failed |
+| `AddressMismatch` | An entry's recorded address does not match the address its own key derives to — caught here, before anything is built or signed for the wrong account |
+
 ## 10. What must be measured before it is believed
 
 1. **Argon2id parameters** (4.3): measured with `tools/XrplFile.KeyBench` on the development

@@ -15,8 +15,11 @@ public sealed record NewVaultEntry(
     VaultEntryKind Kind, string Label, string Network, string Address, string Secret);
 
 /// <summary>
-/// Everything about an entry except its secret. This is what listing returns: drawing a list of
-/// keys must not decrypt a single seed.
+/// Everything about an entry except its secret. This is what listing returns: <see cref="IKeyVault.ListAsync"/>
+/// still has to decrypt every entry to reach its metadata (D7 puts metadata inside the encrypted
+/// blob), so this guarantees something narrower than "no decryption happens" — the secret never
+/// escapes into caller code, into a binding, or into a log, because this shape simply has no
+/// field to carry it in.
 /// </summary>
 public sealed record VaultEntryInfo(
     string Reference,
