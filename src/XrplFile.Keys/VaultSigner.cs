@@ -91,6 +91,11 @@ public sealed class VaultSigner : ITransactionSigner
         ArgumentNullException.ThrowIfNull(vault);
 
         VaultEntry entry = await vault.RevealAsync(reference, "read a public key", cancellationToken).ConfigureAwait(false);
+
+        // An XRPL family seed carries its own curve in its prefix, and the SDK's derivation
+        // (XrplKeypairs.DeriveKeypair) reads it from there and ignores this argument entirely, so
+        // passing it changes nothing about which key comes out today. It is passed anyway so the
+        // call states what it means rather than leaning on a default that happens to be harmless.
         XrplWallet wallet = XrplWallet.FromSeed(entry.Secret, masterAddress: null, algorithm: entry.Info.Algorithm);
 
         // StoreAsync never checks an entry's recorded address against the key behind it, so a
@@ -119,6 +124,8 @@ public sealed class VaultSigner : ITransactionSigner
         // again" from "this run's key no longer exists" can only do it from the typed error.
         VaultEntry entry = await _vault.RevealAsync(_reference, Reason, cancellationToken).ConfigureAwait(false);
 
+        // See the same call in CreateAsync: the seed is self-describing, so the SDK ignores this
+        // argument today. Passed anyway so the call states what it means.
         XrplWallet wallet = XrplWallet.FromSeed(entry.Secret, masterAddress: null, algorithm: entry.Info.Algorithm);
 
         // A copy, because the SDK writes the signature back into the dictionary it is handed and

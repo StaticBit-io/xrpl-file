@@ -43,7 +43,7 @@ Windows: the code must not be gratuitously Windows-only, but nothing else is bui
 | E5 | The vault lives in the application's data directory by default, its path is shown, and another file can be opened | A backup is a copy of the file, so the file must be findable. Opening another is how it arrives on a new machine |
 | E6 | The export container becomes the Wallet project's format, byte for byte | Owner's decision. A key that cannot move between the two products is a key locked in whichever one made it, and inventing a third format serves nobody |
 | E7 | The container is therefore PBKDF2 (`kdfId = 1`), not Argon2id | The Wallet's header carries an iteration count and nothing else; Argon2id's three parameters do not fit. The vault file keeps Argon2id — see 5.2 |
-| E8 | An entry records the algorithm its key uses | `VaultSigner` derives with `XrplWallet.FromSeed(secret)` and no algorithm, which is ed25519 by default. A secp256k1 key is a different account from the same seed, so today the vault cannot hold one |
+| E8 | An entry records the algorithm its key uses | Not for correct derivation: an XRPL family seed carries its own curve in its prefix, and `XrplKeypairs.DeriveKeypair` (`Base/Xrpl.Keypairs/XrplKeypairs.cs`) reads it from there, ignoring the `algorithm` argument entirely — the vault already holds a secp256k1 key correctly with no field at all. It exists for interoperability and display: the shared container format carries an algorithm per key, a Wallet backup arrives with one, and dropping it on the way through would lose what that backup said. Absent still means ed25519 for anything already stored. An earlier revision of this decision claimed the vault could not hold a secp256k1 key; that was wrong — see 5.4 |
 | E9 | No component-test framework | Components are thin by E2, and testing a binding tests Blazor. The obligation E2 creates is what replaces it |
 
 ## 3. Projects
@@ -182,17 +182,31 @@ guess, because a testnet key treated as a mainnet one is an address the user doe
 
 ### 5.4 An entry gains its algorithm
 
-`VaultSigner` calls `XrplWallet.FromSeed(entry.Secret)` with no algorithm, and the SDK defaults to
-ed25519. A secp256k1 key derived from the same seed is a different account with a different
-address.
+**Correction.** An earlier revision of this section said `VaultSigner` derives with no algorithm,
+that the SDK therefore defaults to ed25519, and that a secp256k1 key derived from the same seed is
+a different account the vault could not hold. That was wrong, and is corrected here rather than
+silently rewritten, because a design document that gets this kind of claim wrong and is not seen
+to be wrong stops being trustworthy about the claims next to it — the ones about money and secrets.
 
-So today the vault cannot hold a secp256k1 key. It fails safely rather than silently — the
-address check added during B's Task 8 refuses a signer whose derived address does not match the
-entry's — but it refuses rather than working.
+An XRPL family seed carries its own curve in its prefix: `XrplCodec` gives a secp256k1 seed the
+version byte `33` and an ed25519 seed the version bytes `[0x01, 0xE1, 0x4B]` (the `sEd...` prefix).
+`XrplKeypairs.DeriveKeypair(string seed, string? algorithm, …)` (`Base/Xrpl.Keypairs/XrplKeypairs.cs`
+in the SDK) decodes that prefix and branches on the seed's own type — it never reads the
+`algorithm` parameter at all. `XrplWallet.FromSeed(entry.Secret)` with no algorithm therefore
+already derives a secp256k1 key correctly from a secp256k1 seed, at the right address; the vault
+could hold one before this task, and the address check added during B's Task 8 was never the thing
+standing in the way.
+
+So the field is not what makes derivation correct — the seed already carries that. It exists for
+**interoperability and display**: the shared container format (5.3) carries an algorithm per key,
+a Wallet backup arrives with one recorded, and dropping it on the way through the vault would lose
+what that backup said, even though re-deriving without it would still land on the right address.
 
 `NewVaultEntry`, `VaultEntryInfo` and `VaultEntry` gain an algorithm, `VaultSigner` passes it to
-`FromSeed`, and the container's `algorithm` field is read on import and written on export. Existing
-entries have none; absent means ed25519, which is what they were derived as.
+`FromSeed` — a no-op against today's SDK, kept so the call states what it means rather than relying
+on a default that happens to be harmless — and the container's `algorithm` field is read on import
+and written on export. Existing entries have none; absent still means ed25519, which is what they
+were derived as, and costs nothing to keep meaning.
 
 ### 5.5 A container with no password
 
