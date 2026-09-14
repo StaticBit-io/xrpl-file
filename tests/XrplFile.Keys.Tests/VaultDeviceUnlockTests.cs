@@ -488,4 +488,70 @@ public class VaultDeviceUnlockTests : VaultTestHarness
         Assert.Null(ReadRecordFromFile().DeviceDek);
         Assert.True(vault.IsUnlocked);
     }
+
+    [Fact]
+    public async Task Asking_for_a_device_wrap_with_no_file_says_no_and_touches_nothing()
+    {
+        KeyVault vault = NewVault();
+
+        Assert.False(await vault.HasDeviceWrapAsync(TestContext.Current.CancellationToken));
+        Assert.False(vault.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task Asking_for_a_device_wrap_on_a_locked_vault_with_none_says_no_without_opening_it()
+    {
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+
+        Assert.False(await vault.HasDeviceWrapAsync(TestContext.Current.CancellationToken));
+        Assert.False(vault.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task Asking_for_a_device_wrap_on_a_locked_vault_that_carries_one_says_yes_without_opening_it()
+    {
+        // This is the read that replaces the old unlock-then-relock probe (design review, fix
+        // round 1): a parse of the record, never a real unlock.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
+        await vault.LockAsync();
+
+        Assert.True(await vault.HasDeviceWrapAsync(TestContext.Current.CancellationToken));
+        Assert.False(vault.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task Asking_for_a_device_wrap_on_an_open_vault_answers_from_the_cache()
+    {
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+
+        Assert.False(await vault.HasDeviceWrapAsync(TestContext.Current.CancellationToken));
+
+        Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
+
+        Assert.True(await vault.HasDeviceWrapAsync(TestContext.Current.CancellationToken));
+        Assert.True(vault.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task Asking_for_a_device_wrap_the_platform_secret_no_longer_opens_still_says_yes()
+    {
+        // The honest limit of this read: it answers from the record alone, so a wrap the store can
+        // no longer open still reads as present. That gap is why this is not the same question
+        // UnlockWithDeviceAsync answers -- see the interface's remarks.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("right"), TestContext.Current.CancellationToken);
+        Assert.True(await vault.EnableDeviceUnlockAsync(TestContext.Current.CancellationToken));
+        await vault.LockAsync();
+        await Devices.DeleteAsync(VaultDeviceId, TestContext.Current.CancellationToken);
+
+        Assert.True(await vault.HasDeviceWrapAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(
+            VaultUnlockResult.VaultMissing,
+            await vault.UnlockWithDeviceAsync(TestContext.Current.CancellationToken));
+    }
 }

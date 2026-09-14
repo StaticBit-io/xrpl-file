@@ -178,6 +178,29 @@ public interface IKeyVault
     Task<bool> ExistsAsync(CancellationToken cancellationToken);
 
     /// <summary>
+    /// Whether the record at this vault's path carries a device wrap — not whether "unlock with
+    /// device" would actually succeed. Answered by reading and parsing the record, the same way
+    /// <see cref="ExistsAsync"/> answers "is there a file here": no derivation runs, no data key is
+    /// produced, and the vault's locked state never changes because of this call.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is deliberately not the same question <see cref="UnlockWithDeviceAsync"/> answers. A
+    /// wrap can be present while the platform secret store has lost the secret it was sealed
+    /// under, or holds a secret that no longer opens it — both leave this <see langword="true"/>
+    /// while a real attempt would return <see cref="VaultUnlockResult.VaultMissing"/>. That gap is
+    /// the deliberate cost of asking a question with no side effect: see the type's remarks on why
+    /// no combination of unlock and lock can answer it exactly without risking the vault's state.
+    /// </para>
+    /// <para>
+    /// Returns <see langword="false"/> when there is no file, when the file does not parse, or
+    /// when this build cannot open the record's format — none of those leave anything to unlock
+    /// with, so none of them are a reason to offer the option.
+    /// </para>
+    /// </remarks>
+    Task<bool> HasDeviceWrapAsync(CancellationToken cancellationToken);
+
+    /// <summary>
     /// Writes a new, empty vault and leaves it unlocked. Throws
     /// <see cref="InvalidOperationException"/> rather than overwriting one that is already there.
     /// </summary>

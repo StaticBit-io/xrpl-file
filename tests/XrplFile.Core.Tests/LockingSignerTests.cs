@@ -91,6 +91,8 @@ public class LockingSignerTests
 
         public Task<bool> ExistsAsync(CancellationToken cancellationToken) => Task.FromResult(true);
 
+        public Task<bool> HasDeviceWrapAsync(CancellationToken cancellationToken) => Task.FromResult(false);
+
         public Task CreateAsync(ReadOnlyMemory<byte> password, CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task<VaultUnlockResult> UnlockAsync(ReadOnlyMemory<byte> password, CancellationToken cancellationToken) =>

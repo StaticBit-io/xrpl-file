@@ -322,6 +322,9 @@ internal sealed class RecordingVault : IKeyVault
     public Task<bool> ExistsAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
 
     /// <inheritdoc/>
+    public Task<bool> HasDeviceWrapAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+
+    /// <inheritdoc/>
     public Task CreateAsync(ReadOnlyMemory<byte> password, CancellationToken cancellationToken) =>
         throw new NotSupportedException();
 

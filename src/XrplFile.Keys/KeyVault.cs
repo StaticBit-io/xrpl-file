@@ -226,6 +226,53 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Reads and parses the record the same way <see cref="ExistsAsync"/> reads for existence, and
+    /// nothing more: no password key is derived, no data key is produced, and the vault's locked
+    /// state is untouched either way. When this vault already holds the record open, the cached
+    /// copy answers instead of a redundant file read.
+    /// </remarks>
+    public async Task<bool> HasDeviceWrapAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_record is not null)
+            {
+                return _record.DeviceDek is not null;
+            }
+
+            byte[]? bytes = await DurableFile.ReadAsync(_path, cancellationToken).ConfigureAwait(false);
+            if (bytes is null)
+            {
+                return false;
+            }
+
+            VaultRecord record;
+            try
+            {
+                record = VaultRecordCodec.Parse(bytes);
+            }
+            catch (VaultException ex) when (ex.Error == VaultError.Corrupt)
+            {
+                return false;
+            }
+
+            if (record.V != CurrentVersion || record.KdfId != _kdf.KdfId)
+            {
+                // Nothing this build could open with anyway, so nothing worth offering either.
+                return false;
+            }
+
+            return record.DeviceDek is not null;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task CreateAsync(ReadOnlyMemory<byte> password, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);

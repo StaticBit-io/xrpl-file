@@ -28,37 +28,49 @@ public sealed class UnlockModel(IKeyVault vault)
     /// <summary>
     /// The message for the most recent attempt to open the vault — by password or by device — or
     /// <see langword="null"/> before any such attempt has been made. Never set by
-    /// <see cref="RefreshAsync"/>'s own device-unlock probe: that probe answers a question about
-    /// what is possible, not an attempt the person made, and showing its result as if it were one
-    /// would tell a story about an action nobody took.
+    /// <see cref="RefreshAsync"/>: a refresh answers a question about what is possible, not an
+    /// attempt the person made, and showing a result as if it were one would tell a story about an
+    /// action nobody took.
     /// </summary>
     public UnlockMessage? LastMessage { get; private set; }
 
     /// <summary>
-    /// Whether "unlock with device" is worth showing right now — not merely whether the vault
-    /// format has a place for a device wrap, but whether opening it that way would actually work
-    /// this instant. See the remarks on <see cref="RefreshAsync"/> for how that is decided.
+    /// Whether "unlock with device" is worth showing right now — whether the vault's record
+    /// carries a device wrap at all, not whether opening it that way would actually succeed this
+    /// instant. See the remarks on <see cref="RefreshAsync"/> for why that is the question this
+    /// answers, and what it can be wrong about.
     /// </summary>
     public bool DeviceUnlockOffered { get; private set; }
 
     /// <summary>
     /// Re-reads where the vault stands: whether a file exists at all, and — when one does and it
-    /// is not already open — whether a device unlock is currently possible.
+    /// is not already open — whether the record carries a device wrap.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="IKeyVault"/> exposes no side-effect-free way to ask "would a device unlock work
-    /// right now" — the record does not say whether it carries a device wrap, and even if it did,
-    /// that would only say the option exists in the abstract: the platform secret store could
-    /// still have lost its secret, or the wrap could fail to open with what it has. The only
-    /// truthful answer is to actually attempt <see cref="IKeyVault.UnlockWithDeviceAsync"/> and see.
+    /// <b>This never opens the vault to answer the question.</b> An earlier version of this method
+    /// answered "would a device unlock work right now" by actually calling
+    /// <see cref="IKeyVault.UnlockWithDeviceAsync"/> and, if that opened the vault, calling
+    /// <see cref="IKeyVault.LockAsync"/> to put it back — on the theory that a truthful answer
+    /// needed a real attempt. It does not: those are two separate calls against a vault whose gate
+    /// releases between them, and <see cref="IKeyVault.UnlockWithDeviceAsync"/> unconditionally
+    /// discards whatever key was already resident before installing its own. A real press on
+    /// "unlock with device", landing in the gap between this method's own unlock and its
+    /// compensating lock, unlocks the vault for real and sets <see cref="Stage"/> to
+    /// <see cref="UnlockStage.Unlocked"/> — and then this method's queued lock call runs anyway and
+    /// wipes the key it just unlocked, leaving the screen saying "in" over a vault that is shut.
     /// </para>
     /// <para>
-    /// So that is what this does — and then, if the attempt opened the vault, it locks it straight
-    /// back up. The probe is real, not simulated, but it does not get to be the thing that lets
-    /// the person in: that stays <see cref="UnlockWithDeviceAsync"/>'s job alone, called from a
-    /// deliberate press on the button this flag controls, and never a side effect of the screen
-    /// merely being looked at again.
+    /// A refresh that can change whether the vault is open is the wrong shape regardless of the
+    /// race: this method must never be the thing that opens or closes the vault, so it now asks
+    /// <see cref="IKeyVault.HasDeviceWrapAsync"/> — a read of the record, not an unlock — and pays
+    /// no more than that read costs. See that method's remarks for what this trades away: a device
+    /// wrap can be present while the platform secret store has lost the secret it was sealed under
+    /// or holds one that no longer opens it, so <see cref="DeviceUnlockOffered"/> can say "yes" to
+    /// a press that then reports <see cref="VaultUnlockResult.VaultMissing"/> — the outcome that
+    /// exists precisely to say "there is nothing left to open with, turn the setting off". It
+    /// cannot say "no" to a press that would have worked: no wrap means nothing to open with,
+    /// truthfully, on every path this method can see.
     /// </para>
     /// </remarks>
     public async Task RefreshAsync(CancellationToken cancellationToken)
@@ -79,7 +91,7 @@ public sealed class UnlockModel(IKeyVault vault)
         }
 
         Stage = UnlockStage.Locked;
-        DeviceUnlockOffered = await ProbeDeviceUnlockAsync(cancellationToken).ConfigureAwait(false);
+        DeviceUnlockOffered = await vault.HasDeviceWrapAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Writes a new, empty vault and leaves it open.</summary>
@@ -120,36 +132,5 @@ public sealed class UnlockModel(IKeyVault vault)
         Stage = result is VaultUnlockResult.Success or VaultUnlockResult.VaultDegraded
             ? UnlockStage.Unlocked
             : UnlockStage.Locked;
-    }
-
-    private async Task<bool> ProbeDeviceUnlockAsync(CancellationToken cancellationToken)
-    {
-        VaultUnlockResult probe = await vault.UnlockWithDeviceAsync(cancellationToken).ConfigureAwait(false);
-
-        // See UnlockMessages.For for why CS8524 alone is suppressed here: this switch already
-        // covers every named VaultUnlockResult, and only an impossible cast value is left
-        // uncovered. CS8509 — a genuinely new named member with no arm — stays live.
-#pragma warning disable CS8524
-        bool possible = probe switch
-        {
-            VaultUnlockResult.Success => true,
-            VaultUnlockResult.VaultDegraded => true,
-            VaultUnlockResult.VaultUnavailable => true,
-            VaultUnlockResult.VaultMissing => false,
-            VaultUnlockResult.VaultCorrupt => false,
-            VaultUnlockResult.VaultUnsupported => false,
-            VaultUnlockResult.WrongPassword => false,
-        };
-#pragma warning restore CS8524
-
-        if (probe is VaultUnlockResult.Success or VaultUnlockResult.VaultDegraded)
-        {
-            // The probe just opened the vault for real, which is the only way it could answer
-            // truthfully. Put it back exactly as it found it: a refresh must never be the thing
-            // that lets the person in.
-            await vault.LockAsync().ConfigureAwait(false);
-        }
-
-        return possible;
     }
 }

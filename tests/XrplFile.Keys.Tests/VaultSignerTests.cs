@@ -240,6 +240,9 @@ public class VaultSignerTests : VaultTestHarness
 
         public Task<bool> ExistsAsync(CancellationToken cancellationToken) => inner.ExistsAsync(cancellationToken);
 
+        public Task<bool> HasDeviceWrapAsync(CancellationToken cancellationToken) =>
+            inner.HasDeviceWrapAsync(cancellationToken);
+
         public Task CreateAsync(ReadOnlyMemory<byte> password, CancellationToken cancellationToken) =>
             inner.CreateAsync(password, cancellationToken);
 
