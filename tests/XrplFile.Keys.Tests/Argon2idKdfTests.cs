@@ -1,4 +1,4 @@
-﻿using Konscious.Security.Cryptography;
+using Konscious.Security.Cryptography;
 using Xunit;
 
 namespace XrplFile.Keys.Tests;

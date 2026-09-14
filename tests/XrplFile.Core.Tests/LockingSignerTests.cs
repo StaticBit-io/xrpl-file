@@ -1,4 +1,4 @@
-﻿using XrplFile.Keys;
+using XrplFile.Keys;
 using Xunit;
 
 namespace XrplFile.Tests;

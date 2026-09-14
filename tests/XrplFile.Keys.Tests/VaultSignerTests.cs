@@ -1,4 +1,4 @@
-﻿using Xrpl.Wallet;
+using Xrpl.Wallet;
 using Xunit;
 
 namespace XrplFile.Keys.Tests;
