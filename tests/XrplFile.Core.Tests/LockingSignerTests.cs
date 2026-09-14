@@ -87,6 +87,8 @@ public class LockingSignerTests
 
         public IReadOnlyList<string> DamagedReferences => [];
 
+        public bool WritesAreRefused => false;
+
         public Task AcknowledgeDamageAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task<bool> ExistsAsync(CancellationToken cancellationToken) => Task.FromResult(true);

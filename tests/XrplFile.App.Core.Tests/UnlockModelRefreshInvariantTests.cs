@@ -138,6 +138,8 @@ public class UnlockModelRefreshInvariantTests : VaultHarness
 
         public IReadOnlyList<string> DamagedReferences => inner.DamagedReferences;
 
+        public bool WritesAreRefused => inner.WritesAreRefused;
+
         public Task AcknowledgeDamageAsync(CancellationToken cancellationToken) =>
             inner.AcknowledgeDamageAsync(cancellationToken);
 
@@ -268,6 +270,8 @@ public class UnlockModelRefreshCostTests : VaultHarness
         public IReadOnlyCollection<string> References => inner.References;
 
         public IReadOnlyList<string> DamagedReferences => inner.DamagedReferences;
+
+        public bool WritesAreRefused => inner.WritesAreRefused;
 
         public Task AcknowledgeDamageAsync(CancellationToken cancellationToken) =>
             inner.AcknowledgeDamageAsync(cancellationToken);

@@ -235,6 +235,8 @@ public class VaultSignerTests : VaultTestHarness
 
         public IReadOnlyList<string> DamagedReferences => inner.DamagedReferences;
 
+        public bool WritesAreRefused => inner.WritesAreRefused;
+
         public Task AcknowledgeDamageAsync(CancellationToken cancellationToken) =>
             inner.AcknowledgeDamageAsync(cancellationToken);
 

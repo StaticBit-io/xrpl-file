@@ -18,10 +18,12 @@ public class VaultListModelTests : VaultHarness
 
         KeyRow row = Assert.Single(model.Rows);
         Assert.False(row.IsDamaged);
-        Assert.Equal("mine", row.Info.Label);
-        Assert.Equal(VaultEntryKind.Imported, row.Info.Kind);
-        Assert.Equal("standalone", row.Info.Network);
-        Assert.Equal("rAddressOfmine", row.Info.Address);
+        Assert.NotNull(row.Info);
+        VaultEntryInfo info = row.Info!;
+        Assert.Equal("mine", info.Label);
+        Assert.Equal(VaultEntryKind.Imported, info.Kind);
+        Assert.Equal("standalone", info.Network);
+        Assert.Equal("rAddressOfmine", info.Address);
     }
 
     [Fact]
@@ -36,8 +38,8 @@ public class VaultListModelTests : VaultHarness
         VaultListModel model = new(vault);
         await model.RefreshAsync(TestContext.Current.CancellationToken);
 
-        Assert.True(model.Rows.Single(r => r.Info.Kind == VaultEntryKind.Generated).NeedsExporting);
-        Assert.False(model.Rows.Single(r => r.Info.Kind == VaultEntryKind.Imported).NeedsExporting);
+        Assert.True(model.Rows.Single(r => r.Info?.Kind == VaultEntryKind.Generated).NeedsExporting);
+        Assert.False(model.Rows.Single(r => r.Info?.Kind == VaultEntryKind.Imported).NeedsExporting);
     }
 
     [Fact]
@@ -91,10 +93,36 @@ public class VaultListModelTests : VaultHarness
 
         Assert.Equal(2, model.Rows.Count);
         KeyRow damagedRow = Assert.Single(model.Rows, r => r.IsDamaged);
-        Assert.Equal(damaged, damagedRow.Info.Reference);
+        Assert.Equal(damaged, damagedRow.Reference);
         KeyRow intactRow = Assert.Single(model.Rows, r => !r.IsDamaged);
-        Assert.Equal(intact, intactRow.Info.Reference);
-        Assert.Equal("intact", intactRow.Info.Label);
+        Assert.Equal(intact, intactRow.Reference);
+        Assert.NotNull(intactRow.Info);
+        Assert.Equal("intact", intactRow.Info!.Label);
+    }
+
+    [Fact]
+    public async Task A_damaged_row_exposes_no_metadata()
+    {
+        // The row for a damaged reference must not be able to hand out a kind, label, network or
+        // address: none of it is recoverable, since it lives inside the ciphertext that failed its
+        // own authentication tag. Info is null rather than a placeholder, so a caller cannot read a
+        // fabricated value without first checking IsDamaged.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        string damaged = await vault.StoreAsync(
+            Entry("throwaway", VaultEntryKind.Generated), TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+        FlipOneByteOfEntry(damaged);
+        await vault.UnlockAsync(Password("p"), TestContext.Current.CancellationToken);
+
+        VaultListModel model = new(vault);
+        await model.RefreshAsync(TestContext.Current.CancellationToken);
+
+        KeyRow damagedRow = Assert.Single(model.Rows);
+        Assert.True(damagedRow.IsDamaged);
+        Assert.Equal(damaged, damagedRow.Reference);
+        Assert.Null(damagedRow.Info);
+        Assert.False(damagedRow.NeedsExporting);
     }
 
     [Fact]
@@ -115,8 +143,8 @@ public class VaultListModelTests : VaultHarness
         VaultListModel model = new(vault);
         await model.RefreshAsync(TestContext.Current.CancellationToken);
 
-        Assert.DoesNotContain(model.Rows, r => r.Info.Reference == gone);
-        Assert.Contains(model.Rows, r => r.Info.Reference == kept);
+        Assert.DoesNotContain(model.Rows, r => r.Reference == gone);
+        Assert.Contains(model.Rows, r => r.Reference == kept);
         Assert.False(model.IsDegraded);
     }
 
@@ -144,6 +172,40 @@ public class VaultListModelTests : VaultHarness
         // Proves WritesAreRefused was not a made-up flag: a write that would have thrown
         // VaultError.Degraded before AcknowledgeDamageAsync now goes through.
         await vault.StoreAsync(Entry("two"), TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Writes_are_refused_again_after_a_lock_and_unlock_bring_fresh_damage()
+    {
+        // A model kept alive across a lock cycle must not go on trusting an acknowledgement given
+        // under the unlock that has since ended. If the vault comes back freshly degraded, writes
+        // must read as refused again even though this same model instance already acknowledged
+        // damage once before the lock.
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        string first = await vault.StoreAsync(Entry("one"), TestContext.Current.CancellationToken);
+        string second = await vault.StoreAsync(Entry("two"), TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+        FlipOneByteOfEntry(first);
+        await vault.UnlockAsync(Password("p"), TestContext.Current.CancellationToken);
+
+        VaultListModel model = new(vault);
+        await model.RefreshAsync(TestContext.Current.CancellationToken);
+        Assert.True(model.WritesAreRefused);
+
+        await model.AcknowledgeDamageAsync(TestContext.Current.CancellationToken);
+        Assert.False(model.WritesAreRefused);
+
+        // Lock, then damage a different entry before unlocking again: a second, unrelated round of
+        // damage that this model's earlier acknowledgement has nothing to do with.
+        await vault.LockAsync();
+        FlipOneByteOfEntry(second);
+        VaultUnlockResult unlocked = await vault.UnlockAsync(Password("p"), TestContext.Current.CancellationToken);
+        Assert.Equal(VaultUnlockResult.VaultDegraded, unlocked);
+
+        await model.RefreshAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(model.WritesAreRefused);
     }
 
     [Fact]

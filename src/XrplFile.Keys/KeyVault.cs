@@ -212,6 +212,16 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
     public IReadOnlyList<string> DamagedReferences => Array.AsReadOnly(_damagedReferences);
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// A direct read of <see cref="_recordIntegrityFailed"/> — the same field
+    /// <see cref="RequireTheDamageAcknowledged"/> checks before a write, and the same field
+    /// <see cref="AcknowledgeDamageAsync"/> clears and <see cref="Forget"/> resets on every lock. A
+    /// caller that reads this property is therefore asking the vault's actual gate, not a second
+    /// opinion that could drift from it.
+    /// </remarks>
+    public bool WritesAreRefused => _recordIntegrityFailed;
+
+    /// <inheritdoc/>
     public async Task<bool> ExistsAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);

@@ -3,13 +3,17 @@ using XrplFile.Keys;
 namespace XrplFile.App.Core;
 
 /// <summary>
-/// One row of the key list (design 6). <see cref="Info"/> is always populated: for an entry the
-/// vault could decrypt, it is what <see cref="IKeyVault.ListAsync"/> returned; for one that
-/// failed its own authentication tag, decryption never ran, so every field but
-/// <see cref="VaultEntryInfo.Reference"/> is a placeholder — <see cref="IsDamaged"/> is what tells
-/// a caller not to trust them.
+/// One row of the key list (design 6). <see cref="Reference"/> is always the vault's reference for
+/// this entry; <see cref="Info"/> is the vault's metadata for it, or <see langword="null"/> when
+/// <see cref="IsDamaged"/>. There is no placeholder <see cref="VaultEntryInfo"/> for a damaged
+/// entry: its label, kind, network and address all live inside the ciphertext that failed its own
+/// authentication tag, so decryption never ran and nothing about them can honestly be reported.
+/// Making <see cref="Info"/> nullable rather than documenting the placeholder is deliberate — a
+/// caller that reaches for <c>row.Info.Kind</c> without checking <see cref="IsDamaged"/> first gets
+/// a compiler error under this repository's <c>TreatWarningsAsErrors</c>, not a row that quietly
+/// hands out a kind, label, network or address nobody could actually read.
 /// </summary>
-public sealed record KeyRow(VaultEntryInfo Info, bool IsDamaged, bool NeedsExporting);
+public sealed record KeyRow(string Reference, VaultEntryInfo? Info, bool IsDamaged, bool NeedsExporting);
 
 /// <summary>
 /// The model behind the key list (design 6, 3.1): the entries the vault can show, which of them
@@ -19,8 +23,6 @@ public sealed record KeyRow(VaultEntryInfo Info, bool IsDamaged, bool NeedsExpor
 /// </summary>
 public sealed class VaultListModel(IKeyVault vault)
 {
-    private bool _acknowledged;
-
     /// <summary>
     /// The vault's entries, in the order <see cref="IKeyVault.References"/> reports them.
     /// Meaningful only after <see cref="RefreshAsync"/> has run at least once; empty before that.
@@ -38,12 +40,13 @@ public sealed class VaultListModel(IKeyVault vault)
 
     /// <summary>
     /// Whether a write against the vault would be refused with <see cref="VaultError.Degraded"/>
-    /// right now. True from the refresh that first observes <see cref="IsDegraded"/>, and false
-    /// from the moment <see cref="AcknowledgeDamageAsync"/> succeeds — set directly there rather
-    /// than by asking the vault again, because the vault has no property for it and a write-only
-    /// to find out would be exactly the probing this model must not do (see that method's remarks).
+    /// right now. A direct read of <see cref="IKeyVault.WritesAreRefused"/> — not a flag this model
+    /// caches and updates by hand — so it is correct even for a model instance kept alive across a
+    /// lock and a later unlock that comes back freshly degraded: acknowledging damage under one
+    /// unlock can never be mistaken for acknowledging damage under a different one, because nothing
+    /// here remembers "acknowledged" past the vault's own state doing so.
     /// </summary>
-    public bool WritesAreRefused { get; private set; }
+    public bool WritesAreRefused => vault.WritesAreRefused;
 
     /// <summary>
     /// Re-reads the vault's entries and its damage. Requires the vault to be unlocked, the same as
@@ -65,12 +68,10 @@ public sealed class VaultListModel(IKeyVault vault)
     /// tell a story about a key it has no trace of.
     /// </para>
     /// <para>
-    /// <see cref="WritesAreRefused"/> is recomputed here from <see cref="IsDegraded"/>, but only
-    /// while damage has not already been acknowledged this session: once
-    /// <see cref="AcknowledgeDamageAsync"/> has run, a later call to this method must not flip it
-    /// back to <see langword="true"/> just because the same damaged entries are, correctly, still
-    /// being reported — the vault's own write refusal really is lifted, and re-asserting it here
-    /// would nag about a write that would in fact succeed.
+    /// <see cref="WritesAreRefused"/> is not touched here at all: it reads straight through to
+    /// <see cref="IKeyVault.WritesAreRefused"/>, which the vault itself keeps current across a
+    /// refresh, an acknowledgement, and a lock/unlock cycle in between. There is nothing for this
+    /// method to recompute.
     /// </para>
     /// </remarks>
     public async Task RefreshAsync(CancellationToken cancellationToken)
@@ -92,11 +93,11 @@ public sealed class VaultListModel(IKeyVault vault)
             if (byReference.TryGetValue(reference, out VaultEntryInfo? info))
             {
                 bool needsExporting = info.Kind == VaultEntryKind.Generated && !info.Exported;
-                rows.Add(new KeyRow(info, IsDamaged: false, NeedsExporting: needsExporting));
+                rows.Add(new KeyRow(reference, info, IsDamaged: false, NeedsExporting: needsExporting));
             }
             else if (damagedSet.Contains(reference))
             {
-                rows.Add(new KeyRow(Placeholder(reference), IsDamaged: true, NeedsExporting: false));
+                rows.Add(new KeyRow(reference, Info: null, IsDamaged: true, NeedsExporting: false));
             }
 
             // Neither: the reference disappeared between reading References and reading the list
@@ -106,7 +107,6 @@ public sealed class VaultListModel(IKeyVault vault)
 
         Rows = rows;
         IsDegraded = damagedReferences.Count > 0;
-        WritesAreRefused = IsDegraded && !_acknowledged;
     }
 
     /// <summary>
@@ -118,31 +118,6 @@ public sealed class VaultListModel(IKeyVault vault)
     /// destroy the one witness there is to an entry deleted from the file or the file rolled back,
     /// exactly as the bug this method's own contract was written to prevent did.
     /// </summary>
-    public async Task AcknowledgeDamageAsync(CancellationToken cancellationToken)
-    {
-        await vault.AcknowledgeDamageAsync(cancellationToken).ConfigureAwait(false);
-        _acknowledged = true;
-        WritesAreRefused = false;
-    }
-
-    /// <summary>
-    /// The only <see cref="VaultEntryInfo"/> that can exist for a reference
-    /// <see cref="IKeyVault.ListAsync"/> refused to decrypt: its identity, and nothing else. Every
-    /// other field lives inside the encrypted blob (design D7), so a failed authentication tag
-    /// makes them unrecoverable, not merely unknown — <see cref="VaultEntryKind.Imported"/> is
-    /// chosen over <see cref="VaultEntryKind.Generated"/> only so a damaged row can never be
-    /// mistaken for a throwaway account nobody exported; <see cref="KeyRow.NeedsExporting"/> is
-    /// forced to <see langword="false"/> by the caller regardless.
-    /// </summary>
-    private static VaultEntryInfo Placeholder(string reference) => new(
-        Reference: reference,
-        Kind: VaultEntryKind.Imported,
-        Label: string.Empty,
-        Network: string.Empty,
-        Address: string.Empty,
-        CreatedAt: default,
-        LastKnownSequence: null,
-        DeletableFromLedger: null,
-        Exported: false,
-        Algorithm: null);
+    public Task AcknowledgeDamageAsync(CancellationToken cancellationToken) =>
+        vault.AcknowledgeDamageAsync(cancellationToken);
 }

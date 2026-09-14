@@ -316,6 +316,9 @@ internal sealed class RecordingVault : IKeyVault
     public IReadOnlyList<string> DamagedReferences => throw new NotSupportedException();
 
     /// <inheritdoc/>
+    public bool WritesAreRefused => throw new NotSupportedException();
+
+    /// <inheritdoc/>
     public Task AcknowledgeDamageAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
 
     /// <inheritdoc/>

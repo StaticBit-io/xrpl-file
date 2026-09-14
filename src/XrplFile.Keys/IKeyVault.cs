@@ -149,6 +149,17 @@ public interface IKeyVault
     IReadOnlyList<string> DamagedReferences { get; }
 
     /// <summary>
+    /// Whether a write against this vault would be refused right now with
+    /// <see cref="VaultError.Degraded"/>. Set by the unlock that finds the record's own integrity
+    /// code not matching its current contents, cleared by <see cref="AcknowledgeDamageAsync"/>, and
+    /// always <see langword="false"/> while the vault is locked. A caller that wants to know whether
+    /// writing would be refused reads this rather than catching <see cref="VaultError.Degraded"/>
+    /// from an attempted write — the vault answers the question directly instead of a caller having
+    /// to provoke it.
+    /// </summary>
+    bool WritesAreRefused { get; }
+
+    /// <summary>
     /// Says that the damage reported by the unlock which opened this vault has been seen, and
     /// releases the writes that are refused until it is.
     /// </summary>
