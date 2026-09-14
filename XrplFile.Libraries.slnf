@@ -1,0 +1,15 @@
+{
+  "solution": {
+    "path": "XrplFile.sln",
+    "projects": [
+      "app\\XrplFile.App.Core\\XrplFile.App.Core.csproj",
+      "src\\XrplFile.Core\\XrplFile.Core.csproj",
+      "src\\XrplFile.Keys\\XrplFile.Keys.csproj",
+      "tests\\XrplFile.App.Core.Tests\\XrplFile.App.Core.Tests.csproj",
+      "tests\\XrplFile.Core.Tests\\XrplFile.Core.Tests.csproj",
+      "tests\\XrplFile.Keys.Tests\\XrplFile.Keys.Tests.csproj",
+      "tools\\XrplFile.KeyBench\\XrplFile.KeyBench.csproj",
+      "tools\\XrplFile.Vectors\\XrplFile.Vectors.csproj"
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>XrplFile.App.Core</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\XrplFile.Core\XrplFile.Core.csproj" />
+    <ProjectReference Include="..\..\src\XrplFile.Keys\XrplFile.Keys.csproj" />
+  </ItemGroup>
+</Project>
