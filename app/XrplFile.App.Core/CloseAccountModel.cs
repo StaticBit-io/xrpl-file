@@ -177,8 +177,14 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
 
             try
             {
+                // CancellationToken.None, deliberately not cancellationToken: by the time this runs,
+                // the node has already accepted an irreversible deletion, and this entry is the only
+                // place that will remember where the money went. A caller tearing the screen down, or
+                // a token that simply expires while this write is in flight, must not stop the one
+                // write that matters from landing. Cancellation is still honoured everywhere above
+                // this point, where stopping genuinely means nothing happened.
                 await vault.UpdateAsync(
-                    _reference, new VaultEntryEdit(Closure: closure), cancellationToken).ConfigureAwait(false);
+                    _reference, new VaultEntryEdit(Closure: closure), CancellationToken.None).ConfigureAwait(false);
 
                 Closed = closure;
             }
@@ -200,9 +206,21 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             // after signing and submitting: PublishErrorMessages.For's own sentence for that code is
             // written for the publishing tab, where a refusal costs the open-ledger fee. A refused
             // AccountDelete costs one owner reserve instead, and deserves to say so.
-            Message = ex.Error == XrplFileError.SubmitRefused
-                ? CloseErrorMessages.DeletionRefused
-                : PublishErrorMessages.For(ex);
+            if (ex.Error == XrplFileError.SubmitRefused)
+            {
+                // The node itself has just proved the preflight's Ready conclusion false — that is
+                // what a refusal after signing and submitting means. Leaving Preview (and so
+                // CanClose) as it was would let a second click submit again against the same stale
+                // conclusion and burn a second owner reserve to be refused a second time. Clearing it
+                // forces a fresh preflight, which is also the only way to learn whether the reason
+                // changed.
+                Preview = null;
+                Message = CloseErrorMessages.DeletionRefused;
+            }
+            else
+            {
+                Message = PublishErrorMessages.For(ex);
+            }
         }
         catch (VaultException ex)
         {

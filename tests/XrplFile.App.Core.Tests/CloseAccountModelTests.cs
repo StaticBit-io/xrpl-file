@@ -267,7 +267,7 @@ public sealed class CloseAccountModelTests : VaultHarness
     }
 
     [Fact]
-    public async Task A_refused_deletion_says_the_fee_was_still_claimed()
+    public async Task A_refused_deletion_says_the_fee_was_still_claimed_and_will_not_close_again()
     {
         (CloseAccountModel model, _, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);
         _connections.Sink.Refusals[0] = "tecTOO_SOON";
@@ -275,11 +275,18 @@ public sealed class CloseAccountModelTests : VaultHarness
         await model.SelectAsync(reference, TestContext.Current.CancellationToken);
         model.ChooseDestination(Home);
         await model.PreflightAsync(TestContext.Current.CancellationToken);
+        Assert.True(model.CanClose);
+
         await model.CloseAsync(TestContext.Current.CancellationToken);
 
         // Not PublishErrorMessages.For's own SubmitRefused sentence — that one is written for the
         // publishing tab, where a refusal costs the open-ledger fee rather than a whole owner reserve.
         Assert.Equal(CloseErrorMessages.DeletionRefused, model.Message);
+
+        // The node has just proved the preflight's Ready conclusion false: a second click must not
+        // be able to submit again against the same stale conclusion and burn a second reserve.
+        Assert.Null(model.Preview);
+        Assert.False(model.CanClose);
     }
 
     /// <summary>
