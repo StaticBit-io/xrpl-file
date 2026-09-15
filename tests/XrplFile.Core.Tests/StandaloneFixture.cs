@@ -1,4 +1,8 @@
+using System.Text.Json;
 using Xrpl.Client;
+using Xrpl.Client.Json;
+using Xrpl.Models;
+using Xrpl.Models.Methods;
 using Xrpl.Wallet;
 using Xunit;
 
@@ -101,6 +105,33 @@ internal static class StandaloneFixture
             if (balance > floorDrops) return balance;
 
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+        }
+    }
+
+    public static async Task<long> CurrentLedgerAsync(IXrplClient client, CancellationToken token)
+    {
+        XrplResponse<object> response = await client.GRequest<object, LedgerRequest>(
+            new LedgerRequest { LedgerIndex = new Xrpl.Models.Common.LedgerIndex(Xrpl.Models.Ledger.LedgerIndexType.Validated) }, token);
+
+        return response.Raw.ToJsonElement().GetProperty("ledger_index").GetInt64();
+    }
+
+    /// <summary>
+    /// Closes ledgers until the validated index reaches the target. The stand's sidecar closes one
+    /// every few seconds on its own; this drives them as fast as the node will take them, which is
+    /// what makes a 255-ledger wait a matter of seconds rather than a quarter of an hour.
+    ///
+    /// The SDK has no typed <c>ledger_accept</c> request (it is an admin-only, standalone-only
+    /// command with no production use), so this sends it the way <c>XrplClientLedgerSink</c> and
+    /// the XrplCSharp integration tests do: a bare <see cref="BaseRequest"/> with the command name,
+    /// through <see cref="IXrplClient.AnyRequest"/>.
+    /// </summary>
+    public static async Task CloseLedgersUntilAsync(IXrplClient client, long target, CancellationToken token)
+    {
+        while (await CurrentLedgerAsync(client, token) < target)
+        {
+            token.ThrowIfCancellationRequested();
+            await client.AnyRequest(new BaseRequest { Command = "ledger_accept" }, token);
         }
     }
 }

@@ -45,7 +45,7 @@ public class AccountDeleteThresholdTests
 
             // A new account's sequence is the index of the ledger that created it.
             uint created = await sink.SequenceAsync(throwaway.ClassicAddress, validated: true, token);
-            long createdIn = await CurrentLedgerAsync(client, token);
+            long createdIn = await StandaloneFixture.CurrentLedgerAsync(client, token);
             Assert.InRange(created, createdIn - 5, createdIn);
 
             // The mint moves the sequence by the count plus one, and by nothing else.
@@ -63,7 +63,7 @@ public class AccountDeleteThresholdTests
             await AssertTicketsExistAsync(client, throwaway.ClassicAddress, beforeMint + 1, mint, token);
 
             // Too soon: the threshold sits at Sequence + 255, well past the current index.
-            long now = await CurrentLedgerAsync(client, token);
+            long now = await StandaloneFixture.CurrentLedgerAsync(client, token);
             Assert.True(afterMint + SeqDelta > now, $"the test needs the threshold ahead of ledger {now}");
 
             // Pin the boundary from both sides: one ledger short of the threshold must still
@@ -81,17 +81,17 @@ public class AccountDeleteThresholdTests
             // value captured before it.
             uint sequenceBeforeBoundary = await sink.SequenceAsync(throwaway.ClassicAddress, validated: false, token);
             long boundary = sequenceBeforeBoundary + SeqDelta - 1;
-            await CloseLedgersUntilAsync(client, boundary - 1, token);
+            await StandaloneFixture.CloseLedgersUntilAsync(client, boundary - 1, token);
 
-            long tooSoonLedger = await CurrentLedgerAsync(client, token);
+            long tooSoonLedger = await StandaloneFixture.CurrentLedgerAsync(client, token);
             string tooSoon = await AttemptDeleteAsync(client, sink, throwaway, funder.ClassicAddress, token);
             Assert.Equal("tecTOO_SOON", tooSoon);
 
             uint sequenceAfterRefusal = await sink.SequenceAsync(throwaway.ClassicAddress, validated: false, token);
             long recomputedBoundary = sequenceAfterRefusal + SeqDelta - 1;
-            await CloseLedgersUntilAsync(client, recomputedBoundary, token);
+            await StandaloneFixture.CloseLedgersUntilAsync(client, recomputedBoundary, token);
 
-            long acceptedLedger = await CurrentLedgerAsync(client, token);
+            long acceptedLedger = await StandaloneFixture.CurrentLedgerAsync(client, token);
             string accepted = await AttemptDeleteAsync(client, sink, throwaway, funder.ClassicAddress, token);
             Assert.True(
                 accepted is "tesSUCCESS" or "terQUEUED",
@@ -121,7 +121,7 @@ public class AccountDeleteThresholdTests
             await FundAsync(client, sink, funder, account.ClassicAddress, 50_000_000, token);
 
             uint before = await sink.SequenceAsync(account.ClassicAddress, validated: true, token);
-            long ledgerBefore = await CurrentLedgerAsync(client, token);
+            long ledgerBefore = await StandaloneFixture.CurrentLedgerAsync(client, token);
             long gapBefore = before + SeqDelta - ledgerBefore;
 
             // An AccountSet with no fields: the cheapest transaction there is.
@@ -139,7 +139,7 @@ public class AccountDeleteThresholdTests
             await WaitForSequenceAsync(sink, account.ClassicAddress, sequence + 1, token);
 
             uint after = await sink.SequenceAsync(account.ClassicAddress, validated: true, token);
-            long ledgerAfter = await CurrentLedgerAsync(client, token);
+            long ledgerAfter = await StandaloneFixture.CurrentLedgerAsync(client, token);
             long gapAfter = after + SeqDelta - ledgerAfter;
 
             // Every transaction raises the sequence, and so raises the threshold with it. Sending
@@ -152,33 +152,6 @@ public class AccountDeleteThresholdTests
         finally
         {
             await client.Disconnect();
-        }
-    }
-
-    private static async Task<long> CurrentLedgerAsync(IXrplClient client, CancellationToken token)
-    {
-        XrplResponse<object> response = await client.GRequest<object, LedgerRequest>(
-            new LedgerRequest { LedgerIndex = new Xrpl.Models.Common.LedgerIndex(Xrpl.Models.Ledger.LedgerIndexType.Validated) }, token);
-
-        return response.Raw.ToJsonElement().GetProperty("ledger_index").GetInt64();
-    }
-
-    /// <summary>
-    /// Closes ledgers until the validated index reaches the target. The stand's sidecar closes one
-    /// every few seconds on its own; this drives them as fast as the node will take them, which is
-    /// what makes a 255-ledger wait a matter of seconds rather than a quarter of an hour.
-    ///
-    /// The SDK has no typed <c>ledger_accept</c> request (it is an admin-only, standalone-only
-    /// command with no production use), so this sends it the way <c>XrplClientLedgerSink</c> and
-    /// the XrplCSharp integration tests do: a bare <see cref="BaseRequest"/> with the command name,
-    /// through <see cref="IXrplClient.AnyRequest"/>.
-    /// </summary>
-    private static async Task CloseLedgersUntilAsync(IXrplClient client, long target, CancellationToken token)
-    {
-        while (await CurrentLedgerAsync(client, token) < target)
-        {
-            token.ThrowIfCancellationRequested();
-            await client.AnyRequest(new BaseRequest { Command = "ledger_accept" }, token);
         }
     }
 
