@@ -13,10 +13,11 @@ public sealed class XrplConnectionFactory(INodeSettingsStore settings) : IConnec
                 XrplFileError.NodeUnreachable,
                 $"no node URL is known for the network '{network}'; add one in Settings");
 
-        IXrplClient client = new XrplClient(url);
+        IXrplClient? client = null;
 
         try
         {
+            client = new XrplClient(url);
             await client.Connect(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -24,6 +25,11 @@ public sealed class XrplConnectionFactory(INodeSettingsStore settings) : IConnec
             // Everything a failed WebSocket handshake can throw -- a refused connection, a DNS
             // failure, a TLS failure, a protocol error -- is the same fact to the person holding
             // the screen, and the inner exception is kept so a log still carries which one it was.
+            if (client is not null)
+            {
+                client.Dispose();
+            }
+
             throw new XrplFileException(
                 XrplFileError.NodeUnreachable, $"the node at {url} did not answer", inner: ex);
         }

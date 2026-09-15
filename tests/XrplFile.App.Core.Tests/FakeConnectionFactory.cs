@@ -17,14 +17,14 @@ public sealed class FakeConnectionFactory : IConnectionFactory
 
     public int Disposals { get; private set; }
 
-    /// <summary>When set, <see cref="ConnectAsync"/> throws it instead of connecting.</summary>
+    /// <summary>When set, <see cref="ConnectAsync"/> returns a failed task with it.</summary>
     public Exception? ConnectThrows { get; set; }
 
     public FakeConnectionFactory() => Sink = new FakeLedgerSink(Ledger);
 
     public Task<ILedgerConnection> ConnectAsync(string network, CancellationToken cancellationToken)
     {
-        if (ConnectThrows is not null) throw ConnectThrows;
+        if (ConnectThrows is not null) return Task.FromException<ILedgerConnection>(ConnectThrows);
 
         Connections++;
         return Task.FromResult<ILedgerConnection>(new Connection(this));
