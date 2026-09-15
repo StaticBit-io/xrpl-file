@@ -102,12 +102,19 @@ public sealed class UnfinishedModelTests : VaultHarness
     /// <see cref="UnfinishedModel.Message"/> on its own first line. Without the fix this test guards,
     /// that ordering means a failed delete's explanation is set and then immediately erased: the row
     /// stays (correctly), but the person is told nothing about why deleting it -- the one destructive
-    /// action this screen offers -- did not work. Forces the failure the way the review asked: a
-    /// <see cref="FileStream"/> opened with <see cref="FileShare.None"/> denies the delete a sharing
-    /// violation on Windows (this application's one target platform), which surfaces from
-    /// <see cref="File.Delete(string)"/> as <see cref="IOException"/> -- the same type production
-    /// code would see from a file locked by antivirus scanning it, a sync client uploading it, or the
-    /// running publication itself still writing to it.
+    /// action this screen offers -- did not work.
+    ///
+    /// Forces the failure the way each platform actually enforces it, rather than the way an earlier
+    /// version of this test did -- opening the file with <see cref="FileShare.None"/>, which is a
+    /// genuine sharing violation on Windows but is advisory, and silently ignored, on Unix, where
+    /// CI runs this suite (<c>ubuntu-latest</c>). Deleting a file on Unix is governed entirely by the
+    /// *containing directory's* write permission, not by anything about the file itself: a read-only
+    /// attribute on the file changes nothing there (verified against a Linux container: the delete
+    /// still succeeds), but taking write permission off <see cref="RunPaths.StateDirectory"/> itself
+    /// reliably turns the delete into an <see cref="UnauthorizedAccessException"/>, the same type
+    /// <see cref="File.Delete(string)"/> throws on Windows for the held-open file, while listing the
+    /// directory's own contents (what <see cref="UnfinishedModel.Refresh"/> does next) only ever
+    /// needed read and execute, which are left alone.
     /// </summary>
     [Fact]
     public void A_state_file_that_cannot_be_deleted_says_so_and_keeps_the_row()
@@ -118,9 +125,27 @@ public sealed class UnfinishedModelTests : VaultHarness
         model.Refresh();
         UnfinishedRow row = Assert.Single(model.Rows);
 
-        using (new FileStream(row.Path, FileMode.Open, FileAccess.Read, FileShare.None))
+        if (OperatingSystem.IsWindows())
         {
-            model.Delete(row);
+            using (new FileStream(row.Path, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                model.Delete(row);
+            }
+        }
+        else
+        {
+            UnixFileMode original = File.GetUnixFileMode(Paths.StateDirectory);
+            File.SetUnixFileMode(Paths.StateDirectory, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            try
+            {
+                model.Delete(row);
+            }
+            finally
+            {
+                // Restored before the test's own DisposeAsync tries to recursively delete _directory,
+                // which needs write permission on every directory on the way down.
+                File.SetUnixFileMode(Paths.StateDirectory, original);
+            }
         }
 
         Assert.NotNull(model.Message);

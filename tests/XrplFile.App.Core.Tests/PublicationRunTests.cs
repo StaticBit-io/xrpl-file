@@ -130,11 +130,14 @@ public sealed class PublicationRunTests : VaultHarness
     {
         // PublicationHistory.Save only degrades on IOException/UnauthorizedAccessException; anything
         // else escapes Append uncaught, which is what RunAsync's own last-resort catch around the
-        // append call exists for. "C:\" is a genuine drive root, not a made-up path: Path.GetDirectoryName
-        // returns null for one (there is no parent directory of a root), and Save passes that null
-        // straight into Directory.CreateDirectory, which throws ArgumentNullException -- a type
-        // neither Save nor Append catches, and nothing here ever actually touches the real "C:\".
-        PublicationHistory badHistory = new(@"C:\");
+        // append call exists for. An empty path is what provokes that cross-platform: Path.GetDirectoryName
+        // returns null for one on every platform (there is no parent directory of an empty path --
+        // this is shared BCL logic, not a P/Invoke that could differ by OS, unlike a genuine drive
+        // root such as "C:\", whose own null result is Windows-only, since "\" is not a separator on
+        // Unix), and Save passes that null straight into Directory.CreateDirectory, which throws
+        // ArgumentNullException -- a type neither Save nor Append catches, and nothing here ever
+        // actually touches a real path.
+        PublicationHistory badHistory = new(string.Empty);
 
         (PublicationRun run, PublishRequest request) =
             await ReadyAsync(TestContext.Current.CancellationToken, history: badHistory);
