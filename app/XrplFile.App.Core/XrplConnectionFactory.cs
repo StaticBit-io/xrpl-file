@@ -27,7 +27,16 @@ public sealed class XrplConnectionFactory(INodeSettingsStore settings) : IConnec
             // the screen, and the inner exception is kept so a log still carries which one it was.
             if (client is not null)
             {
-                client.Dispose();
+                try
+                {
+                    client.Dispose();
+                }
+                catch (Exception disposeEx) when (disposeEx is not OperationCanceledException)
+                {
+                    // A close that fails has nothing left to report: the connection is being abandoned
+                    // either way, and throwing here would replace the NodeUnreachable outcome the
+                    // caller needs with an unrelated failure to hang up.
+                }
             }
 
             throw new XrplFileException(
