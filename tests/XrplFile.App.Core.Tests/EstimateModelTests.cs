@@ -66,6 +66,26 @@ public sealed class EstimateModelTests : IDisposable
     }
 
     [Fact]
+    public async Task A_price_the_application_cannot_use_is_refused_even_when_the_account_could_afford_it()
+    {
+        // Past int.MaxValue: both strategy option types price a transaction in an int, so a node
+        // quoting more than that is a price this application refuses rather than wraps around.
+        _connections.Ledger.Fees = new NetworkFees((long)int.MaxValue + 1, 1_000_000, 200_000);
+
+        // Generous on purpose: a balance too small to cover the worst case would also fail
+        // CanPublish, and then this test would pass for the wrong reason. This is well past what
+        // the inflated fee's worst case could ever demand.
+        _connections.Ledger.Balances["rWriter"] = 9_000_000_000_000;
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(Request(), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(model.Estimate);
+        Assert.False(model.CanPublish);
+        Assert.Equal("The node is quoting a price this application cannot use. Try a different node.", model.Message);
+    }
+
+    [Fact]
     public async Task A_second_estimate_replaces_the_first()
     {
         _connections.Ledger.Balances["rWriter"] = 100_000_000;
