@@ -1,0 +1,78 @@
+@implements IDisposable
+@inject NewAccountModel Model
+
+@* Design 4.1: generating a throwaway key, not an account -- NewAccountModel's own remarks are
+   explicit that nothing is on the ledger until somebody funds the address this produces, and this
+   screen says so in fixed copy rather than leaving it implied. CanCreate is the model's own
+   decision (a label given, a network an xrpl-file link can name); this markup only reads it to
+   decide whether the button is live. *@
+
+<h1 class="h3">New account</h1>
+
+<p>
+    This generates a key, not an account &mdash; on the XRP Ledger an account exists once it holds
+    its reserve, so the account appears on the ledger only once somebody funds the address it gets.
+</p>
+
+@if (Model.Message is not null)
+{
+    <div class="alert alert-warning">@Model.Message</div>
+}
+
+<div class="mb-3">
+    <label class="form-label">Label</label>
+    <input class="form-control" @bind="Model.Label" @bind:event="oninput" disabled="@_busy" />
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Network</label>
+    <input class="form-control" @bind="Model.Network" @bind:event="oninput" disabled="@_busy" />
+</div>
+
+<button type="button" class="btn btn-primary" disabled="@(!Model.CanCreate || _busy)" @onclick="CreateAsync">
+    Generate
+</button>
+<button type="button" class="btn btn-link" @onclick="DoneAsync">Back to accounts</button>
+
+@code {
+    [Parameter]
+    public EventCallback OnDone { get; set; }
+
+    private readonly CancellationTokenSource _cts = new();
+    private bool _busy;
+
+    private async Task CreateAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            string? reference = await Model.CreateAsync(_cts.Token);
+            if (reference is not null)
+            {
+                // Cleared only on success, matching AddKey.razor's own reasoning: a refused label or
+                // network has to stay on screen so it can be corrected, not retyped from scratch.
+                Model.Label = string.Empty;
+                Model.Network = "mainnet";
+                await OnDone.InvokeAsync();
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task DoneAsync() => OnDone.InvokeAsync();
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

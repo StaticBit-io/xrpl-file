@@ -1,0 +1,109 @@
+@implements IDisposable
+@inject FundingModel Model
+@inject IJSRuntime JS
+
+@* Design 4.1 and 4.3: the address to send to, its QR, and what the account holds now.
+   FundingModel computes no target amount (G10) and this screen adds none of its own -- a wallet
+   scanning the code is free to send whatever the person decided. Model.AccountExists is what
+   chooses between the balance and "not funded yet" below; this markup never compares BalanceDrops
+   to zero itself. The QR is drawn the same way ExportKey.razor draws one: QrMatrix.Build runs once,
+   off Model.QrPayload, and OnAfterRenderAsync paints the canvas the one time that matters. *@
+
+<h1 class="h3">Fund this account</h1>
+
+<p>
+    Send XRP to the address below, from any wallet. The account appears on the ledger once it holds
+    its reserve.
+</p>
+
+@if (Model.Message is not null)
+{
+    <div class="alert alert-warning">@Model.Message</div>
+}
+
+@if (Model.Address is { } address)
+{
+    <p><code class="user-select-all">@address</code></p>
+
+    <div style="-webkit-touch-callout: none; display: inline-block;">
+        <canvas @ref="_qrCanvas"></canvas>
+    </div>
+
+    <div class="mt-2">
+        <button type="button" class="btn btn-outline-secondary" disabled="@_copying" @onclick="CopyAsync">
+            Copy address
+        </button>
+    </div>
+
+    <p class="mt-3">
+        @if (Model.AccountExists)
+        {
+            <span>Balance: @Model.BalanceDrops.ToString("N0") drops</span>
+        }
+        else
+        {
+            <span class="text-muted">Not funded yet.</span>
+        }
+    </p>
+}
+
+<div class="mt-3">
+    <button type="button" class="btn btn-link" @onclick="BackAsync">Back to accounts</button>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Reference { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback OnBack { get; set; }
+
+    private readonly CancellationTokenSource _cts = new();
+    private ElementReference _qrCanvas;
+    private bool[][]? _pendingMatrix;
+    private bool _copying;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Model.SelectAsync(Reference, _cts.Token);
+        await Model.RefreshAsync(_cts.Token);
+
+        _pendingMatrix = Model.QrPayload is { } payload ? QrMatrix.Build(payload) : null;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingMatrix is { } matrix)
+        {
+            _pendingMatrix = null;
+            await JS.InvokeVoidAsync("drawQrMatrix", _cts.Token, _qrCanvas, matrix);
+        }
+    }
+
+    private async Task CopyAsync()
+    {
+        if (_copying)
+        {
+            return;
+        }
+
+        _copying = true;
+        StateHasChanged();
+        try
+        {
+            await Model.CopyAddressAsync(_cts.Token);
+        }
+        finally
+        {
+            _copying = false;
+        }
+    }
+
+    private Task BackAsync() => OnBack.InvokeAsync();
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

@@ -221,5 +221,12 @@ public static class MauiProgram
         services.AddSingleton<RunModel>();
         services.AddSingleton<UnfinishedModel>();
         services.AddSingleton<HistoryModel>();
+
+        // The Accounts tab (design 4.1/5.1). CloseAccountModel takes the same TimeProvider
+        // registered above, so the container resolves it with no extra wiring.
+        services.AddSingleton<AccountsModel>();
+        services.AddSingleton<NewAccountModel>();
+        services.AddSingleton<FundingModel>();
+        services.AddSingleton<CloseAccountModel>();
     }
 }

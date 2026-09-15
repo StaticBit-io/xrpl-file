@@ -48,6 +48,11 @@
                             @onclick="() => _unlockedView = UnlockedView.Settings">
                         Settings
                     </button>
+                    <button type="button"
+                            class="btn btn-outline-primary @(_unlockedView == UnlockedView.Accounts ? "active" : "")"
+                            @onclick="() => _unlockedView = UnlockedView.Accounts">
+                        Accounts
+                    </button>
                 </div>
                 <button type="button" class="btn btn-outline-secondary" @onclick="LockAsync">Lock</button>
             </div>
@@ -60,9 +65,13 @@
             {
                 <Publish />
             }
-            else
+            else if (_unlockedView == UnlockedView.Settings)
             {
                 <Settings />
+            }
+            else
+            {
+                <Accounts />
             }
             break;
     }
@@ -80,6 +89,7 @@ else
         KeyList,
         Publish,
         Settings,
+        Accounts,
     }
 
     /// <summary>

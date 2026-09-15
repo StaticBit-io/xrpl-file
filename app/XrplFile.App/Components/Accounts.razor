@@ -1,0 +1,226 @@
+@implements IDisposable
+@inject AccountsModel Model
+@inject FundingModel FundingModel
+
+@* Design 4.1: the throwaway-account list, and the three screens it opens into. Every word on a row
+   comes from AccountRow -- label, address, network and, from its own Stage, exactly one of five
+   lines this markup switches on but never derives. AccountStage.Unknown is its own line rather than
+   folded into "the balance": AccountsModel's own remarks are explicit that a cached
+   DeletableFromLedger is not an answer, and showing zero for a balance nobody has actually read
+   would be a different lie in the other direction (design G8).
+
+   AccountsModel.RefreshAsync only re-reads the vault -- no network -- so the list itself is always
+   cheap to draw. Learning what a given row actually holds costs one connection, which is why that is
+   a per-row "Check" button (RefreshFromLedgerAsync) rather than something this screen does for every
+   row on its own; AccountsModel's own remarks on why opening one connection per row would make the
+   list slower than useful.
+
+   The one-second timer is copied from Shell.razor and Publish.razor -- same Timer /
+   CancellationTokenSource / _disposed shape -- but its job here is narrower than either: it exists
+   so that the funding screen's balance, which FundingModel only learns when asked, keeps updating
+   while somebody is actually looking at it, without a button. Nothing else on this screen changes on
+   its own, so the tick only calls FundingModel.RefreshAsync while the funding sub-screen is the one
+   showing. *@
+
+<div class="container py-3" style="max-width: 900px;">
+    @switch (_view)
+    {
+        case SubView.List:
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h1 class="h3 mb-0">Accounts</h1>
+                <button type="button" class="btn btn-primary" @onclick="() => _view = SubView.New">
+                    New account
+                </button>
+            </div>
+
+            @if (Model.Message is not null)
+            {
+                <div class="alert alert-warning">@Model.Message</div>
+            }
+
+            @if (Model.Rows.Count == 0)
+            {
+                <p>No throwaway accounts yet.</p>
+            }
+            else
+            {
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th>Label</th>
+                            <th>Address</th>
+                            <th>Network</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (AccountRow row in Model.Rows)
+                        {
+                            <tr>
+                                <td>@row.Label</td>
+                                <td><code>@row.Address</code></td>
+                                <td>@row.Network</td>
+                                <td>
+                                    @switch (row.Stage)
+                                    {
+                                        case AccountStage.Unknown:
+                                            <span class="text-muted">Not checked yet</span>
+                                            break;
+
+                                        case AccountStage.KeyOnly:
+                                            <span>a key, no account yet</span>
+                                            break;
+
+                                        case AccountStage.Funded:
+                                            <span>@row.BalanceDrops.GetValueOrDefault().ToString("N0") drops</span>
+                                            break;
+
+                                        case AccountStage.Closable:
+                                            <span>can be closed now</span>
+                                            break;
+
+                                        case AccountStage.Closed:
+                                            @if (row.Closure is { } closure)
+                                            {
+                                                <span>
+                                                    Closed &mdash; sent @closure.ArrivedDrops.ToString("N0") drops to
+                                                    @closure.Destination
+                                                </span>
+                                            }
+                                            break;
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    @if (row.Stage != AccountStage.Closed)
+                                    {
+                                        <div class="btn-group btn-group-sm">
+                                            <button type="button" class="btn btn-outline-secondary"
+                                                    disabled="@(_checkingReference == row.Reference)"
+                                                    @onclick="() => CheckAsync(row.Reference)">
+                                                Check
+                                            </button>
+                                            <button type="button" class="btn btn-outline-secondary"
+                                                    @onclick="() => OpenFunding(row.Reference)">
+                                                Fund
+                                            </button>
+                                            <button type="button" class="btn btn-outline-danger"
+                                                    @onclick="() => OpenClose(row.Reference)">
+                                                Close
+                                            </button>
+                                        </div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            break;
+
+        case SubView.New:
+            <NewAccount OnDone="ReturnToListAsync" />
+            break;
+
+        case SubView.Funding:
+            <Funding Reference="@(_activeReference!)" OnBack="ReturnToListAsync" />
+            break;
+
+        case SubView.Close:
+            <CloseAccount Reference="@(_activeReference!)" OnBack="ReturnToListAsync" />
+            break;
+    }
+</div>
+
+@code {
+    private enum SubView
+    {
+        List,
+        New,
+        Funding,
+        Close,
+    }
+
+    /// <summary>How often this screen forces a render while the funding sub-screen may be waiting on
+    /// money to arrive. Matches Shell.razor's own poll -- see that component's own remarks.</summary>
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+
+    private readonly CancellationTokenSource _cts = new();
+    private Timer? _pollTimer;
+    private bool _disposed;
+    private SubView _view = SubView.List;
+    private string? _activeReference;
+    private string? _checkingReference;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Model.RefreshAsync(_cts.Token);
+
+        // Started only once the first refresh has run, matching Shell.razor's own reasoning: a tick
+        // can then never race the first render.
+        _pollTimer = new Timer(OnPollTick, state: null, PollInterval, PollInterval);
+    }
+
+    private void OnPollTick(object? state)
+    {
+        // Same disposal discipline as Shell.razor's own poll: Timer.Dispose does not wait for a
+        // callback already running on a thread-pool thread, so _disposed is checked inside the
+        // delegate the renderer's own dispatcher runs, which orders that check against Dispose().
+        _ = InvokeAsync(async () =>
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (_view == SubView.Funding)
+            {
+                await FundingModel.RefreshAsync(_cts.Token);
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private void OpenFunding(string reference)
+    {
+        _activeReference = reference;
+        _view = SubView.Funding;
+    }
+
+    private void OpenClose(string reference)
+    {
+        _activeReference = reference;
+        _view = SubView.Close;
+    }
+
+    private async Task CheckAsync(string reference)
+    {
+        _checkingReference = reference;
+        StateHasChanged();
+        try
+        {
+            await Model.RefreshFromLedgerAsync(reference, _cts.Token);
+        }
+        finally
+        {
+            _checkingReference = null;
+        }
+    }
+
+    private async Task ReturnToListAsync()
+    {
+        _activeReference = null;
+        _view = SubView.List;
+        await Model.RefreshAsync(_cts.Token);
+    }
+
+    public void Dispose()
+    {
+        // Set before the timer is disposed, for the reason Shell.razor's own Dispose explains.
+        _disposed = true;
+        _pollTimer?.Dispose();
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}
