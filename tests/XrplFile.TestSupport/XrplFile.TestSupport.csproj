@@ -5,6 +5,5 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\XrplFile.Core\XrplFile.Core.csproj" />
-    <ProjectReference Include="..\..\src\XrplFile.Keys\XrplFile.Keys.csproj" />
   </ItemGroup>
 </Project>

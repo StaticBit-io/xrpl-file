@@ -1,14 +1,13 @@
-using XrplFile.Keys;
-
 namespace XrplFile.Tests;
 
 /// <summary>
-/// A TimeProvider double: time moves only when the test calls
+/// The shared manual clock for the tests in this repository: time moves only when the test calls
 /// <see cref="Advance"/>, and advancing fires every still-scheduled timer whose due time has now
-/// been reached, synchronously, on the calling thread. Good enough for the one timer
-/// <see cref="VaultAutoLock"/> ever creates, and simpler than pulling in a package for it —
-/// <c>Microsoft.Extensions.Time.Testing</c> is not referenced anywhere in this repository, and
-/// task 10 asks for a hand-written double rather than adding one for a single class this small.
+/// been reached, synchronously, on the calling thread. Used by anything that needs a timer to fire
+/// on demand rather than on the wall clock — <c>VaultAutoLock</c> (a real repeating period,
+/// re-armed through <c>Change</c>) and <c>RevealModel</c> (a one-shot period, never re-armed) both
+/// drive their timers through it. <c>Microsoft.Extensions.Time.Testing</c> is not referenced
+/// anywhere in this repository, and a hand-written double is deliberate.
 /// </summary>
 public sealed class ManualTimeProvider : TimeProvider
 {
@@ -44,9 +43,9 @@ public sealed class ManualTimeProvider : TimeProvider
     /// A due time relative to "now" at construction or at the last <see cref="Change"/>, plus the
     /// period <see cref="ITimer"/> itself defines: firing re-arms the timer one period later, and
     /// only <see cref="Timeout.InfiniteTimeSpan"/> as the period makes it one-shot. The period is
-    /// honoured rather than ignored because <see cref="VaultAutoLock"/> now passes a real one —
-    /// a double that silently dropped it would let a one-shot implementation pass a test written
-    /// for a repeating window.
+    /// honoured rather than ignored because <c>VaultAutoLock</c> now passes a real one — a double
+    /// that silently dropped it would let a one-shot implementation pass a test written for a
+    /// repeating window.
     /// </summary>
     private sealed class ManualTimer(
         ManualTimeProvider owner, TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) : ITimer
