@@ -30,10 +30,9 @@ public sealed class XrplConnectionFactory(INodeSettingsStore settings) : IConnec
                 {
                     client.Dispose();
                 }
-                catch (Exception disposeEx) when (disposeEx is not OperationCanceledException)
+                catch (Exception)
                 {
-                    // A close that fails has nothing left to report -- throwing here would replace the
-                    // outcome the caller needs with an unrelated failure to hang up.
+                    // Nothing a close throws leaves this method: the caller's outcome is protected.
                 }
             }
 
@@ -75,11 +74,9 @@ public sealed class XrplConnectionFactory(INodeSettingsStore settings) : IConnec
             {
                 await _client.Disconnect().ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception)
             {
-                // A close that fails has nothing left to report: the connection is being abandoned
-                // either way, and throwing here would replace whatever outcome the caller was about
-                // to deliver with a failure to hang up.
+                // Nothing a close throws leaves this method: the caller's outcome is protected.
             }
         }
     }
