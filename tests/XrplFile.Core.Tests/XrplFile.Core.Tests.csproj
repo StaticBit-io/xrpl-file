@@ -11,6 +11,7 @@
     <ProjectReference Include="..\..\src\XrplFile.Core\XrplFile.Core.csproj" />
     <!-- VaultSigner, so a publication here can be signed by a key that never leaves a vault. -->
     <ProjectReference Include="..\..\src\XrplFile.Keys\XrplFile.Keys.csproj" />
+    <ProjectReference Include="..\XrplFile.TestSupport\XrplFile.TestSupport.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\vectors\v1.json" Link="vectors\v1.json" CopyToOutputDirectory="PreserveNewest" />

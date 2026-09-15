@@ -9,7 +9,7 @@ namespace XrplFile.Tests;
 /// case, not the rare one. This double removes the timing from the test without removing what
 /// the test is about: how many times progress was reported, and with what.
 /// </summary>
-internal sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
+public sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
 {
     public void Report(T value) => report(value);
 }
