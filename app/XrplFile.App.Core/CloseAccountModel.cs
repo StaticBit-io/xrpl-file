@@ -13,8 +13,8 @@ namespace XrplFile.App.Core;
 public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connections, TimeProvider time)
 {
     private string? _reference;
-    private string? _address;
     private string? _network;
+    private bool _closing;
 
     /// <summary>The vault's other keys, offered as destinations. Never this account itself.</summary>
     public IReadOnlyList<VaultEntryInfo> Candidates { get; private set; } = [];
@@ -44,7 +44,6 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
         DestinationBalanceDrops = 0;
         Closed = null;
         _reference = null;
-        _address = null;
         _network = null;
 
         try
@@ -60,12 +59,20 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             }
 
             _reference = reference;
-            _address = entry.Address;
             _network = entry.Network;
 
+            // Three ways an offered entry could not actually work as a destination: it is this same
+            // account under a second reference, it is on a network this deletion cannot reach, or it
+            // has already been closed and so no longer exists to receive anything. The preflight would
+            // catch all three and burn no reserve, but a confirmation screen that suggests a
+            // destination already known to be unusable is not one worth trusting.
             Candidates =
             [
-                .. listed.Where(info => !string.Equals(info.Reference, reference, StringComparison.Ordinal)),
+                .. listed.Where(info =>
+                    !string.Equals(info.Reference, reference, StringComparison.Ordinal)
+                    && !string.Equals(info.Address, entry.Address, StringComparison.Ordinal)
+                    && string.Equals(info.Network, entry.Network, StringComparison.Ordinal)
+                    && info.Closure is null),
             ];
         }
         catch (VaultException ex)
@@ -91,7 +98,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
         Message = null;
         Preview = null;
 
-        if (_reference is null || _address is null || _network is null || Destination is null)
+        if (_reference is null || _network is null || Destination is null)
         {
             Message = "Choose where the remainder should go.";
             return;
@@ -133,13 +140,19 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
 
     /// <summary>
     /// Submits the deletion. Does nothing unless a preflight has said it can succeed — pressing a
-    /// button is not a reason to skip the checks that keep an owner reserve from being burned.
+    /// button is not a reason to skip the checks that keep an owner reserve from being burned. Also
+    /// does nothing while a previous call is still in flight, so a double-click cannot sign and
+    /// submit the same deletion twice against the same sequence.
     /// </summary>
     public async Task CloseAsync(CancellationToken cancellationToken)
     {
+        if (_closing) return;
+
         Message = null;
 
         if (!CanClose || _reference is null || _network is null || Destination is null) return;
+
+        _closing = true;
 
         try
         {
@@ -162,18 +175,42 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
 
             AccountClosure closure = new(time.GetUtcNow(), result.Destination, result.ArrivingDrops, result.TxHash);
 
-            await vault.UpdateAsync(
-                _reference, new VaultEntryEdit(Closure: closure), cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await vault.UpdateAsync(
+                    _reference, new VaultEntryEdit(Closure: closure), cancellationToken).ConfigureAwait(false);
 
-            Closed = closure;
+                Closed = closure;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The node has already accepted the deletion: the account is gone and the balance
+                // has already moved. That fact outranks whatever went wrong recording it here, so
+                // the message must keep saying the account was closed rather than being replaced by
+                // the vault's own error — telling somebody the vault is locked about money that is
+                // already gone, and irrecoverably so, is the wrong thing to say. The hash is what
+                // is left to find the closure by, since this screen could not save it.
+                Message = $"{Message} The record of it could not be saved to the vault. " +
+                    $"Its transaction hash is {result.TxHash} — look the deletion up with that.";
+            }
         }
         catch (XrplFileException ex)
         {
-            Message = PublishErrorMessages.For(ex);
+            // ThrowawayAccount.DeleteAsync throws this only for XrplFileError.SubmitRefused, and only
+            // after signing and submitting: PublishErrorMessages.For's own sentence for that code is
+            // written for the publishing tab, where a refusal costs the open-ledger fee. A refused
+            // AccountDelete costs one owner reserve instead, and deserves to say so.
+            Message = ex.Error == XrplFileError.SubmitRefused
+                ? CloseErrorMessages.DeletionRefused
+                : PublishErrorMessages.For(ex);
         }
         catch (VaultException ex)
         {
             Message = VaultErrorMessages.For(ex.Error);
+        }
+        finally
+        {
+            _closing = false;
         }
     }
 }

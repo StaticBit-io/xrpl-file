@@ -94,7 +94,8 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     /// many of them there are — a node under enough load to queue everything a caller sends it,
     /// rather than one scripted submission picked out by position. Nothing else here expresses that
     /// without knowing the position a caller's submission will land at in advance, which a model
-    /// under test often cannot.
+    /// under test often cannot. <see cref="Refusals"/> is checked first, so a position scripted
+    /// there answers what it was scripted to rather than being silently overridden by this one.
     /// </summary>
     public bool QueueEverything { get; set; }
 
@@ -253,16 +254,19 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
         {
             string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"fake:{position}")));
 
-            if (QueueEverything)
-            {
-                Events.Add("submit");
-                return new SubmitOutcome("terQUEUED", hash);
-            }
-
+            // Checked before QueueEverything so a test that scripts a specific position and also
+            // sets QueueEverything gets the position it asked for, not silently overridden by the
+            // catch-all.
             if (Refusals.TryGetValue(position, out string? refusal))
             {
                 Events.Add("submit");
                 return new SubmitOutcome(refusal, hash);
+            }
+
+            if (QueueEverything)
+            {
+                Events.Add("submit");
+                return new SubmitOutcome("terQUEUED", hash);
             }
 
             if (transaction.TryGetValue("TransactionType", out object? kind) && (string)kind == "TicketCreate")

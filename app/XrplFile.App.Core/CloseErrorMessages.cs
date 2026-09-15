@@ -7,6 +7,17 @@ namespace XrplFile.App.Core;
 /// </summary>
 public static class CloseErrorMessages
 {
+    /// <summary>
+    /// The sentence for a deletion the node refused after it was signed and submitted —
+    /// <see cref="XrplFileError.SubmitRefused"/>, as <see cref="ThrowawayAccount.DeleteAsync"/> throws
+    /// it. Deliberately not <see cref="PublishErrorMessages"/>'s own sentence for the same error code:
+    /// that one is written for the publishing tab, where a refusal costs the open-ledger fee — a few
+    /// drops. A refused <c>AccountDelete</c> costs one owner reserve instead, and the difference is
+    /// worth its own sentence rather than borrowing one written for a much smaller number.
+    /// </summary>
+    public const string DeletionRefused =
+        "The node refused the deletion. The attempt still claimed the fee — one owner reserve.";
+
     public static string For(DeletionOutcome outcome) => outcome switch
     {
         DeletionOutcome.Ready =>

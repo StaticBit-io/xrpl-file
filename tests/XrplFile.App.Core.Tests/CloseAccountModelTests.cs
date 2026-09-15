@@ -60,12 +60,56 @@ public sealed class CloseAccountModelTests : VaultHarness
     {
         (CloseAccountModel model, KeyVault vault, string reference, XrplWallet wallet) =
             await OpenAsync(TestContext.Current.CancellationToken);
-        await vault.StoreAsync(Entry("somewhere else"), TestContext.Current.CancellationToken);
+
+        // Network "1", not VaultHarness.Entry's default "standalone": SelectAsync now filters
+        // candidates to the network of the account being closed (see the network test below), and
+        // this test is about the reference/address exclusion, not the network filter.
+        await vault.StoreAsync(
+            new NewVaultEntry(VaultEntryKind.Imported, "somewhere else", "1", "rAddressOfSomewhereElse", "sSecretOfSomewhereElse"),
+            TestContext.Current.CancellationToken);
 
         await model.SelectAsync(reference, TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain(model.Candidates, info => string.Equals(info.Address, wallet.ClassicAddress, StringComparison.Ordinal));
         Assert.Contains(model.Candidates, info => string.Equals(info.Label, "somewhere else", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Candidates_exclude_the_same_address_a_different_network_and_an_already_closed_entry()
+    {
+        (CloseAccountModel model, KeyVault vault, string reference, XrplWallet wallet) =
+            await OpenAsync(TestContext.Current.CancellationToken);
+
+        // The same address as the account being closed, filed under a second reference — offering
+        // it would point the remainder right back at the account being destroyed. On network "2"
+        // rather than "1": the vault itself already refuses a second entry for the same address on
+        // the same network (VaultError.DuplicateAddress), so the only way this situation can arise
+        // at all is across two different networks — which the network filter below would also catch.
+        // Kept as its own entry anyway, since the address check is the one that is actually correct
+        // to rely on here (a network match is not the reason this candidate is unusable).
+        string duplicateAddressReference = await vault.StoreAsync(
+            new NewVaultEntry(VaultEntryKind.Imported, "duplicate address", "2", wallet.ClassicAddress, wallet.Seed),
+            TestContext.Current.CancellationToken);
+
+        // A real destination, but on a network this deletion cannot reach.
+        string otherNetworkReference = await vault.StoreAsync(
+            new NewVaultEntry(VaultEntryKind.Imported, "other network", "2", "rAddressOfOtherNetwork", "sSecretOfOtherNetwork"),
+            TestContext.Current.CancellationToken);
+
+        // An account that no longer exists.
+        string closedReference = await vault.StoreAsync(
+            new NewVaultEntry(VaultEntryKind.Generated, "already closed", "1", "rAddressOfClosed", "sSecretOfClosed"),
+            TestContext.Current.CancellationToken);
+        await vault.UpdateAsync(
+            closedReference,
+            new VaultEntryEdit(Closure: new AccountClosure(DateTimeOffset.UnixEpoch, "rSomewhereElse", 1_000_000, "HASH")),
+            TestContext.Current.CancellationToken);
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain(model.Candidates, info => string.Equals(info.Reference, duplicateAddressReference, StringComparison.Ordinal));
+        Assert.DoesNotContain(model.Candidates, info => string.Equals(info.Reference, otherNetworkReference, StringComparison.Ordinal));
+        Assert.DoesNotContain(model.Candidates, info => string.Equals(info.Reference, closedReference, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -83,6 +127,50 @@ public sealed class CloseAccountModelTests : VaultHarness
         Assert.Equal(5_000_000, model.DestinationBalanceDrops);
         Assert.True(model.Preview.ArrivingDrops > 0);
         Assert.True(model.CanClose);
+    }
+
+    [Fact]
+    public async Task Changing_the_destination_after_a_ready_preflight_clears_it()
+    {
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);
+        _connections.Ledger.Balances[Home] = 5_000_000;
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        model.ChooseDestination(Home);
+        await model.PreflightAsync(TestContext.Current.CancellationToken);
+        Assert.True(model.CanClose);
+
+        // A different destination than the one the preflight actually priced: confirming against
+        // the old figures now would mean the money could go somewhere nobody checked.
+        string anotherHome = XrplWallet.Generate().ClassicAddress;
+        model.ChooseDestination(anotherHome);
+
+        Assert.False(model.CanClose);
+        Assert.Null(model.Preview);
+    }
+
+    [Fact]
+    public async Task Selecting_a_different_account_after_a_ready_preflight_clears_it()
+    {
+        (CloseAccountModel model, KeyVault vault, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);
+        _connections.Ledger.Balances[Home] = 5_000_000;
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        model.ChooseDestination(Home);
+        await model.PreflightAsync(TestContext.Current.CancellationToken);
+        Assert.True(model.CanClose);
+
+        XrplWallet other = XrplWallet.Generate();
+        string otherReference = await vault.StoreAsync(
+            new NewVaultEntry(VaultEntryKind.Generated, "another throwaway", "1", other.ClassicAddress, other.Seed),
+            TestContext.Current.CancellationToken);
+
+        // Switching to a different account without choosing a fresh destination or re-running the
+        // preflight must not leave the stale Ready verdict (and its stale figures) confirmable.
+        await model.SelectAsync(otherReference, TestContext.Current.CancellationToken);
+
+        Assert.False(model.CanClose);
+        Assert.Null(model.Preview);
     }
 
     [Fact]
@@ -120,6 +208,34 @@ public sealed class CloseAccountModelTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_vault_failure_after_a_successful_submission_still_reports_the_closure_and_the_hash()
+    {
+        (CloseAccountModel _, KeyVault vault, string reference, XrplWallet _) =
+            await OpenAsync(TestContext.Current.CancellationToken);
+
+        // The deletion itself goes through the real vault (so SelectAsync/PreflightAsync/signing all
+        // work normally); only the write that would record the closure fails — the ordinary way that
+        // happens is the vault auto-locking while the person reads the confirmation, so a raw
+        // exception unrelated to VaultException is used here to also prove the broader catch works,
+        // not only the one written for a locked vault.
+        CloseAccountModel model = new(new FailingUpdateVault(vault), _connections, TimeProvider.System);
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        model.ChooseDestination(Home);
+        await model.PreflightAsync(TestContext.Current.CancellationToken);
+        await model.CloseAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(model.Preview);
+        Assert.Equal(DeletionOutcome.Submitted, model.Preview.Outcome);
+
+        // The node already accepted the deletion: that must not be erased by the vault write failing.
+        Assert.Null(model.Closed);
+        Assert.NotNull(model.Message);
+        Assert.StartsWith(CloseErrorMessages.For(DeletionOutcome.Submitted), model.Message, StringComparison.Ordinal);
+        Assert.Contains(model.Preview.TxHash, model.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_queued_deletion_records_nothing_yet()
     {
         (CloseAccountModel model, KeyVault vault, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);
@@ -148,5 +264,87 @@ public sealed class CloseAccountModelTests : VaultHarness
         await model.CloseAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(_connections.Sink.Submitted);
+    }
+
+    [Fact]
+    public async Task A_refused_deletion_says_the_fee_was_still_claimed()
+    {
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);
+        _connections.Sink.Refusals[0] = "tecTOO_SOON";
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        model.ChooseDestination(Home);
+        await model.PreflightAsync(TestContext.Current.CancellationToken);
+        await model.CloseAsync(TestContext.Current.CancellationToken);
+
+        // Not PublishErrorMessages.For's own SubmitRefused sentence — that one is written for the
+        // publishing tab, where a refusal costs the open-ledger fee rather than a whole owner reserve.
+        Assert.Equal(CloseErrorMessages.DeletionRefused, model.Message);
+    }
+
+    /// <summary>
+    /// Delegates every member to a real vault except <see cref="UpdateAsync"/>, which always fails —
+    /// so a test can exercise a write that fails after everything before it (listing, revealing,
+    /// signing) genuinely succeeded. Throws a raw exception rather than <see cref="VaultException"/>
+    /// on purpose, to prove <see cref="CloseAccountModel.CloseAsync"/>'s catch around this one write
+    /// is not narrowed to the vault's own exception type.
+    /// </summary>
+    private sealed class FailingUpdateVault(IKeyVault inner) : IKeyVault
+    {
+        public bool IsUnlocked => inner.IsUnlocked;
+
+        public IReadOnlyCollection<string> References => inner.References;
+
+        public IReadOnlyList<string> DamagedReferences => inner.DamagedReferences;
+
+        public bool WritesAreRefused => inner.WritesAreRefused;
+
+        public Task AcknowledgeDamageAsync(CancellationToken cancellationToken) =>
+            inner.AcknowledgeDamageAsync(cancellationToken);
+
+        public Task<bool> ExistsAsync(CancellationToken cancellationToken) => inner.ExistsAsync(cancellationToken);
+
+        public Task<bool> HasDeviceWrapAsync(CancellationToken cancellationToken) =>
+            inner.HasDeviceWrapAsync(cancellationToken);
+
+        public Task CreateAsync(ReadOnlyMemory<byte> password, CancellationToken cancellationToken) =>
+            inner.CreateAsync(password, cancellationToken);
+
+        public Task<VaultUnlockResult> UnlockAsync(ReadOnlyMemory<byte> password, CancellationToken cancellationToken) =>
+            inner.UnlockAsync(password, cancellationToken);
+
+        public Task LockAsync() => inner.LockAsync();
+
+        public Task<IReadOnlyList<VaultEntryInfo>> ListAsync(CancellationToken cancellationToken) =>
+            inner.ListAsync(cancellationToken);
+
+        public Task<string> StoreAsync(NewVaultEntry entry, CancellationToken cancellationToken) =>
+            inner.StoreAsync(entry, cancellationToken);
+
+        public Task<VaultEntry> RevealAsync(string reference, string reason, CancellationToken cancellationToken) =>
+            inner.RevealAsync(reference, reason, cancellationToken);
+
+        public Task<byte[]> ExportAsync(
+            string reference, ReadOnlyMemory<byte> containerPassword, CancellationToken cancellationToken) =>
+            inner.ExportAsync(reference, containerPassword, cancellationToken);
+
+        public Task UpdateAsync(string reference, VaultEntryEdit edit, CancellationToken cancellationToken) =>
+            throw new IOException("fake: the vault's storage did not respond");
+
+        public Task DeleteAsync(string reference, CancellationToken cancellationToken) =>
+            inner.DeleteAsync(reference, cancellationToken);
+
+        public Task<VaultUnlockResult> UnlockWithDeviceAsync(CancellationToken cancellationToken) =>
+            inner.UnlockWithDeviceAsync(cancellationToken);
+
+        public Task<VaultPasswordChange> ChangePasswordAsync(
+            ReadOnlyMemory<byte> oldPassword, ReadOnlyMemory<byte> newPassword, CancellationToken cancellationToken) =>
+            inner.ChangePasswordAsync(oldPassword, newPassword, cancellationToken);
+
+        public Task<bool> EnableDeviceUnlockAsync(CancellationToken cancellationToken) =>
+            inner.EnableDeviceUnlockAsync(cancellationToken);
+
+        public Task DisableDeviceUnlockAsync(CancellationToken cancellationToken) =>
+            inner.DisableDeviceUnlockAsync(cancellationToken);
     }
 }
