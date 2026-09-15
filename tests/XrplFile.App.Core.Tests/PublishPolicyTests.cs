@@ -1,6 +1,6 @@
-namespace XrplFile.App.Core.Tests;
-
 using Xunit;
+
+namespace XrplFile.App.Core.Tests;
 
 public sealed class PublishPolicyTests
 {
