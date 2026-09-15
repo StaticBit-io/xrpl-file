@@ -61,6 +61,56 @@ public enum RefundOutcome
 /// <param name="Outcome">How far the submission got.</param>
 public sealed record RefundResult(string Destination, long SentDrops, long LeftBehindDrops, string TxHash, RefundOutcome Outcome);
 
+/// <summary>How far a deletion got, and why it got no further.</summary>
+public enum DeletionOutcome
+{
+    /// <summary>Every check passed and nothing was submitted. Only a preview answers this.</summary>
+    Ready,
+
+    /// <summary>
+    /// The account's sequence is too close to the current ledger, or it cannot cover the fee. Nothing
+    /// was submitted, and <see cref="DeletionResult.DeletableFromLedger"/> says from which ledger the
+    /// first of those stops being true.
+    /// </summary>
+    NotYet,
+
+    /// <summary>The ledger carries no such destination. Nothing was submitted.</summary>
+    DestinationMissing,
+
+    /// <summary>
+    /// The destination exists and will not take this payment: it wants a destination tag, or it
+    /// authorises its depositors. Nothing was submitted.
+    /// </summary>
+    DestinationRefuses,
+
+    /// <summary>The node applied it to its open ledger.</summary>
+    Submitted,
+
+    /// <summary>
+    /// The node only queued it. Until a ledger takes it every drop is still on the throwaway
+    /// account, and the account still exists — reporting that as money that went home is a lie a
+    /// person only discovers later. The same distinction <see cref="RefundOutcome.Queued"/> draws.
+    /// </summary>
+    Queued,
+}
+
+/// <summary>What a deletion will do, or did.</summary>
+/// <param name="Destination">The address the caller named. Nothing here ever chooses one.</param>
+/// <param name="BalanceDrops">What the account holds, as the node reported it.</param>
+/// <param name="FeeDrops">One owner reserve — <c>AccountDelete</c>'s own price, read from the node.</param>
+/// <param name="ArrivingDrops">What reaches the destination: the balance less the fee, or zero when nothing will be sent.</param>
+/// <param name="TxHash">The deletion's hash, or an empty string when nothing was submitted.</param>
+/// <param name="DeletableFromLedger">The first ledger at which the sequence rule stops refusing, when it currently refuses; otherwise <see langword="null"/>.</param>
+/// <param name="Outcome">How far it got.</param>
+public sealed record DeletionResult(
+    string Destination,
+    long BalanceDrops,
+    long FeeDrops,
+    long ArrivingDrops,
+    string TxHash,
+    long? DeletableFromLedger,
+    DeletionOutcome Outcome);
+
 /// <summary>
 /// An account made for one publication and abandoned afterwards, so that a person's own account
 /// does not carry a thousand transactions of somebody else's file forever.
@@ -247,5 +297,98 @@ public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, ITr
         uint sequence = await _sink.SequenceAsync(Address, validated: true, cancellationToken).ConfigureAwait(false);
 
         return sequence + DeletionSequenceDelta;
+    }
+
+    /// <summary>
+    /// Every check a deletion makes, and every figure it would use, without submitting anything.
+    /// This is what the confirmation screen is built from: showing a person the destination's
+    /// balance and what will move, before they agree, is only possible if the checks can be run
+    /// without the transaction.
+    /// </summary>
+    /// <exception cref="ArgumentException">No destination. Nothing is ever assumed — see <see cref="RefundAsync"/>.</exception>
+    public async Task<DeletionResult> PreviewDeletionAsync(string destination, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(destination))
+        {
+            throw new ArgumentException("a deletion needs a destination; nothing is assumed", nameof(destination));
+        }
+
+        NetworkFees fees = await _source.FeesAsync(cancellationToken).ConfigureAwait(false);
+        AccountState state = await _source.AccountStateAsync(Address, cancellationToken).ConfigureAwait(false);
+
+        // AccountDelete's own price, not the open-ledger fee: rippled's AccountDelete::calculateBaseFee
+        // charges one owner reserve. Read from the node rather than assumed, the way
+        // AccountDeleteThresholdTests reads it.
+        long fee = fees.OwnerReserveDrops;
+        long arriving = Math.Max(0, state.BalanceDrops - fee);
+
+        DeletionResult Refused(DeletionOutcome outcome, long? deletableFrom = null) =>
+            new(destination, state.BalanceDrops, fee, 0, string.Empty, deletableFrom, outcome);
+
+        long deletableFrom = await DeletableFromLedgerAsync(cancellationToken).ConfigureAwait(false);
+        long current = await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+
+        if (current < deletableFrom) return Refused(DeletionOutcome.NotYet, deletableFrom);
+
+        // A balance that cannot cover the fee cannot be deleted now either. It is the same sentence
+        // to the person -- not yet -- and inventing a separate outcome for it would split one
+        // remedy in two.
+        if (state.BalanceDrops <= fee) return Refused(DeletionOutcome.NotYet, deletableFrom);
+
+        DestinationState home = await _source.DestinationAsync(destination, cancellationToken).ConfigureAwait(false);
+
+        if (!home.Exists) return Refused(DeletionOutcome.DestinationMissing);
+
+        if (home.RequiresDestinationTag || home.AuthorisesDepositors)
+        {
+            return Refused(DeletionOutcome.DestinationRefuses);
+        }
+
+        return new DeletionResult(
+            destination, state.BalanceDrops, fee, arriving, string.Empty, null, DeletionOutcome.Ready);
+    }
+
+    /// <summary>
+    /// Closes the account, sending everything it holds less the fee to the named destination.
+    /// Runs <see cref="PreviewDeletionAsync"/> first and submits nothing unless it answers
+    /// <see cref="DeletionOutcome.Ready"/>: a <c>tec</c> result claims the fee, and this fee is one
+    /// owner reserve — the same amount this whole operation exists to recover.
+    /// </summary>
+    /// <exception cref="ArgumentException">No destination.</exception>
+    /// <exception cref="XrplFileException">
+    /// <see cref="XrplFileError.SubmitRefused"/> when the node answered something other than
+    /// <c>tesSUCCESS</c> or <c>terQUEUED</c>.
+    /// </exception>
+    public async Task<DeletionResult> DeleteAsync(string destination, CancellationToken cancellationToken)
+    {
+        DeletionResult preview = await PreviewDeletionAsync(destination, cancellationToken).ConfigureAwait(false);
+
+        if (preview.Outcome != DeletionOutcome.Ready) return preview;
+
+        uint sequence = await _sink.SequenceAsync(Address, validated: false, cancellationToken).ConfigureAwait(false);
+
+        Dictionary<string, object> deletion = new(StringComparer.Ordinal)
+        {
+            ["TransactionType"] = "AccountDelete",
+            ["Account"] = Address,
+            ["Destination"] = destination,
+            ["Sequence"] = sequence,
+            ["Fee"] = preview.FeeDrops.ToString(CultureInfo.InvariantCulture),
+            ["SigningPubKey"] = _signer.PublicKey,
+        };
+
+        SubmitOutcome outcome = await _sink.SubmitAsync(deletion, _signer, cancellationToken).ConfigureAwait(false);
+
+        if (outcome.EngineResult is not ("tesSUCCESS" or "terQUEUED"))
+        {
+            throw new XrplFileException(XrplFileError.SubmitRefused,
+                $"the node answered {outcome.EngineResult} to the deletion of {Address} to {destination}");
+        }
+
+        DeletionOutcome reached = string.Equals(outcome.EngineResult, "terQUEUED", StringComparison.Ordinal)
+            ? DeletionOutcome.Queued
+            : DeletionOutcome.Submitted;
+
+        return preview with { TxHash = outcome.TxHash, Outcome = reached };
     }
 }
