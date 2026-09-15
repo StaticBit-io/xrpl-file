@@ -1,6 +1,21 @@
 namespace XrplFile.App.Core;
 
 /// <summary>
+/// One consistent read of everything Run.razor's own render needs, taken from a single
+/// <see cref="RunSnapshot"/> by <see cref="RunModel.Capture"/> -- see that method's own remarks for
+/// why every field here has to come from the same read rather than each being asked for separately.
+/// </summary>
+public readonly record struct RunView(
+    bool CanCancel,
+    bool IsFinished,
+    bool WasCancelled,
+    string? Link,
+    string? Failure,
+    string? HistoryNote,
+    string StageText,
+    int Percent);
+
+/// <summary>
 /// The run screen (design 4.3). It decides nothing about the run itself — that lives in
 /// <see cref="PublicationRun"/>, which survives this screen — and only turns the run's state into
 /// what a person reads.
@@ -64,6 +79,36 @@ public sealed class RunModel(PublicationRun run)
 
     /// <summary>Puts the outcome away so the Publish tab can offer a new publication.</summary>
     public void Dismiss() => run.Reset();
+
+    /// <summary>
+    /// Everything a render of Run.razor needs, read from one <see cref="RunSnapshot"/> rather than
+    /// the one this type's own instance properties above each take fresh (<see cref="Snapshot"/> is
+    /// a live pass-through to <see cref="PublicationRun.Snapshot"/>, so two of those properties read
+    /// moments apart can observe two different instants of a run that is changing on its own
+    /// background task). A render that read <see cref="CanCancel"/> and then, after the run finished
+    /// in between, <see cref="IsFinished"/> and <see cref="Link"/> would draw an enabled Cancel
+    /// button directly above the "Published" alert -- the exact self-contradicting frame
+    /// <see cref="RunSnapshot"/>'s own remarks describe <see cref="PublicationRun.Snapshot"/> as
+    /// existing to prevent, reopened one layer up by reading it more than once. Run.razor calls this
+    /// once per render and reads every field from the result instead of calling back into this type.
+    /// </summary>
+    public RunView Capture()
+    {
+        RunSnapshot snapshot = run.Snapshot;
+
+        return new RunView(
+            CanCancel: snapshot.State == PublicationRunState.Running,
+            IsFinished: snapshot.State is
+                PublicationRunState.Succeeded or PublicationRunState.Failed or PublicationRunState.Cancelled,
+            WasCancelled: snapshot.State == PublicationRunState.Cancelled,
+            Link: snapshot.Report?.Link.ToString(),
+            Failure: snapshot.Failure,
+            HistoryNote: snapshot.HistoryNote,
+            StageText: snapshot.Progress is { } progress
+                ? $"{StageNameOf(progress.Stage)} — {progress.Done:N0} of {progress.Total:N0}"
+                : "Starting",
+            Percent: snapshot.Progress is { } percentProgress ? PercentOf(percentProgress) : 0);
+    }
 
     public static int PercentOf(PublishProgress progress)
     {

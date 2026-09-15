@@ -3,38 +3,49 @@
 @inject IClipboardService Clipboard
 
 @* Design 4.3: the run in progress, and its outcome. CanCancel, IsFinished, WasCancelled, Link,
-   Failure, HistoryNote, StageText and Percent are all RunModel's own; this component only chooses
-   which of them to draw right now, never what any of them says. RunModel's own remarks are explicit
-   that a HistoryNote can sit beside a successful Link -- not a failure -- which is why it is shown in
-   its own alert rather than folded into the failure branch below. WasCancelled is its own branch for
-   the same reason: PublicationRun leaves Failure null on a cancellation (cancelling was something the
-   person did, not a fault), which used to leave this screen with neither Link nor Failure to show --
-   a frozen progress bar and a Dismiss button with no outcome stated at all.
+   Failure, HistoryNote, StageText and Percent are all RunModel's own, read here as one RunView taken
+   once, at the top of this render, via RunModel.Capture -- not as eight separate RunModel property
+   reads. RunModel.Capture's own remarks explain why: PublicationRun runs on a background task this
+   screen never awaits, so a render that read those eight facts separately could see the run finish
+   partway through them, e.g. an enabled Cancel button drawn directly above a "Published" alert. This
+   component only chooses which of the captured facts to draw right now, never what any of them says.
+   RunModel's own remarks are explicit that a HistoryNote can sit beside a successful Link -- not a
+   failure -- which is why it is shown in its own alert rather than folded into the failure branch
+   below. WasCancelled is its own branch for the same reason: PublicationRun leaves Failure null on a
+   cancellation (cancelling was something the person did, not a fault), which used to leave this
+   screen with neither Link nor Failure to show -- a frozen progress bar and a Dismiss button with no
+   outcome stated at all.
 
    The poll matches Shell.razor's and Publish.razor's own shape and interval: PublicationRun runs on
    a background task this screen never awaits, so nothing repaints on progress without a render
    forced from outside it. Copying a finished link is plumbing, not a decision -- there is no branch
    here over what to copy or when the button is enabled beyond IsFinished already having decided that
-   a link exists. Dismiss additionally fires OnDismissed: Publish.razor's own poll would otherwise
-   notice Model.Dismiss() having reset the run's state up to a second late, during which this
-   component would go on rendering itself -- StageText back to "Starting", Percent back to zero --
-   against an already-Idle run. *@
+   a link exists (CopyLinkAsync reads Model.Link fresh, at the moment the button is actually pressed,
+   which is a different instant than the render that drew it and is exactly when a fresh read is
+   correct). Dismiss additionally fires OnDismissed: Publish.razor's own poll would otherwise notice
+   Model.Dismiss() having reset the run's state up to a second late, during which this component
+   would go on rendering itself -- StageText back to "Starting", Percent back to zero -- against an
+   already-Idle run. *@
+
+@{
+    RunView view = Model.Capture();
+}
 
 <div class="container py-3">
     <h1 class="h3">Publishing</h1>
 
-    <p>@Model.StageText</p>
-    <div class="progress" role="progressbar" aria-valuenow="@Model.Percent" aria-valuemin="0" aria-valuemax="100">
-        <div class="progress-bar" style="width: @(Model.Percent)%">@Model.Percent%</div>
+    <p>@view.StageText</p>
+    <div class="progress" role="progressbar" aria-valuenow="@view.Percent" aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-bar" style="width: @(view.Percent)%">@view.Percent%</div>
     </div>
 
-    <button type="button" class="btn btn-outline-secondary mt-3" disabled="@(!Model.CanCancel)" @onclick="Cancel">
+    <button type="button" class="btn btn-outline-secondary mt-3" disabled="@(!view.CanCancel)" @onclick="Cancel">
         Cancel
     </button>
 
-    @if (Model.IsFinished)
+    @if (view.IsFinished)
     {
-        @if (Model.Link is { } link)
+        @if (view.Link is { } link)
         {
             <div class="alert alert-success mt-3">
                 <p class="mb-2">Published.</p>
@@ -42,16 +53,16 @@
                 <button type="button" class="btn btn-outline-secondary mt-2" @onclick="CopyLinkAsync">Copy link</button>
             </div>
         }
-        else if (Model.Failure is { } failure)
+        else if (view.Failure is { } failure)
         {
             <div class="alert alert-danger mt-3">@failure</div>
         }
-        else if (Model.WasCancelled)
+        else if (view.WasCancelled)
         {
             <div class="alert alert-secondary mt-3">Cancelled. Nothing further was submitted.</div>
         }
 
-        @if (Model.HistoryNote is { } note)
+        @if (view.HistoryNote is { } note)
         {
             <div class="alert alert-info mt-3">@note</div>
         }
