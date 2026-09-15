@@ -89,6 +89,15 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     /// <summary>Which submissions (by position) answer terQUEUED and land only on a later sweep.</summary>
     public Dictionary<int, int> QueuedUntilSweep { get; } = [];
 
+    /// <summary>
+    /// When set, every submission answers <c>terQUEUED</c> rather than reaching the ledger, however
+    /// many of them there are — a node under enough load to queue everything a caller sends it,
+    /// rather than one scripted submission picked out by position. Nothing else here expresses that
+    /// without knowing the position a caller's submission will land at in advance, which a model
+    /// under test often cannot.
+    /// </summary>
+    public bool QueueEverything { get; set; }
+
     /// <summary>Markers whose every submission validates as failed, however often it is retried.</summary>
     public HashSet<string> FailMarkers { get; } = [];
 
@@ -243,6 +252,12 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
         lock (_gate)
         {
             string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"fake:{position}")));
+
+            if (QueueEverything)
+            {
+                Events.Add("submit");
+                return new SubmitOutcome("terQUEUED", hash);
+            }
 
             if (Refusals.TryGetValue(position, out string? refusal))
             {
