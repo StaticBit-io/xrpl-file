@@ -97,16 +97,22 @@ public sealed class PublicationHistory
     /// a later task calls this immediately after a publication succeeds, and an <see cref="IOException"/>
     /// escaping from here would be caught and reported as a failed publication when in fact the
     /// link is good and only the history could not be updated.
+    ///
+    /// <see cref="Directory.CreateDirectory(string)"/> lives inside the same try as the write, not
+    /// before it: a directory this call cannot create (a permissions problem, a path a file already
+    /// occupies) is exactly the kind of failure this method exists to degrade rather than throw, and
+    /// a caller who only guards the write and not the directory creation would still see the
+    /// publication it just paid for reported as failed.
     /// </summary>
     private void Save(IReadOnlyList<PublicationRecord> records)
     {
-        string directoryPath = Path.GetDirectoryName(_path)!;
-        Directory.CreateDirectory(directoryPath);
-
         string temporary = _path + ".tmp";
 
         try
         {
+            string directoryPath = Path.GetDirectoryName(_path)!;
+            Directory.CreateDirectory(directoryPath);
+
             byte[] bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(records, SerializerOptions));
 
             FileStreamOptions options = new()
