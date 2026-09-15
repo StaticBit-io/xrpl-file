@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Encodings.Web;
 
 namespace XrplFile.App.Core;
 
@@ -10,7 +11,11 @@ namespace XrplFile.App.Core;
 /// </summary>
 public sealed class PublicationHistory
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     private readonly string _path;
 
@@ -36,7 +41,7 @@ public sealed class PublicationHistory
             if (!File.Exists(_path)) return [];
 
             List<PublicationRecord>? records = JsonSerializer.Deserialize<List<PublicationRecord>>(
-                File.ReadAllBytes(_path));
+                File.ReadAllBytes(_path), SerializerOptions);
 
             if (records is null) return [];
 
@@ -50,6 +55,13 @@ public sealed class PublicationHistory
         }
     }
 
+    /// <summary>
+    /// Appending to a history that could not be read replaces it with a file holding just the new
+    /// record. This is chosen on purpose: the alternative is refusing to record a publication that
+    /// actually happened and losing its link. The person's publication is in the ledger; if the
+    /// history file is corrupt, replacing it with a fresh start that includes this one is the right
+    /// call.
+    /// </summary>
     public void Append(PublicationRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -62,22 +74,61 @@ public sealed class PublicationHistory
     {
         ArgumentException.ThrowIfNullOrEmpty(link);
 
+        Read();
+        if (Failure is not null) return;
+
         Save([.. Read().Where(record => !string.Equals(record.Link, link, StringComparison.Ordinal))]);
     }
 
     public void Clear() => Save([]);
 
     /// <summary>
-    /// Written to a temporary file in the same directory and then moved over the real one, so a
-    /// crash in the middle cannot leave a truncated array where a history used to be. The same
-    /// shape as the vault's own durable write, for the same reason.
+    /// Written to a temporary file in the same directory, flushed to disk, and then moved over the
+    /// real one, so a crash in the middle cannot leave a truncated array where a history used to be
+    /// or a cached write that is lost on power loss. The same durability as the vault's own durable
+    /// write. If the write fails, <see cref="Failure"/> is set and the exception is not thrown —
+    /// a later task calls this immediately after a publication succeeds, and an <see cref="IOException"/>
+    /// escaping from here would be caught and reported as a failed publication when in fact the
+    /// link is good and only the history could not be updated.
     /// </summary>
     private void Save(IReadOnlyList<PublicationRecord> records)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        string directoryPath = Path.GetDirectoryName(_path)!;
+        Directory.CreateDirectory(directoryPath);
 
         string temporary = _path + ".tmp";
-        File.WriteAllBytes(temporary, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(records, SerializerOptions)));
-        File.Move(temporary, _path, overwrite: true);
+
+        try
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(records, SerializerOptions));
+
+            FileStreamOptions options = new()
+            {
+                Mode = FileMode.Create,
+                Access = FileAccess.Write,
+                Share = FileShare.None,
+            };
+
+            using (FileStream stream = new(temporary, options))
+            {
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(temporary, _path, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Failure = "The publications file could not be written. Your file is in the ledger and your link is safe, but this history could not be updated. Try again later.";
+
+            try
+            {
+                File.Delete(temporary);
+            }
+            catch
+            {
+                // Best effort; if cleanup fails, leave it. The next write will overwrite it.
+            }
+        }
     }
 }

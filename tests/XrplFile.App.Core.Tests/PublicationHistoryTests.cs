@@ -87,4 +87,44 @@ public sealed class PublicationHistoryTests : IDisposable
 
         Assert.Single(Directory.GetFiles(_directory));
     }
+
+    [Fact]
+    public void Forgetting_against_a_corrupt_file_leaves_the_file_original_bytes_on_disk()
+    {
+        byte[] garbage = Encoding.UTF8.GetBytes("{ this is not json");
+        File.WriteAllBytes(HistoryPath, garbage);
+
+        PublicationHistory history = new(HistoryPath);
+        history.Forget("xrpl-file://testnet/ONE");
+
+        Assert.Equal(garbage, File.ReadAllBytes(HistoryPath));
+        Assert.NotNull(history.Failure);
+    }
+
+    [Fact]
+    public void Clearing_against_a_corrupt_file_still_empties_it()
+    {
+        byte[] garbage = Encoding.UTF8.GetBytes("{ this is not json");
+        File.WriteAllBytes(HistoryPath, garbage);
+
+        PublicationHistory history = new(HistoryPath);
+        history.Clear();
+
+        Assert.Empty(new PublicationHistory(HistoryPath).Read());
+    }
+
+    [Fact]
+    public void A_record_whose_name_is_cyrillic_round_trips_unescaped_in_the_file()
+    {
+        PublicationRecord record = new("xrpl-file://testnet/ABC", "фото.png", 4096, "image/png", "testnet", "rWriter", 7, 84, DateTimeOffset.UnixEpoch);
+        PublicationHistory history = new(HistoryPath);
+        history.Append(record);
+
+        PublicationHistory newHistory = new(HistoryPath);
+        Assert.Equal("фото.png", newHistory.Read()[0].Name);
+
+        string fileContent = File.ReadAllText(HistoryPath);
+        Assert.Contains("фото.png", fileContent);
+        Assert.DoesNotContain("\\u", fileContent);
+    }
 }
