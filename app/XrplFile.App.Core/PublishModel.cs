@@ -63,8 +63,17 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             ? null
             : Keys.FirstOrDefault(key => string.Equals(key.Reference, SelectedReference, StringComparison.Ordinal));
 
-    /// <summary>The node this publication would go to, or <see langword="null"/> when there is none.</summary>
-    public string? NodeUrl => SelectedKey is null ? null : NodeEndpoint.Resolve(nodes, SelectedKey.Network);
+    /// <summary>
+    /// The node this publication would go to, or <see langword="null"/> when there is none. Resolved
+    /// from the network's canonical form, not the entry's raw text: <see cref="Endpoints.For"/> and a
+    /// person's own overrides in <see cref="INodeSettingsStore"/> are both keyed by the canonical
+    /// name, so a key recorded as e.g. <c>"TESTNET"</c> must resolve the same node as one recorded
+    /// as <c>"testnet"</c> rather than being told, wrongly, that no node URL is known for it.
+    /// </summary>
+    public string? NodeUrl =>
+        SelectedKey is not null && XrplFileLink.TryNormalizeNetwork(SelectedKey.Network, out string? canonical)
+            ? NodeEndpoint.Resolve(nodes, canonical)
+            : null;
 
     /// <summary>Why the screen cannot go on, or <see langword="null"/> when it can.</summary>
     public string? Message { get; private set; }
@@ -224,7 +233,7 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             return;
         }
 
-        if (!XrplFileLink.TryNormalizeNetwork(SelectedKey.Network, out _))
+        if (!XrplFileLink.TryNormalizeNetwork(SelectedKey.Network, out string? canonicalNetwork))
         {
             Message =
                 $"The key's network '{SelectedKey.Network}' is not one an xrpl-file link can name. "
@@ -239,8 +248,10 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
                 + "so the link will only open for a reader whose limit has been raised. Publishing it still works.";
         }
 
+        // Named by its canonical form: that is the network the publication will actually use, and
+        // the one NodeUrl itself resolved against, so it is also the one worth reading about here.
         Message = NodeUrl is null
-            ? $"No node URL is known for the network '{SelectedKey.Network}'. Add one in Settings."
+            ? $"No node URL is known for the network '{canonicalNetwork}'. Add one in Settings."
             : null;
     }
 }

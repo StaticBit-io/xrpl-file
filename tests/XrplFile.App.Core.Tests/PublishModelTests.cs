@@ -178,6 +178,21 @@ public sealed class PublishModelTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_key_recorded_in_a_different_case_resolves_the_built_in_node()
+    {
+        // An empty settings store: whatever NodeUrl finds here comes from Endpoints.For alone, keyed
+        // by the canonical name -- not from an override that happens to match the raw entry text.
+        (PublishModel model, _, string reference) =
+            await OpenAsync(TestContext.Current.CancellationToken, network: "TESTNET");
+        WriteFile("photo.png", 2048);
+        await model.PickFileAsync(TestContext.Current.CancellationToken);
+        model.SelectKey(reference);
+
+        Assert.Equal(Endpoints.For("testnet")[0], model.NodeUrl);
+        Assert.Null(model.Message);
+    }
+
+    [Fact]
     public async Task A_file_past_the_readers_default_limit_is_warned_about_and_still_allowed()
     {
         (PublishModel model, _, string reference) =
