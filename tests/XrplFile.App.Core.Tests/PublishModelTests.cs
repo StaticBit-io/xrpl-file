@@ -43,12 +43,18 @@ public sealed class PublishModelTests : VaultHarness
         return path;
     }
 
+    /// <param name="network">
+    /// The entry's network. Defaults to <see cref="VaultHarness.Entry"/>'s own default,
+    /// <c>"standalone"</c> — a network xrpl-file cannot address, since only tests about that refusal
+    /// want it. Tests that need to actually build a request pass a network the format accepts.
+    /// </param>
     private async Task<(PublishModel Model, KeyVault Vault, string Reference)> OpenAsync(
-        CancellationToken token, INodeSettingsStore? nodes = null)
+        CancellationToken token, INodeSettingsStore? nodes = null, string network = "standalone")
     {
         KeyVault vault = NewVault();
         await vault.CreateAsync(Password("a master password"), token);
-        string reference = await vault.StoreAsync(Entry("publishing key"), token);
+        NewVaultEntry entry = Entry("publishing key") with { Network = network };
+        string reference = await vault.StoreAsync(entry, token);
 
         PublishModel model = new(vault, _picker, nodes ?? new FileNodeSettingsStore(Path.Combine(_files, "nodes.json")));
         await model.RefreshKeysAsync(token);
@@ -90,7 +96,8 @@ public sealed class PublishModelTests : VaultHarness
     [Fact]
     public async Task A_file_and_a_key_build_a_request()
     {
-        (PublishModel model, _, string reference) = await OpenAsync(TestContext.Current.CancellationToken);
+        (PublishModel model, _, string reference) =
+            await OpenAsync(TestContext.Current.CancellationToken, network: "testnet");
         WriteFile("photo.png", 2048);
         await model.PickFileAsync(TestContext.Current.CancellationToken);
         model.SelectKey(reference);
@@ -104,13 +111,14 @@ public sealed class PublishModelTests : VaultHarness
         Assert.Equal("image/png", request.Type);
         Assert.Equal(2048, request.File.Length);
         Assert.Equal(reference, request.KeyReference);
-        Assert.Equal("standalone", request.Network);
+        Assert.Equal("testnet", request.Network);
     }
 
     [Fact]
     public async Task An_unknown_extension_publishes_as_an_octet_stream()
     {
-        (PublishModel model, _, string reference) = await OpenAsync(TestContext.Current.CancellationToken);
+        (PublishModel model, _, string reference) =
+            await OpenAsync(TestContext.Current.CancellationToken, network: "testnet");
         WriteFile("notes.wibble", 16);
         await model.PickFileAsync(TestContext.Current.CancellationToken);
         model.SelectKey(reference);
@@ -123,9 +131,10 @@ public sealed class PublishModelTests : VaultHarness
     [Fact]
     public async Task A_network_with_no_node_url_is_named_before_anything_is_spent()
     {
-        // The harness's entries are on "standalone", which Endpoints.For does not know, so an
-        // empty settings store leaves the network unreachable.
-        (PublishModel model, _, string reference) = await OpenAsync(TestContext.Current.CancellationToken);
+        // A NetworkID is a network xrpl-file can address, but Endpoints.For knows only the three
+        // names, so an empty settings store leaves a NetworkID unreachable.
+        (PublishModel model, _, string reference) =
+            await OpenAsync(TestContext.Current.CancellationToken, network: "1");
         WriteFile("photo.png", 2048);
         await model.PickFileAsync(TestContext.Current.CancellationToken);
         model.SelectKey(reference);
@@ -136,9 +145,43 @@ public sealed class PublishModelTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_key_whose_network_the_format_cannot_address_stops_the_flow()
+    {
+        // OpenAsync's default network, "standalone", is exactly what a real local stand's key would
+        // carry -- a name the vault happily stores but xrpl-file cannot put in a link.
+        (PublishModel model, _, string reference) = await OpenAsync(TestContext.Current.CancellationToken);
+        WriteFile("photo.png", 2048);
+        await model.PickFileAsync(TestContext.Current.CancellationToken);
+        model.SelectKey(reference);
+
+        Assert.False(model.CanEstimate);
+        Assert.Null(await model.BuildRequestAsync(TestContext.Current.CancellationToken));
+        Assert.Contains("standalone", model.Message ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("xrpl-file link", model.Message ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_key_recorded_in_a_different_case_publishes_on_the_canonical_network()
+    {
+        (PublishModel model, _, string reference) =
+            await OpenAsync(TestContext.Current.CancellationToken, network: "TESTNET");
+        WriteFile("photo.png", 2048);
+        await model.PickFileAsync(TestContext.Current.CancellationToken);
+        model.SelectKey(reference);
+
+        Assert.True(model.CanEstimate);
+
+        PublishRequest? request = await model.BuildRequestAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(request);
+        Assert.Equal("testnet", request.Network);
+    }
+
+    [Fact]
     public async Task A_file_past_the_readers_default_limit_is_warned_about_and_still_allowed()
     {
-        (PublishModel model, _, string reference) = await OpenAsync(TestContext.Current.CancellationToken);
+        (PublishModel model, _, string reference) =
+            await OpenAsync(TestContext.Current.CancellationToken, network: "testnet");
 
         // Nothing this size is written to disk: the warning is a function of the recorded size.
         model.SelectKey(reference);
@@ -163,7 +206,8 @@ public sealed class PublishModelTests : VaultHarness
     [Fact]
     public async Task A_locked_vault_refuses_to_build_a_request()
     {
-        (PublishModel model, KeyVault vault, string reference) = await OpenAsync(TestContext.Current.CancellationToken);
+        (PublishModel model, KeyVault vault, string reference) =
+            await OpenAsync(TestContext.Current.CancellationToken, network: "testnet");
         WriteFile("photo.png", 2048);
         await model.PickFileAsync(TestContext.Current.CancellationToken);
         model.SelectKey(reference);

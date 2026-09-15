@@ -73,7 +73,8 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
     public string? Warning { get; private set; }
 
     public bool CanEstimate =>
-        FilePath is not null && FileSize > 0 && FileSize <= MaxFileBytes && SelectedKey is not null;
+        FilePath is not null && FileSize > 0 && FileSize <= MaxFileBytes && SelectedKey is not null
+        && XrplFileLink.TryNormalizeNetwork(SelectedKey.Network, out _);
 
     public async Task RefreshKeysAsync(CancellationToken cancellationToken)
     {
@@ -176,13 +177,18 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             return null;
         }
 
+        // CanEstimate already established that the key's network normalizes; the canonical form is
+        // what travels in the request, so a key recorded as e.g. "TESTNET" publishes as "testnet"
+        // rather than being refused deep inside the run for a mismatch of its own making.
+        XrplFileLink.TryNormalizeNetwork(SelectedKey.Network, out string? canonicalNetwork);
+
         return new PublishRequest(
             bytes,
             TypeOf(FileName!),
             FileName!,
             SelectedKey.Reference,
             SelectedKey.Address,
-            SelectedKey.Network);
+            canonicalNetwork!);
     }
 
     private static string TypeOf(string fileName) =>
@@ -215,6 +221,14 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
         if (SelectedKey is null)
         {
             Message = "Choose the key that will publish it.";
+            return;
+        }
+
+        if (!XrplFileLink.TryNormalizeNetwork(SelectedKey.Network, out _))
+        {
+            Message =
+                $"The key's network '{SelectedKey.Network}' is not one an xrpl-file link can name. "
+                + "xrpl-file links use 'mainnet', 'testnet', 'devnet', or a NetworkID written as digits.";
             return;
         }
 
