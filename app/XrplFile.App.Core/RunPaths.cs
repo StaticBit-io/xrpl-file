@@ -8,16 +8,17 @@ namespace XrplFile.App.Core;
 /// </summary>
 public sealed class RunPaths
 {
-    private const string ApplicationDirectoryName = "XrplFile";
-
     /// <param name="baseDirectory">
     /// Where to put them. Defaults to the application data directory, which is what the running
     /// application uses; tests pass a temporary directory.
     /// </param>
     public RunPaths(string? baseDirectory = null)
     {
+        // The directory name itself comes from VaultLocation, not a second copy of the same literal
+        // here: this directory and the vault's default one are both named relative to the same
+        // application-data root, and the two must agree for design F12 to mean anything.
         string root = baseDirectory ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ApplicationDirectoryName);
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), VaultLocation.ApplicationDirectoryName);
 
         StateDirectory = Path.GetFullPath(Path.Combine(root, "runs"));
         HistoryPath = Path.GetFullPath(Path.Combine(root, "publications.json"));

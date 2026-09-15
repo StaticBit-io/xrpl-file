@@ -8,7 +8,14 @@ namespace XrplFile.App.Core;
 /// </summary>
 public static class VaultLocation
 {
-    private const string ApplicationDirectoryName = "XrplFile";
+    /// <summary>
+    /// The one name of this application's own directory under the platform's application-data
+    /// directory. Internal, not private: <see cref="RunPaths"/> shares it rather than repeating the
+    /// literal, so the two can never drift apart and stop naming the same directory -- which design
+    /// F12 depends on (a publication's state files live in this same directory, deliberately never
+    /// beside the vault file itself, which is portable and may live elsewhere entirely).
+    /// </summary>
+    internal const string ApplicationDirectoryName = "XrplFile";
 
     /// <summary>The vault file's name, wherever it is opened from.</summary>
     public static string FileName => "vault.json";
