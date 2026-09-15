@@ -4,8 +4,12 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <!-- XrplClient, for the one class that actually opens a WebSocket: XrplConnectionFactory. -->
     <ProjectReference Include="..\..\src\XrplFile.Core\XrplFile.Core.csproj" />
     <ProjectReference Include="..\..\src\XrplFile.Keys\XrplFile.Keys.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Xrpl" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="XrplFile.App.Core.Tests" />

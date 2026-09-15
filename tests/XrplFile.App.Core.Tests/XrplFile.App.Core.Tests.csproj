@@ -9,5 +9,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\app\XrplFile.App.Core\XrplFile.App.Core.csproj" />
+    <ProjectReference Include="..\XrplFile.TestSupport\XrplFile.TestSupport.csproj" />
   </ItemGroup>
 </Project>
