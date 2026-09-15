@@ -158,6 +158,11 @@ public sealed class PublishModelTests : VaultHarness
         Assert.Null(await model.BuildRequestAsync(TestContext.Current.CancellationToken));
         Assert.Contains("standalone", model.Message ?? string.Empty, StringComparison.Ordinal);
         Assert.Contains("xrpl-file link", model.Message ?? string.Empty, StringComparison.Ordinal);
+
+        // The whole point of this screen catching the refusal is that the person never sees the
+        // library's own error name -- that is what used to arrive, deep inside a confirmed run, as
+        // a bare "InvalidLink". Pin it so a future edit cannot paste it back into the message.
+        Assert.DoesNotContain("InvalidLink", model.Message ?? string.Empty, StringComparison.Ordinal);
     }
 
     [Fact]
