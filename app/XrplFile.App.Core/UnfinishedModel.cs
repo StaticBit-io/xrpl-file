@@ -116,15 +116,23 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
     {
         ArgumentNullException.ThrowIfNull(row);
 
+        string? failure = null;
+
         try
         {
             File.Delete(row.Path);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Message = "That state file could not be deleted.";
+            failure = "That state file could not be deleted.";
         }
 
+        // Refresh() clears Message on its own first line -- it has to run either way, since a
+        // successful delete needs the row gone and a failed one needs the row (still on disk) to
+        // stay listed. The failure, if there is one, is applied after, or Refresh() would erase it
+        // and this destructive action would fail with nothing on screen to say so.
         Refresh();
+
+        if (failure is not null) Message = failure;
     }
 }
