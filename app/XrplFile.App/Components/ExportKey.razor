@@ -1,6 +1,5 @@
 @implements IDisposable
 @inject ExportModel Model
-@inject IFilePickerService FilePicker
 @inject IJSRuntime JS
 
 @* Design section 8: a container sealed under its own password, offered as a file or as a QR code.
@@ -138,26 +137,17 @@ else
         }
 
         _busy = true;
+        // Reset on every attempt, not just a successful one: without this, a save that fails after
+        // an earlier save succeeded still showed "Saved." alongside the new failure alert, because
+        // nothing ever told this flag the earlier success no longer describes what just happened.
+        _saved = false;
         StateHasChanged();
         try
         {
-            // The entry is marked exported here and nowhere earlier: only a save that came back
-            // true actually put the bytes somewhere. A cancelled dialog returns false and a full or
-            // read-only disk throws out of the picker, and in both cases this key still exists
-            // nowhere but the vault -- which is exactly what the badge on the key list, and the
-            // warning before deleting it, are there to say.
-            bool saved = await FilePicker.SaveFileAsync($"{Reference}.xrplkey", _container, _cts.Token);
-            if (saved)
-            {
-                await Model.RecordSavedAsync(Reference, _cts.Token);
-                _saved = true;
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Whatever the platform's own save threw -- a full disk, a folder gone read-only. The
-            // words are the model's, not this component's.
-            Model.ReportSaveFailed();
+            // The entry is marked exported only once the platform actually wrote the bytes, and
+            // what a platform failure means -- report it, or let it crash -- is Model.SaveToFileAsync's
+            // decision, not this markup's; see its own remarks for why.
+            _saved = await Model.SaveToFileAsync(Reference, _container, _cts.Token);
         }
         finally
         {

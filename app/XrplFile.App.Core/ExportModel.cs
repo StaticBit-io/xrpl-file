@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -27,7 +29,17 @@ public sealed record QrPayload(string Text, int ContainerBytes, bool FitsOneCode
 /// The model behind exporting one vault entry to a portable backup container and turning that
 /// container into a QR code (design section 8).
 /// </summary>
-public sealed class ExportModel(IKeyVault vault)
+/// <param name="vault">The vault a container is sealed from and a save is recorded against.</param>
+/// <param name="filePicker">
+/// The platform's save dialog. Called from <see cref="SaveToFileAsync"/> rather than from
+/// <c>ExportKey.razor</c>, so that what a failed write means -- report it, or let it crash -- is
+/// this model's decision and not the component's, the same split <see cref="VaultLocationModel.ChoosePath"/>
+/// makes for <see cref="IVaultLocationStore.WriteChosenPath"/>. This differs from <see cref="AddKeyModel"/>,
+/// which lets its component call <see cref="IFilePickerService.PickFileAsync"/> directly: reading a
+/// file back only ever succeeds or is cancelled, nothing here has to judge what a platform failure
+/// means. Writing one can fail in ways only this model has the vocabulary to describe.
+/// </param>
+public sealed class ExportModel(IKeyVault vault, IFilePickerService filePicker)
 {
     /// <summary>
     /// The largest alphanumeric payload one QR code is assumed to carry: version 40, correction
@@ -145,16 +157,90 @@ public sealed class ExportModel(IKeyVault vault)
     }
 
     /// <summary>
+    /// Asks the platform to save <paramref name="container"/> where the person chooses, and records
+    /// the outcome: <see cref="RecordSavedAsync"/> on a save that landed, <see cref="ReportSaveFailed"/>
+    /// on one the platform refused, and neither on a cancelled dialog.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the platform call and its <see langword="catch"/> live here and not in <c>ExportKey.razor</c>.</b>
+    /// Deciding which of the platform's failures are this file's ordinary business -- a full disk, a
+    /// folder gone read-only -- and which would be a defect in this application's own code is a
+    /// judgement, not a rendering choice, the same one <see cref="VaultLocationModel.ChoosePath"/>
+    /// makes for <see cref="IVaultLocationStore.WriteChosenPath"/> rather than leaving it to
+    /// <c>VaultUnreachable.razor</c>.
+    /// </para>
+    /// <para>
+    /// <b>What is caught, and why <see cref="COMException"/> is one of the three.</b>
+    /// <see cref="IOException"/> and <see cref="UnauthorizedAccessException"/> are the .NET
+    /// exceptions a full or read-only destination is documented to raise. On this platform the save
+    /// dialog and the write both go through WinRT (<c>FileSavePicker</c>, <c>FileIO.WriteBytesAsync</c>
+    /// in <c>MauiFilePickerService</c>), and CsWinRT's projection maps only a fixed, small table of
+    /// HRESULTs onto specific .NET exception types (<c>WinRT.ExceptionHelpers.GetExceptionForHR</c>
+    /// in the CsWinRT source) -- <c>E_ACCESSDENIED</c> becomes <see cref="UnauthorizedAccessException"/>,
+    /// a handful of others become <see cref="FileNotFoundException"/>, <see cref="DirectoryNotFoundException"/>,
+    /// and the like, but <c>ERROR_DISK_FULL</c> (0x80070070) is not in that table. An HRESULT the
+    /// table does not recognise falls to its <see langword="default"/> case, which is a bare
+    /// <see cref="COMException"/> carrying that HRESULT -- not an <see cref="IOException"/>, so a
+    /// disk that fills while writing a backup would otherwise miss this catch entirely and reach
+    /// Blazor's own unhandled-error page, exactly the failure <c>VaultUnreachable.razor</c> was
+    /// fixed for on the other screen. <see cref="COMException"/> is added rather than a bare
+    /// <see cref="Exception"/> because it is the one type this specific WinRT boundary can produce
+    /// for a native failure that is not one of the mapped, more specific types; a defect in this
+    /// application's own C# -- a null reference, an argument, a cast -- still propagates unmapped
+    /// and uncaught, exactly as before.
+    /// </para>
+    /// <para>
+    /// <b><see cref="ReportSaveFailed"/>'s sentence stays generic</b> rather than naming disk-full
+    /// specifically: <see cref="COMException"/> covers every HRESULT CsWinRT does not otherwise map,
+    /// not only <c>ERROR_DISK_FULL</c>, and a wrong guess at the cause would be worse than none.
+    /// </para>
+    /// </remarks>
+    /// <returns>
+    /// <see langword="true"/> once the platform has written the file, whether or not
+    /// <see cref="RecordSavedAsync"/> then succeeded in flagging the entry -- see its own remarks for
+    /// why a failure to record the flag does not undo the save. <see langword="false"/> when the
+    /// person cancelled the dialog or the platform refused the write; <see cref="Problem"/> is set in
+    /// the second case only.
+    /// </returns>
+    public async Task<bool> SaveToFileAsync(string reference, byte[] container, CancellationToken cancellationToken)
+    {
+        bool saved;
+        try
+        {
+            saved = await filePicker
+                .SaveFileAsync($"{reference}.xrplkey", container, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or COMException)
+        {
+            ReportSaveFailed();
+            return false;
+        }
+
+        if (!saved)
+        {
+            return false;
+        }
+
+        await RecordSavedAsync(reference, cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
     /// Records that the platform refused to write the container where the person asked for it, so
     /// the screen has words for it and the entry stays unexported.
     /// </summary>
     /// <remarks>
     /// The counterpart to <see cref="RecordSavedAsync"/> for a save that threw rather than one that
-    /// came back <see langword="false"/>. A caller that cancels the dialog is not a failure and must
-    /// not call this: nothing went wrong, the person simply chose not to save yet. The sentence is
+    /// came back <see langword="false"/>. Called only from <see cref="SaveToFileAsync"/>'s own
+    /// <see langword="catch"/>: a caller that cancels the dialog is not a failure and must not reach
+    /// this, and nothing else in this model catches a platform write failure. The sentence is
     /// composed here rather than in the component for the same reason every other sentence in this
     /// model is, and it names nothing about where the file was going -- a path on screen is exactly
-    /// what <see cref="CreateMessages"/> exists to prevent elsewhere.
+    /// what <see cref="CreateMessages"/> exists to prevent elsewhere. Left public: a test exercises
+    /// the sentence and its effect on the exported flag without needing a platform failure to
+    /// reproduce it.
     /// </remarks>
     public void ReportSaveFailed() =>
         Problem =
