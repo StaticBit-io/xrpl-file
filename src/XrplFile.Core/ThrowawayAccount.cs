@@ -349,9 +349,10 @@ public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, ITr
         // and then submit with the transaction's now-higher sequence -- refused again, burning a
         // second owner reserve on a second tecTOO_SOON.
         //
-        // FakeLedgerSink hands out one counter for both validated: true and validated: false, so no
-        // test in this suite can tell the wrong read from the right one; this comment is the only
-        // guard against that regression.
+        // Pinned by ThrowawayAccountDeletionTests's
+        // The_gate_uses_the_sequence_the_transaction_will_carry_not_the_validated_one, which puts
+        // the two reads in disagreement via FakeLedgerSink.SetValidatedSequence: a validated
+        // sequence that clears the threshold against a ledger the unvalidated one does not.
         uint sequence = await _sink.SequenceAsync(Address, validated: false, cancellationToken).ConfigureAwait(false);
         long deletableFrom = sequence + DeletionSequenceDelta;
         long current = await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);

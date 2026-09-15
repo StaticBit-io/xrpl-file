@@ -20,7 +20,8 @@ public sealed class ThrowawayAccountDeletionTests
         long balanceDrops = 30_000_000,
         long currentLedger = 5_000,
         uint sequence = 100,
-        bool destinationExists = true)
+        bool destinationExists = true,
+        uint? validatedSequence = null)
     {
         FakeLedgerSource ledger = new() { CurrentLedger = currentLedger };
         ledger.Balances[Writer] = balanceDrops;
@@ -32,6 +33,7 @@ public sealed class ThrowawayAccountDeletionTests
 
         FakeLedgerSink sink = new(ledger);
         sink.SetSequence(sequence);
+        if (validatedSequence is not null) sink.SetValidatedSequence(validatedSequence);
 
         ThrowawayAccount account = new(sink, ledger, Signer);
         return (account, ledger, sink);
@@ -56,6 +58,24 @@ public sealed class ThrowawayAccountDeletionTests
 
         Assert.Equal(DeletionOutcome.NotYet, preview.Outcome);
         Assert.Equal(354, preview.DeletableFromLedger);
+        Assert.Empty(sink.Submitted);
+    }
+
+    [Fact]
+    public async Task The_gate_uses_the_sequence_the_transaction_will_carry_not_the_validated_one()
+    {
+        // A validated sequence that lags the unvalidated one -- exactly what an already-applied or
+        // in-flight transaction leaves behind on a real node. Validated (100) clears the threshold
+        // against ledger 400 (100 + 254 = 354); the unvalidated sequence DeleteAsync will actually
+        // sign with (200) does not (200 + 254 = 454). A gate that read the validated number would
+        // answer Ready and submit here -- rippled would refuse the resulting transaction with
+        // tecTOO_SOON and still claim its owner reserve.
+        (ThrowawayAccount account, _, FakeLedgerSink sink) =
+            Ready(currentLedger: 400, sequence: 200, validatedSequence: 100);
+
+        DeletionResult result = await account.DeleteAsync(Home, TestContext.Current.CancellationToken);
+
+        Assert.Equal(DeletionOutcome.NotYet, result.Outcome);
         Assert.Empty(sink.Submitted);
     }
 

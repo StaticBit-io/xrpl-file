@@ -25,6 +25,16 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     private readonly Lock _gate = new();
     private readonly List<Dictionary<string, object>> _submitted = [];
     private uint _nextSequence = 10;
+
+    /// <summary>
+    /// What a validated-sequence read answers instead of <see cref="_nextSequence"/>, when set by
+    /// <see cref="SetValidatedSequence"/>. Null — the default — keeps this fake's original
+    /// single-counter behaviour, where a validated read and an unvalidated one answer the same
+    /// number, which is what every test that does not call <see cref="SetValidatedSequence"/>
+    /// relies on.
+    /// </summary>
+    private uint? _validatedSequenceOverride;
+
     private int _ledgersClosed;
     private int _inFlight;
     private int _peakInFlight;
@@ -142,6 +152,20 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
         lock (_gate) _nextSequence = sequence;
     }
 
+    /// <summary>
+    /// Makes a validated-sequence read answer a different number than <see cref="SetSequence"/>'s
+    /// unvalidated one, so a test can put the two in disagreement — exactly the situation an
+    /// in-flight or already-applied transaction produces on a real node, and the situation
+    /// <see cref="ThrowawayAccount.PreviewDeletionAsync"/>'s deletion gate has to survive: it must
+    /// measure the threshold against the sequence the transaction will actually be signed with,
+    /// not against a validated read that can lag behind it. Pass <see langword="null"/> to go back
+    /// to answering <see cref="SetSequence"/>'s number for both reads.
+    /// </summary>
+    public void SetValidatedSequence(uint? sequence)
+    {
+        lock (_gate) _validatedSequenceOverride = sequence;
+    }
+
     public Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken)
     {
         lock (_gate)
@@ -159,6 +183,8 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
                 // describes.
                 _ledgersClosed++;
                 Events.Add("query");
+
+                return Task.FromResult(_validatedSequenceOverride ?? _nextSequence);
             }
 
             return Task.FromResult(_nextSequence);
