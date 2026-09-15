@@ -132,13 +132,13 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     /// <summary>
     /// Sets the sequence this sink will next hand out, so a test can put an account within
     /// AccountDelete's deletion threshold without minting ninety throwaway transactions to get
-    /// there. This fake tracks one sequence counter regardless of which account asks for it — it
-    /// only ever models the one throwaway account a real caller signs for — so <paramref name="account"/>
-    /// is unused; it is taken anyway so a call here reads like the <see cref="SequenceAsync"/> it primes.
+    /// there. Takes no account: this fake tracks one sequence counter regardless of which account
+    /// asks for it, the same way <see cref="SequenceAsync"/> itself does — it only ever models the
+    /// one throwaway account a real caller signs for, and a parameter this fake could not honour
+    /// would invite a test priming two accounts to get one counter and debug the wrong thing.
     /// </summary>
-    public void SetSequence(string account, uint sequence)
+    public void SetSequence(uint sequence)
     {
-        _ = account;
         lock (_gate) _nextSequence = sequence;
     }
 

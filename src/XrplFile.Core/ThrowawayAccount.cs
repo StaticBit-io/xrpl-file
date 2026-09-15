@@ -98,7 +98,11 @@ public enum DeletionOutcome
 /// <param name="Destination">The address the caller named. Nothing here ever chooses one.</param>
 /// <param name="BalanceDrops">What the account holds, as the node reported it.</param>
 /// <param name="FeeDrops">One owner reserve — <c>AccountDelete</c>'s own price, read from the node.</param>
-/// <param name="ArrivingDrops">What reaches the destination: the balance less the fee, or zero when nothing will be sent.</param>
+/// <param name="ArrivingDrops">
+/// What reaches the destination: the balance less the fee, or zero when nothing will be sent. It
+/// has actually arrived only once <see cref="Outcome"/> is <see cref="DeletionOutcome.Submitted"/>
+/// — the same caveat <see cref="RefundResult.SentDrops"/> carries.
+/// </param>
 /// <param name="TxHash">The deletion's hash, or an empty string when nothing was submitted.</param>
 /// <param name="DeletableFromLedger">The first ledger at which the sequence rule stops refusing, when it currently refuses; otherwise <see langword="null"/>.</param>
 /// <param name="Outcome">How far it got.</param>
@@ -322,18 +326,44 @@ public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, ITr
         long fee = fees.OwnerReserveDrops;
         long arriving = Math.Max(0, state.BalanceDrops - fee);
 
+        // Owned objects besides tickets -- trust lines, offers, escrows -- make a real
+        // AccountDelete answer tecHAS_OBLIGATIONS, still claiming the fee. This preflight does not
+        // gate on state.OwnerCount to catch it: a throwaway account exists for one publication and
+        // mints only tickets, which AccountDelete clears on its own, so OwnerCount is expected to
+        // already be zero by the time a deletion is attempted. An account handed to
+        // ThrowawayAccount carrying other objects would still lose the reserve to this one
+        // uncaught tec* -- accepted for the same reason DeletableFromLedgerAsync's own gap between
+        // a refused attempt and a retry is accepted below, rather than closed.
         DeletionResult Refused(DeletionOutcome outcome, long? deletableFrom = null) =>
             new(destination, state.BalanceDrops, fee, 0, string.Empty, deletableFrom, outcome);
 
-        long deletableFrom = await DeletableFromLedgerAsync(cancellationToken).ConfigureAwait(false);
+        // The threshold has to be measured against the sequence the transaction will actually
+        // carry -- the account's *unvalidated* sequence, the one SequenceAsync(validated: false)
+        // hands the sink for signing -- and not DeletableFromLedgerAsync's validated: true read.
+        // rippled's own precondition, Sequence + 255 > view.seq(), is checked against the sequence
+        // the transaction being built carries; a first AccountDelete refused with tecTOO_SOON is
+        // still applied and still consumes that sequence (AccountDeleteThresholdTests recomputes
+        // its own boundary from a validated: false read after every refusal for exactly this
+        // reason, rather than trusting a value captured before it). Gating here on the last
+        // validated sequence instead would read a stale, lower number on an immediate retry, pass,
+        // and then submit with the transaction's now-higher sequence -- refused again, burning a
+        // second owner reserve on a second tecTOO_SOON.
+        //
+        // FakeLedgerSink hands out one counter for both validated: true and validated: false, so no
+        // test in this suite can tell the wrong read from the right one; this comment is the only
+        // guard against that regression.
+        uint sequence = await _sink.SequenceAsync(Address, validated: false, cancellationToken).ConfigureAwait(false);
+        long deletableFrom = sequence + DeletionSequenceDelta;
         long current = await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
 
         if (current < deletableFrom) return Refused(DeletionOutcome.NotYet, deletableFrom);
 
         // A balance that cannot cover the fee cannot be deleted now either. It is the same sentence
         // to the person -- not yet -- and inventing a separate outcome for it would split one
-        // remedy in two.
-        if (state.BalanceDrops <= fee) return Refused(DeletionOutcome.NotYet, deletableFrom);
+        // remedy in two. The sequence rule is not what is refusing here -- the check above already
+        // passed -- so DeletableFromLedger stays null rather than naming a ledger that is not the
+        // reason for the wait.
+        if (state.BalanceDrops <= fee) return Refused(DeletionOutcome.NotYet);
 
         DestinationState home = await _source.DestinationAsync(destination, cancellationToken).ConfigureAwait(false);
 

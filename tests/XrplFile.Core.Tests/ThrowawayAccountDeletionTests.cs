@@ -1,3 +1,4 @@
+using System.Globalization;
 using Xrpl.Wallet;
 using Xunit;
 
@@ -30,7 +31,7 @@ public sealed class ThrowawayAccountDeletionTests
         }
 
         FakeLedgerSink sink = new(ledger);
-        sink.SetSequence(Writer, sequence);
+        sink.SetSequence(sequence);
 
         ThrowawayAccount account = new(sink, ledger, Signer);
         return (account, ledger, sink);
@@ -111,7 +112,7 @@ public sealed class ThrowawayAccountDeletionTests
     [Fact]
     public async Task A_deletion_that_can_proceed_submits_an_AccountDelete_carrying_the_destination()
     {
-        (ThrowawayAccount account, _, FakeLedgerSink sink) = Ready();
+        (ThrowawayAccount account, FakeLedgerSource ledger, FakeLedgerSink sink) = Ready();
 
         DeletionResult result = await account.DeleteAsync(Home, TestContext.Current.CancellationToken);
 
@@ -121,6 +122,38 @@ public sealed class ThrowawayAccountDeletionTests
         Assert.Equal(Writer, submitted["Account"]);
         Assert.Equal(Home, submitted["Destination"]);
         Assert.NotEqual(string.Empty, result.TxHash);
+
+        // Pinned against the node's own fee rather than a literal: the fake's open-ledger fee (10)
+        // and its owner reserve (200,000) are far enough apart that a regression writing the wrong
+        // one into the transaction cannot pass this by accident.
+        NetworkFees fees = await ledger.FeesAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(fees.OwnerReserveDrops.ToString(CultureInfo.InvariantCulture), submitted["Fee"]);
+    }
+
+    [Fact]
+    public async Task A_queued_deletion_says_it_is_queued_rather_than_that_the_account_is_gone()
+    {
+        (ThrowawayAccount account, _, FakeLedgerSink sink) = Ready();
+        sink.Refusals[0] = "terQUEUED";
+
+        DeletionResult result = await account.DeleteAsync(Home, TestContext.Current.CancellationToken);
+
+        // terQUEUED is not arrival: the queue can drop the submission, and until a ledger takes it
+        // the account still exists and every drop is still on it.
+        Assert.Equal(DeletionOutcome.Queued, result.Outcome);
+        Assert.NotEqual(string.Empty, result.TxHash);
+    }
+
+    [Fact]
+    public async Task A_deletion_the_node_refuses_is_not_reported_as_the_account_being_gone()
+    {
+        (ThrowawayAccount account, _, FakeLedgerSink sink) = Ready();
+        sink.Refusals[0] = "tecTOO_SOON";
+
+        XrplFileException refused = await Assert.ThrowsAsync<XrplFileException>(
+            () => account.DeleteAsync(Home, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.SubmitRefused, refused.Error);
     }
 
     [Fact]
@@ -132,5 +165,10 @@ public sealed class ThrowawayAccountDeletionTests
 
         Assert.Equal(DeletionOutcome.NotYet, result.Outcome);
         Assert.Empty(sink.Submitted);
+
+        // The sequence rule is not what is refusing here -- the account is well past its
+        // threshold -- so naming a ledger would point at a moment that is not the actual reason
+        // for the wait.
+        Assert.Null(result.DeletableFromLedger);
     }
 }
