@@ -5,6 +5,8 @@ using XrplFile.Tests;
 
 using Xunit;
 
+using static XrplFile.App.Core.Tests.GatedWait;
+
 namespace XrplFile.App.Core.Tests;
 
 public sealed class RunModelTests : VaultHarness
@@ -183,70 +185,5 @@ public sealed class RunModelTests : VaultHarness
             new byte[4096], "application/octet-stream", "file.bin", reference, wallet.ClassicAddress, "1");
 
         return (run, request);
-    }
-
-    /// <summary>
-    /// Copied rather than shared with <c>PublicationRunTests.GatedSubmitSink</c> — see that class's
-    /// own remarks for why the gate exists at all (a bare cancel racing <c>PublicationSession.StartAsync</c>
-    /// itself is not deterministic) and <c>UnfinishedModelTests</c>'s own remarks for why this
-    /// repository copies this particular double per file rather than promoting it to something shared.
-    /// </summary>
-    private sealed class GatedSubmitSink(ILedgerSink inner, int gateAt) : ILedgerSink
-    {
-        private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private int _count;
-
-        public Task Reached => _reached.Task;
-
-        public void Release() => _release.TrySetResult();
-
-        public Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken) =>
-            inner.SequenceAsync(account, validated, cancellationToken);
-
-        public async Task<SubmitOutcome> SubmitAsync(
-            Dictionary<string, object> transaction, ITransactionSigner signer, CancellationToken cancellationToken)
-        {
-            if (Interlocked.Increment(ref _count) == gateAt)
-            {
-                _reached.TrySetResult();
-                await _release.Task.ConfigureAwait(false);
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-
-            return await inner.SubmitAsync(transaction, signer, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private sealed class GatedConnectionFactory(FakeConnectionFactory inner, GatedSubmitSink sink) : IConnectionFactory
-    {
-        public async Task<ILedgerConnection> ConnectAsync(string network, CancellationToken cancellationToken)
-        {
-            ILedgerConnection connection = await inner.ConnectAsync(network, cancellationToken).ConfigureAwait(false);
-            return new Connection(connection, sink);
-        }
-
-        private sealed class Connection(ILedgerConnection inner, ILedgerSink sink) : ILedgerConnection
-        {
-            public ILedgerSource Source => inner.Source;
-
-            public ILedgerSink Sink => sink;
-
-            public string Url => inner.Url;
-
-            public ValueTask DisposeAsync() => inner.DisposeAsync();
-        }
-    }
-
-    private static async Task WaitForGateAsync(GatedSubmitSink gate, PublicationRun run)
-    {
-        Task finished = await Task.WhenAny(gate.Reached, run.Completion).ConfigureAwait(false);
-
-        if (!ReferenceEquals(finished, gate.Reached))
-        {
-            throw new InvalidOperationException(
-                $"the run finished ({run.Snapshot.State}) before reaching the gated submission, so there is "
-                + "nothing left to release");
-        }
     }
 }
