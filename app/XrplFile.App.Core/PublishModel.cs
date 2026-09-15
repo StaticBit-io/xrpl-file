@@ -64,6 +64,20 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             : Keys.FirstOrDefault(key => string.Equals(key.Reference, SelectedReference, StringComparison.Ordinal));
 
     /// <summary>
+    /// Whether <paramref name="key"/> is the one currently chosen — the same
+    /// <see cref="StringComparison.Ordinal"/> comparison <see cref="SelectedKey"/> itself uses, kept
+    /// here rather than left for the key list's own markup to redo with whatever comparison (or none
+    /// stated at all) happened to be typed there.
+    /// </summary>
+    public bool IsSelected(VaultEntryInfo key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+
+        return SelectedReference is not null
+            && string.Equals(key.Reference, SelectedReference, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The node this publication would go to, or <see langword="null"/> when there is none. Resolved
     /// from the network's canonical form, not the entry's raw text: <see cref="Endpoints.For"/> and a
     /// person's own overrides in <see cref="INodeSettingsStore"/> are both keyed by the canonical

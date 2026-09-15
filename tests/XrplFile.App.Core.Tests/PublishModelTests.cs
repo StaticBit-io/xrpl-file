@@ -237,4 +237,28 @@ public sealed class PublishModelTests : VaultHarness
         Assert.Null(await model.BuildRequestAsync(TestContext.Current.CancellationToken));
         Assert.NotNull(model.Message);
     }
+
+    [Fact]
+    public async Task IsSelected_is_true_only_for_the_chosen_key()
+    {
+        (PublishModel model, KeyVault vault, string reference) =
+            await OpenAsync(TestContext.Current.CancellationToken, network: "testnet");
+        NewVaultEntry other = Entry("other key") with { Network = "testnet" };
+        string otherReference = await vault.StoreAsync(other, TestContext.Current.CancellationToken);
+        await model.RefreshKeysAsync(TestContext.Current.CancellationToken);
+
+        model.SelectKey(reference);
+
+        Assert.True(model.IsSelected(model.Keys.Single(key => key.Reference == reference)));
+        Assert.False(model.IsSelected(model.Keys.Single(key => key.Reference == otherReference)));
+    }
+
+    [Fact]
+    public async Task IsSelected_is_false_for_every_key_before_any_is_chosen()
+    {
+        (PublishModel model, _, string reference) =
+            await OpenAsync(TestContext.Current.CancellationToken, network: "testnet");
+
+        Assert.False(model.IsSelected(model.Keys.Single(key => key.Reference == reference)));
+    }
 }

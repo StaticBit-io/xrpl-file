@@ -9,10 +9,29 @@ public sealed class RunModel(PublicationRun run)
 {
     public RunSnapshot Snapshot => run.Snapshot;
 
+    /// <summary>
+    /// Whether there is a run to show at all. <see cref="PublicationRunState.Idle"/> means nothing
+    /// has started yet, or a finished run's outcome was already put away by <see cref="Dismiss"/> —
+    /// both read as "show the picker instead of this screen", which is a decision, not a fact this
+    /// application's one caller (Publish.razor) should make itself by comparing
+    /// <see cref="Snapshot"/>.State to <see cref="PublicationRunState.Idle"/> in its own markup.
+    /// </summary>
+    public bool IsActive => Snapshot.State != PublicationRunState.Idle;
+
     public bool CanCancel => Snapshot.State == PublicationRunState.Running;
 
     public bool IsFinished => Snapshot.State is
         PublicationRunState.Succeeded or PublicationRunState.Failed or PublicationRunState.Cancelled;
+
+    /// <summary>
+    /// Whether the run ended because it was cancelled, rather than succeeding or failing.
+    /// <see cref="PublicationRun"/> reports a cancellation with <see cref="RunSnapshot.Failure"/> left
+    /// <see langword="null"/> — cancelling is something a person did, not a fault to describe as one
+    /// — which otherwise leaves a finished screen with neither <see cref="Link"/> nor
+    /// <see cref="Failure"/> to show: a frozen progress bar and a Dismiss button with nothing saying
+    /// what happened. This is the third outcome a screen needs alongside those two.
+    /// </summary>
+    public bool WasCancelled => Snapshot.State == PublicationRunState.Cancelled;
 
     public string? Link => Snapshot.Report?.Link.ToString();
 

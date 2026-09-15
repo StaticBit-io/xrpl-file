@@ -99,9 +99,29 @@
             <button type="button" class="btn btn-outline-primary mt-2" @onclick="SaveNodes">
                 Save node URLs
             </button>
+
+            <div class="mt-3">
+                <label class="form-label">Add a network not listed above</label>
+                <p class="text-body-secondary mb-2">
+                    A locally run standalone node, for one: its network is a NetworkID such as
+                    <code>1</code>, which has no row until it is added here.
+                </p>
+                <div class="d-flex flex-wrap gap-2">
+                    <input class="form-control" style="max-width: 12rem;" placeholder="network name or NetworkID"
+                           value="@_newNetworkName" @oninput="e => _newNetworkName = (string)e.Value!" />
+                    <input class="form-control" style="max-width: 20rem;" placeholder="wss://&hellip;"
+                           value="@_newNetworkUrl" @oninput="e => _newNetworkUrl = (string)e.Value!" />
+                    <button type="button" class="btn btn-outline-primary" @onclick="AddNetwork">Add</button>
+                </div>
+            </div>
+
             @if (NodeSettings.Message is { } nodeProblem)
             {
                 <div class="alert alert-warning mt-2">@nodeProblem</div>
+            }
+            else if (_nodesSaved)
+            {
+                <div class="alert alert-success mt-2">Saved.</div>
             }
         </section>
 
@@ -118,6 +138,9 @@
     private bool _deviceUnlockEnabled;
     private bool _busy;
     private bool _choosingVault;
+    private bool _nodesSaved;
+    private string _newNetworkName = string.Empty;
+    private string _newNetworkUrl = string.Empty;
     private VaultLocationModel.Outcome? _chooseVaultOutcome;
 
     protected override async Task OnInitializedAsync()
@@ -143,12 +166,28 @@
 
     private string NodeEdit(string network) => _nodeEdits.TryGetValue(network, out string? value) ? value : string.Empty;
 
-    private void SetNodeEdit(string network, string value) => _nodeEdits[network] = value;
+    private void SetNodeEdit(string network, string value)
+    {
+        _nodeEdits[network] = value;
+        _nodesSaved = false;
+    }
 
     private void SaveNodes()
     {
-        if (NodeSettings.Save(_nodeEdits))
+        _nodesSaved = NodeSettings.Save(_nodeEdits);
+        if (_nodesSaved)
         {
+            RestartNodeEdits();
+        }
+    }
+
+    private void AddNetwork()
+    {
+        _nodesSaved = NodeSettings.AddNetwork(_newNetworkName, _newNetworkUrl);
+        if (_nodesSaved)
+        {
+            _newNetworkName = string.Empty;
+            _newNetworkUrl = string.Empty;
             RestartNodeEdits();
         }
     }

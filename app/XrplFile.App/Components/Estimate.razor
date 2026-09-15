@@ -4,10 +4,17 @@
 
 @* Design 4.2: what a publication will cost, before it is agreed to. Every figure below is
    EstimateModel.Estimate's own; this component decides only whether to show the alert CanPublish and
-   Message already settled, never the numbers behind either. *@
+   Message already settled, never the numbers behind either. This is also the last screen before
+   money is spent, so what file and which key -- both already settled in Request, by PublishModel,
+   before this component ever existed -- are named here too, not only the cost. *@
 
 <div class="container py-3">
     <h1 class="h3">Estimate</h1>
+
+    <p>
+        Publishing <strong>@Request.Name</strong> (@Request.File.Length.ToString("N0") bytes) from
+        <code>@Request.Account</code>.
+    </p>
 
     @if (Model.Estimate is { } estimate)
     {
@@ -65,11 +72,10 @@
         _starting = true;
         try
         {
-            // False here would mean a run is already going, which CanEstimate/CanPublish's own
-            // reachability through Publish.razor already rules out: that screen only ever shows this
-            // one once PublicationRun.Snapshot.State is Idle. Nothing further is done with the
-            // result -- Publish.razor's own poll notices the state change and swaps to <Run /> within
-            // one second either way.
+            // False here would mean a run is already going, which reaching this screen through
+            // Publish.razor already rules out: that screen only ever shows this one when
+            // RunModel.IsActive is false. Nothing further is done with the result -- Publish.razor's
+            // own poll notices IsActive flip and swaps to <Run /> within one second either way.
             Run.Start(Request);
             await OnStarted.InvokeAsync();
         }

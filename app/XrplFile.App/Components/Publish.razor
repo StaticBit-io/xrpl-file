@@ -1,22 +1,29 @@
 @implements IDisposable
 @inject PublishModel Model
-@inject PublicationRun Run
+@inject RunModel Run
 
 @* Design 4.1 and F13: the Publish tab renders exactly one of its three stops -- the running/finished
    screen once a run exists, the estimate once one has been taken, or the picker below -- and every
-   fact on screen is read straight off PublishModel or PublicationRun. The only thing this component
-   decides is which of the three stops that is, which is navigation, not a fact about the publication;
-   KeyList.razor's own remarks make the same distinction for its own sub-screens.
+   fact on screen is read straight off PublishModel or RunModel. Whether a run is active at all is
+   RunModel.IsActive's own decision, not this markup's: it used to compare
+   Run.Snapshot.State != PublicationRunState.Idle directly against the service PublicationRun,
+   reaching past the model and putting a comparison nothing here can test into markup. The only thing
+   this component still decides for itself is which of the three stops is on screen, which is
+   navigation, not a fact about the publication; KeyList.razor's own remarks make the same distinction
+   for its own sub-screens.
 
    The one-second timer exists only to make PublicationRun's own background progress visible: its
    Snapshot changes on a task this screen never awaits, and without a poll forcing a render, <Run />
    would go on showing whatever it read at its last user-triggered render. Copied verbatim from
    Shell.razor's own poll, at the same interval and with the same Timer/CancellationTokenSource/
-   _disposed shape, so the two screens can never notice a change at different moments. *@
+   _disposed shape, so the two screens can never notice a change at different moments. Dismissing a
+   run from <Run /> also calls StateHasChanged directly, through OnDismissed, rather than waiting on
+   this same poll: without it, this branch would go on showing <Run /> — now re-rendering itself
+   against a freshly Idle snapshot — for up to a second after the button was pressed. *@
 
-@if (Run.Snapshot.State != PublicationRunState.Idle)
+@if (Run.IsActive)
 {
-    <Run />
+    <Run OnDismissed="StateHasChanged" />
 }
 else if (_estimated)
 {
@@ -37,21 +44,21 @@ else
         <ul class="list-group my-3">
             @foreach (VaultEntryInfo key in Model.Keys)
             {
-                <li class="list-group-item @(key.Reference == Model.SelectedReference ? "active" : "")"
+                <li class="list-group-item @(Model.IsSelected(key) ? "active" : "")"
                     @onclick="() => Model.SelectKey(key.Reference)">
                     @key.Label &mdash; @key.Address (@key.Network)
                 </li>
             }
         </ul>
 
-        @if (Model.Warning is not null)
-        {
-            <div class="alert alert-warning">@Model.Warning</div>
-        }
-
         @if (Model.Message is not null)
         {
-            <div class="alert alert-secondary">@Model.Message</div>
+            <div class="alert alert-warning">@Model.Message</div>
+        }
+
+        @if (Model.Warning is not null)
+        {
+            <div class="alert alert-secondary">@Model.Warning</div>
         }
 
         <button type="button" class="btn btn-primary" disabled="@(!Model.CanEstimate)" @onclick="EstimateAsync">

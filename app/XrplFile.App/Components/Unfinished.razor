@@ -11,6 +11,14 @@
 <div class="container py-3">
     <h2 class="h5">Unfinished runs</h2>
 
+    @if (Model.Rows.Count > 0)
+    {
+        <p class="text-body-secondary">
+            Deleting does not undo what a run already spent &mdash; only finishing it, by resuming,
+            does not pay those fees again.
+        </p>
+    }
+
     @if (Model.Message is not null)
     {
         <div class="alert alert-warning">@Model.Message</div>

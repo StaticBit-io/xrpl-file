@@ -142,4 +142,86 @@ public sealed class NodeSettingsModelTests : IDisposable
 
         Assert.Equal("wss://example.com", new FileNodeSettingsStore(SettingPath).Read()["mainnet"]);
     }
+
+    /// <summary>
+    /// The case this model exists to serve: a locally run standalone node, whose network is a
+    /// NetworkID that is in neither Endpoints.KnownNetworks nor the store on first use, so Refresh
+    /// alone can never produce a row for it.
+    /// </summary>
+    [Fact]
+    public void Adding_a_NetworkID_not_already_listed_creates_its_row_and_writes_it()
+    {
+        NodeSettingsModel model = NewModel();
+        model.Refresh();
+
+        Assert.True(model.AddNetwork("1", "ws://localhost:6006"));
+        Assert.Null(model.Message);
+
+        NodeSettingRow row = Assert.Single(model.Rows, row => row.Network == "1");
+        Assert.Equal("ws://localhost:6006", row.Url);
+        Assert.Equal("ws://localhost:6006", new FileNodeSettingsStore(SettingPath).Read()["1"]);
+    }
+
+    [Fact]
+    public void Adding_a_network_no_link_can_carry_is_refused_and_nothing_is_written()
+    {
+        NodeSettingsModel model = NewModel();
+        model.Refresh();
+
+        Assert.False(model.AddNetwork("not a network", "ws://localhost:6006"));
+        Assert.NotNull(model.Message);
+        Assert.Empty(new FileNodeSettingsStore(SettingPath).Read());
+    }
+
+    [Fact]
+    public void Adding_a_network_with_a_blank_url_is_refused()
+    {
+        NodeSettingsModel model = NewModel();
+        model.Refresh();
+
+        Assert.False(model.AddNetwork("1", "   "));
+        Assert.NotNull(model.Message);
+        Assert.Empty(new FileNodeSettingsStore(SettingPath).Read());
+    }
+
+    [Fact]
+    public void Adding_a_network_with_a_bad_url_is_refused()
+    {
+        NodeSettingsModel model = NewModel();
+        model.Refresh();
+
+        Assert.False(model.AddNetwork("1", "https://localhost:6006"));
+        Assert.NotNull(model.Message);
+        Assert.Empty(new FileNodeSettingsStore(SettingPath).Read());
+    }
+
+    [Fact]
+    public void Adding_a_network_normalizes_its_case_to_the_canonical_form()
+    {
+        NodeSettingsModel model = NewModel();
+        model.Refresh();
+
+        Assert.True(model.AddNetwork("TESTNET", "wss://example.com"));
+
+        // "testnet" is already a known row -- AddNetwork's canonicalisation must land the override on
+        // that same row, not create a second, differently-cased one beside it.
+        Assert.Single(model.Rows, row => row.Network == "testnet");
+        Assert.Equal("wss://example.com", model.Rows.Single(row => row.Network == "testnet").Url);
+    }
+
+    [Fact]
+    public void Adding_a_network_preserves_other_existing_overrides()
+    {
+        FileNodeSettingsStore store = new(SettingPath);
+        store.Write(new Dictionary<string, string>(StringComparer.Ordinal) { ["mainnet"] = "wss://existing.example.com" });
+
+        NodeSettingsModel model = new(store);
+        model.Refresh();
+
+        Assert.True(model.AddNetwork("2", "ws://localhost:6007"));
+
+        IReadOnlyDictionary<string, string> written = store.Read();
+        Assert.Equal("wss://existing.example.com", written["mainnet"]);
+        Assert.Equal("ws://localhost:6007", written["2"]);
+    }
 }

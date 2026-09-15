@@ -16,17 +16,25 @@ public sealed record NodeSettingRow(string Network, string Url);
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Which rows to show.</b> <see cref="Endpoints.For"/> knows exactly three names --
-/// <c>mainnet</c>, <c>testnet</c>, <c>devnet</c> -- and those are listed every time, in that fixed
-/// order, whether or not a person has ever touched them, so the built-in networks are visible and
-/// editable without already knowing they exist. Anything else in <see cref="INodeSettingsStore.Read"/>
-/// -- a NetworkID typed in before, a private stand's name such as <c>"standalone"</c> -- is appended
-/// after them, in the order <see cref="IReadOnlyDictionary{TKey,TValue}.Keys"/> happens to enumerate
-/// it: nothing about that order is meaningful, so nothing here tries to make it one. A network that
-/// has never been overridden and is not one of the three known names has no row at all -- there is
-/// nothing to show a value for and nothing to edit -- which matches <see cref="PublishModel.Message"/>'s
-/// own remedy for that case ("Add one in Settings"): the row appears the first time a person actually
-/// types a URL for it and saves, at which point <see cref="Refresh"/> finds it in the file.
+/// <b>Which rows to show.</b> <see cref="Endpoints.KnownNetworks"/> is listed every time, in its own
+/// fixed order, whether or not a person has ever touched any of it, so the built-in networks are
+/// visible and editable without already knowing they exist. Anything else in
+/// <see cref="INodeSettingsStore.Read"/> -- a NetworkID typed in before, a private stand's name such
+/// as <c>"standalone"</c> -- is appended after them, in the order
+/// <see cref="IReadOnlyDictionary{TKey,TValue}.Keys"/> happens to enumerate it: nothing about that
+/// order is meaningful, so nothing here tries to make it one.
+/// </para>
+/// <para>
+/// <b>The row a person cannot already reach.</b> A network that has never been overridden and is not
+/// a known name has no row at all -- there is nothing to show a value for and nothing to edit. That
+/// used to mean a dead end: <see cref="PublishModel.Message"/>'s own remedy for exactly this case
+/// ("Add one in Settings") pointed at a box that did not exist, for the one network this feature was
+/// actually built to serve -- a locally run standalone node, whose network is a NetworkID like
+/// <c>"1"</c>, in neither list on first use. <see cref="AddNetwork"/> is the way in: it takes a
+/// network name and a URL together, validates the name the same way a link itself would refuse one
+/// (<see cref="XrplFileLink.TryNormalizeNetwork"/> -- a name no link can carry is not worth storing),
+/// and writes the pair straight to the store rather than only adding an empty row for a later
+/// <see cref="Save"/> to fill in.
 /// </para>
 /// <para>
 /// <b>What an empty box means.</b> <see cref="NodeEndpoint.Resolve"/> already treats a blank or
@@ -46,11 +54,9 @@ public sealed record NodeSettingRow(string Network, string Url);
 /// </remarks>
 public sealed class NodeSettingsModel(INodeSettingsStore store)
 {
-    private static readonly string[] KnownNetworks = ["mainnet", "testnet", "devnet"];
-
     public IReadOnlyList<NodeSettingRow> Rows { get; private set; } = [];
 
-    /// <summary>Why the last <see cref="Save"/> did not take effect, or <see langword="null"/> when it did.</summary>
+    /// <summary>Why the last <see cref="Save"/> or <see cref="AddNetwork"/> did not take effect, or <see langword="null"/> when it did.</summary>
     public string? Message { get; private set; }
 
     public void Refresh()
@@ -59,7 +65,7 @@ public sealed class NodeSettingsModel(INodeSettingsStore store)
 
         IReadOnlyDictionary<string, string> overrides = store.Read();
 
-        List<string> networks = [.. KnownNetworks];
+        List<string> networks = [.. Endpoints.KnownNetworks];
         foreach (string network in overrides.Keys)
         {
             if (!networks.Contains(network, StringComparer.Ordinal))
@@ -70,6 +76,51 @@ public sealed class NodeSettingsModel(INodeSettingsStore store)
 
         Rows = [.. networks.Select(network => new NodeSettingRow(
             network, overrides.TryGetValue(network, out string? url) ? url : string.Empty))];
+    }
+
+    /// <summary>
+    /// Adds a network not already listed, with the URL that reaches it, in one step -- the row
+    /// <see cref="Refresh"/> alone can never produce for a network nobody has configured yet. Refused,
+    /// with <see cref="Message"/> saying why and nothing written, when <paramref name="network"/> is
+    /// not one <see cref="XrplFileLink.TryNormalizeNetwork"/> accepts (the same rule a link itself
+    /// enforces at construction) or when <paramref name="url"/> is blank or not a <c>ws</c>/<c>wss</c>
+    /// URL -- there is nothing useful in a row with no address. On success, <see cref="Refresh"/> runs
+    /// so <see cref="Rows"/> shows the new row at its canonical network name.
+    /// </summary>
+    public bool AddNetwork(string network, string url)
+    {
+        ArgumentNullException.ThrowIfNull(network);
+        ArgumentNullException.ThrowIfNull(url);
+
+        Message = null;
+
+        if (!XrplFileLink.TryNormalizeNetwork(network, out string? canonical))
+        {
+            Message = $"'{network}' is not a network an xrpl-file link can name.";
+            return false;
+        }
+
+        string trimmedUrl = url.Trim();
+        if (trimmedUrl.Length == 0)
+        {
+            Message = "Give the new network a URL to save it with.";
+            return false;
+        }
+
+        if (!IsWebSocketUrl(trimmedUrl))
+        {
+            Message = $"'{url}' is not a ws:// or wss:// URL.";
+            return false;
+        }
+
+        Dictionary<string, string> written = new(store.Read(), StringComparer.Ordinal)
+        {
+            [canonical] = trimmedUrl,
+        };
+
+        store.Write(written);
+        Refresh();
+        return true;
     }
 
     /// <summary>
