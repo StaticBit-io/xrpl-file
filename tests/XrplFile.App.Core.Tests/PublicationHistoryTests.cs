@@ -143,4 +143,41 @@ public sealed class PublicationHistoryTests : IDisposable
         Assert.Empty(history.Read());
         Assert.Null(history.Failure);
     }
+
+    [Fact]
+    public void Appending_to_a_corrupt_file_clears_the_failure_message_once_the_write_succeeds()
+    {
+        byte[] garbage = Encoding.UTF8.GetBytes("{ this is not json");
+        File.WriteAllBytes(HistoryPath, garbage);
+
+        PublicationHistory history = new(HistoryPath);
+
+        // Append reads first -- which sets Failure for the corrupt file -- and then replaces that
+        // same file with one holding just the new record. Failure must reflect only the write's own
+        // outcome once Append returns, not the read's: the write succeeded, and "the file has been
+        // left as it is" (Read's own sentence) would be a false thing to say about a file Append
+        // just deliberately overwrote.
+        history.Append(Record("xrpl-file://testnet/NEW", DateTimeOffset.UnixEpoch));
+
+        Assert.Null(history.Failure);
+        Assert.Equal("xrpl-file://testnet/NEW", Assert.Single(history.Read()).Link);
+    }
+
+    [Fact]
+    public void Concurrent_appends_do_not_corrupt_each_others_writes()
+    {
+        PublicationHistory history = new(HistoryPath);
+
+        // What two overlapping PublicationRun continuations hitting one PublicationHistory instance
+        // looks like from this type's own side, without needing PublicationRun in the loop at all:
+        // Save writes one fixed .tmp path under FileShare.None, so two genuinely overlapping writers
+        // race that single file, and Failure is a plain auto-property either can clobber regardless
+        // of which one actually failed. Twenty, run through Parallel.For rather than sequentially,
+        // to give the runtime room to actually overlap them rather than happening to interleave one
+        // at a time on the same thread.
+        Parallel.For(0, 20, i => history.Append(Record($"xrpl-file://testnet/R{i}", DateTimeOffset.UnixEpoch.AddSeconds(i))));
+
+        Assert.Null(history.Failure);
+        Assert.Equal(20, history.Read().Count);
+    }
 }

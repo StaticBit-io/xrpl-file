@@ -17,6 +17,21 @@ public sealed class PublicationHistory
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
+    /// <summary>
+    /// Every public method's body runs entirely under this, never released partway through a
+    /// read-then-write pair. Nothing about <see cref="_path"/> guarantees only one publication ever
+    /// finishes at once: a screen can start a new run the moment a previous one reports
+    /// <see cref="PublicationRunState.Succeeded"/>, and its own history append can then overlap a
+    /// still-running one's. Without this, two overlapping calls race <see cref="Failure"/> (a plain
+    /// auto-property, last write wins regardless of which call it belongs to) and race
+    /// <see cref="SaveCore"/>'s own fixed <c>.tmp</c> path under <see cref="FileShare.None"/> (the loser
+    /// finds the file already open and reports "could not be written" for a write that was never
+    /// its own to make). Serialising here is simpler than pinning each write to the run that made
+    /// it, and honest about what the actual hazard is: it is this type's own file access that is
+    /// unsafe under overlap, not something a caller can fix by tagging its calls.
+    /// </summary>
+    private readonly Lock _fileLock = new();
+
     private readonly string _path;
 
     public PublicationHistory(string path)
@@ -25,14 +40,66 @@ public sealed class PublicationHistory
     }
 
     /// <summary>
-    /// Why the last <see cref="Read"/> came back empty, when it came back empty because the file
-    /// could not be read rather than because there is nothing in it. A screen shows this instead of
-    /// pretending the person has never published anything.
+    /// Why the last <see cref="Read"/>, <see cref="Append"/>, <see cref="Forget"/> or
+    /// <see cref="Clear"/> did not do what it says, or <see langword="null"/> when it did.
+    /// A screen shows this instead of pretending the person has never published anything, or that a
+    /// publication which actually succeeded was safely recorded when it was not.
     /// </summary>
     public string? Failure { get; private set; }
 
     /// <summary>Newest first. An unreadable file reads as empty and sets <see cref="Failure"/>.</summary>
     public IReadOnlyList<PublicationRecord> Read()
+    {
+        lock (_fileLock)
+        {
+            return ReadCore();
+        }
+    }
+
+    /// <summary>
+    /// Appending to a history that could not be read replaces it with a file holding just the new
+    /// record. This is chosen on purpose: the alternative is refusing to record a publication that
+    /// actually happened and losing its link. The person's publication is in the ledger; if the
+    /// history file is corrupt, replacing it with a fresh start that includes this one is the right
+    /// call.
+    /// </summary>
+    public void Append(PublicationRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+
+        lock (_fileLock)
+        {
+            List<PublicationRecord> records = [.. ReadCore(), record];
+            SaveCore(records);
+        }
+    }
+
+    public void Forget(string link)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(link);
+
+        lock (_fileLock)
+        {
+            IReadOnlyList<PublicationRecord> records = ReadCore();
+            if (Failure is not null) return;
+
+            SaveCore([.. records.Where(record => !string.Equals(record.Link, link, StringComparison.Ordinal))]);
+        }
+    }
+
+    public void Clear()
+    {
+        lock (_fileLock)
+        {
+            // No need to reset Failure by hand here first: SaveCore clears it on its own success,
+            // and its own failure sets it to a sentence about this write, which is the one that
+            // matters once Clear has actually been asked for.
+            SaveCore([]);
+        }
+    }
+
+    /// <summary>Not locked itself — every caller already holds <see cref="_fileLock"/>.</summary>
+    private IReadOnlyList<PublicationRecord> ReadCore()
     {
         Failure = null;
 
@@ -56,40 +123,6 @@ public sealed class PublicationHistory
     }
 
     /// <summary>
-    /// Appending to a history that could not be read replaces it with a file holding just the new
-    /// record. This is chosen on purpose: the alternative is refusing to record a publication that
-    /// actually happened and losing its link. The person's publication is in the ledger; if the
-    /// history file is corrupt, replacing it with a fresh start that includes this one is the right
-    /// call.
-    /// </summary>
-    public void Append(PublicationRecord record)
-    {
-        ArgumentNullException.ThrowIfNull(record);
-
-        List<PublicationRecord> records = [.. Read(), record];
-        Save(records);
-    }
-
-    public void Forget(string link)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(link);
-
-        IReadOnlyList<PublicationRecord> records = Read();
-        if (Failure is not null) return;
-
-        Save([.. records.Where(record => !string.Equals(record.Link, link, StringComparison.Ordinal))]);
-    }
-
-    public void Clear()
-    {
-        // Clear resets the list entirely, so it resets the failure reason along with it.
-        // Append keeps the read's verdict because it deliberately collapses an unreadable file,
-        // and the Failure that Read set is the only message that the old list was lost.
-        Failure = null;
-        Save([]);
-    }
-
-    /// <summary>
     /// Written to a temporary file in the same directory, flushed to disk, and then moved over the
     /// real one, so a crash in the middle cannot leave a truncated array where a history used to be
     /// or a cached write that is lost on power loss. The same durability as the vault's own durable
@@ -103,13 +136,23 @@ public sealed class PublicationHistory
     /// occupies) is exactly the kind of failure this method exists to degrade rather than throw, and
     /// a caller who only guards the write and not the directory creation would still see the
     /// publication it just paid for reported as failed.
+    ///
+    /// <see cref="Failure"/> is cleared at the start of the attempt, not left for a caller to reset:
+    /// <see cref="Append"/> calls <see cref="ReadCore"/> first, which may set <see cref="Failure"/>
+    /// for a corrupt file this write is about to replace — a write that then succeeds must not leave
+    /// that stale "could not be read... left as it is" behind, since the file was not left as it is,
+    /// it was overwritten. Only this attempt's own outcome decides <see cref="Failure"/> from here on.
+    ///
+    /// Not locked itself — every caller already holds <see cref="_fileLock"/>.
     /// </summary>
-    private void Save(IReadOnlyList<PublicationRecord> records)
+    private void SaveCore(IReadOnlyList<PublicationRecord> records)
     {
         string temporary = _path + ".tmp";
 
         try
         {
+            Failure = null;
+
             string directoryPath = Path.GetDirectoryName(_path)!;
             Directory.CreateDirectory(directoryPath);
 

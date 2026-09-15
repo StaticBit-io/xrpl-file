@@ -18,7 +18,17 @@ public sealed class PublicationRunTests : VaultHarness
 
     private PublicationHistory History => new(Paths.HistoryPath);
 
-    private async Task<(PublicationRun Run, PublishRequest Request)> ReadyAsync(CancellationToken token, int size = 4096)
+    /// <param name="connections">
+    /// The factory the run is built with. Defaults to the class's own <see cref="_connections"/>;
+    /// a test that needs to decorate the connection (to gate a submission, say) passes its own
+    /// wrapper here rather than constructing the wallet and vault entry by hand a second time.
+    /// </param>
+    /// <param name="history">
+    /// The history the run is built with. Defaults to <see cref="History"/> (a fresh one over this
+    /// instance's own file); a test that needs the append itself to misbehave passes its own.
+    /// </param>
+    private async Task<(PublicationRun Run, PublishRequest Request)> ReadyAsync(
+        CancellationToken token, int size = 4096, IConnectionFactory? connections = null, PublicationHistory? history = null)
     {
         KeyVault vault = NewVault();
         await vault.CreateAsync(Password("a master password"), token);
@@ -31,7 +41,7 @@ public sealed class PublicationRunTests : VaultHarness
 
         _connections.Ledger.Balances[wallet.ClassicAddress] = 100_000_000;
 
-        PublicationRun run = new(_connections, vault, Paths, History);
+        PublicationRun run = new(connections ?? _connections, vault, Paths, history ?? History);
         PublishRequest request = new(
             new byte[size], "application/octet-stream", "file.bin", reference, wallet.ClassicAddress, "1");
 
@@ -86,14 +96,6 @@ public sealed class PublicationRunTests : VaultHarness
     [Fact]
     public async Task A_publication_that_succeeded_is_reported_so_even_when_the_history_cannot_be_written()
     {
-        KeyVault vault = NewVault();
-        await vault.CreateAsync(Password("a master password"), TestContext.Current.CancellationToken);
-        XrplWallet wallet = XrplWallet.Generate();
-        string reference = await vault.StoreAsync(
-            new NewVaultEntry(VaultEntryKind.Generated, "run key", "standalone", wallet.ClassicAddress, wallet.Seed),
-            TestContext.Current.CancellationToken);
-        _connections.Ledger.Balances[wallet.ClassicAddress] = 100_000_000;
-
         // A plain file occupying the path the history's own directory would need to be, so
         // PublicationHistory.Save's Directory.CreateDirectory throws IOException every time it is
         // asked to write -- the exact shape of the defect this test guards against: that used to
@@ -105,9 +107,8 @@ public sealed class PublicationRunTests : VaultHarness
         File.WriteAllBytes(blockedParent, [1]);
         PublicationHistory brokenHistory = new(Path.Combine(blockedParent, "publications.json"));
 
-        PublicationRun run = new(_connections, vault, Paths, brokenHistory);
-        PublishRequest request = new(
-            new byte[4096], "application/octet-stream", "file.bin", reference, wallet.ClassicAddress, "1");
+        (PublicationRun run, PublishRequest request) =
+            await ReadyAsync(TestContext.Current.CancellationToken, history: brokenHistory);
 
         run.Start(request);
         await run.Completion;
@@ -122,6 +123,87 @@ public sealed class PublicationRunTests : VaultHarness
         // And the person is told the history specifically did not get updated, rather than the
         // failure being silently absorbed where nothing on the run's own screen would ever show it.
         Assert.NotNull(snapshot.HistoryFailure);
+    }
+
+    [Fact]
+    public async Task An_exception_from_appending_to_the_history_keeps_its_own_message()
+    {
+        // PublicationHistory.Save only degrades on IOException/UnauthorizedAccessException; anything
+        // else escapes Append uncaught, which is what RunAsync's own last-resort catch around the
+        // append call exists for. "C:\" is a genuine drive root, not a made-up path: Path.GetDirectoryName
+        // returns null for one (there is no parent directory of a root), and Save passes that null
+        // straight into Directory.CreateDirectory, which throws ArgumentNullException -- a type
+        // neither Save nor Append catches, and nothing here ever actually touches the real "C:\".
+        PublicationHistory badHistory = new(@"C:\");
+
+        (PublicationRun run, PublishRequest request) =
+            await ReadyAsync(TestContext.Current.CancellationToken, history: badHistory);
+
+        run.Start(request);
+        await run.Completion;
+
+        RunSnapshot snapshot = run.Snapshot;
+        Assert.Equal(PublicationRunState.Succeeded, snapshot.State);
+        Assert.NotNull(snapshot.Report);
+
+        // The exception's own message survives into the sentence, rather than being thrown away:
+        // this runs after money has already been spent, and losing every trace of what went wrong
+        // afterwards is not something to also do here.
+        Assert.NotNull(snapshot.HistoryFailure);
+        Assert.Contains("Value cannot be null", snapshot.HistoryFailure, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A connection whose <see cref="DisposeAsync"/> throws after actually disposing the real one
+    /// underneath, standing in for a socket or a strategy's own cleanup that itself reports an error
+    /// on close. Used to prove that a throwing disposal cannot turn an already-decided outcome into
+    /// a different one (see <c>PublicationRun.RunAsync</c>'s <c>DisposeQuietlyAsync</c> and its own
+    /// remarks on why that dependency is closed rather than left implicit).
+    /// </summary>
+    private sealed class ThrowingDisposalConnectionFactory(FakeConnectionFactory inner) : IConnectionFactory
+    {
+        public async Task<ILedgerConnection> ConnectAsync(string network, CancellationToken cancellationToken)
+        {
+            ILedgerConnection connection = await inner.ConnectAsync(network, cancellationToken).ConfigureAwait(false);
+            return new Connection(connection);
+        }
+
+        private sealed class Connection(ILedgerConnection inner) : ILedgerConnection
+        {
+            public ILedgerSource Source => inner.Source;
+
+            public ILedgerSink Sink => inner.Sink;
+
+            public string Url => inner.Url;
+
+            public async ValueTask DisposeAsync()
+            {
+                await inner.DisposeAsync().ConfigureAwait(false);
+                throw new IOException("simulated: closing the connection itself failed");
+            }
+        }
+    }
+
+    [Fact]
+    public async Task A_disposal_that_throws_does_not_turn_a_completed_publication_into_a_reported_failure()
+    {
+        ThrowingDisposalConnectionFactory connections = new(_connections);
+        (PublicationRun run, PublishRequest request) =
+            await ReadyAsync(TestContext.Current.CancellationToken, connections: connections);
+
+        run.Start(request);
+        await run.Completion;
+
+        RunSnapshot snapshot = run.Snapshot;
+
+        // The publication itself succeeded, and closing the connection afterwards throwing must not
+        // be able to take that back: without DisposeQuietlyAsync's own guard, this run's
+        // finalState = Succeeded (already decided before the connection's disposal even started)
+        // would be overwritten by the generic catch-all, reporting Failed with no report -- the same
+        // shape of loss fix 5 (across both review rounds) exists to prevent, just from a different
+        // cause.
+        Assert.Equal(PublicationRunState.Succeeded, snapshot.State);
+        Assert.NotNull(snapshot.Report);
     }
 
     [Fact]
@@ -145,7 +227,10 @@ public sealed class PublicationRunTests : VaultHarness
     [Fact]
     public async Task A_cancelled_run_reports_cancelled_and_leaves_a_state_file()
     {
-        (PublicationRun run, PublishRequest request) = await ReadyAsync(TestContext.Current.CancellationToken, size: 200_000);
+        GatedSubmitSink gate = new(_connections.Sink, gateAt: 1);
+        GatedConnectionFactory connections = new(_connections, gate);
+        (PublicationRun run, PublishRequest request) =
+            await ReadyAsync(TestContext.Current.CancellationToken, connections: connections);
 
         run.Start(request);
 
@@ -158,13 +243,18 @@ public sealed class PublicationRunTests : VaultHarness
         // every single time, not occasionally -- the run reported Cancelled correctly, but
         // PublicationSession.Unfinished came back empty because no state file was ever written.
         //
-        // Waiting for the first progress report fixes this deterministically: PublicationRun only
-        // reports progress from inside PublicationSession.RunAsync, which starts strictly after
-        // StartAsync has already saved the state file, and a 200,000-byte file batches into two
-        // ticket batches of up to 100 memos each (PublishPolicy.TicketsPerBatch), so the run still
-        // has a second batch of work left when the first batch's progress lands.
-        await WaitForProgressAsync(run, TestContext.Current.CancellationToken);
+        // Waiting for gate.Reached fixes this deterministically and without polling: it resolves
+        // the instant the run's first submission begins, which is necessarily after
+        // PublicationSession.StartAsync has already saved the state file (RunAsync -- and every
+        // submission inside it -- only starts once StartAsync has returned). Unlike polling
+        // Snapshot.Progress, this is not a lagging indicator: Progress is reported through
+        // System.Progress<int>, which posts to the thread pool, so by the time a poll observes it
+        // the run may already be further along than the read implies -- on a contended machine, far
+        // enough along to have finished. The gate holds the run at exactly this point until
+        // Release() is called, so there is nothing left to race.
+        await gate.Reached;
         run.Cancel();
+        gate.Release();
 
         await run.Completion;
 
@@ -179,53 +269,24 @@ public sealed class PublicationRunTests : VaultHarness
         Assert.Equal(_connections.Connections, _connections.Disposals);
     }
 
-    /// <summary>
-    /// Spins until <paramref name="run"/> has reported its first <see cref="PublishProgress"/>, or
-    /// fails loudly rather than hanging forever if the run finishes (or dies) before ever reporting
-    /// one -- which would otherwise turn a broken run into a test that never completes. Both failure
-    /// messages say what this was actually waiting for, rather than surfacing as a bare
-    /// <see cref="OperationCanceledException"/> that names nothing.
-    /// </summary>
-    private static async Task WaitForProgressAsync(PublicationRun run, CancellationToken cancellationToken)
-    {
-        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-
-        while (run.Snapshot.Progress is null)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (run.Completion.IsCompleted)
-            {
-                throw new InvalidOperationException(
-                    $"the run finished ({run.Snapshot.State}) before reporting any progress, so there is no "
-                    + "way left to cancel it mid-flight");
-            }
-
-            if (DateTime.UtcNow > deadline)
-            {
-                throw new TimeoutException(
-                    $"waited 10 seconds for the run to report its first PublishProgress and it never did; "
-                    + $"the run is still in state {run.Snapshot.State}");
-            }
-
-            await Task.Yield();
-        }
-    }
-
     [Fact]
     public async Task A_cancelled_run_records_nothing_in_the_history()
     {
-        (PublicationRun run, PublishRequest request) = await ReadyAsync(TestContext.Current.CancellationToken, size: 200_000);
+        GatedSubmitSink gate = new(_connections.Sink, gateAt: 1);
+        GatedConnectionFactory connections = new(_connections, gate);
+        (PublicationRun run, PublishRequest request) =
+            await ReadyAsync(TestContext.Current.CancellationToken, connections: connections);
 
         run.Start(request);
 
         // Cancelling immediately, as the brief's own version does, kills the run inside
         // VaultSigner.CreateAsync before it ever connects (see the sibling test's own remarks on
-        // WaitForProgressAsync) -- which can never reach history.Append under any implementation,
-        // correct or broken, so it proves nothing about the thing this test names. Waiting for real
-        // progress cancels a run that is actually publishing.
-        await WaitForProgressAsync(run, TestContext.Current.CancellationToken);
+        // gate.Reached) -- which can never reach history.Append under any implementation, correct
+        // or broken, so it proves nothing about the thing this test names. Waiting for the gate
+        // cancels a run that is actually publishing.
+        await gate.Reached;
         run.Cancel();
+        gate.Release();
 
         await run.Completion;
 
@@ -252,6 +313,12 @@ public sealed class PublicationRunTests : VaultHarness
         RunSnapshot snapshot = run.Snapshot;
         Assert.Equal(PublicationRunState.Failed, snapshot.State);
         Assert.NotNull(snapshot.Failure);
+
+        // This is the one failure test where both a connection and a strategy genuinely exist when
+        // the failure lands (the node-unreachable and no-such-entry tests below each stop short of
+        // one or the other), which makes it the strongest place in this file to check that neither
+        // leaked.
+        Assert.Equal(_connections.Connections, _connections.Disposals);
 
         // The service is not wedged: Reset succeeds and a further Start is accepted, neither of
         // which an unhandled fault would have allowed.
@@ -302,7 +369,10 @@ public sealed class PublicationRunTests : VaultHarness
     [Fact]
     public async Task Stopping_returns_only_once_the_run_has_actually_stopped()
     {
-        (PublicationRun run, PublishRequest request) = await ReadyAsync(TestContext.Current.CancellationToken, size: 200_000);
+        GatedSubmitSink gate = new(_connections.Sink, gateAt: 1);
+        GatedConnectionFactory connections = new(_connections, gate);
+        (PublicationRun run, PublishRequest request) =
+            await ReadyAsync(TestContext.Current.CancellationToken, connections: connections);
 
         run.Start(request);
 
@@ -310,8 +380,15 @@ public sealed class PublicationRunTests : VaultHarness
         // the instant Start() returns races VaultSigner.CreateAsync's own reveal, and a run that
         // finishes on its own also ends with stopped == true and State != Running -- so an ungated
         // version of this test would pass whether or not StopAsync interrupted anything.
-        await WaitForProgressAsync(run, TestContext.Current.CancellationToken);
-        bool stopped = await run.StopAsync(TimeSpan.FromMinutes(1));
+        //
+        // StopAsync itself is started before the gate is released, not awaited immediately: it
+        // calls Cancel() as its very first act, and only then waits, so starting it while the run
+        // is still held at the gate and releasing right after captures the same "interrupted, not
+        // outlasted" scenario without any real waiting either.
+        await gate.Reached;
+        Task<bool> stopping = run.StopAsync(TimeSpan.FromMinutes(1));
+        gate.Release();
+        bool stopped = await stopping;
 
         Assert.True(stopped);
         Assert.True(run.Completion.IsCompleted);
@@ -332,19 +409,33 @@ public sealed class PublicationRunTests : VaultHarness
     }
 
     /// <summary>
-    /// An <see cref="ILedgerSink"/> whose first <see cref="SubmitAsync"/> call waits
-    /// <paramref name="delay"/> before doing anything else, deliberately not against
-    /// <see cref="CancellationToken"/> — standing in for a submission already in flight against a
-    /// real socket, which <see cref="PublicationRun.Cancel"/> cannot recall. <see cref="Started"/>
-    /// resolves the instant that first call begins, before the delay, so a test can know the run has
-    /// reached it without waiting out the delay itself.
+    /// An <see cref="ILedgerSink"/> that holds its <paramref name="gateAt"/>-th
+    /// <see cref="SubmitAsync"/> call open until <see cref="Release"/> is called, deliberately not
+    /// looking at the transaction's own <see cref="CancellationToken"/> until then — standing in for
+    /// a submission already in flight against a real socket, which <see cref="PublicationRun.Cancel"/>
+    /// cannot recall until the socket actually answers. <see cref="Reached"/> resolves the instant
+    /// that call begins, before it waits, so a test can know the run is held at exactly that point
+    /// without polling anything or waiting on the wall clock.
+    ///
+    /// Replaces an earlier version of this double that instead slept a fixed real delay: that made
+    /// the one test using it cost two real seconds and, more importantly, made every gated
+    /// cancellation test in this file vulnerable to the same problem <see cref="Reached"/> exists to
+    /// avoid — a poll of <see cref="RunSnapshot.Progress"/> is a lagging indicator (progress is
+    /// reported through <see cref="System.Progress{T}"/>, which posts to the thread pool rather than
+    /// calling inline), so on a contended machine the run can finish before a polling loop ever
+    /// observes the report it was waiting for.
     /// </summary>
-    private sealed class SlowFirstSubmitSink(ILedgerSink inner, TimeSpan delay) : ILedgerSink
+    private sealed class GatedSubmitSink(ILedgerSink inner, int gateAt) : ILedgerSink
     {
-        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private int _first = 1;
+        private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _count;
 
-        public Task Started => _started.Task;
+        /// <summary>Resolves the instant the gated submission begins, before it waits to be released.</summary>
+        public Task Reached => _reached.Task;
+
+        /// <summary>Lets the gated submission proceed.</summary>
+        public void Release() => _release.TrySetResult();
 
         public Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken) =>
             inner.SequenceAsync(account, validated, cancellationToken);
@@ -352,10 +443,20 @@ public sealed class PublicationRunTests : VaultHarness
         public async Task<SubmitOutcome> SubmitAsync(
             Dictionary<string, object> transaction, ITransactionSigner signer, CancellationToken cancellationToken)
         {
-            if (Interlocked.Exchange(ref _first, 0) == 1)
+            if (Interlocked.Increment(ref _count) == gateAt)
             {
-                _started.TrySetResult();
-                await Task.Delay(delay).ConfigureAwait(false);
+                _reached.TrySetResult();
+
+                // Deliberately not awaited against cancellationToken: the test decides exactly when
+                // this proceeds by calling Release(), so nothing here depends on real time or on
+                // how fast the fake ledger happens to run.
+                await _release.Task.ConfigureAwait(false);
+
+                // Once released, honour cancellation exactly where a real submission's own checks
+                // would, rather than silently carrying on with a transaction nobody wants sent any
+                // more -- this is what lets a test call Cancel() while the run is held here and see
+                // it actually take effect once Release() lets the run notice.
+                cancellationToken.ThrowIfCancellationRequested();
             }
 
             return await inner.SubmitAsync(transaction, signer, cancellationToken).ConfigureAwait(false);
@@ -364,17 +465,16 @@ public sealed class PublicationRunTests : VaultHarness
 
     /// <summary>
     /// A connection factory that hands out <see cref="FakeConnectionFactory"/>'s own ledger, wrapped
-    /// so its sink's first submission stalls uncancelably. A test-local type for the same reason the
-    /// clock-advancing pair above are: one test's need, not a knob on the shared double.
+    /// so its sink's submissions go through a <see cref="GatedSubmitSink"/>. A test-local type for
+    /// the same reason the clock-advancing pair below are: one test's need, not a knob on the shared
+    /// double.
     /// </summary>
-    private sealed class SlowFirstSubmitConnectionFactory(FakeConnectionFactory inner, TimeSpan delay) : IConnectionFactory
+    private sealed class GatedConnectionFactory(FakeConnectionFactory inner, GatedSubmitSink sink) : IConnectionFactory
     {
-        public SlowFirstSubmitSink Sink { get; } = new(inner.Sink, delay);
-
         public async Task<ILedgerConnection> ConnectAsync(string network, CancellationToken cancellationToken)
         {
             ILedgerConnection connection = await inner.ConnectAsync(network, cancellationToken).ConfigureAwait(false);
-            return new Connection(connection, Sink);
+            return new Connection(connection, sink);
         }
 
         private sealed class Connection(ILedgerConnection inner, ILedgerSink sink) : ILedgerConnection
@@ -392,32 +492,27 @@ public sealed class PublicationRunTests : VaultHarness
     [Fact]
     public async Task Stopping_returns_false_when_the_timeout_expires_with_the_run_still_going()
     {
-        KeyVault vault = NewVault();
-        await vault.CreateAsync(Password("a master password"), TestContext.Current.CancellationToken);
-        XrplWallet wallet = XrplWallet.Generate();
-        string reference = await vault.StoreAsync(
-            new NewVaultEntry(VaultEntryKind.Generated, "run key", "standalone", wallet.ClassicAddress, wallet.Seed),
-            TestContext.Current.CancellationToken);
-        _connections.Ledger.Balances[wallet.ClassicAddress] = 100_000_000;
+        GatedSubmitSink gate = new(_connections.Sink, gateAt: 1);
+        GatedConnectionFactory connections = new(_connections, gate);
+        (PublicationRun run, PublishRequest request) =
+            await ReadyAsync(TestContext.Current.CancellationToken, connections: connections);
 
-        // Two real seconds of a first submission that does not look at the cancellation token,
-        // against a fifty-millisecond StopAsync timeout: the timeout has to expire long before the
-        // run could possibly react, which is the one branch of StopAsync nothing exercised before —
-        // the branch that keeps a closing window from hanging forever on a run that will not yield.
-        SlowFirstSubmitConnectionFactory connections = new(_connections, TimeSpan.FromSeconds(2));
-        PublicationRun run = new(connections, vault, Paths, History);
+        // The run is held at its very first submission, not looking at cancellation until released:
+        // StopAsync's short timeout has to expire while it is genuinely stuck there, which is the
+        // one branch of StopAsync nothing exercised before -- the branch that keeps a closing window
+        // from hanging forever on a run that will not yield. No real delay is needed for this any
+        // more: the gate itself is what holds the run, for as long as the test wants.
+        run.Start(request);
+        await gate.Reached;
 
-        run.Start(new PublishRequest(
-            new byte[4096], "application/octet-stream", "file.bin", reference, wallet.ClassicAddress, "1"));
-
-        await connections.Sink.Started;
         bool stopped = await run.StopAsync(TimeSpan.FromMilliseconds(50));
 
         Assert.False(stopped);
         Assert.Equal(PublicationRunState.Running, run.Snapshot.State);
 
         // Let the run actually finish, so nothing from this test is still running when the next one
-        // starts: the delayed submission's own cancellation check catches up once the delay passes.
+        // starts: StopAsync already called Cancel(), so releasing the gate lets that take effect.
+        gate.Release();
         await run.Completion;
         Assert.Equal(PublicationRunState.Cancelled, run.Snapshot.State);
     }

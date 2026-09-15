@@ -17,7 +17,7 @@ public enum PublicationRunState
 /// <see cref="PublicationRunState.Running"/> carrying the previous run's one.
 /// </summary>
 /// <param name="HistoryFailure">
-/// Why a succeeded run's <see cref="PublicationHistory.Append"/> could not record it, or
+/// Why a succeeded run's <see cref="PublicationHistory.Append"/> did not record it, or
 /// <see langword="null"/> when it did (or when the run has not succeeded). The publication itself
 /// is never at risk from this — <see cref="Report"/> and <see cref="State"/> already carry it — but
 /// a person whose history silently stopped growing has no way to know their last publication is
@@ -59,6 +59,17 @@ public sealed class PublicationRun(
     private string? _network;
     private string? _historyFailure;
 
+    /// <summary>
+    /// Which run this is, counting from 1 at the first <see cref="Begin"/>. Exists only to pin a
+    /// write onto the run it belongs to: the history append that follows a success runs after
+    /// <see cref="PublicationRunState.Succeeded"/> is already published, which is the one window
+    /// where <see cref="Begin"/> and <see cref="Reset"/> both accept — a screen reacting to that
+    /// success and starting another run immediately must not have the first run's history outcome
+    /// land on the second run's snapshot. See <see cref="RunAsync"/>'s own remarks at the two writes
+    /// this guards.
+    /// </summary>
+    private int _generation;
+
     /// <summary>Completes when the current run has finished, however it finished.</summary>
     /// <remarks>
     /// Read under <see cref="_gate"/>, like every other piece of this run's state: an unsynchronised
@@ -68,7 +79,13 @@ public sealed class PublicationRun(
     /// </remarks>
     public Task Completion
     {
-        get { lock (_gate) return _completion; }
+        get
+        {
+            lock (_gate)
+            {
+                return _completion;
+            }
+        }
     }
 
     public RunSnapshot Snapshot
@@ -158,6 +175,7 @@ public sealed class PublicationRun(
             // Built only once a start is actually going to happen: a refused start (the branch
             // above) must not allocate a token source nobody will ever dispose.
             CancellationTokenSource cancellation = new();
+            int generation = ++_generation;
 
             _cancellation?.Dispose();
             _cancellation = cancellation;
@@ -168,13 +186,13 @@ public sealed class PublicationRun(
             _historyFailure = null;
             _name = request.Name;
             _network = request.Network;
-            _completion = Task.Run(() => RunAsync(request, statePath, cancellation.Token));
+            _completion = Task.Run(() => RunAsync(request, statePath, cancellation.Token, generation));
         }
 
         return true;
     }
 
-    private async Task RunAsync(PublishRequest request, string? statePath, CancellationToken cancellationToken)
+    private async Task RunAsync(PublishRequest request, string? statePath, CancellationToken cancellationToken, int generation)
     {
         PublicationRunState finalState;
         PublicationReport? report = null;
@@ -184,54 +202,79 @@ public sealed class PublicationRun(
         {
             paths.EnsureCreated();
 
-            await using ILedgerConnection connection =
+            ILedgerConnection connection =
                 await connections.ConnectAsync(request.Network, cancellationToken).ConfigureAwait(false);
 
-            SessionOptions estimateOptions = new()
+            try
             {
-                StateDirectory = paths.StateDirectory,
-                TicketsPerBatch = PublishPolicy.TicketsPerBatch,
-            };
+                SessionOptions estimateOptions = new()
+                {
+                    StateDirectory = paths.StateDirectory,
+                    TicketsPerBatch = PublishPolicy.TicketsPerBatch,
+                };
 
-            // Estimated again here rather than carried from the screen: the node's price moves, and
-            // StartAsync refuses a strategy priced differently (FeeMismatch). This is also what the
-            // budget is set from, so a run cannot quietly cost more than what was just priced.
-            PublicationEstimate estimate = await PublicationSession.EstimateAsync(
-                connection.Source, request.Account, request.File.Length, estimateOptions, cancellationToken)
-                .ConfigureAwait(false);
-
-            SessionOptions options = new()
-            {
-                StateDirectory = paths.StateDirectory,
-                TicketsPerBatch = PublishPolicy.TicketsPerBatch,
-                BudgetDrops = estimate.RequiredDrops,
-            };
-
-            VaultSigner signer = await VaultSigner
-                .CreateAsync(vault, request.KeyReference, cancellationToken, autoLock).ConfigureAwait(false);
-
-            await using ISubmissionStrategy strategy = PublishPolicy.Create(estimate, connection, signer);
-
-            PublicationSession session = statePath is null
-                ? await PublicationSession.StartAsync(
-                    strategy,
-                    connection.Source,
-                    request.File,
-                    request.Type,
-                    request.Name,
-                    request.Account,
-                    request.KeyReference,
-                    request.Network,
-                    options,
-                    cancellationToken).ConfigureAwait(false)
-                : await PublicationSession.ResumeAsync(
-                    strategy, connection.Source, request.File, statePath, options, cancellationToken)
+                // Estimated again here rather than carried from the screen: the node's price moves,
+                // and StartAsync refuses a strategy priced differently (FeeMismatch). This is also
+                // what the budget is set from, so a run cannot quietly cost more than what was just
+                // priced.
+                PublicationEstimate estimate = await PublicationSession.EstimateAsync(
+                    connection.Source, request.Account, request.File.Length, estimateOptions, cancellationToken)
                     .ConfigureAwait(false);
 
-            report = await session
-                .RunAsync(new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false);
+                SessionOptions options = new()
+                {
+                    StateDirectory = paths.StateDirectory,
+                    TicketsPerBatch = PublishPolicy.TicketsPerBatch,
+                    BudgetDrops = estimate.RequiredDrops,
+                };
 
-            finalState = PublicationRunState.Succeeded;
+                VaultSigner signer = await VaultSigner
+                    .CreateAsync(vault, request.KeyReference, cancellationToken, autoLock).ConfigureAwait(false);
+
+                ISubmissionStrategy strategy = PublishPolicy.Create(estimate, connection, signer);
+
+                try
+                {
+                    PublicationSession session = statePath is null
+                        ? await PublicationSession.StartAsync(
+                            strategy,
+                            connection.Source,
+                            request.File,
+                            request.Type,
+                            request.Name,
+                            request.Account,
+                            request.KeyReference,
+                            request.Network,
+                            options,
+                            cancellationToken).ConfigureAwait(false)
+                        : await PublicationSession.ResumeAsync(
+                            strategy, connection.Source, request.File, statePath, options, cancellationToken)
+                            .ConfigureAwait(false);
+
+                    report = await session
+                        .RunAsync(new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false);
+
+                    finalState = PublicationRunState.Succeeded;
+                }
+                finally
+                {
+                    // Disposal is cleanup, not part of what the run is about, and its own outcome
+                    // must never be able to override the one just decided above: a paid publication
+                    // that already has its report in hand must not be reported Failed with the
+                    // report thrown away because closing the strategy afterwards happened to throw.
+                    // Every strategy this application builds today either swallows its own disposal
+                    // errors or does nothing (SequenceStrategy.DisposeAsync is a no-op; TicketStrategy
+                    // does not throw from disposing its queue), so this is not reachable yet — but
+                    // the previous version of this method did not depend on that being true, and
+                    // this one does, so the dependency is closed here rather than left implicit.
+                    await DisposeQuietlyAsync(strategy).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                // Same reasoning as the strategy's own disposal above, one level out.
+                await DisposeQuietlyAsync(connection).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -266,13 +309,13 @@ public sealed class PublicationRun(
             finalState = PublicationRunState.Failed;
         }
 
-        // Every `await using` declared above has already been disposed by the time control reaches
-        // here — during stack unwinding into whichever catch ran, or as the try block's own scope
-        // closed on the success path — so publishing the terminal state only from this point on,
-        // never from inside the try, means a screen that reacts to Succeeded and immediately starts
-        // another run can never observe the previous run's connection or strategy still mid-dispose
-        // (design F6's "closing stops it" only means something if the stop is visible after it has
-        // actually happened).
+        // Every connection and strategy acquired above has already been disposed (quietly; see the
+        // finally blocks) by the time control reaches here — during stack unwinding into whichever
+        // catch ran, or as the try block's own scope closed on the success path — so publishing the
+        // terminal state only from this point on, never from inside the try, means a screen that
+        // reacts to Succeeded and immediately starts another run can never observe the previous
+        // run's connection or strategy still mid-dispose (design F6's "closing stops it" only means
+        // something if the stop is visible after it has actually happened).
         if (finalState == PublicationRunState.Succeeded)
         {
             // Assigned before the history is touched, and specifically before Append is called: a
@@ -284,6 +327,13 @@ public sealed class PublicationRun(
             // publication as Failed with _report never assigned at all — the one outcome
             // PublicationHistory's own remarks say must never happen. Save no longer lets that
             // happen either, but the ordering here is the primary defence, not a backstop for it.
+            //
+            // This is also the point _state stops being Running, which is the only thing that keeps
+            // Begin and Reset out — from here on a screen reacting to Succeeded may legitimately
+            // start the next run before the history append below has even begun. The two writes
+            // that follow are therefore pinned to this run's own generation, not written
+            // unconditionally: a newer run's Begin bumps _generation, and a write this run makes
+            // after that must be dropped rather than land on a snapshot that is no longer about it.
             lock (_gate)
             {
                 _report = report;
@@ -305,24 +355,38 @@ public sealed class PublicationRun(
                     report.FeeDropsEstimated,
                     report.FinishedAt));
 
+                // PublicationHistory.Failure means "the append that just ran did not record this
+                // publication" — Save clears it on its own success, including when Read (which
+                // Append calls first) had set it for an unrelated, earlier reason, so a stale
+                // "could not be read" left over from a corrupt-but-now-repaired file can no longer
+                // reach here as if it described this append.
                 if (history.Failure is not null)
                 {
-                    lock (_gate) _historyFailure = history.Failure;
+                    lock (_gate)
+                    {
+                        if (_generation == generation) _historyFailure = history.Failure;
+                    }
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // PublicationHistory.Append is documented not to throw IOException or
-                // UnauthorizedAccessException any more — it degrades into Failure instead, which is
-                // surfaced above. This is the last-resort guard for anything else: the publication
-                // already succeeded and is already recorded in _report and _state, so nothing here
-                // may escape RunAsync uncaught (the exact wedge the catch-all above exists to
-                // prevent) or turn this run into a reported failure (the exact loss the ordering
-                // above exists to prevent).
+                // UnauthorizedAccessException any more — it degrades into Failure instead, handled
+                // above. This is the last-resort guard for anything else. It exists not because
+                // _state could still be corrupted by it (Succeeded is already published, so Reset
+                // and the next Start already work regardless) but because Completion must not fault:
+                // a screen or a test awaiting a publication that actually succeeded would otherwise
+                // receive an exception instead of a completed run, and a RunAsync that lets this
+                // escape leaves an unobserved task exception behind it besides. The exception's own
+                // message is kept, not discarded: this runs after money has been spent, and losing
+                // every trace of what went wrong afterwards is not something to also do here.
                 lock (_gate)
                 {
-                    _historyFailure =
-                        "The publication succeeded, but recording it in your history failed unexpectedly.";
+                    if (_generation == generation)
+                    {
+                        _historyFailure =
+                            $"The publication succeeded, but recording it in your history failed unexpectedly: {ex.Message}";
+                    }
                 }
             }
         }
@@ -335,6 +399,23 @@ public sealed class PublicationRun(
                 _cancellation?.Dispose();
                 _cancellation = null;
             }
+        }
+    }
+
+    /// <summary>
+    /// Disposes something this run acquired without letting whatever it throws be mistaken for the
+    /// run's own outcome. See the two call sites in <see cref="RunAsync"/> for why that distinction
+    /// matters here specifically.
+    /// </summary>
+    private static async ValueTask DisposeQuietlyAsync(IAsyncDisposable disposable)
+    {
+        try
+        {
+            await disposable.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Swallowed on purpose — see the call sites' own remarks.
         }
     }
 
