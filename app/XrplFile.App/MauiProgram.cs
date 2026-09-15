@@ -85,15 +85,25 @@ public static class MauiProgram
     /// while the process lives on — ordinary on desktop (closing the window without quitting is a
     /// window manager away) and the normal case on every other platform MAUI can target, where the
     /// OS backgrounds an app instead of killing its process. <c>App.xaml.cs</c> is where this is
-    /// closed: its constructor takes <see cref="IKeyVault"/> and <see cref="VaultAutoLock"/> from
-    /// this same DI container (MAUI resolves <c>App</c> through it, exactly like every service
-    /// registered here), and its <see cref="Window.Destroying"/> handler calls
-    /// <see cref="IKeyVault.LockAsync"/> and then <see cref="VaultAutoLock.DisposeAsync"/>.
+    /// closed: its constructor takes <see cref="IKeyVault"/>, <see cref="VaultAutoLock"/> and
+    /// <see cref="PublicationRun"/> from this same DI container (MAUI resolves <c>App</c> through
+    /// it, exactly like every service registered here), and its <see cref="Window.Destroying"/>
+    /// handler stops a running publication (<see cref="PublicationRun.StopAsync"/>, bounded so a
+    /// run that will not stop cannot hold the window open forever — design F6) before it calls
+    /// <see cref="IKeyVault.LockAsync"/> and then <see cref="VaultAutoLock.DisposeAsync"/>: locking
+    /// first would land while the run was still going and kill it at its next signature with
+    /// <c>VaultError.Locked</c>, mid batch, with money already spent.
     /// <see cref="Window.Destroying"/> is .NET MAUI's own cross-platform window-lifecycle event —
     /// not a Windows-specific hook reached for because it was the one available — and on this
     /// project's Windows target it corresponds to the native window's <c>Closed</c> event: an
     /// ordinary window close reaches it, and so does the application shutting down through any
-    /// other in-process path that closes its one window.
+    /// other in-process path that closes its one window. It cannot refuse a close, though — by the
+    /// time it fires the window is already going — so on Windows <c>App.xaml.cs</c> also reaches
+    /// past it, through the MAUI window's platform handler, to WinUI's own cancellable
+    /// <c>AppWindow.Closing</c>, to ask before closing over a running publication at all (design
+    /// F7). That confirmation is Windows-only because the cancellable hook is Windows-only;
+    /// <see cref="Window.Destroying"/> stays the one teardown path every platform this application
+    /// can target reaches.
     /// </para>
     /// <para>
     /// What it does not cover, stated rather than left implied: a process ended outright — killed
