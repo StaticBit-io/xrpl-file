@@ -481,9 +481,15 @@ public sealed class PublicationRun(
     }
 
     /// <summary>
-    /// Reports straight through on the calling thread. <see cref="Progress{T}"/> posts to a
-    /// synchronization context, which on a MAUI Blazor window means the report arrives after the
-    /// screen has already read the state it was supposed to update.
+    /// Reports straight through on the calling thread, not through <see cref="Progress{T}"/>.
+    /// <see cref="Progress{T}"/> captures whatever <see cref="SynchronizationContext"/> is current
+    /// when it is constructed and posts every report there, falling back to the thread pool when
+    /// there is none -- and the sink built here is constructed inside <see cref="RunAsync"/>, which
+    /// itself runs under <see cref="Task.Run(Func{Task})"/>, off any synchronization context. A
+    /// <see cref="Progress{T}"/> built there would therefore post every report to the thread pool,
+    /// landing on some other thread at some later, unpredictable time rather than being observable
+    /// the instant it is reported -- never reaching a MAUI Blazor window synchronously with the
+    /// call that raised it.
     /// </summary>
     private sealed class SynchronousProgress(Action<PublishProgress> report) : IProgress<PublishProgress>
     {
