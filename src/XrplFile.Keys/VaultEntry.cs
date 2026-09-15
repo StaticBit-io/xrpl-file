@@ -10,6 +10,18 @@ public enum VaultEntryKind
     Imported,
 }
 
+/// <summary>
+/// What happened when a throwaway account was closed. Kept on the entry rather than anywhere else
+/// because the key outlives the account: a deleted address can be funded back into existence and
+/// this seed still controls it, so the entry is the only place that can say the account it names is
+/// gone and where its remainder went.
+/// </summary>
+/// <param name="ClosedAt">When the deletion was submitted.</param>
+/// <param name="Destination">Where the remainder was sent. The person named it; nothing chose it.</param>
+/// <param name="ArrivedDrops">What the deletion sent: the balance less its fee.</param>
+/// <param name="TxHash">The deletion's transaction hash.</param>
+public sealed record AccountClosure(DateTimeOffset ClosedAt, string Destination, long ArrivedDrops, string TxHash);
+
 /// <summary>An entry on its way in. The vault assigns the reference and the creation time.</summary>
 /// <param name="Algorithm">
 /// The signing algorithm the seed was derived with (<c>XrplWallet.Ed25519</c> or
@@ -32,6 +44,12 @@ public sealed record NewVaultEntry(
 /// that way. There is no migration: absence keeps meaning exactly what it always meant. Trailing
 /// and optional so every existing construction site keeps compiling.
 /// </param>
+/// <param name="Closure">
+/// What happened when the account this entry names was closed, or <see langword="null"/> while it
+/// is still open — which is what every entry ever stored before this field existed means, since
+/// none of them could have been closed by a build that could not yet record it. Trailing and
+/// optional so every existing construction site keeps compiling.
+/// </param>
 public sealed record VaultEntryInfo(
     string Reference,
     VaultEntryKind Kind,
@@ -42,7 +60,8 @@ public sealed record VaultEntryInfo(
     uint? LastKnownSequence,
     long? DeletableFromLedger,
     bool Exported,
-    string? Algorithm = null);
+    string? Algorithm = null,
+    AccountClosure? Closure = null);
 
 /// <summary>An entry with its secret. Only <see cref="IKeyVault.RevealAsync"/> produces one.</summary>
 public sealed record VaultEntry(VaultEntryInfo Info, string Secret);
@@ -56,4 +75,5 @@ public sealed record VaultEntryEdit(
     string? Label = null,
     uint? LastKnownSequence = null,
     long? DeletableFromLedger = null,
-    bool? Exported = null);
+    bool? Exported = null,
+    AccountClosure? Closure = null);

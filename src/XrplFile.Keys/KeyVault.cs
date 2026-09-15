@@ -767,6 +767,7 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                     LastKnownSequence = edit.LastKnownSequence ?? entry.Info.LastKnownSequence,
                     DeletableFromLedger = edit.DeletableFromLedger ?? entry.Info.DeletableFromLedger,
                     Exported = edit.Exported ?? entry.Info.Exported,
+                    Closure = edit.Closure ?? entry.Info.Closure,
                 };
 
                 record.Entries[reference] = SealEntry(dataKey, reference, entry with { Info = edited });
@@ -1779,6 +1780,17 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                 }
 
                 writer.WriteBoolean("exported", info.Exported);
+
+                if (info.Closure is { } closure)
+                {
+                    writer.WriteStartObject("closure");
+                    writer.WriteString("closedAt", closure.ClosedAt);
+                    writer.WriteString("destination", closure.Destination);
+                    writer.WriteNumber("arrivedDrops", closure.ArrivedDrops);
+                    writer.WriteString("txHash", closure.TxHash);
+                    writer.WriteEndObject();
+                }
+
                 writer.WriteEndObject();
             }
 
@@ -1802,7 +1814,8 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
                     Number(root, "lastKnownSequence") is long sequence ? (uint)sequence : null,
                     Number(root, "deletableFromLedger"),
                     root.GetProperty("exported").GetBoolean(),
-                    Algorithm: OptionalString(root, "algorithm"));
+                    Algorithm: OptionalString(root, "algorithm"),
+                    Closure: OptionalClosure(root));
 
                 return new VaultEntry(info, root.GetProperty("secret").GetString()!);
             }
@@ -1835,5 +1848,29 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
             root.TryGetProperty(name, out JsonElement value) && value.ValueKind != JsonValueKind.Null
                 ? value.GetString()
                 : null;
+
+        /// <summary>
+        /// The closure, tolerant of the property being missing entirely — the same shape every
+        /// entry written before this field existed has, and <see cref="OptionalString"/>'s reason
+        /// applies here too: a missing property must read as "never closed", not as damage.
+        /// </summary>
+        /// <remarks>
+        /// Inside the object the fields use <c>GetProperty</c>, which is right: an entry that
+        /// carries a closure carries all of it, and a half-written one is damage the tag would
+        /// already have caught.
+        /// </remarks>
+        private static AccountClosure? OptionalClosure(JsonElement root)
+        {
+            if (!root.TryGetProperty("closure", out JsonElement value) || value.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            return new AccountClosure(
+                value.GetProperty("closedAt").GetDateTimeOffset(),
+                value.GetProperty("destination").GetString()!,
+                value.GetProperty("arrivedDrops").GetInt64(),
+                value.GetProperty("txHash").GetString()!);
+        }
     }
 }
