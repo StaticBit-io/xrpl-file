@@ -151,10 +151,17 @@ public sealed class RunModelTests : VaultHarness
         Assert.Null(model.Link);
     }
 
-    private static PublicationRun NewRun()
+    /// <summary>
+    /// A run that is never actually started in the test that calls this -- safe to build over
+    /// <see cref="NeverVault"/>. Shares this class's own <see cref="_directory"/> rather than
+    /// creating a fresh temporary one per call: nothing here ever calls <see cref="RunPaths.EnsureCreated"/>
+    /// (an idle run touches no file), so every caller sharing one directory is harmless, and
+    /// <see cref="DisposeAsync"/> already owns cleaning it up -- a second, per-call temporary
+    /// directory would need its own cleanup that nothing here ever did.
+    /// </summary>
+    private PublicationRun NewRun()
     {
-        string directory = Directory.CreateTempSubdirectory("xrpl-file-runmodel-").FullName;
-        RunPaths paths = new(directory);
+        RunPaths paths = new(_directory);
         return new PublicationRun(
             new FakeConnectionFactory(), new NeverVault(), paths, new PublicationHistory(paths.HistoryPath));
     }
