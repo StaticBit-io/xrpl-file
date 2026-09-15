@@ -45,38 +45,58 @@ public partial class App : Application
 	/// Asks before closing over a running publication. Wired separately from
 	/// <see cref="OnWindowDestroying"/> because only WinUI's own <c>AppWindow.Closing</c> can refuse
 	/// a close -- <see cref="Window.Destroying"/> is raised once the window is already going and
-	/// cannot stop it (design F7). Everything this decides -- whether a run is going, what stopping
-	/// means, how long to wait -- lives in <see cref="PublicationRun"/>; this only asks the question
-	/// and, on "yes", stops the run and closes for real.
+	/// cannot stop it (design F7). Whether a run is going and what stopping means live in
+	/// <see cref="PublicationRun"/>; how long to wait is <see cref="StopTimeout"/>, declared above in
+	/// this file. This method only asks the question and, on "yes", stops the run and closes for
+	/// real.
 	/// </summary>
 	private void AttachClosingConfirmation(Window window)
 	{
 		bool closeApproved = false;
+		bool confirming = false;
 
 		window.HandlerChanged += (_, _) =>
 		{
 			if (window.Handler?.PlatformView is not Microsoft.UI.Xaml.Window platformWindow) return;
 
+			// No ConfigureAwait(false) anywhere below, unlike OnWindowDestroying: both awaits must
+			// resume on the UI thread on purpose -- DisplayAlertAsync needs it to show the dialog,
+			// and CloseWindow needs it to close the window.
 			platformWindow.AppWindow.Closing += async (_, args) =>
 			{
-				if (closeApproved || _run.Snapshot.State != PublicationRunState.Running) return;
-
-				args.Cancel = true;
-
 				try
 				{
-					string name = _run.Snapshot.Name ?? "the file";
-					bool confirmed = window.Page is null || await window.Page.DisplayAlertAsync(
-						"Publication in progress",
-						$"\"{name}\" is still publishing. Closing now will stop the run; it can be resumed later. Close anyway?",
-						"Close",
-						"Cancel");
+					if (closeApproved) return;
 
-					if (!confirmed) return;
+					RunSnapshot snapshot = _run.Snapshot;
+					if (snapshot.State != PublicationRunState.Running) return;
 
-					await _run.StopAsync(StopTimeout);
-					closeApproved = true;
-					Application.Current?.CloseWindow(window);
+					// Cancelled regardless of whether a confirmation is already pending below: a
+					// second close attempt while the first is still awaiting an answer must not be
+					// allowed through just because nothing here has said "yes" to it yet.
+					args.Cancel = true;
+					if (confirming) return;
+
+					confirming = true;
+					try
+					{
+						string name = snapshot.Name ?? "the file";
+						bool confirmed = window.Page is null || await window.Page.DisplayAlertAsync(
+							"Publication in progress",
+							$"\"{name}\" is still publishing. Closing now will stop the run; it can be resumed later. Close anyway?",
+							"Close",
+							"Cancel");
+
+						if (!confirmed) return;
+
+						await _run.StopAsync(StopTimeout);
+						closeApproved = true;
+						Application.Current?.CloseWindow(window);
+					}
+					finally
+					{
+						confirming = false;
+					}
 				}
 				catch (Exception)
 				{
@@ -102,13 +122,24 @@ public partial class App : Application
 		{
 			try
 			{
-				// Before the lock, not after. Locking first would land while a publication was
-				// still going, and the run would die at its next signature with
-				// VaultError.Locked -- mid batch, with tickets live and money already spent.
-				// Stopping first leaves the state file part A writes, so the run is in the
-				// unfinished list next time the application opens.
-				await _run.StopAsync(StopTimeout).ConfigureAwait(false);
-				await _vault.LockAsync().ConfigureAwait(false);
+				try
+				{
+					// Before the lock, not after. Locking first would land while a publication was
+					// still going, and the run would die at its next signature with
+					// VaultError.Locked -- mid batch, with tickets live and money already spent.
+					// Stopping first leaves the state file part A writes, so the run is in the
+					// unfinished list next time the application opens.
+					await _run.StopAsync(StopTimeout).ConfigureAwait(false);
+				}
+				finally
+				{
+					// Runs even if the stop above threw -- cancelling a token propagates whatever a
+					// registered callback throws, and a data key that outlives a failed stop with
+					// the idle timer already disposed (below) would have nothing left to reclaim it.
+					// The lock belongs on every path out of this handler, not only the one where the
+					// stop succeeded.
+					await _vault.LockAsync().ConfigureAwait(false);
+				}
 			}
 			finally
 			{
