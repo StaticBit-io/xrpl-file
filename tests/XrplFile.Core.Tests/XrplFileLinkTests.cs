@@ -58,4 +58,26 @@ public class XrplFileLinkTests
         Assert.True(XrplFileLink.TryParse($"xrpl-file://devnet/{Hash}", out XrplFileLink? link));
         Assert.Equal("devnet", link!.Network);
     }
+
+    [Theory]
+    [InlineData("mainnet", "mainnet")]
+    [InlineData("testnet", "testnet")]
+    [InlineData("devnet", "devnet")]
+    [InlineData("TestNet", "testnet")]
+    [InlineData("21338", "21338")]
+    public void Try_normalize_network_accepts_what_the_format_can_address(string network, string expectedCanonical)
+    {
+        Assert.True(XrplFileLink.TryNormalizeNetwork(network, out string? canonical));
+        Assert.Equal(expectedCanonical, canonical);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("0123")]
+    [InlineData("standalone")]
+    public void Try_normalize_network_refuses_what_the_format_cannot_address(string network)
+    {
+        Assert.False(XrplFileLink.TryNormalizeNetwork(network, out string? canonical));
+        Assert.Null(canonical);
+    }
 }

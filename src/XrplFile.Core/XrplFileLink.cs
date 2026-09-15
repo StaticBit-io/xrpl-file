@@ -66,19 +66,43 @@ public sealed record XrplFileLink
     /// constructor would refuse cannot be discovered after a thousand paid transactions.
     /// </summary>
     internal static string RequireNetwork(string network) =>
-        NormalizeNetwork(network)
-        ?? throw new XrplFileException(XrplFileError.InvalidLink, $"'{network}' is neither a network name nor a NetworkID");
+        TryNormalizeNetwork(network, out string? canonical)
+            ? canonical
+            : throw new XrplFileException(XrplFileError.InvalidLink, $"'{network}' is neither a network name nor a NetworkID");
 
-    private static string? NormalizeNetwork(string network)
+    /// <summary>
+    /// Whether <paramref name="network"/> is a network an xrpl-file link can name — <c>mainnet</c>,
+    /// <c>testnet</c> or <c>devnet</c> in any case, or a NetworkID written as digits with no leading
+    /// zero — and, when it is, <paramref name="canonical"/> holds its canonical form: the known name
+    /// lower-cased, or the NetworkID unchanged. This is the same rule <see cref="RequireNetwork"/>
+    /// enforces at construction, exposed so a caller can ask before committing to a network the
+    /// format cannot address, rather than discovering it from a thrown <see cref="XrplFileException"/>.
+    /// </summary>
+    public static bool TryNormalizeNetwork(string? network, [NotNullWhen(true)] out string? canonical)
     {
-        if (string.IsNullOrEmpty(network)) return null;
+        if (string.IsNullOrEmpty(network))
+        {
+            canonical = null;
+            return false;
+        }
 
         string lower = network.ToLowerInvariant();
-        if (KnownNetworks.Contains(lower)) return lower;
+        if (KnownNetworks.Contains(lower))
+        {
+            canonical = lower;
+            return true;
+        }
 
         // Any other network is named by its NetworkID: digits only, no sign, no leading zero.
         bool digits = lower.All(character => character is >= '0' and <= '9');
-        return digits && (lower.Length == 1 || lower[0] != '0') ? lower : null;
+        if (digits && (lower.Length == 1 || lower[0] != '0'))
+        {
+            canonical = lower;
+            return true;
+        }
+
+        canonical = null;
+        return false;
     }
 
     private static string? NormalizeHash(string hash)
