@@ -127,4 +127,20 @@ public sealed class PublicationHistoryTests : IDisposable
         Assert.Contains("фото.png", fileContent);
         Assert.DoesNotContain("\\u", fileContent);
     }
+
+    [Fact]
+    public void Clearing_a_corrupt_file_clears_the_failure_message()
+    {
+        byte[] garbage = Encoding.UTF8.GetBytes("{ this is not json");
+        File.WriteAllBytes(HistoryPath, garbage);
+
+        PublicationHistory history = new(HistoryPath);
+        history.Read();
+        Assert.NotNull(history.Failure);
+
+        history.Clear();
+
+        Assert.Empty(history.Read());
+        Assert.Null(history.Failure);
+    }
 }

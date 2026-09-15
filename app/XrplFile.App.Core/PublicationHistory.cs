@@ -74,13 +74,20 @@ public sealed class PublicationHistory
     {
         ArgumentException.ThrowIfNullOrEmpty(link);
 
-        Read();
+        IReadOnlyList<PublicationRecord> records = Read();
         if (Failure is not null) return;
 
-        Save([.. Read().Where(record => !string.Equals(record.Link, link, StringComparison.Ordinal))]);
+        Save([.. records.Where(record => !string.Equals(record.Link, link, StringComparison.Ordinal))]);
     }
 
-    public void Clear() => Save([]);
+    public void Clear()
+    {
+        // Clear resets the list entirely, so it resets the failure reason along with it.
+        // Append keeps the read's verdict because it deliberately collapses an unreadable file,
+        // and the Failure that Read set is the only message that the old list was lost.
+        Failure = null;
+        Save([]);
+    }
 
     /// <summary>
     /// Written to a temporary file in the same directory, flushed to disk, and then moved over the
