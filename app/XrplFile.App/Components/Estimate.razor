@@ -1,0 +1,87 @@
+@implements IDisposable
+@inject EstimateModel Model
+@inject PublicationRun Run
+
+@* Design 4.2: what a publication will cost, before it is agreed to. Every figure below is
+   EstimateModel.Estimate's own; this component decides only whether to show the alert CanPublish and
+   Message already settled, never the numbers behind either. *@
+
+<div class="container py-3">
+    <h1 class="h3">Estimate</h1>
+
+    @if (Model.Estimate is { } estimate)
+    {
+        <table class="table">
+            <tbody>
+                <tr><th>Chunks</th><td>@estimate.Chunks.ToString("N0")</td></tr>
+                <tr><th>Transactions</th><td>@estimate.Transactions.ToString("N0")</td></tr>
+                <tr><th>Fee per transaction</th><td>@estimate.FeeDropsPerTransaction.ToString("N0") drops</td></tr>
+                <tr><th>Total fee</th><td>@estimate.FeeDropsTotal.ToString("N0") drops</td></tr>
+                <tr><th>Required</th><td>@estimate.RequiredDrops.ToString("N0") drops</td></tr>
+                <tr><th>Account balance</th><td>@estimate.BalanceDrops.ToString("N0") drops</td></tr>
+                <tr><th>Spendable</th><td>@estimate.SpendableDrops.ToString("N0") drops</td></tr>
+            </tbody>
+        </table>
+
+        <p>Node: <code>@Model.NodeUrl</code> (@Request.Network)</p>
+    }
+
+    @if (Model.Message is not null)
+    {
+        <div class="alert alert-warning">@Model.Message</div>
+    }
+
+    <button type="button" class="btn btn-outline-secondary" disabled="@_starting" @onclick="Back">Back</button>
+    <button type="button" class="btn btn-primary" disabled="@(!Model.CanPublish || _starting)" @onclick="PublishAsync">
+        Publish
+    </button>
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private bool _starting;
+
+    [Parameter, EditorRequired]
+    public PublishRequest Request { get; set; } = null!;
+
+    [Parameter]
+    public EventCallback OnBack { get; set; }
+
+    /// <summary>Fired once <see cref="PublicationRun.Start"/> has actually been called.</summary>
+    [Parameter]
+    public EventCallback OnStarted { get; set; }
+
+    protected override async Task OnInitializedAsync() => await Model.EstimateAsync(Request, _cts.Token);
+
+    private Task Back() => OnBack.InvokeAsync();
+
+    private async Task PublishAsync()
+    {
+        if (_starting || !Model.CanPublish)
+        {
+            return;
+        }
+
+        _starting = true;
+        try
+        {
+            // False here would mean a run is already going, which CanEstimate/CanPublish's own
+            // reachability through Publish.razor already rules out: that screen only ever shows this
+            // one once PublicationRun.Snapshot.State is Idle. Nothing further is done with the
+            // result -- Publish.razor's own poll notices the state change and swaps to <Run /> within
+            // one second either way.
+            Run.Start(Request);
+            await OnStarted.InvokeAsync();
+        }
+        finally
+        {
+            _starting = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

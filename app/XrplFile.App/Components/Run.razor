@@ -1,0 +1,90 @@
+@implements IDisposable
+@inject RunModel Model
+@inject IClipboardService Clipboard
+
+@* Design 4.3: the run in progress, and its outcome. CanCancel, IsFinished, Link, Failure,
+   HistoryNote, StageText and Percent are all RunModel's own; this component only chooses which of
+   them to draw right now, never what any of them says. RunModel's own remarks are explicit that a
+   HistoryNote can sit beside a successful Link -- not a failure -- which is why it is shown in its
+   own alert rather than folded into the failure branch below.
+
+   The poll matches Shell.razor's and Publish.razor's own shape and interval: PublicationRun runs on
+   a background task this screen never awaits, so nothing repaints on progress without a render
+   forced from outside it. Copying a finished link is plumbing, not a decision -- there is no branch
+   here over what to copy or when the button is enabled beyond IsFinished already having decided that
+   a link exists. *@
+
+<div class="container py-3">
+    <h1 class="h3">Publishing</h1>
+
+    <p>@Model.StageText</p>
+    <div class="progress" role="progressbar" aria-valuenow="@Model.Percent" aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-bar" style="width: @(Model.Percent)%">@Model.Percent%</div>
+    </div>
+
+    <button type="button" class="btn btn-outline-secondary mt-3" disabled="@(!Model.CanCancel)" @onclick="Cancel">
+        Cancel
+    </button>
+
+    @if (Model.IsFinished)
+    {
+        @if (Model.Link is { } link)
+        {
+            <div class="alert alert-success mt-3">
+                <p class="mb-2">Published.</p>
+                <code class="d-block p-2 bg-body-tertiary text-break user-select-all">@link</code>
+                <button type="button" class="btn btn-outline-secondary mt-2" @onclick="CopyLinkAsync">Copy link</button>
+            </div>
+        }
+        else if (Model.Failure is { } failure)
+        {
+            <div class="alert alert-danger mt-3">@failure</div>
+        }
+
+        @if (Model.HistoryNote is { } note)
+        {
+            <div class="alert alert-info mt-3">@note</div>
+        }
+
+        <button type="button" class="btn btn-primary mt-3" @onclick="Dismiss">Dismiss</button>
+    }
+</div>
+
+@code {
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+
+    private readonly CancellationTokenSource _cts = new();
+    private Timer? _pollTimer;
+    private bool _disposed;
+
+    protected override void OnInitialized() =>
+        _pollTimer = new Timer(OnPollTick, state: null, PollInterval, PollInterval);
+
+    private void OnPollTick(object? state)
+    {
+        _ = InvokeAsync(() =>
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private void Cancel() => Model.Cancel();
+
+    private void Dismiss() => Model.Dismiss();
+
+    private Task CopyLinkAsync() =>
+        Model.Link is { } link ? Clipboard.CopyAsync(link, _cts.Token) : Task.CompletedTask;
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _pollTimer?.Dispose();
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

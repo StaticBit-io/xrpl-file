@@ -39,6 +39,11 @@
                         Keys
                     </button>
                     <button type="button"
+                            class="btn btn-outline-primary @(_unlockedView == UnlockedView.Publish ? "active" : "")"
+                            @onclick="() => _unlockedView = UnlockedView.Publish">
+                        Publish
+                    </button>
+                    <button type="button"
                             class="btn btn-outline-primary @(_unlockedView == UnlockedView.Settings ? "active" : "")"
                             @onclick="() => _unlockedView = UnlockedView.Settings">
                         Settings
@@ -50,6 +55,10 @@
             @if (_unlockedView == UnlockedView.KeyList)
             {
                 <KeyList />
+            }
+            else if (_unlockedView == UnlockedView.Publish)
+            {
+                <Publish />
             }
             else
             {
@@ -69,6 +78,7 @@ else
     private enum UnlockedView
     {
         KeyList,
+        Publish,
         Settings,
     }
 

@@ -1,0 +1,82 @@
+@implements IDisposable
+@inject HistoryModel Model
+
+@* Design 4.5 and design 12. Every record and every word is HistoryModel's own; the sentence below
+   about forgetting and clearing only changing this local list is fixed copy, not something computed
+   from the model, so it stays even when there is nothing to forget yet. *@
+
+<div class="container py-3">
+    <div class="d-flex justify-content-between align-items-center">
+        <h2 class="h5 mb-0">Published files</h2>
+        @if (Model.Records.Count > 0)
+        {
+            <button type="button" class="btn btn-outline-danger btn-sm" @onclick="Clear">Clear list</button>
+        }
+    </div>
+
+    <p class="text-body-secondary">
+        Forgetting or clearing only changes this list on this device. Every file is already in the
+        ledger, and any link you kept elsewhere still works.
+    </p>
+
+    @if (Model.Message is not null)
+    {
+        <div class="alert alert-warning">@Model.Message</div>
+    }
+
+    @if (Model.Records.Count == 0)
+    {
+        <p>Nothing published yet.</p>
+    }
+    else
+    {
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Network</th>
+                    <th>Link</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (PublicationRecord record in Model.Records)
+                {
+                    <tr>
+                        <td>@record.Name</td>
+                        <td>@record.Network</td>
+                        <td><code class="text-break">@record.Link</code></td>
+                        <td class="text-end">
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-outline-secondary" @onclick="() => CopyAsync(record)">
+                                    Copy
+                                </button>
+                                <button type="button" class="btn btn-outline-danger" @onclick="() => Forget(record)">
+                                    Forget
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override void OnInitialized() => Model.Refresh();
+
+    private Task CopyAsync(PublicationRecord record) => Model.CopyLinkAsync(record, _cts.Token);
+
+    private void Forget(PublicationRecord record) => Model.Forget(record);
+
+    private void Clear() => Model.Clear();
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

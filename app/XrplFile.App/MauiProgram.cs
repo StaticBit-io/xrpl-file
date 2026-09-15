@@ -176,5 +176,40 @@ public static class MauiProgram
         services.AddSingleton(provider => new PasswordChangeModel(
             provider.GetRequiredService<IKeyVault>(), vaultPath));
         services.AddSingleton(new VaultLocationModel(locationStore, vaultPath));
+
+        // The node settings file sits beside this method's own vault-location.txt, in the
+        // application data directory, and is read the same defensive way.
+        services.AddSingleton<INodeSettingsStore>(new FileNodeSettingsStore());
+        services.AddSingleton<IConnectionFactory>(
+            provider => new XrplConnectionFactory(provider.GetRequiredService<INodeSettingsStore>()));
+        services.AddSingleton<NodeSettingsModel>();
+
+        // Run state and the publications file are in the application's data directory, never beside
+        // the vault: the vault is portable by design (E5) and this is not.
+        services.AddSingleton(new RunPaths());
+
+        // PublicationHistory's own lock is per instance (see its remarks on "This lock is per
+        // instance"), and the races it closes reopen across instances that each think they are the
+        // only writer. Registered once, as the concrete type, so PublicationRun (as
+        // IPublicationHistory) and HistoryModel (which needs Read/Forget/Clear, not on that
+        // interface) resolve to the same object.
+        services.AddSingleton(provider => new PublicationHistory(provider.GetRequiredService<RunPaths>().HistoryPath));
+        services.AddSingleton<IPublicationHistory>(provider => provider.GetRequiredService<PublicationHistory>());
+
+        // A singleton because a publication outlives the screen that started it (design F5). It is
+        // handed the same VaultAutoLock the signer uses, so progress in a stage that signs nothing
+        // still counts as activity (design 10) -- exactly how TouchingVault is built one block above.
+        services.AddSingleton(provider => new PublicationRun(
+            provider.GetRequiredService<IConnectionFactory>(),
+            provider.GetRequiredService<IKeyVault>(),
+            provider.GetRequiredService<RunPaths>(),
+            provider.GetRequiredService<IPublicationHistory>(),
+            autoLock));
+
+        services.AddSingleton<PublishModel>();
+        services.AddSingleton<EstimateModel>();
+        services.AddSingleton<RunModel>();
+        services.AddSingleton<UnfinishedModel>();
+        services.AddSingleton<HistoryModel>();
     }
 }

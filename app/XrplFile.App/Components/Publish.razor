@@ -1,0 +1,134 @@
+@implements IDisposable
+@inject PublishModel Model
+@inject PublicationRun Run
+
+@* Design 4.1 and F13: the Publish tab renders exactly one of its three stops -- the running/finished
+   screen once a run exists, the estimate once one has been taken, or the picker below -- and every
+   fact on screen is read straight off PublishModel or PublicationRun. The only thing this component
+   decides is which of the three stops that is, which is navigation, not a fact about the publication;
+   KeyList.razor's own remarks make the same distinction for its own sub-screens.
+
+   The one-second timer exists only to make PublicationRun's own background progress visible: its
+   Snapshot changes on a task this screen never awaits, and without a poll forcing a render, <Run />
+   would go on showing whatever it read at its last user-triggered render. Copied verbatim from
+   Shell.razor's own poll, at the same interval and with the same Timer/CancellationTokenSource/
+   _disposed shape, so the two screens can never notice a change at different moments. *@
+
+@if (Run.Snapshot.State != PublicationRunState.Idle)
+{
+    <Run />
+}
+else if (_estimated)
+{
+    <Estimate Request="_request!" OnBack="() => _estimated = false" OnStarted="Started" />
+}
+else
+{
+    <div class="container py-3">
+        <h1 class="h3">Publish a file</h1>
+
+        <button type="button" class="btn btn-outline-primary" @onclick="PickAsync">Choose a file&hellip;</button>
+
+        @if (Model.FileName is not null)
+        {
+            <p class="mt-2">@Model.FileName &mdash; @Model.FileSize.ToString("N0") bytes</p>
+        }
+
+        <ul class="list-group my-3">
+            @foreach (VaultEntryInfo key in Model.Keys)
+            {
+                <li class="list-group-item @(key.Reference == Model.SelectedReference ? "active" : "")"
+                    @onclick="() => Model.SelectKey(key.Reference)">
+                    @key.Label &mdash; @key.Address (@key.Network)
+                </li>
+            }
+        </ul>
+
+        @if (Model.Warning is not null)
+        {
+            <div class="alert alert-warning">@Model.Warning</div>
+        }
+
+        @if (Model.Message is not null)
+        {
+            <div class="alert alert-secondary">@Model.Message</div>
+        }
+
+        <button type="button" class="btn btn-primary" disabled="@(!Model.CanEstimate)" @onclick="EstimateAsync">
+            Estimate
+        </button>
+    </div>
+
+    <Unfinished />
+    <History />
+}
+
+@code {
+    /// <summary>
+    /// How often this screen forces a render while a run may be progressing. Matches Shell.razor's
+    /// own poll -- see that component's own remarks on why the two must agree.
+    /// </summary>
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+
+    private readonly CancellationTokenSource _cts = new();
+    private Timer? _pollTimer;
+    private bool _disposed;
+    private bool _estimated;
+    private PublishRequest? _request;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Model.RefreshKeysAsync(_cts.Token);
+
+        // Started only once the first refresh has run, matching Shell.razor's own reasoning: a tick
+        // can then never race the first render.
+        _pollTimer = new Timer(OnPollTick, state: null, PollInterval, PollInterval);
+    }
+
+    private void OnPollTick(object? state)
+    {
+        // Same disposal discipline as Shell.razor's own poll: Timer.Dispose does not wait for a
+        // callback already running on a thread-pool thread, so _disposed is checked inside the
+        // delegate the renderer's own dispatcher runs, which orders that check against Dispose().
+        _ = InvokeAsync(() =>
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private async Task PickAsync() => await Model.PickFileAsync(_cts.Token);
+
+    private async Task EstimateAsync()
+    {
+        PublishRequest? request = await Model.BuildRequestAsync(_cts.Token);
+        if (request is null)
+        {
+            return;
+        }
+
+        _request = request;
+        _estimated = true;
+    }
+
+    /// <summary>
+    /// Estimate.razor's own OnStarted, fired once PublicationRun.Start has been called. Returns this
+    /// screen to the picker underneath -- not to the estimate, which described a request that has
+    /// already been handed off -- so a Dismiss on the run screen that follows finds a fresh start
+    /// rather than a stale estimate.
+    /// </summary>
+    private void Started() => _estimated = false;
+
+    public void Dispose()
+    {
+        // Set before the timer is disposed, for the reason Shell.razor's own Dispose explains.
+        _disposed = true;
+        _pollTimer?.Dispose();
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

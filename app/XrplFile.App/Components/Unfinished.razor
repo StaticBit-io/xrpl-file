@@ -1,0 +1,103 @@
+@implements IDisposable
+@inject UnfinishedModel Model
+
+@* Design 4.4 and design 11 (resuming). Every row and every word is UnfinishedModel's own; this
+   screen only offers Resume and Delete per row and shows whatever Model.Message the last action left
+   behind. An unreadable row (row.Unreadable) still names, by its path, a run that spent money --
+   UnfinishedRow's own remarks -- so it stays listed rather than dropped; pressing Resume on it is
+   left to UnfinishedModel.ResumeAsync to refuse, which it already does with its own Message, rather
+   than this screen pre-judging the row and disabling the button itself. *@
+
+<div class="container py-3">
+    <h2 class="h5">Unfinished runs</h2>
+
+    @if (Model.Message is not null)
+    {
+        <div class="alert alert-warning">@Model.Message</div>
+    }
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p>No unfinished runs.</p>
+    }
+    else
+    {
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th>Network</th>
+                    <th>Stage</th>
+                    <th>Chunks</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (UnfinishedRow row in Model.Rows)
+                {
+                    <tr>
+                        @if (row.Unreadable is { } unreadable)
+                        {
+                            <td colspan="4">
+                                <span class="text-danger">@unreadable</span> (<code>@row.Path</code>)
+                            </td>
+                        }
+                        else
+                        {
+                            <td>@row.Name (@row.Size.ToString("N0") bytes)</td>
+                            <td>@row.Network</td>
+                            <td>@row.Stage</td>
+                            <td>@row.Chunks.ToString("N0")</td>
+                        }
+                        <td class="text-end">
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-outline-secondary" disabled="@_busy"
+                                        @onclick="() => ResumeAsync(row)">
+                                    Resume
+                                </button>
+                                <button type="button" class="btn btn-outline-danger" disabled="@_busy"
+                                        @onclick="() => Delete(row)">
+                                    Delete
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private bool _busy;
+
+    protected override void OnInitialized() => Model.Refresh();
+
+    private async Task ResumeAsync(UnfinishedRow row)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            await Model.ResumeAsync(row, _cts.Token);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Delete(UnfinishedRow row) => Model.Delete(row);
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

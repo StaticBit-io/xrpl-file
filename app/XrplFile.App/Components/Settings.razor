@@ -2,6 +2,7 @@
 @inject DeviceUnlockModel Model
 @inject VaultLocationModel LocationModel
 @inject IFilePickerService FilePicker
+@inject NodeSettingsModel NodeSettings
 
 @* Design 6, "Settings": the vault's own path, a button that reveals it in the file manager, opening
    a different vault, and the device-unlock switch. DeviceUnlockModel.IsEnabledAsync is re-read after
@@ -79,6 +80,31 @@
             }
         </section>
 
+        <section class="mb-4">
+            <h2 class="h5">Node URLs</h2>
+            <p>
+                Which rippled node each network publishes to and reads from. Leave a box empty to use
+                the built-in endpoint for that network; a network this application does not already
+                know &mdash; a NetworkID, or a private stand &mdash; needs a URL here before anything
+                can be published to it.
+            </p>
+            @foreach (NodeSettingRow row in NodeSettings.Rows)
+            {
+                <div class="mb-2">
+                    <label class="form-label">@row.Network</label>
+                    <input class="form-control" placeholder="(built-in endpoint)"
+                           value="@NodeEdit(row.Network)" @oninput="e => SetNodeEdit(row.Network, (string)e.Value!)" />
+                </div>
+            }
+            <button type="button" class="btn btn-outline-primary mt-2" @onclick="SaveNodes">
+                Save node URLs
+            </button>
+            @if (NodeSettings.Message is { } nodeProblem)
+            {
+                <div class="alert alert-warning mt-2">@nodeProblem</div>
+            }
+        </section>
+
         <button type="button" class="btn btn-outline-primary" @onclick="() => _showChangePassword = true">
             Change master password
         </button>
@@ -87,6 +113,7 @@
 
 @code {
     private readonly CancellationTokenSource _cts = new();
+    private readonly Dictionary<string, string> _nodeEdits = new(StringComparer.Ordinal);
     private bool _showChangePassword;
     private bool _deviceUnlockEnabled;
     private bool _busy;
@@ -96,6 +123,34 @@
     protected override async Task OnInitializedAsync()
     {
         _deviceUnlockEnabled = await Model.IsEnabledAsync(_cts.Token);
+
+        NodeSettings.Refresh();
+        RestartNodeEdits();
+    }
+
+    // The boxes hold their own typed-but-not-yet-saved text; NodeSettingsModel.Rows only ever carries
+    // what was last saved. Reset every time Rows changes underneath -- after the initial Refresh
+    // above and after a successful SaveNodes below -- so the boxes never show one save's edits
+    // sitting on top of a different save's own result.
+    private void RestartNodeEdits()
+    {
+        _nodeEdits.Clear();
+        foreach (NodeSettingRow row in NodeSettings.Rows)
+        {
+            _nodeEdits[row.Network] = row.Url;
+        }
+    }
+
+    private string NodeEdit(string network) => _nodeEdits.TryGetValue(network, out string? value) ? value : string.Empty;
+
+    private void SetNodeEdit(string network, string value) => _nodeEdits[network] = value;
+
+    private void SaveNodes()
+    {
+        if (NodeSettings.Save(_nodeEdits))
+        {
+            RestartNodeEdits();
+        }
     }
 
     private void RevealInFileManager()
