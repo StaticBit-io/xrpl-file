@@ -67,4 +67,27 @@ public sealed class NodeSettingsTests : IDisposable
 
         Assert.Equal(Endpoints.For("mainnet")[0], NodeEndpoint.Resolve(store, "mainnet"));
     }
+
+    [Fact]
+    public void The_default_constructor_places_the_setting_beside_the_default_vault()
+    {
+        FileNodeSettingsStore store = new();
+
+        // Not exercised end to end here (that would touch this machine's real application-data
+        // directory); this only pins where the parameterless constructor computes the setting path
+        // to be, the same way VaultLocationTests pins VaultLocation.DefaultPath's own shape.
+        string expected = Path.Combine(Path.GetDirectoryName(VaultLocation.DefaultPath)!, "node-urls.json");
+        Assert.Equal(expected, store.SettingPath);
+    }
+
+    [Fact]
+    public void An_unreadable_setting_is_left_on_disk_rather_than_quietly_deleted()
+    {
+        // Forgetting which endpoints somebody configured is not this method's decision to make: the
+        // bytes may still be recoverable by hand, and the settings screen can overwrite them.
+        File.WriteAllBytes(SettingPath, Encoding.UTF8.GetBytes("this is not json"));
+
+        Assert.Empty(new FileNodeSettingsStore(SettingPath).Read());
+        Assert.True(File.Exists(SettingPath));
+    }
 }
