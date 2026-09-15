@@ -85,6 +85,7 @@ public sealed class AccountsModelTests : VaultHarness
         AccountRow row = Assert.Single(model.Rows);
         Assert.Equal(AccountStage.Closed, row.Stage);
         Assert.Equal(closure, row.Closure);
+        Assert.Null(row.BalanceDrops);
         Assert.Equal(0, _connections.Connections);
     }
 
