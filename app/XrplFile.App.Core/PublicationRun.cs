@@ -233,6 +233,21 @@ public sealed class PublicationRun(
                     connection.Source, request.Account, request.File.Length, estimateOptions, cancellationToken)
                     .ConfigureAwait(false);
 
+                // PublishPolicy.Create's own remarks say every caller checks this first and that
+                // reaching it otherwise is a defect -- but EstimateModel's own check only ever gates
+                // a fresh Start: it runs once, against a screen the person is looking at, and this
+                // estimate is a second, independent one taken right here because the node's price
+                // can have moved since. UnfinishedModel.ResumeAsync reaches PublicationRun.Resume,
+                // and so this method, without ever going through EstimateModel at all, so checking
+                // only there would leave a resumed run free to reach PublishPolicy.Create's own
+                // defect exception. Checked again here instead, which covers both callers with the
+                // one sentence this application actually has for it, before either one reveals a key
+                // or spends anything on a strategy this price can never be used to build.
+                if (estimate.FeeDropsPerTransaction > int.MaxValue)
+                {
+                    throw new FeeTooLargeForApplicationException();
+                }
+
                 SessionOptions options = new()
                 {
                     StateDirectory = paths.StateDirectory,
@@ -291,6 +306,11 @@ public sealed class PublicationRun(
         catch (OperationCanceledException)
         {
             finalState = PublicationRunState.Cancelled;
+        }
+        catch (FeeTooLargeForApplicationException)
+        {
+            failure = PublishErrorMessages.FeeTooLargeForApplication;
+            finalState = PublicationRunState.Failed;
         }
         catch (XrplFileException ex)
         {
@@ -469,4 +489,13 @@ public sealed class PublicationRun(
     {
         public void Report(PublishProgress value) => report(value);
     }
+
+    /// <summary>
+    /// Thrown, and caught a few lines below, purely as local control flow: a way to unwind out of
+    /// <see cref="RunAsync"/>'s nested try/finally blocks -- so the connection already opened for
+    /// the estimate is still disposed by the finally around it -- to the one place this run's
+    /// terminal state is decided, without duplicating that decision at the point the price is
+    /// found to be unusable. Never crosses this class's own boundary.
+    /// </summary>
+    private sealed class FeeTooLargeForApplicationException : Exception;
 }

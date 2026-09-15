@@ -52,9 +52,14 @@ public static class PublishPolicy
     /// differently with <see cref="XrplFileError.FeeMismatch"/>.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// The node's price does not fit the <see cref="int"/> both options types use. Callers check
-    /// <see cref="PublicationEstimate.FeeDropsPerTransaction"/> against <see cref="int.MaxValue"/>
-    /// before offering to publish at all (see <c>EstimateModel</c>), so reaching this is a defect.
+    /// The node's price does not fit the <see cref="int"/> both options types use. Every caller
+    /// checks <see cref="PublicationEstimate.FeeDropsPerTransaction"/> against
+    /// <see cref="int.MaxValue"/> before ever reaching here -- <c>EstimateModel</c> for a fresh
+    /// estimate, and <c>PublicationRun.RunAsync</c> for the one it re-takes before both a fresh
+    /// start and a resume, which is what actually covers <c>UnfinishedModel.ResumeAsync</c> (it
+    /// reaches this method through <c>PublicationRun.Resume</c> without ever going through
+    /// <c>EstimateModel</c> at all) -- so reaching this is a defect regardless of which caller got
+    /// here.
     /// </exception>
     public static ISubmissionStrategy Create(
         PublicationEstimate estimate, ILedgerConnection connection, ITransactionSigner signer)

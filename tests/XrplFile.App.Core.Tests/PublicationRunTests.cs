@@ -565,17 +565,47 @@ public sealed class PublicationRunTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_price_the_application_cannot_use_is_refused_before_a_strategy_is_built()
+    {
+        // Past int.MaxValue -- see EstimateModelTests's own sibling test for why both strategy
+        // option types refuse it. PublishPolicy.Create's own remarks say every caller checks this
+        // first and that reaching it otherwise is a defect, naming EstimateModel as the caller --
+        // but EstimateModel only gates the *first* look at a request, and RunAsync re-estimates on
+        // its own before ever calling PublishPolicy.Create (see its own remarks on why: the node's
+        // price can move between the estimate and the run). UnfinishedModel.ResumeAsync reaches
+        // PublicationRun.Resume, and so PublishPolicy.Create, without ever going through
+        // EstimateModel at all -- so the check has to live here, in RunAsync itself, to actually
+        // cover every caller rather than only the one that happens to ask first. Exercised through
+        // Start rather than Resume: both call the same RunAsync, and this is the simpler of the two
+        // to set up.
+        _connections.Ledger.Fees = new NetworkFees((long)int.MaxValue + 1, 1_000_000, 200_000);
+
+        (PublicationRun run, PublishRequest request) = await ReadyAsync(TestContext.Current.CancellationToken);
+
+        run.Start(request);
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
+        Assert.Equal(PublishErrorMessages.FeeTooLargeForApplication, run.Snapshot.Failure);
+
+        // No strategy, and therefore no vault reveal, was ever reached for a run refused this
+        // early -- but a connection was already opened for the (re-)estimate, and it must not leak.
+        Assert.Equal(1, _connections.Connections);
+        Assert.Equal(_connections.Connections, _connections.Disposals);
+    }
+
+    [Fact]
     public async Task A_failure_after_the_strategy_is_built_still_disposes_everything()
     {
         (PublicationRun run, PublishRequest request) = await ReadyAsync(TestContext.Current.CancellationToken);
 
         // The node refuses the very first submission -- well after PublishPolicy.Create has already
-        // built the strategy, which nothing else in this file reaches: the two sibling failure tests
-        // above each stop earlier (NodeUnreachable before any connection exists at all;
-        // NoSuchEntry before any strategy does). SequenceStrategy.SubmitAsync turns a refusal engine
-        // result into XrplFileException(SubmitRefused, ...), so this is also the first test to
-        // exercise that specific mapping. This is the one test that actually exercises the strategy's
-        // own disposal finally (RunAsync's inner try/finally around ISubmissionStrategy), not only
+        // built the strategy, which nothing else in this file reaches: the sibling failure tests
+        // above each stop earlier (NodeUnreachable before any connection exists at all; NoSuchEntry
+        // and the price-too-large test before any strategy does). SequenceStrategy.SubmitAsync turns
+        // a refusal engine result into XrplFileException(SubmitRefused, ...), so this is also the
+        // first test to exercise that specific mapping. This is the one test that actually exercises
+        // the strategy's own disposal finally (RunAsync's inner try/finally around ISubmissionStrategy), not only
         // the connection's outer one -- there is no separate counter for strategy disposal to assert
         // on directly, but this run cannot reach the connection's own disposal (and this assertion)
         // without the strategy's inner finally having already run first.

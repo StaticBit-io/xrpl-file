@@ -56,8 +56,9 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
             // Both strategy option types take an int fee, and the run prices its strategy from this
             // number so the session does not refuse it with FeeMismatch. A price this large is not a
             // situation the protocol produces; it is one this application says no to rather than
-            // wraps around.
-            Message = "The node is quoting a price this application cannot use. Try a different node.";
+            // wraps around. PublicationRun.RunAsync re-checks this same thing for itself before a
+            // resume (which never reaches this model at all) and uses this exact sentence too.
+            Message = PublishErrorMessages.FeeTooLargeForApplication;
             return;
         }
 

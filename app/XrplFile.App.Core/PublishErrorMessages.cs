@@ -12,6 +12,17 @@ namespace XrplFile.App.Core;
 /// </summary>
 public static class PublishErrorMessages
 {
+    /// <summary>
+    /// A node price too large for either strategy option type to hold (design F1: both price a
+    /// transaction in an <see cref="int"/>). Not one of <see cref="XrplFileError"/>'s own cases --
+    /// the library never throws for this on its own, since <see cref="PublicationEstimate"/> carries
+    /// the raw <see cref="long"/> without judging it -- so it is this application's own sentence,
+    /// shared by every place that has to say it: <see cref="EstimateModel"/> for a fresh estimate
+    /// and <see cref="PublicationRun"/> for the one it re-takes before a resume, so a person reads
+    /// the same words for the same refusal regardless of which screen it happened on.
+    /// </summary>
+    public const string FeeTooLargeForApplication = "The node is quoting a price this application cannot use. Try a different node.";
+
     public static string For(XrplFileError error) => error switch
     {
         XrplFileError.NodeUnreachable =>
