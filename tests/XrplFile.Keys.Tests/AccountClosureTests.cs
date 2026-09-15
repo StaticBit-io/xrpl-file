@@ -54,10 +54,44 @@ public sealed class AccountClosureTests : VaultTestHarness
     }
 
     /// <summary>
-    /// The test that matters most: an entry written <b>before</b> the closure field existed must
-    /// still open. That cannot be proven with a round trip through <see cref="KeyVault.StoreAsync"/>
-    /// and <see cref="KeyVault.ListAsync"/> — the writer under test always writes the property now,
-    /// so a round trip can only ever exercise the "present" path, never the "absent" one.
+    /// Every other closure in this suite uses <see cref="DateTimeOffset.UnixEpoch"/>, which has
+    /// neither fractional seconds nor a non-zero offset. The clock that fills this field in for
+    /// real is a later task's work, and it will hand back both, so the round trip has to be proven
+    /// against a timestamp shaped like that rather than one that happens to be all zeros where
+    /// truncation would be invisible.
+    /// </summary>
+    [Fact]
+    public async Task A_closures_timestamp_survives_fractional_seconds_and_a_nonzero_offset()
+    {
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("a master password"), TestContext.Current.CancellationToken);
+        string reference = await vault.StoreAsync(Entry("throwaway"), TestContext.Current.CancellationToken);
+
+        DateTimeOffset closedAt = new(2026, 9, 15, 12, 34, 56, 789, TimeSpan.FromHours(3));
+        AccountClosure closure = new(closedAt, "rHome", 28_800_000, "ABC");
+        await vault.UpdateAsync(reference, new VaultEntryEdit(Closure: closure), TestContext.Current.CancellationToken);
+
+        VaultEntryInfo info = Assert.Single(await vault.ListAsync(TestContext.Current.CancellationToken));
+
+        Assert.NotNull(info.Closure);
+        Assert.Equal(closedAt, info.Closure.ClosedAt);
+        Assert.Equal(closedAt.Offset, info.Closure.ClosedAt.Offset);
+        Assert.Equal(closedAt.Millisecond, info.Closure.ClosedAt.Millisecond);
+    }
+
+    /// <summary>
+    /// <see cref="An_entry_with_no_closure_reads_back_as_open"/> already drives the absent-property
+    /// path end to end: <c>EntryCodec.Write</c> writes a <c>"closure"</c> property only when
+    /// <c>info.Closure</c> is not <see langword="null"/>, so a freshly stored, never-closed entry is
+    /// serialised with no such property at all, and reading it back exercises exactly the read code
+    /// that a pre-existing entry would hit. What that round trip cannot pin down is the shape a
+    /// build that predates this field actually wrote to disk — it always goes through today's
+    /// <c>Write</c>, so a future change that moved <c>Write</c> and <c>Read</c> in lockstep could
+    /// keep that round trip green while silently breaking every entry written by an older build.
+    /// This test takes <c>Write</c> out of the loop entirely: it hand-builds the exact plaintext
+    /// every entry stored before this task has — no <c>"closure"</c> property anywhere in the
+    /// object — and feeds it to the decoder directly, pinning the historical shape independently of
+    /// whatever the current writer does.
     /// </summary>
     /// <remarks>
     /// <para>
