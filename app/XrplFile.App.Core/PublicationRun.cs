@@ -16,12 +16,13 @@ public enum PublicationRunState
 /// separate reads could see <see cref="PublicationRunState.Succeeded"/> with no report yet, or
 /// <see cref="PublicationRunState.Running"/> carrying the previous run's one.
 /// </summary>
-/// <param name="HistoryFailure">
-/// Why a succeeded run's <see cref="PublicationHistory.Append"/> did not record it, or
-/// <see langword="null"/> when it did (or when the run has not succeeded). The publication itself
-/// is never at risk from this — <see cref="Report"/> and <see cref="State"/> already carry it — but
-/// a person whose history silently stopped growing has no way to know their last publication is
-/// missing from the list unless something tells them, which is what this is for.
+/// <param name="HistoryNote">
+/// Something about the history that the person should know after a succeeded run, or
+/// <see langword="null"/> when there is nothing to say (including when the run has not succeeded).
+/// Not only a failure: <see cref="IPublicationHistory.Append"/> can succeed at recording the
+/// publication and still have something worth mentioning, such as an earlier, corrupt list it had
+/// to replace. The publication itself is never at risk from anything this carries — <see cref="Report"/>
+/// and <see cref="State"/> already say so on their own — this is about the list, not the ledger.
 /// </param>
 public sealed record RunSnapshot(
     PublicationRunState State,
@@ -30,7 +31,7 @@ public sealed record RunSnapshot(
     string? Failure,
     string? Name,
     string? Network,
-    string? HistoryFailure);
+    string? HistoryNote);
 
 /// <summary>
 /// The one publication this application can have going (design 8, F5). It holds the cancellation
@@ -44,7 +45,7 @@ public sealed class PublicationRun(
     IConnectionFactory connections,
     IKeyVault vault,
     RunPaths paths,
-    PublicationHistory history,
+    IPublicationHistory history,
     VaultAutoLock? autoLock = null)
 {
     private readonly Lock _gate = new();
@@ -57,7 +58,7 @@ public sealed class PublicationRun(
     private string? _failure;
     private string? _name;
     private string? _network;
-    private string? _historyFailure;
+    private string? _historyNote;
 
     /// <summary>
     /// Which run this is, counting from 1 at the first <see cref="Begin"/>. Exists only to pin a
@@ -65,8 +66,11 @@ public sealed class PublicationRun(
     /// <see cref="PublicationRunState.Succeeded"/> is already published, which is the one window
     /// where <see cref="Begin"/> and <see cref="Reset"/> both accept — a screen reacting to that
     /// success and starting another run immediately must not have the first run's history outcome
-    /// land on the second run's snapshot. See <see cref="RunAsync"/>'s own remarks at the two writes
-    /// this guards.
+    /// land on the second run's snapshot. Bumped in <see cref="Begin"/> (a new run starting is the
+    /// ordinary case this exists for) and in <see cref="Reset"/> too: a plain reset, with no new run
+    /// at all, opens exactly the same window, since it accepts on the same "not Running" state and
+    /// can therefore also run concurrently with a still-in-flight history append from the run it is
+    /// clearing. See <see cref="RunAsync"/>'s own remarks at the two writes this guards.
     /// </summary>
     private int _generation;
 
@@ -94,7 +98,7 @@ public sealed class PublicationRun(
         {
             lock (_gate)
             {
-                return new RunSnapshot(_state, _progress, _report, _failure, _name, _network, _historyFailure);
+                return new RunSnapshot(_state, _progress, _report, _failure, _name, _network, _historyNote);
             }
         }
     }
@@ -155,7 +159,15 @@ public sealed class PublicationRun(
             _failure = null;
             _name = null;
             _network = null;
-            _historyFailure = null;
+            _historyNote = null;
+
+            // Bumped here, not only in Begin: Reset accepts on the same "not Running" state Begin
+            // does, and a history append from the run just cleared can still be in flight when it
+            // runs (the append follows Succeeded, which is already published by the time either of
+            // these can be called). Without this, that append's own write — pinned to the
+            // generation Reset is about to leave behind — would still match and land its note on
+            // this now-Idle snapshot, which is exactly what pinning it was supposed to prevent.
+            ++_generation;
 
             // Already disposed and nulled by RunAsync's own terminal-state publication once the run
             // in question is not Running any more — this is a second, defensive clearing so a stale
@@ -183,7 +195,7 @@ public sealed class PublicationRun(
             _progress = null;
             _report = null;
             _failure = null;
-            _historyFailure = null;
+            _historyNote = null;
             _name = request.Name;
             _network = request.Network;
             _completion = Task.Run(() => RunAsync(request, statePath, cancellation.Token, generation));
@@ -344,7 +356,7 @@ public sealed class PublicationRun(
 
             try
             {
-                history.Append(new PublicationRecord(
+                HistoryAppendResult appended = history.Append(new PublicationRecord(
                     report!.Link.ToString(),
                     request.Name,
                     request.File.Length,
@@ -355,36 +367,35 @@ public sealed class PublicationRun(
                     report.FeeDropsEstimated,
                     report.FinishedAt));
 
-                // PublicationHistory.Failure means "the append that just ran did not record this
-                // publication" — Save clears it on its own success, including when Read (which
-                // Append calls first) had set it for an unrelated, earlier reason, so a stale
-                // "could not be read" left over from a corrupt-but-now-repaired file can no longer
-                // reach here as if it described this append.
-                if (history.Failure is not null)
+                // Taken from Append's own return value, not from a shared property read afterward:
+                // IPublicationHistory.Append is documented to return only its own call's outcome, so
+                // this cannot read a different, overlapping append's verdict as if it were this
+                // run's.
+                if (appended.Note is not null)
                 {
                     lock (_gate)
                     {
-                        if (_generation == generation) _historyFailure = history.Failure;
+                        if (_generation == generation) _historyNote = appended.Note;
                     }
                 }
             }
             catch (Exception ex)
             {
                 // PublicationHistory.Append is documented not to throw IOException or
-                // UnauthorizedAccessException any more — it degrades into Failure instead, handled
-                // above. This is the last-resort guard for anything else. It exists not because
-                // _state could still be corrupted by it (Succeeded is already published, so Reset
-                // and the next Start already work regardless) but because Completion must not fault:
-                // a screen or a test awaiting a publication that actually succeeded would otherwise
-                // receive an exception instead of a completed run, and a RunAsync that lets this
-                // escape leaves an unobserved task exception behind it besides. The exception's own
-                // message is kept, not discarded: this runs after money has been spent, and losing
-                // every trace of what went wrong afterwards is not something to also do here.
+                // UnauthorizedAccessException any more — it returns a Recorded: false result instead,
+                // handled above. This is the last-resort guard for anything else. It exists not
+                // because _state could still be corrupted by it (Succeeded is already published, so
+                // Reset and the next Start already work regardless) but because Completion must not
+                // fault: a screen or a test awaiting a publication that actually succeeded would
+                // otherwise receive an exception instead of a completed run, and a RunAsync that lets
+                // this escape leaves an unobserved task exception behind it besides. The exception's
+                // own message is kept, not discarded: this runs after money has been spent, and
+                // losing every trace of what went wrong afterwards is not something to also do here.
                 lock (_gate)
                 {
                     if (_generation == generation)
                     {
-                        _historyFailure =
+                        _historyNote =
                             $"The publication succeeded, but recording it in your history failed unexpectedly: {ex.Message}";
                     }
                 }

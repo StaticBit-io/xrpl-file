@@ -164,6 +164,49 @@ public sealed class PublicationHistoryTests : IDisposable
     }
 
     [Fact]
+    public void Appending_to_a_healthy_history_returns_recorded_with_no_note()
+    {
+        PublicationHistory history = new(HistoryPath);
+        HistoryAppendResult result = history.Append(Record("xrpl-file://testnet/ONE", DateTimeOffset.UnixEpoch));
+
+        Assert.True(result.Recorded);
+        Assert.Null(result.Note);
+    }
+
+    [Fact]
+    public void Appending_to_a_corrupt_file_returns_recorded_with_a_note_about_the_replacement()
+    {
+        byte[] garbage = Encoding.UTF8.GetBytes("{ this is not json");
+        File.WriteAllBytes(HistoryPath, garbage);
+
+        PublicationHistory history = new(HistoryPath);
+        HistoryAppendResult result = history.Append(Record("xrpl-file://testnet/NEW", DateTimeOffset.UnixEpoch));
+
+        // Recorded, not a failure -- the publication is safely in the list -- but still worth a note:
+        // the file could not be read at all, so whatever else it used to hold could not be carried
+        // forward, and Append replaced it outright rather than merging into it.
+        Assert.True(result.Recorded);
+        Assert.NotNull(result.Note);
+        Assert.Equal("xrpl-file://testnet/NEW", Assert.Single(history.Read()).Link);
+    }
+
+    [Fact]
+    public void Appending_when_the_write_itself_fails_returns_not_recorded_with_a_note()
+    {
+        // A plain file occupying the path the history's own directory would need to be, so
+        // Directory.CreateDirectory throws every time Save is asked to write -- the write itself
+        // fails here, not the read, which is the one case that is genuinely a failure to record.
+        string blockedParent = Path.Combine(_directory, "blocked-history-parent");
+        File.WriteAllBytes(blockedParent, [1]);
+        PublicationHistory history = new(Path.Combine(blockedParent, "publications.json"));
+
+        HistoryAppendResult result = history.Append(Record("xrpl-file://testnet/ONE", DateTimeOffset.UnixEpoch));
+
+        Assert.False(result.Recorded);
+        Assert.NotNull(result.Note);
+    }
+
+    [Fact]
     public void Concurrent_appends_do_not_corrupt_each_others_writes()
     {
         PublicationHistory history = new(HistoryPath);
