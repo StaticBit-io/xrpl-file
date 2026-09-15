@@ -80,10 +80,14 @@ public sealed class PublicationHistory : IPublicationHistory
 
     /// <summary>
     /// Why the last <see cref="Read"/>, <see cref="Forget"/> or <see cref="Clear"/> did not do what
-    /// it says, or <see langword="null"/> when it did. <see cref="Append"/> does not set this — it
-    /// returns its own outcome instead (see <see cref="HistoryAppendResult"/>), because this
-    /// property is exactly the shared, unsynchronised state that made an overlapping caller able to
-    /// read a different call's verdict as if it were its own.
+    /// it says, or <see langword="null"/> when it did. <see cref="Append"/> still writes this too —
+    /// it calls <see cref="ReadCore"/> and <see cref="SaveCore"/> just like everything else, and
+    /// cannot avoid touching it as a side effect of that — but a caller must not read it as
+    /// <see cref="Append"/>'s own signal: by the time this property is readable again outside
+    /// <see cref="_fileLock"/>, a second, overlapping <see cref="Append"/> already queued behind it
+    /// could have changed it first. <see cref="Append"/> returns its own outcome instead (see
+    /// <see cref="HistoryAppendResult"/>), computed under the same lock acquisition as the write
+    /// itself, which is what makes it safe to trust as that call's own.
     /// </summary>
     public string? Failure { get; private set; }
 

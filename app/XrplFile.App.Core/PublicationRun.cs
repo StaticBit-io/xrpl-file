@@ -371,7 +371,25 @@ public sealed class PublicationRun(
                 // IPublicationHistory.Append is documented to return only its own call's outcome, so
                 // this cannot read a different, overlapping append's verdict as if it were this
                 // run's.
-                if (appended.Note is not null)
+                //
+                // Branches on Recorded, not merely on whether Note happens to be set: the one
+                // implementation today never returns Recorded: false with a null Note, but that
+                // invariant lives in HistoryAppendResult's own documentation, not in anything the
+                // compiler enforces, and IPublicationHistory now admits other implementations. A
+                // future one that violated it must not have "the publication was not recorded" pass
+                // through here silently just because it forgot to explain why.
+                if (!appended.Recorded)
+                {
+                    lock (_gate)
+                    {
+                        if (_generation == generation)
+                        {
+                            _historyNote = appended.Note
+                                ?? "The publication succeeded, but could not be recorded in your history.";
+                        }
+                    }
+                }
+                else if (appended.Note is not null)
                 {
                     lock (_gate)
                     {

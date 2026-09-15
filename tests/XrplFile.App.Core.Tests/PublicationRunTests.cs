@@ -154,6 +154,37 @@ public sealed class PublicationRunTests : VaultHarness
     }
 
     /// <summary>
+    /// An <see cref="IPublicationHistory"/> that returns a malformed result: <c>Recorded: false</c>
+    /// with no <c>Note</c> to say why. <see cref="HistoryAppendResult"/>'s own documentation says a
+    /// failure to record always carries a reason, but nothing enforces that on
+    /// <see cref="IPublicationHistory"/> itself -- the interface admits any implementation, and this
+    /// is the one this one real implementation never produces but a future one could.
+    /// </summary>
+    private sealed class NotRecordedWithNoNoteHistory : IPublicationHistory
+    {
+        public HistoryAppendResult Append(PublicationRecord record) => new(Recorded: false, Note: null);
+    }
+
+    [Fact]
+    public async Task A_not_recorded_result_with_no_note_still_surfaces_something()
+    {
+        (PublicationRun run, PublishRequest request) = await ReadyAsync(
+            TestContext.Current.CancellationToken, history: new NotRecordedWithNoNoteHistory());
+
+        run.Start(request);
+        await run.Completion;
+
+        RunSnapshot snapshot = run.Snapshot;
+        Assert.Equal(PublicationRunState.Succeeded, snapshot.State);
+        Assert.NotNull(snapshot.Report);
+
+        // The decision has to be Recorded, not "was there a Note to show": a check that only looked
+        // at Note would let "not recorded" pass through in total silence the moment an
+        // implementation forgot to explain why, which is exactly the failure mode this test is for.
+        Assert.NotNull(snapshot.HistoryNote);
+    }
+
+    /// <summary>
     /// An <see cref="IPublicationHistory"/> whose first <see cref="Append"/> call holds until
     /// <see cref="Release"/> is called, then returns a manufactured, unmistakable result instead of
     /// touching the real history behind it at all -- exactly the <see cref="GatedSubmitSink"/>
@@ -233,22 +264,35 @@ public sealed class PublicationRunTests : VaultHarness
         }
 
         Task run1Completion = run.Completion;
-        Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
 
-        // The second run, on the very same PublicationRun instance and the very same shared history
-        // -- accepted only because _state is Succeeded, not Running.
-        Assert.True(run.Start(new PublishRequest(
-            new byte[4096], "application/octet-stream", "run2.bin", reference2, wallet2.ClassicAddress, "1")));
-        await run.Completion;
+        // Wrapped in try/finally: run 1's background thread is parked inside its own gated Append
+        // call from this point on, and stays that way until gate.Release() runs. Without the finally,
+        // an assertion failing anywhere in here would leave that thread blocked forever rather than
+        // just failing the test -- the test still fails and reports correctly either way, but a
+        // parked thread should not be left behind by a test that is done.
+        try
+        {
+            Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
 
-        Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
-        Assert.Equal("run2.bin", run.Snapshot.Name);
+            // The second run, on the very same PublicationRun instance and the very same shared
+            // history -- accepted only because _state is Succeeded, not Running.
+            Assert.True(run.Start(new PublishRequest(
+                new byte[4096], "application/octet-stream", "run2.bin", reference2, wallet2.ClassicAddress, "1")));
+            await run.Completion;
 
-        // Now let run 1's own append finally proceed and try to write its (manufactured, unmistakable)
-        // note -- this is the actual test: does it land here, on run 2's now-current snapshot?
-        gate.Release();
+            Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
+            Assert.Equal("run2.bin", run.Snapshot.Name);
+        }
+        finally
+        {
+            // Lets run 1's own append finally proceed and try to write its (manufactured,
+            // unmistakable) note.
+            gate.Release();
+        }
+
         await run1Completion;
 
+        // The actual test: did run 1's note land here, on run 2's now-current snapshot?
         Assert.Equal("run2.bin", run.Snapshot.Name);
         Assert.Null(run.Snapshot.HistoryNote);
     }
@@ -270,20 +314,32 @@ public sealed class PublicationRunTests : VaultHarness
         }
 
         Task runCompletion = run.Completion;
-        Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
 
-        // No second run this time -- just the screen putting the finished run's outcome away, which
-        // Reset accepts for the same reason Begin would: _state is Succeeded, not Running. This is
-        // the scenario Reset's own generation bump exists for: without it, the run's late-arriving
-        // note would still match the generation Reset just cleared and land on this now-Idle snapshot.
-        run.Reset();
-        Assert.Equal(PublicationRunState.Idle, run.Snapshot.State);
+        // Wrapped in try/finally for the same reason the sibling test above is: the run's background
+        // thread is parked inside its own gated Append call until gate.Release() runs, and an
+        // assertion failing in between must not leave it parked forever.
+        try
+        {
+            Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
 
-        // Now let the run's own append finally proceed and try to write its (manufactured,
-        // unmistakable) note -- this is the actual test: does it land here, after the reset?
-        gate.Release();
+            // No second run this time -- just the screen putting the finished run's outcome away,
+            // which Reset accepts for the same reason Begin would: _state is Succeeded, not Running.
+            // This is the scenario Reset's own generation bump exists for: without it, the run's
+            // late-arriving note would still match the generation Reset just cleared and land on
+            // this now-Idle snapshot.
+            run.Reset();
+            Assert.Equal(PublicationRunState.Idle, run.Snapshot.State);
+        }
+        finally
+        {
+            // Lets the run's own append finally proceed and try to write its (manufactured,
+            // unmistakable) note.
+            gate.Release();
+        }
+
         await runCompletion;
 
+        // The actual test: did the note land here, after the reset?
         Assert.Equal(PublicationRunState.Idle, run.Snapshot.State);
         Assert.Null(run.Snapshot.HistoryNote);
     }
@@ -698,12 +754,22 @@ public sealed class PublicationRunTests : VaultHarness
 
         bool stopped = await run.StopAsync(TimeSpan.FromMilliseconds(50));
 
-        Assert.False(stopped);
-        Assert.Equal(PublicationRunState.Running, run.Snapshot.State);
+        // Wrapped in try/finally: the run is parked inside its own gated submission from this point
+        // on, until gate.Release() runs. Without the finally, either assertion failing here would
+        // leave that background thread blocked forever rather than just failing the test.
+        try
+        {
+            Assert.False(stopped);
+            Assert.Equal(PublicationRunState.Running, run.Snapshot.State);
+        }
+        finally
+        {
+            // Let the run actually finish, so nothing from this test is still running when the next
+            // one starts: StopAsync already called Cancel(), so releasing the gate lets that take
+            // effect.
+            gate.Release();
+        }
 
-        // Let the run actually finish, so nothing from this test is still running when the next one
-        // starts: StopAsync already called Cancel(), so releasing the gate lets that take effect.
-        gate.Release();
         await run.Completion;
         Assert.Equal(PublicationRunState.Cancelled, run.Snapshot.State);
     }
