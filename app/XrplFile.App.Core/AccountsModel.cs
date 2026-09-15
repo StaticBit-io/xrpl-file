@@ -27,14 +27,19 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
         List<AccountRow> rows = [];
         foreach (VaultEntryInfo info in listed.Where(entry => entry.Kind == VaultEntryKind.Generated))
         {
-            // A row already refreshed from a node keeps what it learned; a new one starts as a key
-            // with no account, which is what an unfunded address is.
+            // A row already refreshed from a node keeps what it learned. A new one — or one no
+            // node has ever been asked about — starts as Unknown: a cached DeletableFromLedger may
+            // still ride along for display (it is what it is for), but it is not an answer, and
+            // claiming KeyOnly from the vault alone would say "nothing on the ledger" about an
+            // account that cache could only exist for if something had once been funded. Closed is
+            // the one stage the vault gets to declare outright — a closure is a fact it owns, and
+            // no node is needed to confirm it.
             rows.Add(_rows.TryGetValue(info.Reference, out AccountRow? known) && info.Closure is null
                 ? known with { Label = info.Label, Closure = info.Closure }
                 : new AccountRow(
                     info.Reference, info.Label, info.Address, info.Network,
-                    info.Closure is null ? AccountStage.KeyOnly : AccountStage.Closed,
-                    0, info.DeletableFromLedger, null, info.Closure));
+                    info.Closure is null ? AccountStage.Unknown : AccountStage.Closed,
+                    null, info.DeletableFromLedger, null, info.Closure));
         }
 
         _rows.Clear();
@@ -70,6 +75,12 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
             long deletableFrom = sequence + ThrowawayAccount.DeletionSequenceDelta;
             long remaining = Math.Max(0, deletableFrom - current);
 
+            // Closable here means only that the sequence threshold has passed — it does not repeat
+            // the balance-versus-fee, destination-exists and destination-refuses checks
+            // ThrowawayAccount.PreviewDeletionAsync also applies. That is deliberate: the preflight
+            // on the closing screen is the authority on whether a close will actually go through,
+            // and it will answer NotYet with the real reason when this stage alone would have said
+            // yes. This is a rough "worth trying" signal for the list, not a promise.
             AccountStage stage = state.BalanceDrops == 0
                 ? AccountStage.KeyOnly
                 : remaining == 0 ? AccountStage.Closable : AccountStage.Funded;
@@ -83,7 +94,8 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
             };
 
             _rows[reference] = updated;
-            Rows = [.. Rows.Select(existing => existing.Reference == reference ? updated : existing)];
+            Rows = [.. Rows.Select(existing =>
+                string.Equals(existing.Reference, reference, StringComparison.Ordinal) ? updated : existing)];
 
             // Kept on the entry so the next launch can say roughly how long is left before the node
             // has answered. Never read back to decide anything (design G8).

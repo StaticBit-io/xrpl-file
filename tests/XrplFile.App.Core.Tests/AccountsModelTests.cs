@@ -31,12 +31,45 @@ public sealed class AccountsModelTests : VaultHarness
     public async Task A_key_nobody_has_funded_is_a_key_only()
     {
         (AccountsModel model, KeyVault vault) = await OpenAsync(TestContext.Current.CancellationToken);
+        string reference = await vault.StoreAsync(Entry("generated", VaultEntryKind.Generated), TestContext.Current.CancellationToken);
+
+        // KeyOnly is a claim only a node can make — an unfunded address is confirmed, not assumed.
+        await model.RefreshAsync(TestContext.Current.CancellationToken);
+        await model.RefreshFromLedgerAsync(reference, TestContext.Current.CancellationToken);
+
+        AccountRow row = Assert.Single(model.Rows);
+        Assert.Equal(AccountStage.KeyOnly, row.Stage);
+        Assert.Equal(0, row.BalanceDrops);
+    }
+
+    [Fact]
+    public async Task A_freshly_listed_row_is_unknown_not_key_only()
+    {
+        (AccountsModel model, KeyVault vault) = await OpenAsync(TestContext.Current.CancellationToken);
         await vault.StoreAsync(Entry("generated", VaultEntryKind.Generated), TestContext.Current.CancellationToken);
 
         await model.RefreshAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(AccountStage.KeyOnly, Assert.Single(model.Rows).Stage);
-        Assert.Equal(0, model.Rows[0].BalanceDrops);
+        AccountRow row = Assert.Single(model.Rows);
+        Assert.Equal(AccountStage.Unknown, row.Stage);
+        Assert.Null(row.BalanceDrops);
+        Assert.Equal(0, _connections.Connections);
+    }
+
+    [Fact]
+    public async Task A_cached_deletable_ledger_from_a_previous_session_is_shown_as_unknown_not_key_only()
+    {
+        (AccountsModel model, KeyVault vault) = await OpenAsync(TestContext.Current.CancellationToken);
+        string reference = await vault.StoreAsync(Entry("generated", VaultEntryKind.Generated), TestContext.Current.CancellationToken);
+        await vault.UpdateAsync(reference, new VaultEntryEdit(DeletableFromLedger: 12_345), TestContext.Current.CancellationToken);
+
+        await model.RefreshAsync(TestContext.Current.CancellationToken);
+
+        AccountRow row = Assert.Single(model.Rows);
+        Assert.Equal(AccountStage.Unknown, row.Stage);
+        Assert.Null(row.BalanceDrops);
+        Assert.Equal(12_345, row.DeletableFromLedger);
+        Assert.Equal(0, _connections.Connections);
     }
 
     [Fact]
@@ -69,6 +102,32 @@ public sealed class AccountsModelTests : VaultHarness
         AccountRow row = Assert.Single(model.Rows);
         Assert.Equal(30_000_000, row.BalanceDrops);
         Assert.NotNull(row.DeletableFromLedger);
+    }
+
+    [Fact]
+    public async Task A_row_refreshed_from_the_ledger_keeps_what_it_learned_across_a_later_refresh()
+    {
+        (AccountsModel model, KeyVault vault) = await OpenAsync(TestContext.Current.CancellationToken);
+        NewVaultEntry entry = Entry("generated", VaultEntryKind.Generated);
+        string reference = await vault.StoreAsync(entry, TestContext.Current.CancellationToken);
+        _connections.Ledger.Balances[entry.Address] = 30_000_000;
+
+        await model.RefreshAsync(TestContext.Current.CancellationToken);
+        await model.RefreshFromLedgerAsync(reference, TestContext.Current.CancellationToken);
+
+        AccountRow refreshed = Assert.Single(model.Rows);
+
+        // Only the vault-owned Label changes between the two listings; what the ledger taught the
+        // row must survive untouched.
+        await vault.UpdateAsync(reference, new VaultEntryEdit(Label: "renamed"), TestContext.Current.CancellationToken);
+        await model.RefreshAsync(TestContext.Current.CancellationToken);
+
+        AccountRow row = Assert.Single(model.Rows);
+        Assert.Equal(refreshed.Stage, row.Stage);
+        Assert.Equal(refreshed.BalanceDrops, row.BalanceDrops);
+        Assert.Equal(refreshed.DeletableFromLedger, row.DeletableFromLedger);
+        Assert.Equal(refreshed.LedgersRemaining, row.LedgersRemaining);
+        Assert.Equal("renamed", row.Label);
     }
 
     [Fact]
