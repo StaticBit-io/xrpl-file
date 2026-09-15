@@ -27,35 +27,40 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
 
     public string? Message { get; private set; }
 
+    /// <summary>
+    /// Resolves <paramref name="reference"/> before touching anything shown, so a failed or empty
+    /// lookup leaves the previous selection on screen rather than blanking it. The address may be
+    /// the one thing a person is halfway through copying when, say, the vault locks itself between
+    /// two visits to this screen — a lookup that cannot answer must not be the reason it disappears.
+    /// </summary>
     public async Task SelectAsync(string reference, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(reference);
 
         Message = null;
-        Address = null;
-        Network = null;
-        BalanceDrops = 0;
-        AccountExists = false;
 
+        VaultEntryInfo? entry;
         try
         {
             IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(cancellationToken).ConfigureAwait(false);
-            VaultEntryInfo? entry = listed.FirstOrDefault(
-                info => string.Equals(info.Reference, reference, StringComparison.Ordinal));
-
-            if (entry is null)
-            {
-                Message = "That key is no longer in the vault.";
-                return;
-            }
-
-            Address = entry.Address;
-            Network = entry.Network;
+            entry = listed.FirstOrDefault(info => string.Equals(info.Reference, reference, StringComparison.Ordinal));
         }
         catch (VaultException ex)
         {
             Message = VaultErrorMessages.For(ex.Error);
+            return;
         }
+
+        if (entry is null)
+        {
+            Message = "That key is no longer in the vault.";
+            return;
+        }
+
+        Address = entry.Address;
+        Network = entry.Network;
+        BalanceDrops = 0;
+        AccountExists = false;
     }
 
     public async Task RefreshAsync(CancellationToken cancellationToken)

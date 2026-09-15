@@ -9,7 +9,7 @@ public sealed class FundingModelTests : VaultHarness
     private readonly FakeConnectionFactory _connections = new();
     private readonly FakeClipboard _clipboard = new();
 
-    private async Task<(FundingModel Model, string Reference, NewVaultEntry Entry)> OpenAsync(CancellationToken token)
+    private async Task<(FundingModel Model, string Reference, NewVaultEntry Entry, KeyVault Vault)> OpenAsync(CancellationToken token)
     {
         KeyVault vault = NewVault();
         await vault.CreateAsync(Password("a master password"), token);
@@ -17,13 +17,13 @@ public sealed class FundingModelTests : VaultHarness
         string reference = await vault.StoreAsync(entry, token);
 
         FundingModel model = new(vault, _connections, _clipboard);
-        return (model, reference, entry);
+        return (model, reference, entry, vault);
     }
 
     [Fact]
     public async Task Selecting_a_key_shows_its_address_and_a_QR_of_exactly_that_address()
     {
-        (FundingModel model, string reference, NewVaultEntry entry) = await OpenAsync(TestContext.Current.CancellationToken);
+        (FundingModel model, string reference, NewVaultEntry entry, _) = await OpenAsync(TestContext.Current.CancellationToken);
 
         await model.SelectAsync(reference, TestContext.Current.CancellationToken);
 
@@ -34,7 +34,7 @@ public sealed class FundingModelTests : VaultHarness
     [Fact]
     public async Task An_unfunded_address_reads_as_no_account_yet()
     {
-        (FundingModel model, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);
+        (FundingModel model, string reference, _, _) = await OpenAsync(TestContext.Current.CancellationToken);
 
         await model.SelectAsync(reference, TestContext.Current.CancellationToken);
         await model.RefreshAsync(TestContext.Current.CancellationToken);
@@ -46,7 +46,7 @@ public sealed class FundingModelTests : VaultHarness
     [Fact]
     public async Task A_funded_address_reads_back_its_balance()
     {
-        (FundingModel model, string reference, NewVaultEntry entry) = await OpenAsync(TestContext.Current.CancellationToken);
+        (FundingModel model, string reference, NewVaultEntry entry, _) = await OpenAsync(TestContext.Current.CancellationToken);
         _connections.Ledger.Balances[entry.Address] = 30_000_000;
 
         await model.SelectAsync(reference, TestContext.Current.CancellationToken);
@@ -59,7 +59,7 @@ public sealed class FundingModelTests : VaultHarness
     [Fact]
     public async Task Copying_the_address_does_not_put_it_on_a_clearing_timer()
     {
-        (FundingModel model, string reference, NewVaultEntry entry) = await OpenAsync(TestContext.Current.CancellationToken);
+        (FundingModel model, string reference, NewVaultEntry entry, _) = await OpenAsync(TestContext.Current.CancellationToken);
 
         await model.SelectAsync(reference, TestContext.Current.CancellationToken);
         await model.CopyAddressAsync(TestContext.Current.CancellationToken);
@@ -71,7 +71,7 @@ public sealed class FundingModelTests : VaultHarness
     [Fact]
     public async Task A_node_that_does_not_answer_says_so_and_keeps_the_address()
     {
-        (FundingModel model, string reference, NewVaultEntry entry) = await OpenAsync(TestContext.Current.CancellationToken);
+        (FundingModel model, string reference, NewVaultEntry entry, _) = await OpenAsync(TestContext.Current.CancellationToken);
         await model.SelectAsync(reference, TestContext.Current.CancellationToken);
         _connections.ConnectThrows = new XrplFileException(XrplFileError.NodeUnreachable, "no answer");
 
@@ -79,5 +79,19 @@ public sealed class FundingModelTests : VaultHarness
 
         Assert.Equal(entry.Address, model.Address);
         Assert.Equal(PublishErrorMessages.For(XrplFileError.NodeUnreachable), model.Message);
+    }
+
+    [Fact]
+    public async Task A_locked_vault_leaves_the_previous_selection_and_says_why()
+    {
+        (FundingModel model, string reference, NewVaultEntry entry, KeyVault vault) =
+            await OpenAsync(TestContext.Current.CancellationToken);
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+
+        Assert.Equal(entry.Address, model.Address);
+        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
     }
 }
