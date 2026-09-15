@@ -102,6 +102,37 @@ public sealed class MauiClipboardService : IClipboardService, IDisposable
         ArmExpiry(value, expiry);
     }
 
+    /// <summary>
+    /// Copies a published link: no <see cref="ClipboardContentOptions"/>, no expiry timer. Left as an
+    /// ordinary clipboard entry on purpose — a link is not a secret, and the person copying it means
+    /// to paste it somewhere and keep it, which is the opposite of what <see cref="CopySecretAsync"/>
+    /// exists to prevent.
+    /// </summary>
+    /// <remarks>
+    /// This deliberately does not touch <see cref="_gate"/>, <see cref="_expiryTimer"/> or
+    /// <see cref="_copied"/>. A timer armed by an earlier <see cref="CopySecretAsync"/> call, still
+    /// pending when this runs, is left alone rather than cancelled — and that is safe, not merely
+    /// harmless, because of what <see cref="ClearIfStillOurs"/> already checks: it clears the
+    /// clipboard only if the clipboard still holds exactly the secret it armed for. Once this method
+    /// has replaced the clipboard's contents with the link, that comparison fails on its own, and the
+    /// stray timer fires into a no-op. Reaching into the gate here to cancel it explicitly would add a
+    /// second path to the same outcome for no benefit, and a subtly wrong one at that: disposing
+    /// <see cref="_expiryTimer"/> without clearing <see cref="_copied"/> would leave a secret value
+    /// sitting in memory with nothing left to expire it.
+    /// </remarks>
+    public async Task CopyAsync(string value, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            DataPackage package = new() { RequestedOperation = DataPackageOperation.Copy };
+            package.SetText(value);
+            WindowsClipboard.SetContent(package);
+        }).ConfigureAwait(false);
+    }
+
     private void ArmExpiry(string value, TimeSpan expiry)
     {
         lock (_gate)

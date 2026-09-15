@@ -54,4 +54,11 @@ public interface IClipboardService
     /// </param>
     /// <param name="cancellationToken">Cancels the copy itself, not whatever the platform does with the value afterwards.</param>
     Task CopySecretAsync(string value, TimeSpan expiry, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Copies something that is not a secret and therefore does not expire. A published link is
+    /// meant to be pasted somewhere and kept; <see cref="CopySecretAsync"/>'s clearing timer would
+    /// take it back out of the clipboard before the person had used it.
+    /// </summary>
+    Task CopyAsync(string value, CancellationToken cancellationToken);
 }

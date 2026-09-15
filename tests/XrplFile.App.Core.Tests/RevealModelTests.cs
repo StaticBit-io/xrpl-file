@@ -165,5 +165,12 @@ public class RevealModelTests : VaultHarness
             CopiedExpiry = expiry;
             return Task.CompletedTask;
         }
+
+        public Task CopyAsync(string value, CancellationToken cancellationToken)
+        {
+            CopiedValue = value;
+            CopiedExpiry = TimeSpan.Zero;
+            return Task.CompletedTask;
+        }
     }
 }
