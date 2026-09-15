@@ -129,17 +129,22 @@ public sealed class PublishModelTests : VaultHarness
     }
 
     [Fact]
-    public async Task A_network_with_no_node_url_is_named_before_anything_is_spent()
+    public async Task A_network_with_no_node_url_refuses_to_estimate_and_says_so()
     {
         // A NetworkID is a network xrpl-file can address, but Endpoints.For knows only the three
-        // names, so an empty settings store leaves a NetworkID unreachable.
+        // names, so an empty settings store leaves a NetworkID unreachable -- exactly the
+        // standalone-stand case the override feature (INodeSettingsStore) exists for, and exactly
+        // the case that used to leave Estimate live: pressing it read the whole file into memory
+        // and moved to the estimate screen only to have XrplConnectionFactory resolve the very same
+        // NodeEndpoint.Resolve and refuse to connect, reporting the misleading "node did not answer"
+        // sentence instead of the accurate one already shown right here.
         (PublishModel model, _, string reference) =
             await OpenAsync(TestContext.Current.CancellationToken, network: "1");
         WriteFile("photo.png", 2048);
         await model.PickFileAsync(TestContext.Current.CancellationToken);
         model.SelectKey(reference);
 
-        Assert.True(model.CanEstimate);
+        Assert.False(model.CanEstimate);
         Assert.Null(model.NodeUrl);
         Assert.Contains("Settings", model.Message ?? string.Empty, StringComparison.Ordinal);
     }

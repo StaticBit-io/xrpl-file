@@ -97,7 +97,7 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
 
     public bool CanEstimate =>
         FilePath is not null && FileSize > 0 && FileSize <= MaxFileBytes && SelectedKey is not null
-        && XrplFileLink.TryNormalizeNetwork(SelectedKey.Network, out _);
+        && XrplFileLink.TryNormalizeNetwork(SelectedKey.Network, out _) && NodeUrl is not null;
 
     public async Task RefreshKeysAsync(CancellationToken cancellationToken)
     {
