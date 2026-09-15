@@ -1,6 +1,7 @@
 using Xunit;
 
 using XrplFile.Keys;
+using XrplFile.Tests;
 
 namespace XrplFile.App.Core.Tests;
 
@@ -163,88 +164,6 @@ public class RevealModelTests : VaultHarness
             CopiedValue = value;
             CopiedExpiry = expiry;
             return Task.CompletedTask;
-        }
-    }
-}
-
-/// <summary>
-/// A TimeProvider double for <see cref="RevealModelTests"/>: time moves only when the test calls
-/// <see cref="Advance"/>, and advancing fires every still-scheduled timer whose due time has now
-/// been reached, synchronously, on the calling thread. Mirrors
-/// <c>tests/XrplFile.Keys.Tests/VaultAutoLockTests.cs</c>'s own <c>ManualTimeProvider</c>: the two
-/// live in separate test projects and are not shared code, so a change to one does not have to
-/// touch the other, and this is simpler than pulling in a package for it —
-/// <c>Microsoft.Extensions.Time.Testing</c> is not referenced anywhere in this repository.
-/// </summary>
-internal sealed class ManualTimeProvider : TimeProvider
-{
-    private readonly List<ManualTimer> _timers = [];
-    private DateTimeOffset _now = DateTimeOffset.UtcNow;
-
-    public override DateTimeOffset GetUtcNow() => _now;
-
-    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-    {
-        ManualTimer timer = new(this, callback, state, dueTime);
-        _timers.Add(timer);
-        return timer;
-    }
-
-    /// <summary>Moves the clock forward and fires every still-scheduled timer whose due time has now passed.</summary>
-    public void Advance(TimeSpan by)
-    {
-        _now += by;
-
-        // A snapshot: a callback firing here disposes its own timer (RevealModel.Hide does exactly
-        // that), which removes it from _timers — safe against a copy, not against the live list.
-        foreach (ManualTimer timer in _timers.ToArray())
-        {
-            timer.FireIfDue(_now);
-        }
-    }
-
-    private void Forget(ManualTimer timer) => _timers.Remove(timer);
-
-    /// <summary>
-    /// The one-shot shape <see cref="RevealModel"/> actually uses: a due time relative to "now" at
-    /// construction, and no periodic re-arming — firing does not reschedule it, matching
-    /// <see cref="Timeout.InfiniteTimeSpan"/> always being the period <see cref="RevealModel"/>
-    /// passes. Nothing here ever calls <see cref="Change"/> again.
-    /// </summary>
-    private sealed class ManualTimer(ManualTimeProvider owner, TimerCallback callback, object? state, TimeSpan dueTime) : ITimer
-    {
-        private readonly DateTimeOffset _dueAt = owner.GetUtcNow() + dueTime;
-        private bool _disposed;
-        private bool _fired;
-
-        public bool Change(TimeSpan dueTime, TimeSpan period) => throw new NotSupportedException();
-
-        internal void FireIfDue(DateTimeOffset now)
-        {
-            if (_disposed || _fired || now < _dueAt)
-            {
-                return;
-            }
-
-            _fired = true;
-            callback(state);
-        }
-
-        public void Dispose()
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-            owner.Forget(this);
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            Dispose();
-            return ValueTask.CompletedTask;
         }
     }
 }

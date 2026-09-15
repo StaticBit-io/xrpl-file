@@ -9,6 +9,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\XrplFile.Keys\XrplFile.Keys.csproj" />
+    <ProjectReference Include="..\XrplFile.TestSupport\XrplFile.TestSupport.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- Written once by the Wallet's own BackupContainer.Pack; see WalletCompatibilityTests. -->
