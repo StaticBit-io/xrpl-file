@@ -9,7 +9,8 @@ surface it can put behind a screen.
 | A | tickets and the publication session | shipped |
 | B | the key vault — this document | shipped |
 | C1 | the application shell and the vault screens | shipped |
-| C2, C3, C4 | publishing, the throwaway account's life, reading a link | not started |
+| C2 | publishing: a file, a key, an estimate, a run | shipped |
+| C3, C4 | the throwaway account's life, reading a link | not started |
 
 ## 1. The task
 

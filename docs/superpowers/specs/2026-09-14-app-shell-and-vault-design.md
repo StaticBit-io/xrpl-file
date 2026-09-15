@@ -9,7 +9,7 @@ is the first piece of one: the shell it all hangs from, and every screen the vau
 | A | tickets and the publication session | shipped |
 | B | the key vault | shipped |
 | **C1** | **the shell and the vault screens — this document** | **shipped** |
-| C2 | publishing: a file, a key, an estimate, a run | not started |
+| C2 | publishing: a file, a key, an estimate, a run | shipped |
 | C3 | the throwaway account's life, including reclaiming its reserve | not started |
 | C4 | reading a link back into a file | not started |
 

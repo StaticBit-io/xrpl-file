@@ -10,7 +10,7 @@ file into the ledger.
 | A | tickets and the publication session | shipped |
 | B | the key vault | shipped |
 | C1 | the shell and the vault screens | shipped |
-| **C2** | **publishing: a file, a key, an estimate, a run — this document** | **in progress** |
+| **C2** | **publishing: a file, a key, an estimate, a run — this document** | **shipped** |
 | C3 | the throwaway account's life, including reclaiming its reserve | not started |
 | C4 | reading a link back into a file | not started |
 
@@ -63,8 +63,14 @@ Any file source other than the local disk.
 
 ## 3. The shape of it
 
-Nothing new is added to `XrplFile.Core` or `XrplFile.Keys`. Everything lands in the application
-projects C1 created, plus one new test-support library.
+`XrplFile.Core` gains two public members. `XrplFileLink.TryNormalizeNetwork`, because the publish
+screen has to ask whether a key's network is one a link can carry — a vault entry records its
+network as free text, and without it the refusal arrived from inside a run the person had already
+confirmed, as `InvalidLink`, instead of from the screen where the key is chosen. And
+`Endpoints.KnownNetworks`, because the settings screen needs to enumerate the built-in networks,
+and `Endpoints` previously exposed only a lookup, so the application had retyped the list, where a
+fourth built-in network would have silently gone missing. Nothing is added to `XrplFile.Keys`.
+Everything else lands in the application projects C1 created, plus one new test-support library.
 
 ```
 app/XrplFile.App.Core/            (net10.0, no MAUI — everything testable)
