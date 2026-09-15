@@ -751,6 +751,9 @@ public sealed class PublicationRunTests : VaultHarness
 
         public Task<long> CurrentLedgerAsync(CancellationToken cancellationToken) =>
             inner.CurrentLedgerAsync(cancellationToken);
+
+        public Task<DestinationState> DestinationAsync(string account, CancellationToken cancellationToken) =>
+            inner.DestinationAsync(account, cancellationToken);
     }
 
     /// <summary>

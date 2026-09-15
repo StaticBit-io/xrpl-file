@@ -55,4 +55,12 @@ public interface ILedgerSource
 
     /// <summary>The index of the latest validated ledger.</summary>
     Task<long> CurrentLedgerAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// What the node says about an account that is about to receive everything another account
+    /// holds. Answers <see cref="DestinationState.Absent"/> for an account the ledger does not
+    /// carry, the same way <see cref="AccountStateAsync"/> answers <see cref="AccountState.Absent"/>
+    /// — an unfunded account is an answer, not a failure to answer.
+    /// </summary>
+    Task<DestinationState> DestinationAsync(string account, CancellationToken cancellationToken);
 }

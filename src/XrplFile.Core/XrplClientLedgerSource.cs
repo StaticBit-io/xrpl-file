@@ -4,6 +4,7 @@ using Xrpl.Client;
 using Xrpl.Client.Exceptions;
 using Xrpl.Client.Json;
 using Xrpl.Models.Common;
+using Xrpl.Models.Ledger;
 using Xrpl.Models.Methods;
 using LedgerIndexType = Xrpl.Models.Ledger.LedgerIndexType;
 
@@ -138,6 +139,28 @@ public sealed class XrplClientLedgerSource : ILedgerSource
         // TicketCount the same way; absent and zero mean the same for both.
         return new AccountState(
             drops, (int)(Number(data, "OwnerCount") ?? 0), (int)(Number(data, "TicketCount") ?? 0));
+    }
+
+    public async Task<DestinationState> DestinationAsync(string account, CancellationToken cancellationToken)
+    {
+        JsonElement? answer = await AskOrAbsentAsync(
+            new AccountInfoRequest(account), "account_info", XrplErrorCodes.ActNotFound, cancellationToken).ConfigureAwait(false);
+
+        if (answer is not { } found || !found.TryGetProperty("account_data", out JsonElement data))
+        {
+            return DestinationState.Absent;
+        }
+
+        // The flag bits are the SDK's own AccountRootFlags (Xrpl.Models.Ledger), which names them
+        // after rippled's LedgerFormats.h: lsfRequireDestTag is 131072 and lsfDepositAuth is
+        // 16777216. Named rather than written as numbers so a reader can check them against the
+        // protocol rather than against this file.
+        uint flags = (uint)(Number(data, "Flags") ?? 0);
+
+        return new DestinationState(
+            Exists: true,
+            RequiresDestinationTag: (flags & (uint)AccountRootFlags.lsfRequireDestTag) != 0,
+            AuthorisesDepositors: (flags & (uint)AccountRootFlags.lsfDepositAuth) != 0);
     }
 
     public async Task<long> CurrentLedgerAsync(CancellationToken cancellationToken)

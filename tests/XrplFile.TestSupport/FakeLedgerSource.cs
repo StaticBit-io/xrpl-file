@@ -227,4 +227,10 @@ public sealed class FakeLedgerSource : ILedgerSource
     }
 
     public Task<long> CurrentLedgerAsync(CancellationToken cancellationToken) => Task.FromResult(CurrentLedger);
+
+    /// <summary>Destinations this fake ledger carries. Anything not here is <see cref="DestinationState.Absent"/>.</summary>
+    public Dictionary<string, DestinationState> Destinations { get; } = new(StringComparer.Ordinal);
+
+    public Task<DestinationState> DestinationAsync(string account, CancellationToken cancellationToken) =>
+        Task.FromResult(Destinations.TryGetValue(account, out DestinationState? state) ? state : DestinationState.Absent);
 }
