@@ -117,6 +117,12 @@ public sealed class UnfinishedModelTests : VaultHarness
     /// <see cref="File.Delete(string)"/> throws on Windows for the held-open file, while listing the
     /// directory's own contents (what <see cref="UnfinishedModel.Refresh"/> does next) only ever
     /// needed read and execute, which are left alone.
+    ///
+    /// The Unix branch assumes a non-root process, which is what <c>ubuntu-latest</c>'s own job
+    /// steps actually run as. Root ignores a directory's own permission bits entirely
+    /// (<c>CAP_DAC_OVERRIDE</c>), so <see cref="File.Delete(string)"/> would succeed instead of
+    /// throwing and this test would fail if the suite were ever run as root -- e.g. inside a plain
+    /// Docker container, whose default user is root unless told otherwise.
     /// </summary>
     [Fact]
     public void A_state_file_that_cannot_be_deleted_says_so_and_keeps_the_row()
