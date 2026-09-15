@@ -80,7 +80,7 @@ public abstract class VaultHarness : IAsyncDisposable
     }
 
     /// <inheritdoc/>
-    public async ValueTask DisposeAsync()
+    public virtual async ValueTask DisposeAsync()
     {
         foreach (KeyVault vault in _vaults)
         {
