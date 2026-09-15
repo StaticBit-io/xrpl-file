@@ -9,8 +9,7 @@ public sealed class EstimateModelTests : IDisposable
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
-    private EstimateModel NewModel() =>
-        new(_connections, new FileNodeSettingsStore(Path.Combine(_directory, "nodes.json")), new RunPaths(_directory));
+    private EstimateModel NewModel() => new(_connections, new RunPaths(_directory));
 
     private static PublishRequest Request(int size = 4096) =>
         new(new byte[size], "application/octet-stream", "file.bin", "ref-1", "rWriter", "standalone");

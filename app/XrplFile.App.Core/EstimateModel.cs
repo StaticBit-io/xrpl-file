@@ -6,15 +6,7 @@ namespace XrplFile.App.Core;
 /// peak ticket reserve a sequence run never pays — so showing it unchanged overstates the cost and
 /// never understates it, and a second estimator would be one nothing validates.
 /// </summary>
-// `nodes` is accepted so this screen's constructor stays wired the same way as its siblings
-// (PublishModel takes the same store) and so a future need here — showing the configured URL
-// before a connection is attempted, say — does not change the signature callers already build
-// against. Nothing in this class reads it today: IConnectionFactory.ConnectAsync is the one seam
-// that resolves a network to a URL (design F10), and NodeUrl below comes back from the connection
-// it opens rather than from a second resolution done here.
-#pragma warning disable CS9113 // parameter is unread
-public sealed class EstimateModel(IConnectionFactory connections, INodeSettingsStore nodes, RunPaths paths)
-#pragma warning restore CS9113
+public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths)
 {
     public PublicationEstimate? Estimate { get; private set; }
 
