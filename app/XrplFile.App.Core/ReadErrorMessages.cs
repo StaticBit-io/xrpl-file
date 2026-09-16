@@ -10,6 +10,45 @@ namespace XrplFile.App.Core;
 /// </summary>
 public static class ReadErrorMessages
 {
+    /// <summary>
+    /// The temporary file a read was assembling could not be written to, for a filesystem reason
+    /// (<see cref="ReadRun.RunAsync"/>'s own <c>IOException</c>/<c>UnauthorizedAccessException</c>
+    /// catch). Not keyed by <see cref="XrplFileError"/>: nothing in that enum describes a local disk
+    /// failure, and inventing a member for one would describe something the library never raises.
+    /// </summary>
+    public const string TemporaryWriteFailed =
+        "The file could not be written to a temporary location while it was being read.";
+
+    /// <summary>
+    /// A read failed for a reason this class has no more specific sentence for — either an exception
+    /// <see cref="ReadRun.RunAsync"/>'s catch-all caught, or an <see cref="XrplFileError"/> added
+    /// since this class was last taught a sentence for one (<see cref="For(XrplFileError)"/>'s own
+    /// <c>default</c> throws; this is what that throw is turned into before it can escape). The same
+    /// sentence serves both call sites: to the person reading, "this application does not know why"
+    /// means the same thing either way.
+    /// </summary>
+    public const string ReadFailedGeneric =
+        "Something went wrong that this application does not have a specific message for.";
+
+    /// <summary>
+    /// The save dialog itself could not open or write the chosen file — a full disk, a revoked
+    /// permission, a destination that went away while the dialog was open
+    /// (<see cref="ReadRun.SaveAsync"/>'s own <c>IOException</c>/<c>UnauthorizedAccessException</c>
+    /// catch). Distinct from <see cref="TemporaryWriteFailed"/>: that one is about the read's own
+    /// scratch file, before saving was ever asked for; this one is about the place the person chose.
+    /// </summary>
+    public const string SaveFailed =
+        "The file could not be opened to save, or could not be written to where you chose.";
+
+    /// <summary>
+    /// The save dialog failed for a reason <see cref="ReadRun.SaveAsync"/>'s catch-all caught rather
+    /// than its own named exceptions. Deliberately not the same text as <see cref="ReadFailedGeneric"/>:
+    /// this failure is specific to saving a read that already succeeded, and telling the person "while
+    /// saving" is the difference between "try reading it again" and "try saving it again".
+    /// </summary>
+    public const string SaveFailedGeneric =
+        "Something went wrong while saving that this application does not have a specific message for.";
+
     public static string For(XrplFileError error) => error switch
     {
         XrplFileError.InvalidLink =>

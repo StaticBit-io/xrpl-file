@@ -208,11 +208,11 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            failure = "The file could not be opened to save, or could not be written to where you chose.";
+            failure = ReadErrorMessages.SaveFailed;
         }
         catch (Exception)
         {
-            failure = "Something went wrong while saving that this application does not have a specific message for.";
+            failure = ReadErrorMessages.SaveFailedGeneric;
         }
 
         lock (_gate)
@@ -415,18 +415,18 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
                 // compiler enforces. A throw raised inside this catch would otherwise escape past
                 // every handler below it, including the catch-all, and leave this run's own terminal
                 // state undecided.
-                failure = "Something went wrong that this application does not have a specific message for.";
+                failure = ReadErrorMessages.ReadFailedGeneric;
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             finalState = ReadState.Failed;
-            failure = "The file could not be written to a temporary location while it was being read.";
+            failure = ReadErrorMessages.TemporaryWriteFailed;
         }
         catch (Exception)
         {
             finalState = ReadState.Failed;
-            failure = "Something went wrong that this application does not have a specific message for.";
+            failure = ReadErrorMessages.ReadFailedGeneric;
         }
 
         lock (_gate)
