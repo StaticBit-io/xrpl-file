@@ -8,8 +8,31 @@ public sealed class FakeFilePicker : IFilePickerService
 {
     public string? PathToReturn { get; set; }
 
+    public byte[]? SavedStream { get; private set; }
+
+    public string? SavedStreamName { get; private set; }
+
+    public bool SaveStreamResult { get; set; } = true;
+
+    /// <summary>When set, <see cref="SaveStreamAsync"/> throws this instead of doing anything else --
+    /// the platform picker failing (a full disk, a revoked permission) rather than the person merely
+    /// cancelling the dialog.</summary>
+    public Exception? SaveStreamThrows { get; set; }
+
     public Task<bool> SaveFileAsync(string suggestedFileName, byte[] content, CancellationToken cancellationToken) =>
         throw new NotSupportedException("the publish screen never saves a file");
+
+    public async Task<bool> SaveStreamAsync(string suggestedFileName, Stream content, CancellationToken cancellationToken)
+    {
+        if (SaveStreamThrows is { } failure) throw failure;
+
+        using MemoryStream buffer = new();
+        await content.CopyToAsync(buffer, cancellationToken);
+
+        SavedStreamName = suggestedFileName;
+        SavedStream = buffer.ToArray();
+        return SaveStreamResult;
+    }
 
     public Task<byte[]?> PickFileAsync(CancellationToken cancellationToken) =>
         throw new NotSupportedException("the publish screen picks a path, not bytes");
@@ -59,6 +82,17 @@ public sealed class PublishModelTests : VaultHarness
         PublishModel model = new(vault, _picker, nodes ?? new FileNodeSettingsStore(Path.Combine(_files, "nodes.json")));
         await model.RefreshKeysAsync(token);
         return (model, vault, reference);
+    }
+
+    [Fact]
+    public void ReaderDefaultMaxBytes_is_the_readers_own_default_not_a_copy_of_it()
+    {
+        // Round 2's N1/M1 finding: this constant was still a bare 20_000_000 after
+        // ReadModel.MaxBytes was fixed the same way (ReadModelTests' own
+        // MaxBytes_is_the_readers_own_default_not_a_copy_of_it), and the only other test touching
+        // it (A_file_past_the_readers_default_limit_is_warned_about_and_still_allowed) compares it
+        // to itself, not to the library, so a drift here would have left the suite green.
+        Assert.Equal(new ReaderOptions().MaxBytes, PublishModel.ReaderDefaultMaxBytes);
     }
 
     [Fact]

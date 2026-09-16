@@ -12,7 +12,7 @@ file into the ledger.
 | C1 | the shell and the vault screens | shipped |
 | **C2** | **publishing: a file, a key, an estimate, a run — this document** | **shipped** |
 | C3 | the throwaway account's life, including reclaiming its reserve | shipped |
-| C4 | reading a link back into a file | not started |
+| C4 | reading a link back into a file | shipped |
 
 C2 adds nothing to the format and nothing to the publication machinery. Part A already publishes,
 resumes, estimates and reports. What is missing is every decision a library refuses to make for a

@@ -40,6 +40,14 @@ public interface IFilePickerService
     Task<bool> SaveFileAsync(string suggestedFileName, byte[] content, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Saves a file the caller supplies as a stream rather than as an array. Reading a file back out
+    /// of the ledger streams it to a temporary file as its blocks arrive, so by the time there is
+    /// something to save it is already on disk and there is no reason to bring it back into memory.
+    /// </summary>
+    /// <returns><see langword="false"/> when the person cancelled the dialog.</returns>
+    Task<bool> SaveStreamAsync(string suggestedFileName, Stream content, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Asks the user to choose an existing file and returns its bytes — the shape importing a
     /// backup container needs.
     /// </summary>

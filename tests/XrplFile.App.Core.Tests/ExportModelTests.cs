@@ -384,6 +384,9 @@ internal sealed class ScriptedFilePickerService(Func<bool> save) : IFilePickerSe
     public Task<bool> SaveFileAsync(string suggestedFileName, byte[] content, CancellationToken cancellationToken) =>
         Task.FromResult(save());
 
+    public Task<bool> SaveStreamAsync(string suggestedFileName, Stream content, CancellationToken cancellationToken) =>
+        throw new NotSupportedException("This fake only scripts SaveFileAsync.");
+
     public Task<byte[]?> PickFileAsync(CancellationToken cancellationToken) =>
         throw new NotSupportedException("This fake only scripts SaveFileAsync.");
 

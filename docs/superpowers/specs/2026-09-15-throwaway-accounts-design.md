@@ -12,7 +12,7 @@ sitting on the ledger forever.
 | C1 | the shell and the vault screens | shipped |
 | C2 | publishing: a file, a key, an estimate, a run | shipped |
 | **C3** | **the throwaway account's life, including reclaiming its reserve — this document** | **shipped** |
-| C4 | reading a link back into a file | not started |
+| C4 | reading a link back into a file | shipped |
 
 `XrplFile.Core` already knows most of this. `ThrowawayAccount` computes what an account still needs
 (`FundingAsync`), waits for it (`AwaitFundingAsync`), reports who funded it (`FunderAsync`), sends

@@ -11,6 +11,18 @@ using static XrplFile.App.Core.Tests.GatedWait;
 
 namespace XrplFile.App.Core.Tests;
 
+// See HeavySigningCollection.cs for the full account, corrected in fix round 2: this is a
+// symptom-level workaround, not a fix. Progress_touches_the_idle_lock signs roughly a thousand
+// chunk transactions, and when ReadRunTests' own heavy differential test runs at the same time
+// (xUnit's default parallel collections), the two floods of chunk-submission progress reports both
+// go through XrplFileWriter's `new Progress<int>` wrapping (src/XrplFile.Core/XrplFileWriter.cs,
+// around lines 155 and 238) -- which, with no SynchronizationContext, posts every report to the
+// shared thread pool instead of invoking it inline the way PublicationRun.SynchronousProgress
+// promises. Under that combined load the posted callbacks that eventually touch the idle lock
+// arrive late enough against the fake clock that the window expires and the vault genuinely locks
+// mid-publication. VaultAutoLock is not at fault; XrplFileWriter is, and C4 may not touch it -- the
+// real fix is tracked as its own task.
+[Collection("HeavySigning")]
 public sealed class PublicationRunTests : VaultHarness
 {
     private readonly string _directory = Directory.CreateTempSubdirectory("xrpl-file-run-").FullName;

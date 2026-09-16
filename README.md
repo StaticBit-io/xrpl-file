@@ -25,9 +25,9 @@ and its reasoning are in [docs/superpowers/specs](docs/superpowers/specs).
 | `app/XrplFile.App.Core` | models for the desktop application's screens — no MAUI, no UI |
 | `app/XrplFile.App` | the desktop application itself: MAUI Blazor Hybrid, Windows only so far |
 
-A command-line uploader, an HTTP gateway, a demo page and an embeddable `<xrpl-file>` element
-are planned next, alongside the rest of the desktop application below: publishing a file, reclaiming
-a throwaway account's reserve, and reading a link back.
+A command-line uploader, an HTTP gateway, a demo page and an embeddable `<xrpl-file>` element are
+planned next. The desktop application below already does the rest: publishing a file, reclaiming a
+throwaway account's reserve, and reading a link back.
 
 ## Reading a file (.NET)
 
@@ -258,9 +258,18 @@ built with none touches nothing, and the vault only ever locks when something ca
 [docs/superpowers/specs](docs/superpowers/specs)): today it creates and unlocks a vault, lists keys,
 adds one by generating it, importing a typed seed, or opening a backup container and choosing a key
 out of it, exports and reveals a seed, changes the master password, turns "remember on this device"
-on and off, deletes a key, and reports damage. It does not yet spend any XRP — publishing a file,
-reclaiming a throwaway account's reserve, and reading a link back are still done by calling
-`XrplFile.Core` directly, the way the samples above show.
+on and off, deletes a key, and reports damage. It also spends XRP: the Publish tab writes a file into
+the ledger from a key held in the vault, with an estimate shown before anything is signed and a
+publications list kept afterward; the Accounts tab reclaims a throwaway account's reserve once the
+account is old enough for the ledger to allow deleting it; and the Read tab takes an `xrpl-file://`
+link — pasted in, or reached with one click beside a row of that publications list — shows the name,
+size and type its manifest describes before downloading anything, then reads it block by block with
+progress and cancellation and saves the verified result wherever the person chooses. The application
+reimplements no hash and no tree: every cryptographic check — the block list against the manifest's
+root, each block against its own hash — stays in `XrplFile.Core`, the same reader the samples above
+call directly. What the Read tab does add on top, so a large file can show progress and be cancelled
+rather than downloading as one uninterruptible call, is a block-by-block loop, and that loop still
+only calls the library's own verifying methods for each block.
 
 Every key the application manages lives in one vault file, encrypted under a single master password
 chosen when the vault is created. The file is deliberately portable: a backup is a copy of it, and a

@@ -9,12 +9,15 @@ namespace XrplFile.App.Core;
 public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INodeSettingsStore nodes)
 {
     /// <summary>
-    /// <see cref="ReaderOptions.MaxBytes"/>'s own default. A larger file publishes correctly and
-    /// then produces a link the library's reader refuses unless its caller raises the ceiling, so
+    /// Read from <see cref="ReaderOptions.MaxBytes"/>'s own default rather than copied as a literal
+    /// — round 2's N1/M1 finding: this was still a bare <c>20_000_000</c> after <see cref="ReadModel.MaxBytes"/>
+    /// was fixed the same way, and the one test touching it compared it to itself rather than to the
+    /// library, so a drift here would have left the suite green. A larger file publishes correctly
+    /// and then produces a link the library's reader refuses unless its caller raises the ceiling, so
     /// this is a warning rather than a refusal (design 4.1) — the limit is the reader's default, not
     /// the format's, and the writer's read-back lifts it for itself.
     /// </summary>
-    public const long ReaderDefaultMaxBytes = 20_000_000;
+    public static readonly long ReaderDefaultMaxBytes = new ReaderOptions().MaxBytes;
 
     /// <summary>
     /// The largest file this application will load. The whole file is held in memory as
