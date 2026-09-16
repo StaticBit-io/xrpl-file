@@ -4,10 +4,6 @@ using Xunit;
 
 namespace XrplFile.App.Core.Tests;
 
-// See HeavySigningCollection.cs: this class's differential test signs roughly a thousand chunk
-// transactions and reliably contends with PublicationRunTests' own heavy test when both run in
-// xUnit's default parallel collections.
-[Collection("HeavySigning")]
 public sealed class ReadRunTests : IDisposable
 {
     private readonly FakeConnectionFactory _connections = new();
@@ -68,14 +64,15 @@ public sealed class ReadRunTests : IDisposable
     /// <summary>
     /// Seeds <paramref name="connections"/>'s fake ledger with a single-chunk file's manifest and
     /// chunk transaction, computed directly -- no signing, no submission, no
-    /// <c>PublicationSession</c> round trip. Round 2, N1: <see cref="Resetting_a_run_that_is_still_going_changes_nothing"/>
+    /// <c>PublicationSession</c> round trip. <see cref="Resetting_a_run_that_is_still_going_changes_nothing"/>
     /// and <see cref="Disposing_during_a_save_clears_saving_the_same_way_start_and_reset_do"/> used
-    /// to reach <see cref="ReadyAsync"/>, whose real publish signs for real through
-    /// <c>XrplWallet</c> -- individually cheap even so, but a third real signer inside the
-    /// "HeavySigning" collection was measured bringing back the exact thread-pool-queue flake that
-    /// collection exists to suppress (3 failures in 22 runs with them, 0 in 39 without). Neither test
-    /// is about publishing -- one is about <see cref="ReadRun.Reset"/>, the other about
-    /// <see cref="ReadRun.Dispose"/> -- so this reaches the same read paths a real publish would
+    /// to reach <see cref="ReadyAsync"/>, whose publish signs for real through <c>XrplWallet</c>.
+    /// They were moved off it while a thread-pool defect in <c>XrplFileWriter</c> made a third heavy
+    /// signer in this project enough to fail <c>PublicationRunTests.Progress_touches_the_idle_lock</c>;
+    /// that defect is fixed and the test class that serialised them is gone. This seed stays because
+    /// it was the right fixture regardless: neither test is about publishing -- one is about
+    /// <see cref="ReadRun.Reset"/>, the other about <see cref="ReadRun.Dispose"/> -- and this reaches
+    /// the same read paths a real publish would
     /// (a genuine <see cref="XrplFileReader.ManifestAsync"/> lookup and a genuine, gate-able
     /// <see cref="XrplFileReader.BlockAsync"/> scan, both cryptographically real -- the block hash
     /// really is <see cref="FileTree.BlockHash"/> over the chunk, and the reader really does check it)
@@ -324,9 +321,8 @@ public sealed class ReadRunTests : IDisposable
         // somebody pointed the Read tab at a different link -- and this is the test that proves
         // Reset() actually refuses, not merely that the source reads as though it does.
         //
-        // Seeded synthetically rather than through ReadyAsync (round 2, N1): this test is about
-        // Reset(), not about publishing, and ReadyAsync's real signing was measured reintroducing
-        // the HeavySigning flake -- see SeedSyntheticFileAsync's own remarks.
+        // Seeded synthetically rather than through ReadyAsync: this test is about Reset(), not
+        // about publishing -- see SeedSyntheticFileAsync's own remarks.
         (XrplFileLink link, ManifestRecord manifest) =
             await SeedSyntheticFileAsync(_connections, TestContext.Current.CancellationToken);
 
@@ -359,9 +355,8 @@ public sealed class ReadRunTests : IDisposable
         // Dispose was the one of the three that did not, so a save superseded by a Dispose would
         // leave Saving stuck true on a snapshot nothing will ever clear again.
         //
-        // Seeded synthetically rather than through ReadyAsync (round 2, N1): this test is about
-        // Dispose(), not about publishing, and ReadyAsync's real signing was measured reintroducing
-        // the HeavySigning flake -- see SeedSyntheticFileAsync's own remarks.
+        // Seeded synthetically rather than through ReadyAsync: this test is about Dispose(), not
+        // about publishing -- see SeedSyntheticFileAsync's own remarks.
         (XrplFileLink link, ManifestRecord manifest) =
             await SeedSyntheticFileAsync(_connections, TestContext.Current.CancellationToken);
 
