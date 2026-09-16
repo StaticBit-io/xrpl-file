@@ -13,6 +13,16 @@ public sealed class ReadModelTests : IDisposable
         new(_connections, new FileNodeSettingsStore(Path.Combine(_directory, "node-urls.json")));
 
     [Fact]
+    public void MaxBytes_is_the_readers_own_default_not_a_copy_of_it()
+    {
+        // The remedy Ruling 8 already chose for this shape (PublishModel.ReaderDefaultMaxBytes is
+        // its earlier instance): derive the number rather than let a second literal drift from the
+        // library's own. ReadModel.MaxBytes is now `new ReaderOptions().MaxBytes` by construction,
+        // so this is a change-detector for exactly one thing -- somebody reintroducing a literal here.
+        Assert.Equal(new ReaderOptions().MaxBytes, ReadModel.MaxBytes);
+    }
+
+    [Fact]
     public async Task A_link_that_does_not_parse_is_refused_without_asking_a_node()
     {
         ReadModel model = NewModel();

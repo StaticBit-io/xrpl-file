@@ -8,12 +8,15 @@ namespace XrplFile.App.Core;
 public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore nodes)
 {
     /// <summary>
-    /// The largest file this application reads — <see cref="ReaderOptions.MaxBytes"/>'s own default.
-    /// With the file streamed to disk rather than held in memory this is policy rather than
-    /// architecture (design H7): what argues against raising it is the node, not this application.
-    /// Two hundred megabytes is roughly two hundred thousand requests.
+    /// The largest file this application reads — read from <see cref="ReaderOptions.MaxBytes"/>'s
+    /// own default rather than copied as a literal, so this and <see cref="ReadRun"/> (which
+    /// constructs its own <see cref="ReaderOptions"/> and reads the same property) cannot drift
+    /// apart the way a hard-coded copy of the same number already had within this one part. With the
+    /// file streamed to disk rather than held in memory this is policy rather than architecture
+    /// (design H7): what argues against raising it is the node, not this application. Two hundred
+    /// megabytes is roughly two hundred thousand requests.
     /// </summary>
-    public const long MaxBytes = 20_000_000;
+    public static readonly long MaxBytes = new ReaderOptions().MaxBytes;
 
     private readonly Lock _gate = new();
 
