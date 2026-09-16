@@ -11,6 +11,10 @@ using static XrplFile.App.Core.Tests.GatedWait;
 
 namespace XrplFile.App.Core.Tests;
 
+// See HeavySigningCollection.cs: Progress_touches_the_idle_lock signs roughly a thousand chunk
+// transactions and reliably contends with ReadRunTests' own heavy differential test when both run
+// in xUnit's default parallel collections.
+[Collection("HeavySigning")]
 public sealed class PublicationRunTests : VaultHarness
 {
     private readonly string _directory = Directory.CreateTempSubdirectory("xrpl-file-run-").FullName;
