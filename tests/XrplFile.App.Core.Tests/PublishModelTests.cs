@@ -14,11 +14,18 @@ public sealed class FakeFilePicker : IFilePickerService
 
     public bool SaveStreamResult { get; set; } = true;
 
+    /// <summary>When set, <see cref="SaveStreamAsync"/> throws this instead of doing anything else --
+    /// the platform picker failing (a full disk, a revoked permission) rather than the person merely
+    /// cancelling the dialog.</summary>
+    public Exception? SaveStreamThrows { get; set; }
+
     public Task<bool> SaveFileAsync(string suggestedFileName, byte[] content, CancellationToken cancellationToken) =>
         throw new NotSupportedException("the publish screen never saves a file");
 
     public async Task<bool> SaveStreamAsync(string suggestedFileName, Stream content, CancellationToken cancellationToken)
     {
+        if (SaveStreamThrows is { } failure) throw failure;
+
         using MemoryStream buffer = new();
         await content.CopyToAsync(buffer, cancellationToken);
 

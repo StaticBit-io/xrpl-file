@@ -29,6 +29,7 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
     private string? _failure;
     private bool _saved;
     private string? _temporary;
+    private bool _disposed;
 
     /// <summary>
     /// Bumped by <see cref="Start"/>, <see cref="Reset"/> and <see cref="Dispose"/> — anything that
@@ -71,6 +72,7 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
     }
 
     /// <summary>Starts a read. <see langword="false"/> when one is already going.</summary>
+    /// <exception cref="ObjectDisposedException">This instance has already been disposed.</exception>
     public bool Start(XrplFileLink link, ManifestRecord manifest)
     {
         ArgumentNullException.ThrowIfNull(link);
@@ -80,6 +82,12 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
 
         lock (_gate)
         {
+            if (_disposed)
+            {
+                cancellation.Dispose();
+                throw new ObjectDisposedException(nameof(ReadRun));
+            }
+
             if (_state == ReadState.Running)
             {
                 cancellation.Dispose();
@@ -149,7 +157,10 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
 
         lock (_gate)
         {
-            if (_state != ReadState.Succeeded || _temporary is null) return;
+            // Disposed is folded into the same guard as "nothing to save" rather than thrown: a
+            // screen that raced a Dispose() against an already-in-flight SaveAsync call should see
+            // that save quietly do nothing, not fault the Task it is awaiting.
+            if (_disposed || _state != ReadState.Succeeded || _temporary is null) return;
 
             path = _temporary;
 
@@ -175,7 +186,10 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
         catch (OperationCanceledException)
         {
             // Not a failure worth reporting: the save itself, or a closing window, was cancelled.
-            // _saved stays false; _failure stays whatever it already was.
+            // _saved stays false, and failure stays null below -- clearing a stale one is still
+            // correct here: whatever went wrong on some earlier attempt is not what happened on
+            // this one, and this one ending without a fresh error of its own does not mean the old
+            // sentence is still the right thing for the snapshot to say.
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -193,7 +207,11 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
             if (_generation != generation) return;
 
             _saved = saved;
-            if (failure is not null) _failure = failure;
+
+            // Unconditional, not "if failure is not null": a successful save (or a cancelled one)
+            // has to clear a sentence a previous, failed attempt on this same run left behind, or
+            // Saved: true could sit next to an error that no longer describes anything real.
+            _failure = failure;
         }
     }
 
@@ -233,11 +251,21 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
     /// no-op (the file is still open) and the run's own terminal block finishes the job once it
     /// notices the cancellation, the same way an abandoned <see cref="StopAsync"/> timeout already
     /// relies on it to.
+    ///
+    /// Idempotent, and marks this instance disposed: without that flag, <see cref="Start"/> would
+    /// happily begin a brand-new run on an object its owner considers gone, and
+    /// <see cref="SaveAsync"/> could still pass its own guard afterward — reachable specifically when
+    /// the delete above fails (the state this leaves behind is otherwise unchanged: <c>_state</c>
+    /// stays whatever it was, so a run that had already succeeded still reads as
+    /// <see cref="ReadState.Succeeded"/> with <c>_temporary</c> still set).
     /// </summary>
     public void Dispose()
     {
         lock (_gate)
         {
+            if (_disposed) return;
+
+            _disposed = true;
             _cancellation?.Cancel();
             _cancellation?.Dispose();
             _cancellation = null;

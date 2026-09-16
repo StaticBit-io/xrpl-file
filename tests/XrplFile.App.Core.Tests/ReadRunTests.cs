@@ -35,11 +35,17 @@ public sealed class ReadRunTests : IDisposable
         {
             try
             {
-                run.Reset();
+                // ReadRun.Dispose, not Reset(): Reset() returns immediately while the run is still
+                // Running (by design -- it must not tear down a run's state out from under its own
+                // background task), which would leave a gated test's run that never got released
+                // cleaned up by nothing at all. Dispose() cancels first, so even a run parked at a
+                // gate this test forgot to release still gets its token and its temporary file put
+                // away -- it is exactly the method ReadRun grew IDisposable for.
+                run.Dispose();
             }
             catch (Exception)
             {
-                // ReadRun.Reset already swallows its own cleanup failures (DeleteTemporary's catch
+                // ReadRun.Dispose already swallows its own cleanup failures (DeleteTemporary's catch
                 // is unconditional); this exists only in case a future change reintroduces one that
                 // does not, so a flaky teardown here can never replace whatever the test itself
                 // actually failed on -- the same reasoning PublishedFileFixture's own guarded cleanup
@@ -153,6 +159,63 @@ public sealed class ReadRunTests : IDisposable
     }
 
     [Fact]
+    public async Task A_save_dialog_that_throws_reports_a_failure_instead_of_escaping()
+    {
+        // SaveAsync's own error boundary (design 4.2's C2 fix): the picker throwing is what a full
+        // disk or a revoked permission on the platform side surfaces as. Reachable proof it is
+        // actually caught, not merely present in the source: FakeFilePicker had no way to throw
+        // until this round -- SaveStreamResult can only report a person cancelling the dialog,
+        // never the dialog itself failing.
+        (ReadRun run, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(run.Start(link, manifest));
+        await run.Completion;
+
+        _picker.SaveStreamThrows = new IOException("disk full");
+
+        await run.SaveAsync(TestContext.Current.CancellationToken);
+
+        ReadSnapshot snapshot = run.Snapshot;
+        Assert.False(snapshot.Saved);
+        Assert.Equal(
+            "The file could not be opened to save, or could not be written to where you chose.",
+            snapshot.Failure);
+
+        // The read itself is untouched by a save failure: still the succeeded read it was, still
+        // able to be retried.
+        Assert.Equal(ReadState.Succeeded, snapshot.State);
+    }
+
+    [Fact]
+    public async Task A_reset_while_the_save_dialog_is_open_does_not_land_saved_on_a_run_that_no_longer_exists()
+    {
+        // The generation pin SaveAsync carries (design's Important 3 fix), made reachable rather
+        // than merely present: a gated picker holds SaveAsync inside the platform call -- as if the
+        // person were still looking at the dialog -- so a Reset() can land in the exact window
+        // between the dialog opening and its returning that the pin exists to guard.
+        (ReadRun _, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
+
+        GatedFilePicker gate = new(_picker);
+        ReadRun run = Track(new ReadRun(_connections, gate));
+
+        Assert.True(run.Start(link, manifest));
+        await run.Completion;
+
+        Task saving = run.SaveAsync(TestContext.Current.CancellationToken);
+        await gate.Reached;
+
+        // The dialog is open (the picker's own SaveStreamAsync is parked at the gate) when this
+        // runs -- exactly what a screen reacting to a fresh navigation, or a second read starting,
+        // would do while the person is still looking at the save dialog from this one.
+        run.Reset();
+
+        gate.Release();
+        await saving;
+
+        Assert.False(run.Snapshot.Saved);
+    }
+
+    [Fact]
     public async Task A_second_read_while_one_is_going_is_refused()
     {
         (ReadRun run, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
@@ -254,6 +317,18 @@ public sealed class ReadRunTests : IDisposable
         run.Dispose();
 
         Assert.False(File.Exists(temporary));
+    }
+
+    [Fact]
+    public async Task Starting_a_disposed_run_throws()
+    {
+        // Without the disposed flag, Start() would happily begin a brand-new run on an object its
+        // owner already considers gone -- the object Dispose() exists to put away for good.
+        (ReadRun run, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
+
+        run.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => run.Start(link, manifest));
     }
 
     [Fact]
@@ -474,5 +549,43 @@ public sealed class ReadRunTests : IDisposable
 
             public ValueTask DisposeAsync() => inner.DisposeAsync();
         }
+    }
+
+    /// <summary>
+    /// Holds <see cref="SaveStreamAsync"/> open until <see cref="Release"/> is called, standing in
+    /// for a modal save dialog the person has not yet dismissed -- the same <c>Reached</c>/<c>Release</c>
+    /// shape as <see cref="GatedAccountTransactionsSource"/>, applied to the picker seam instead of
+    /// the ledger one.
+    /// </summary>
+    private sealed class GatedFilePicker(IFilePickerService inner) : IFilePickerService
+    {
+        private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Resolves the instant the gated call begins, before it waits to be released.</summary>
+        public Task Reached => _reached.Task;
+
+        /// <summary>Lets the gated call proceed.</summary>
+        public void Release() => _release.TrySetResult();
+
+        public Task<bool> SaveFileAsync(string suggestedFileName, byte[] content, CancellationToken cancellationToken) =>
+            inner.SaveFileAsync(suggestedFileName, content, cancellationToken);
+
+        public async Task<bool> SaveStreamAsync(string suggestedFileName, Stream content, CancellationToken cancellationToken)
+        {
+            _reached.TrySetResult();
+
+            // Not awaited against cancellationToken: the test decides exactly when this proceeds by
+            // calling Release(), the same contract every other gate in this file follows.
+            await _release.Task.ConfigureAwait(false);
+
+            return await inner.SaveStreamAsync(suggestedFileName, content, cancellationToken).ConfigureAwait(false);
+        }
+
+        public Task<byte[]?> PickFileAsync(CancellationToken cancellationToken) =>
+            inner.PickFileAsync(cancellationToken);
+
+        public Task<string?> PickExistingFilePathAsync(CancellationToken cancellationToken) =>
+            inner.PickExistingFilePathAsync(cancellationToken);
     }
 }
