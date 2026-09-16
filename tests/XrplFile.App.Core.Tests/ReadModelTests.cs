@@ -35,10 +35,14 @@ public sealed class ReadModelTests : IDisposable
     [Fact]
     public void MaxBytes_is_the_readers_own_default_not_a_copy_of_it()
     {
-        // The remedy Ruling 8 already chose for this shape (PublishModel.ReaderDefaultMaxBytes is
-        // its earlier instance): derive the number rather than let a second literal drift from the
-        // library's own. ReadModel.MaxBytes is now `new ReaderOptions().MaxBytes` by construction,
-        // so this is a change-detector for exactly one thing -- somebody reintroducing a literal here.
+        // Round 2's N1 finding corrected an earlier version of this comment, which wrongly credited
+        // Ruling 8 -- that ruling is about the duplicated "no node URL" sentence, not this ceiling,
+        // and was never applied here. The actual remedy: derive the number rather than let a second
+        // literal drift from the library's own, the same fix PublishModel.ReaderDefaultMaxBytes
+        // needed for the identical reason once round 2 found it was still a bare literal too
+        // (PublishModelTests' own ReaderDefaultMaxBytes_is_the_readers_own_default_not_a_copy_of_it).
+        // ReadModel.MaxBytes is now `new ReaderOptions().MaxBytes` by construction, so this is a
+        // change-detector for exactly one thing -- somebody reintroducing a literal here.
         Assert.Equal(new ReaderOptions().MaxBytes, ReadModel.MaxBytes);
     }
 
