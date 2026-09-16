@@ -11,7 +11,7 @@ application produced — and turns it back into the file, on disk, verified.
 | C1 | the shell and the vault screens | shipped |
 | C2 | publishing: a file, a key, an estimate, a run | shipped |
 | C3 | the throwaway account's life, including reclaiming its reserve | shipped |
-| **C4** | **reading a link back into a file — this document** | **in progress** |
+| **C4** | **reading a link back into a file — this document** | **shipped** |
 
 `XrplFileReader` in `XrplFile.Core` already reads. It has done since part A, it is covered by the
 committed vectors, and the browser reader in `web/` is a second implementation of the same format

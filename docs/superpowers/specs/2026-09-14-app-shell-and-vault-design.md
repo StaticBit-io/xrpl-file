@@ -11,7 +11,7 @@ is the first piece of one: the shell it all hangs from, and every screen the vau
 | **C1** | **the shell and the vault screens — this document** | **shipped** |
 | C2 | publishing: a file, a key, an estimate, a run | shipped |
 | C3 | the throwaway account's life, including reclaiming its reserve | shipped |
-| C4 | reading a link back into a file | not started |
+| C4 | reading a link back into a file | shipped |
 
 C1 spends no money and talks to no node. That is deliberate: it is the only part of the
 application where a mistake costs nothing, which makes it the right place to stand up the shell,

@@ -11,7 +11,7 @@ surface it can put behind a screen.
 | C1 | the application shell and the vault screens | shipped |
 | C2 | publishing: a file, a key, an estimate, a run | shipped |
 | C3 | the throwaway account's life | shipped |
-| C4 | reading a link | not started |
+| C4 | reading a link | shipped |
 
 ## 1. The task
 
