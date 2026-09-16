@@ -164,7 +164,11 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
             // Disposed is folded into the same guard as "nothing to save" rather than thrown: a
             // screen that raced a Dispose() against an already-in-flight SaveAsync call should see
             // that save quietly do nothing, not fault the Task it is awaiting.
-            if (_disposed || _state != ReadState.Succeeded || _temporary is null) return;
+            // _saving is part of the same guard rather than left to the screen's disabled button:
+            // that button is the only thing stopping a second dialog today, and a run that can be
+            // made to open two file dialogs by a fast enough second click is not correct on its own
+            // terms. Quietly doing nothing is right here for the same reason it is right above.
+            if (_disposed || _saving || _state != ReadState.Succeeded || _temporary is null) return;
 
             path = _temporary;
 

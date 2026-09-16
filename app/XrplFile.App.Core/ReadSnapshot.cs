@@ -38,5 +38,18 @@ public sealed record ReadSnapshot(
     /// <c>RunModel.IsFinished</c> makes for <c>PublicationRun</c> (design C2), moved here because
     /// this screen has no wrapping model of its own to hold it on.
     /// </summary>
-    public bool IsFinished => State is ReadState.Succeeded or ReadState.Failed or ReadState.Cancelled;
+    /// <remarks>
+    /// Written as a switch that throws on anything it has not been told about, rather than
+    /// <c>is A or B or C</c>, which reads more nicely and checks nothing: a sixth
+    /// <see cref="ReadState"/> would simply fall out of that as <see langword="false"/> and reach a
+    /// screen as a wrong answer. The throw is unreachable by design — the test that walks every
+    /// member of the enum is what makes it so, and is what fails the day somebody adds one — which
+    /// is the same trade <c>ReadErrorMessages</c> already makes for the same reason.
+    /// </remarks>
+    public bool IsFinished => State switch
+    {
+        ReadState.Succeeded or ReadState.Failed or ReadState.Cancelled => true,
+        ReadState.Idle or ReadState.Running => false,
+        _ => throw new ArgumentOutOfRangeException(nameof(State), State, "This state has not been told whether it has ended."),
+    };
 }
