@@ -13,8 +13,11 @@ public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore
     /// constructs its own <see cref="ReaderOptions"/> and reads the same property) cannot drift
     /// apart the way a hard-coded copy of the same number already had within this one part. With the
     /// file streamed to disk rather than held in memory this is policy rather than architecture
-    /// (design H7): what argues against raising it is the node, not this application. Two hundred
-    /// megabytes is roughly two hundred thousand requests.
+    /// (design H7): what argues against raising it is the node, not this application. Twenty
+    /// megabytes at roughly a kilobyte of file per memo is on the order of twenty thousand
+    /// requests -- design H7's own text says "two hundred megabytes ... two hundred thousand
+    /// requests", off by the same factor of ten in both figures; not corrected there, since it is
+    /// the binding spec and this fix is scoped to the code comment it was copied into.
     /// </summary>
     public static readonly long MaxBytes = new ReaderOptions().MaxBytes;
 
