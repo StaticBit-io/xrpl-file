@@ -15,12 +15,17 @@
    row on its own; AccountsModel's own remarks on why opening one connection per row would make the
    list slower than useful.
 
-   The one-second timer is copied from Shell.razor and Publish.razor -- same Timer /
-   CancellationTokenSource / _disposed shape -- but its job here is narrower than either: it exists
-   so that the funding screen's balance, which FundingModel only learns when asked, keeps updating
-   while somebody is actually looking at it, without a button. Nothing else on this screen changes on
-   its own, so the tick only calls FundingModel.RefreshAsync while the funding sub-screen is the one
-   showing. *@
+   The timer is copied from Shell.razor and Publish.razor -- same Timer / CancellationTokenSource /
+   _disposed shape -- but its job here is heavier than either, not narrower: Shell.razor's own poll
+   reads one boolean the vault already holds in memory, and Publish.razor's only redraws against a
+   snapshot another task already produced, while this one's tick -- while the funding sub-screen is
+   showing -- opens a connection, asks account_info, and closes it again (FundingModel.RefreshAsync).
+   Money may take an hour to arrive (ThrowawayAccount.AwaitFundingAsync's own remarks), and doing a
+   full handshake once a second for that long reads as connection flooding to a public node and is a
+   plausible way to be rate-limited off it while somebody is just waiting for their transfer to land.
+   The interval is five seconds rather than Shell's and Publish's one for exactly that reason -- a
+   balance update lagging by a few seconds costs nothing here, unlike a lock check or a progress
+   redraw the other two screens exist for. *@
 
 <div class="container py-3" style="max-width: 900px;">
     @switch (_view)
@@ -76,8 +81,18 @@
                                             @* Guaranteed non-null on this branch (AccountsModel only reaches Funded
                                                once a node has actually answered); the null-forgiving operator states
                                                that invariant rather than GetValueOrDefault() quietly standing in for
-                                               an answer nobody gave, which is exactly the zero design G8 forbids. *@
+                                               an answer nobody gave, which is exactly the zero design G8 forbids.
+                                               DeletableFromLedger and LedgersRemaining are set alongside BalanceDrops
+                                               by the same AccountsModel.RefreshFromLedgerAsync branch, so they are
+                                               just as guaranteed here -- this is design 4.1's third state, "an
+                                               account that can be closed from ledger N -- with the countdown". *@
                                             <span>@row.BalanceDrops!.Value.ToString("N0") drops</span>
+                                            <br />
+                                            <span class="text-muted">
+                                                Closable from ledger @row.DeletableFromLedger!.Value.ToString("N0")
+                                                &mdash; about @row.LedgersRemaining!.Value.ToString("N0") ledgers
+                                                remaining (@row.TimeRemainingDescription)
+                                            </span>
                                             break;
 
                                         case AccountStage.Closable:
@@ -145,9 +160,10 @@
         Close,
     }
 
-    /// <summary>How often this screen forces a render while the funding sub-screen may be waiting on
-    /// money to arrive. Matches Shell.razor's own poll -- see that component's own remarks.</summary>
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+    /// <summary>How often this screen forces a render, and re-asks the node for the funding
+    /// sub-screen's balance while somebody may be waiting on money to arrive. See the remarks at the
+    /// top of this file for why this differs from Shell.razor's and Publish.razor's own interval.</summary>
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
 
     private readonly CancellationTokenSource _cts = new();
     private Timer? _pollTimer;

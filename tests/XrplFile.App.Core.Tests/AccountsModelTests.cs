@@ -33,6 +33,13 @@ public sealed class AccountsModelTests : VaultHarness
         (AccountsModel model, KeyVault vault) = await OpenAsync(TestContext.Current.CancellationToken);
         string reference = await vault.StoreAsync(Entry("generated", VaultEntryKind.Generated), TestContext.Current.CancellationToken);
 
+        // ThrowForUnfundedAccounts makes this test a real regression guard, not just an assertion:
+        // if RefreshFromLedgerAsync ever went back to asking this account's sequence before
+        // noticing its balance is zero, this fake would answer exactly the RippledException a real
+        // node's actNotFound produces (XrplClientLedgerSink.SequenceAsync has nothing catching it),
+        // and this test would fail with that exception rather than with a wrong Stage.
+        _connections.Sink.ThrowForUnfundedAccounts = true;
+
         // KeyOnly is a claim only a node can make — an unfunded address is confirmed, not assumed.
         await model.RefreshAsync(TestContext.Current.CancellationToken);
         await model.RefreshFromLedgerAsync(reference, TestContext.Current.CancellationToken);
@@ -40,6 +47,9 @@ public sealed class AccountsModelTests : VaultHarness
         AccountRow row = Assert.Single(model.Rows);
         Assert.Equal(AccountStage.KeyOnly, row.Stage);
         Assert.Equal(0, row.BalanceDrops);
+        Assert.Null(row.DeletableFromLedger);
+        Assert.Null(row.LedgersRemaining);
+        Assert.Null(model.Message);
     }
 
     [Fact]
@@ -146,6 +156,21 @@ public sealed class AccountsModelTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_locked_vault_says_why_instead_of_throwing_out_of_RefreshAsync()
+    {
+        (AccountsModel model, KeyVault vault) = await OpenAsync(TestContext.Current.CancellationToken);
+        await vault.StoreAsync(Entry("generated", VaultEntryKind.Generated), TestContext.Current.CancellationToken);
+        await model.RefreshAsync(TestContext.Current.CancellationToken);
+        await vault.LockAsync();
+
+        // Every other model in this application catches VaultException around its own vault reads;
+        // RefreshAsync used to be the one exception, reachable from the tab's own initialisation.
+        await model.RefreshAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
+    }
+
+    [Fact]
     public void HasActions_is_true_for_every_stage_except_closed()
     {
         static AccountRow Row(AccountStage stage) =>
@@ -156,5 +181,16 @@ public sealed class AccountsModelTests : VaultHarness
         Assert.True(Row(AccountStage.Funded).HasActions);
         Assert.True(Row(AccountStage.Closable).HasActions);
         Assert.False(Row(AccountStage.Closed).HasActions);
+    }
+
+    [Fact]
+    public void TimeRemainingDescription_follows_LedgersRemaining()
+    {
+        AccountRow noCountdown = new("ref", "label", "rAddress", "1", AccountStage.Closable, 0, 264, 0, null);
+        AccountRow counting = new("ref", "label", "rAddress", "1", AccountStage.Funded, 5_000_000, 264, 64, null);
+
+        Assert.Equal(LedgerTiming.Describe(LedgerTiming.Estimate(0)), noCountdown.TimeRemainingDescription);
+        Assert.Equal(LedgerTiming.Describe(LedgerTiming.Estimate(64)), counting.TimeRemainingDescription);
+        Assert.NotNull(counting.TimeRemainingDescription);
     }
 }

@@ -29,4 +29,12 @@ public sealed record AccountRow(
     /// comparing <see cref="Stage"/> to <see cref="AccountStage.Closed"/> itself.
     /// </summary>
     public bool HasActions => Stage != AccountStage.Closed;
+
+    /// <summary>
+    /// Roughly how long <see cref="LedgersRemaining"/> is, in words (design 4.1's countdown, and
+    /// 5.2/6's "roughly how long that is"). Null under the same conditions <see cref="LedgersRemaining"/>
+    /// is. The Accounts screen reads this rather than multiplying by a ledger interval itself — a
+    /// component holds no decisions.
+    /// </summary>
+    public string? TimeRemainingDescription => LedgerTiming.Describe(LedgerTiming.Estimate(LedgersRemaining));
 }
