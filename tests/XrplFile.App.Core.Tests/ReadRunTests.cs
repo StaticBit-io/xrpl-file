@@ -65,6 +65,68 @@ public sealed class ReadRunTests : IDisposable
         return (Track(new ReadRun(_connections, _picker)), link, manifest);
     }
 
+    /// <summary>
+    /// Seeds <paramref name="connections"/>'s fake ledger with a single-chunk file's manifest and
+    /// chunk transaction, computed directly -- no signing, no submission, no
+    /// <c>PublicationSession</c> round trip. Round 2, N1: <see cref="Resetting_a_run_that_is_still_going_changes_nothing"/>
+    /// and <see cref="Disposing_during_a_save_clears_saving_the_same_way_start_and_reset_do"/> used
+    /// to reach <see cref="ReadyAsync"/>, whose real publish signs for real through
+    /// <c>XrplWallet</c> -- individually cheap even so, but a third real signer inside the
+    /// "HeavySigning" collection was measured bringing back the exact thread-pool-queue flake that
+    /// collection exists to suppress (3 failures in 22 runs with them, 0 in 39 without). Neither test
+    /// is about publishing -- one is about <see cref="ReadRun.Reset"/>, the other about
+    /// <see cref="ReadRun.Dispose"/> -- so this reaches the same read paths a real publish would
+    /// (a genuine <see cref="XrplFileReader.ManifestAsync"/> lookup and a genuine, gate-able
+    /// <see cref="XrplFileReader.BlockAsync"/> scan, both cryptographically real -- the block hash
+    /// really is <see cref="FileTree.BlockHash"/> over the chunk, and the reader really does check it)
+    /// without any of the signing cost.
+    /// </summary>
+    private static async Task<(XrplFileLink Link, ManifestRecord Manifest)> SeedSyntheticFileAsync(
+        FakeConnectionFactory connections, CancellationToken token, string name = "synthetic.bin", int size = 256)
+    {
+        const string writer = "rSyntheticWriter";
+        const long chunkLedger = 2000;
+        const long manifestLedger = chunkLedger + 1;
+
+        byte[] bytes = new byte[size];
+        for (int i = 0; i < bytes.Length; i++) bytes[i] = (byte)i;
+
+        IReadOnlyList<byte[]> chunks = FileTree.Split(bytes, MemoLayout.ChunkBytes);
+
+        // Guards this fixture staying the single-chunk, single-block shape it is documented as: a
+        // size that grew past one chunk would silently need a second ledger transaction this helper
+        // does not write, and BlockListAsync's own Blocks == 1 fast path (no AccountTransactionsAsync
+        // call at all) would stop matching what the caller actually gets back.
+        Assert.Single(chunks);
+
+        string blockHash = Convert.ToHexString(FileTree.BlockHash(chunks));
+
+        Manifest manifest = new(
+            "application/octet-stream", size, MemoLayout.ChunkBytes, blockHash,
+            chunkLedger, chunkLedger, Blocks: 1, Lists: 0, name);
+
+        string chunkHash = SyntheticHash("chunk");
+        string manifestHash = SyntheticHash("manifest");
+
+        connections.Ledger
+            .Add(new LedgerTransaction(
+                chunkHash, chunkLedger, writer, Succeeded: true, Validated: true, Result: "tesSUCCESS",
+                MemoLayout.ChunkMarkerHex(0), MemoLayout.Hex(chunks[0]), MemoFormatHex: null))
+            .Add(new LedgerTransaction(
+                manifestHash, manifestLedger, writer, Succeeded: true, Validated: true, Result: "tesSUCCESS",
+                MemoLayout.ManifestMarkerHex, MemoLayout.Utf8Hex(manifest.Encode()), MemoLayout.JsonFormatHex));
+
+        XrplFileLink link = new("testnet", manifestHash);
+
+        await using ILedgerConnection connection = await connections.ConnectAsync(link.Network, token);
+        ManifestRecord record = await new XrplFileReader(connection.Source).ManifestAsync(link, token);
+
+        return (link, record);
+    }
+
+    private static string SyntheticHash(string label) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(label)));
+
     [Fact]
     public async Task A_read_starts_idle()
     {
@@ -261,7 +323,12 @@ public sealed class ReadRunTests : IDisposable
         // discarded. It may not -- a running read must not be silently thrown away just because
         // somebody pointed the Read tab at a different link -- and this is the test that proves
         // Reset() actually refuses, not merely that the source reads as though it does.
-        (ReadRun _, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
+        //
+        // Seeded synthetically rather than through ReadyAsync (round 2, N1): this test is about
+        // Reset(), not about publishing, and ReadyAsync's real signing was measured reintroducing
+        // the HeavySigning flake -- see SeedSyntheticFileAsync's own remarks.
+        (XrplFileLink link, ManifestRecord manifest) =
+            await SeedSyntheticFileAsync(_connections, TestContext.Current.CancellationToken);
 
         GatedAccountTransactionsSource gate = new(_connections.Ledger);
         ReadRun run = Track(new ReadRun(new GatedReadConnectionFactory(_connections, gate), _picker));
@@ -291,7 +358,12 @@ public sealed class ReadRunTests : IDisposable
         // all baseline _saving to false for the generation they leave behind -- until this fix,
         // Dispose was the one of the three that did not, so a save superseded by a Dispose would
         // leave Saving stuck true on a snapshot nothing will ever clear again.
-        (ReadRun _, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
+        //
+        // Seeded synthetically rather than through ReadyAsync (round 2, N1): this test is about
+        // Dispose(), not about publishing, and ReadyAsync's real signing was measured reintroducing
+        // the HeavySigning flake -- see SeedSyntheticFileAsync's own remarks.
+        (XrplFileLink link, ManifestRecord manifest) =
+            await SeedSyntheticFileAsync(_connections, TestContext.Current.CancellationToken);
 
         GatedFilePicker gate = new(_picker);
         ReadRun run = Track(new ReadRun(_connections, gate));
@@ -312,6 +384,19 @@ public sealed class ReadRunTests : IDisposable
         await saving;
 
         Assert.False(run.Snapshot.Saving);
+
+        // Round 2, N2: Dispose() ran while SaveAsync still held the temporary file open, so
+        // DeleteTemporary's own delete failed and left _temporary set for a retry (its own remarks
+        // describe exactly this). Dispose() itself guards against a second call once _disposed is
+        // true, so the class's own teardown loop -- which calls Dispose() again for every tracked
+        // run -- never reaches that retry and used to leak one "xrpl-file-read-*" directory per run
+        // of this test. Reset() carries no such guard, so it is the one caller left that can still
+        // retry the delete once the save has actually released the file, which by this point (after
+        // awaiting `saving` above) it has -- proven here rather than left to the class teardown.
+        string? temporary = run.TemporaryPathForTests;
+        Assert.NotNull(temporary);
+        run.Reset();
+        Assert.False(File.Exists(temporary));
     }
 
     [Fact]
