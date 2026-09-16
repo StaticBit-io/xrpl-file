@@ -11,7 +11,7 @@ sitting on the ledger forever.
 | B | the key vault | shipped |
 | C1 | the shell and the vault screens | shipped |
 | C2 | publishing: a file, a key, an estimate, a run | shipped |
-| **C3** | **the throwaway account's life, including reclaiming its reserve — this document** | **in progress** |
+| **C3** | **the throwaway account's life, including reclaiming its reserve — this document** | **shipped** |
 | C4 | reading a link back into a file | not started |
 
 `XrplFile.Core` already knows most of this. `ThrowawayAccount` computes what an account still needs
@@ -61,20 +61,29 @@ Choosing a destination on the person's behalf, ever.
 
 ## 3. What `XrplFile.Core` gains
 
-### 3.1 `ThrowawayAccount.DeleteAsync`
+### 3.1 `ThrowawayAccount.PreviewDeletionAsync` and `DeleteAsync`
 
-One method beside `RefundAsync`, with the same discipline about destinations: an empty one is an
+Two methods beside `RefundAsync`, with the same discipline about destinations: an empty one is an
 `ArgumentException`, because nothing here ever chooses one.
 
 ```
+Task<DeletionResult> PreviewDeletionAsync(string destination, CancellationToken cancellationToken)
 Task<DeletionResult> DeleteAsync(string destination, CancellationToken cancellationToken)
 ```
 
-It reads the network's fees, the account's state, the destination, and the validated ledger index;
-decides whether the transaction can succeed; and submits only if it can.
+`PreviewDeletionAsync` reads the network's fees, the account's state, the destination, and the
+validated ledger index, and decides whether the transaction can succeed — without submitting
+anything. `DeleteAsync` re-runs that same preview and submits only when it answers `Ready`. The split
+exists for the confirmation screen: section 5.1 requires it to show the destination's balance, what
+will move and the fee before the person commits, and a single method that only submits cannot supply
+those figures — either it would have to submit to find out, which is exactly what the preflight
+exists to prevent, or the screen would recompute the same arithmetic itself, where it could drift
+from the transaction it is describing.
 
 `DeletionOutcome` distinguishes:
 
+- `Ready` — every check passed and nothing was submitted. Only a preview answers this; it is what
+  `DeleteAsync` looks for before it submits.
 - `NotYet` — the threshold is not reached. Nothing is submitted, and the result carries the ledger
   from which deletion becomes possible, so the screen can count down to it.
 - `DestinationMissing` — the destination does not exist on the ledger. Nothing is submitted.

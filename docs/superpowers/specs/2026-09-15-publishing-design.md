@@ -11,7 +11,7 @@ file into the ledger.
 | B | the key vault | shipped |
 | C1 | the shell and the vault screens | shipped |
 | **C2** | **publishing: a file, a key, an estimate, a run — this document** | **shipped** |
-| C3 | the throwaway account's life, including reclaiming its reserve | not started |
+| C3 | the throwaway account's life, including reclaiming its reserve | shipped |
 | C4 | reading a link back into a file | not started |
 
 C2 adds nothing to the format and nothing to the publication machinery. Part A already publishes,
