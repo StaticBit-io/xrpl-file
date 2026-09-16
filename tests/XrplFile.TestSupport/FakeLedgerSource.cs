@@ -252,9 +252,35 @@ public sealed class FakeLedgerSource : ILedgerSource
         }
     }
 
-    /// <summary>Destinations this fake ledger carries. Anything not here is <see cref="DestinationState.Absent"/>.</summary>
+    /// <summary>
+    /// Explicit overrides for what <see cref="DestinationAsync"/> answers -- the only way to give a
+    /// destination its flags (<see cref="DestinationState.RequiresDestinationTag"/>,
+    /// <see cref="DestinationState.AuthorisesDepositors"/>), and still honoured ahead of
+    /// <see cref="Balances"/> below when a test needs an account explicitly absent regardless of
+    /// what it holds. Most tests need neither and can rely on <see cref="Balances"/> alone.
+    /// </summary>
     public Dictionary<string, DestinationState> Destinations { get; } = new(StringComparer.Ordinal);
 
-    public Task<DestinationState> DestinationAsync(string account, CancellationToken cancellationToken) =>
-        Task.FromResult(Destinations.TryGetValue(account, out DestinationState? state) ? state : DestinationState.Absent);
+    /// <summary>
+    /// What this fake answers a destination check with: an explicit entry in
+    /// <see cref="Destinations"/> when a test put one there, otherwise derived from
+    /// <see cref="Balances"/> the same way <see cref="AccountStateAsync"/> already treats a zero
+    /// balance as absent -- an account cannot hold XRP without existing, and a fake that let those
+    /// two dictionaries disagree let a test describe a ledger no real node could ever answer with:
+    /// a funded account this method calls nonexistent, or the reverse. Every close test used to keep
+    /// them in step by hand; this makes that bookkeeping the fake's job instead of the test's.
+    /// </summary>
+    public Task<DestinationState> DestinationAsync(string account, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            if (Destinations.TryGetValue(account, out DestinationState? state)) return Task.FromResult(state);
+
+            bool funded = Balances.TryGetValue(account, out long drops) && drops > 0;
+
+            return Task.FromResult(funded
+                ? new DestinationState(Exists: true, RequiresDestinationTag: false, AuthorisesDepositors: false)
+                : DestinationState.Absent);
+        }
+    }
 }
