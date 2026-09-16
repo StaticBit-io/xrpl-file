@@ -293,6 +293,13 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
             _cancellation = null;
             ++_generation;
 
+            // Baselined the same way Start and Reset already baseline it for their own, newer
+            // generation (see _generation's own remarks) -- without this, an in-flight SaveAsync that
+            // finds itself superseded by this Dispose would leave _saving true forever, since
+            // SaveAsync's own generation guard returns before reaching the line that would otherwise
+            // clear it.
+            _saving = false;
+
             DeleteTemporary();
         }
     }

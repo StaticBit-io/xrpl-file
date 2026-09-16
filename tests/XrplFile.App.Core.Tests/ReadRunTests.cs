@@ -285,6 +285,36 @@ public sealed class ReadRunTests : IDisposable
     }
 
     [Fact]
+    public async Task Disposing_during_a_save_clears_saving_the_same_way_start_and_reset_do()
+    {
+        // _generation's own remarks describe Start, Reset and Dispose as one family of bumpers that
+        // all baseline _saving to false for the generation they leave behind -- until this fix,
+        // Dispose was the one of the three that did not, so a save superseded by a Dispose would
+        // leave Saving stuck true on a snapshot nothing will ever clear again.
+        (ReadRun _, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
+
+        GatedFilePicker gate = new(_picker);
+        ReadRun run = Track(new ReadRun(_connections, gate));
+
+        Assert.True(run.Start(link, manifest));
+        await run.Completion;
+
+        Task saving = run.SaveAsync(TestContext.Current.CancellationToken);
+        await gate.Reached;
+
+        Assert.True(run.Snapshot.Saving);
+
+        run.Dispose();
+
+        Assert.False(run.Snapshot.Saving);
+
+        gate.Release();
+        await saving;
+
+        Assert.False(run.Snapshot.Saving);
+    }
+
+    [Fact]
     public async Task A_second_read_while_one_is_going_is_refused()
     {
         (ReadRun run, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
