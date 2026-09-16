@@ -90,7 +90,9 @@ public sealed class MauiFilePickerService : IFilePickerService
 
         transaction.Stream.Size = 0;
 
-        Stream destination = transaction.Stream.AsStreamForWrite();
+        // Disposed before the transaction it wraps, so the wrapper lets go of the WinRT stream
+        // before that stream's owner does.
+        using Stream destination = transaction.Stream.AsStreamForWrite();
         await content.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
 
         // The wrapper Stream can buffer bytes that a commit would not otherwise see; flush it into
