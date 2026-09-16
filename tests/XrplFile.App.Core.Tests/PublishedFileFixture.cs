@@ -29,12 +29,15 @@ public static class PublishedFileFixture
     /// <summary>
     /// Publishes <paramref name="size"/> deterministic bytes as <paramref name="name"/> of type
     /// <paramref name="type"/>, over <paramref name="connections"/>'s fake ledger, and returns the
-    /// link the publication produced. Uses the <c>"testnet"</c> network: the one xrpl-file link
-    /// format accepts that also has a built-in node URL, so <see cref="NodeEndpoint.Resolve"/>
-    /// answers without a settings file.
+    /// link the publication produced. <paramref name="name"/> may be <see langword="null"/> --
+    /// <see cref="Manifest.Name"/> itself is nullable, for a file published with none -- in which
+    /// case the deterministic content is still seeded from a fixed string rather than from the
+    /// (absent) name. Uses the <c>"testnet"</c> network: the one xrpl-file link format accepts that
+    /// also has a built-in node URL, so <see cref="NodeEndpoint.Resolve"/> answers without a
+    /// settings file.
     /// </summary>
     public static async Task<XrplFileLink> PublishAsync(
-        FakeConnectionFactory connections, string name, string type, long size)
+        FakeConnectionFactory connections, string? name, string type, long size)
     {
         ArgumentNullException.ThrowIfNull(connections);
 
@@ -51,7 +54,7 @@ public static class PublishedFileFixture
             SessionOptions options = new() { StateDirectory = stateDirectory, TicketsPerBatch = 100 };
 
             PublicationSession session = await PublicationSession.StartAsync(
-                strategy, connections.Ledger, VectorStream.Bytes(name, size), type, name,
+                strategy, connections.Ledger, VectorStream.Bytes(name ?? "unnamed", size), type, name,
                 wallet.ClassicAddress, "fixture-key", "testnet", options, CancellationToken.None);
 
             PublicationReport report = await session.RunAsync(null, CancellationToken.None);
