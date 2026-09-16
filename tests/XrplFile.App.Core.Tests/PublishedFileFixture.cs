@@ -45,14 +45,24 @@ public static class PublishedFileFixture
         await using SequenceStrategy strategy = new(connections.Sink, signer, StrategyOptions);
 
         string stateDirectory = Directory.CreateTempSubdirectory("xrpl-file-read-fixture-").FullName;
-        SessionOptions options = new() { StateDirectory = stateDirectory, TicketsPerBatch = 100 };
 
-        PublicationSession session = await PublicationSession.StartAsync(
-            strategy, connections.Ledger, VectorStream.Bytes(name, size), type, name,
-            wallet.ClassicAddress, "fixture-key", "testnet", options, CancellationToken.None);
+        try
+        {
+            SessionOptions options = new() { StateDirectory = stateDirectory, TicketsPerBatch = 100 };
 
-        PublicationReport report = await session.RunAsync(null, CancellationToken.None);
+            PublicationSession session = await PublicationSession.StartAsync(
+                strategy, connections.Ledger, VectorStream.Bytes(name, size), type, name,
+                wallet.ClassicAddress, "fixture-key", "testnet", options, CancellationToken.None);
 
-        return report.Link;
+            PublicationReport report = await session.RunAsync(null, CancellationToken.None);
+
+            return report.Link;
+        }
+        finally
+        {
+            // Matches PublicationSessionTests.Dispose() and ReadModelTests.Dispose() -- state files
+            // are per-call scratch, not something a repeated local run should be left to accumulate.
+            Directory.Delete(stateDirectory, recursive: true);
+        }
     }
 }
