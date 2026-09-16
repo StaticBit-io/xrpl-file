@@ -54,6 +54,11 @@
                             @onclick="() => Tabs.Show(AppTab.Accounts)">
                         Accounts
                     </button>
+                    <button type="button"
+                            class="btn btn-outline-primary @(Tabs.Tab == AppTab.Read ? "active" : "")"
+                            @onclick="() => Tabs.Show(AppTab.Read)">
+                        Read
+                    </button>
                 </div>
                 <button type="button" class="btn btn-outline-secondary" @onclick="LockAsync">Lock</button>
             </div>
@@ -73,6 +78,10 @@
             else if (Tabs.Tab == AppTab.Accounts)
             {
                 <Accounts />
+            }
+            else if (Tabs.Tab == AppTab.Read)
+            {
+                <Read />
             }
             break;
     }

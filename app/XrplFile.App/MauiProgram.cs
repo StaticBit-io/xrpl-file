@@ -233,5 +233,11 @@ public static class MauiProgram
         // Shell.razor, so something outside that markup (the publications list, once Task 6 adds
         // it) can put a link on ReadModel and then switch the shell to the Read tab itself.
         services.AddSingleton<ShellModel>();
+
+        // The Read tab (design 4.1/4.2). Both singletons for the same reason every model here is:
+        // state survives switching tabs, and for ReadRun that is the whole of decision H6 -- a read
+        // started on this tab must keep running while the person looks at Accounts or Publish.
+        services.AddSingleton<ReadModel>();
+        services.AddSingleton<ReadRun>();
     }
 }

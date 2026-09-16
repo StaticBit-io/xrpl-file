@@ -1,0 +1,172 @@
+@implements IDisposable
+@inject ReadModel Model
+@inject ReadRun Run
+
+@* Design 4.1 and 4.2: the Read tab. It draws exactly one of four things, and which one is entirely
+   Snapshot.State's and Model's own decision -- this markup only names the branch, never computes it.
+   A running read is its own branch (progress and Cancel); Succeeded, Failed and Cancelled share a
+   second branch the way Run.razor's own IsFinished block shares one Dismiss button across its three
+   outcomes, because all three are "the read is over, offer a way back" and differ only in what they
+   say; the fourth branch is Idle, where Model itself decides between "no manifest yet" (Model.Manifest
+   is null) and "a manifest with a Read button" (CanRead already folds in both the manifest and any
+   message the lookup produced).
+
+   Snapshot is taken once, at the top of this render, into a local -- not read field by field -- for
+   the same reason Run.razor takes RunModel.Capture() once: ReadRun runs the block loop on a
+   background task this screen never awaits, so separate reads of State, BlocksDone and Failure could
+   land on different instants of the same run and draw, for instance, a Cancel button over a result
+   that already finished. Part C2 had to fix exactly that shape twice.
+
+   The blocks-done and bytes-done progress uses the browser's own <progress> element with raw done/
+   total values as its attributes rather than a computed percentage: ReadSnapshot carries no percent
+   of its own (unlike RunView, whose Percent is PublicationRun's own computed field), and turning
+   BlocksDone/BlocksTotal into a percentage here would be exactly the kind of decision this component
+   is not supposed to make on its own.
+
+   The one-second timer exists for the same reason as Publish.razor's and Shell.razor's own pollers:
+   a run's Snapshot changes on a task this component never awaits, so nothing here repaints on
+   progress without a render forced from outside it. Copied verbatim from Shell.razor's own poll, at
+   the same interval and the same Timer/CancellationTokenSource/_disposed shape, so every screen that
+   polls agrees on when it looks again. *@
+
+@{
+    ReadSnapshot snapshot = Run.Snapshot;
+}
+
+@if (snapshot.State == ReadState.Running)
+{
+    <div class="container py-3">
+        <h1 class="h3">Reading</h1>
+
+        <p>@snapshot.BlocksDone of @snapshot.BlocksTotal blocks</p>
+        <progress class="w-100" value="@snapshot.BlocksDone" max="@snapshot.BlocksTotal"></progress>
+
+        <p class="mt-3">@snapshot.BytesDone.ToString("N0") of @snapshot.BytesTotal.ToString("N0") bytes</p>
+        <progress class="w-100" value="@snapshot.BytesDone" max="@snapshot.BytesTotal"></progress>
+
+        <button type="button" class="btn btn-outline-secondary mt-3" @onclick="Cancel">Cancel</button>
+    </div>
+}
+else if (snapshot.State is ReadState.Succeeded or ReadState.Failed or ReadState.Cancelled)
+{
+    <div class="container py-3">
+        <h1 class="h3">Reading</h1>
+
+        @if (snapshot.State == ReadState.Succeeded)
+        {
+            <div class="alert alert-success">
+                <p class="mb-2">@(snapshot.Name is { } name ? $"Read \"{name}\" successfully." : "Read successfully.")</p>
+                <button type="button" class="btn btn-outline-secondary" @onclick="SaveAsync">Save&hellip;</button>
+                @if (snapshot.Saved)
+                {
+                    <p class="mt-2 mb-0">Saved.</p>
+                }
+            </div>
+        }
+        else if (snapshot.State == ReadState.Failed)
+        {
+            <div class="alert alert-danger">@snapshot.Failure</div>
+        }
+        else
+        {
+            <div class="alert alert-secondary">Cancelled. Nothing was saved.</div>
+        }
+
+        <button type="button" class="btn btn-primary mt-3" @onclick="Dismiss">Dismiss</button>
+    </div>
+}
+else
+{
+    <div class="container py-3">
+        <h1 class="h3">Read a file</h1>
+
+        <div class="mb-3">
+            <label class="form-label">Link</label>
+            <input class="form-control" @bind="Model.Link" @bind:event="oninput" />
+        </div>
+
+        <button type="button" class="btn btn-outline-primary" @onclick="LookUpAsync">Look up</button>
+
+        @if (Model.Message is not null)
+        {
+            <div class="alert alert-warning mt-3">@Model.Message</div>
+        }
+
+        @if (Model.Manifest is { } manifest)
+        {
+            <div class="mt-3">
+                <p class="mb-1">@(manifest.Manifest.Name ?? "(no name)")</p>
+                <p class="mb-1">@manifest.Manifest.Size.ToString("N0") bytes</p>
+                <p class="mb-1">@manifest.Manifest.Type</p>
+                <p class="mb-1">Written by @manifest.Writer</p>
+                <p class="mb-1">@manifest.Manifest.Blocks block(s)</p>
+                <p class="mb-1">Node: @Model.NodeUrl</p>
+            </div>
+
+            <button type="button" class="btn btn-primary" disabled="@(!Model.CanRead)" @onclick="StartRead">
+                Read
+            </button>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>
+    /// How often this screen forces a render while a read may be progressing. Matches Shell.razor's
+    /// and Publish.razor's own poll -- see their own remarks on why every poller in this application
+    /// agrees on the interval.
+    /// </summary>
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+
+    private readonly CancellationTokenSource _cts = new();
+    private Timer? _pollTimer;
+    private bool _disposed;
+
+    protected override void OnInitialized() =>
+        _pollTimer = new Timer(OnPollTick, state: null, PollInterval, PollInterval);
+
+    private void OnPollTick(object? state)
+    {
+        // Same disposal discipline as Shell.razor's and Publish.razor's own pollers: Timer.Dispose
+        // does not wait for a callback already running on a thread-pool thread, so _disposed is
+        // checked inside the delegate the renderer's own dispatcher runs, which orders that check
+        // against Dispose().
+        _ = InvokeAsync(() =>
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    private Task LookUpAsync() => Model.LookUpAsync(_cts.Token);
+
+    // Model.CanRead is what gates this button (disabled unless it is true), and CanRead is defined
+    // as Manifest is not null && Message is null -- LookUpAsync's own finally block only ever writes
+    // Parsed and Manifest together, never one without the other, so CanRead being true is already the
+    // model's guarantee that both are set. The null-forgiving operators below assert exactly that
+    // guarantee rather than repeating it as a second check this markup would otherwise be inventing.
+    private void StartRead() => Run.Start(Model.Parsed!, Model.Manifest!);
+
+    private void Cancel() => Run.Cancel();
+
+    private Task SaveAsync() => Run.SaveAsync(_cts.Token);
+
+    private void Dismiss()
+    {
+        Run.Reset();
+        Model.Clear();
+    }
+
+    public void Dispose()
+    {
+        // Set before the timer is disposed, for the reason Shell.razor's own Dispose explains.
+        _disposed = true;
+        _pollTimer?.Dispose();
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}
