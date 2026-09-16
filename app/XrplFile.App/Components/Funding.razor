@@ -7,44 +7,62 @@
    scanning the code is free to send whatever the person decided. Model.AccountExists is what
    chooses between the balance and "not funded yet" below; this markup never compares BalanceDrops
    to zero itself. The QR is drawn the same way ExportKey.razor draws one: QrMatrix.Build runs once,
-   off Model.QrPayload, and OnAfterRenderAsync paints the canvas the one time that matters. *@
+   off Model.QrPayload, and OnAfterRenderAsync paints the canvas the one time that matters.
 
-<h1 class="h3">Fund this account</h1>
+   FundingModel is a singleton, and SelectAsync deliberately assigns Address only once the lookup
+   has actually resolved -- its own remarks explain why: a failed or slow lookup must not blank
+   whatever the previous selection left on screen. That is correct for FundingModel itself, but it
+   means Model.Address can still be the PREVIOUS row's address for as long as this component's own
+   OnInitializedAsync is awaiting SelectAsync, and Blazor renders once before an awaited
+   OnInitializedAsync completes. Rendering nothing at all until _ready is set -- after SelectAsync
+   and the first RefreshAsync have both returned for THIS component's own Reference -- is what keeps
+   that stale address, and its live Copy button, off the screen: the worst outcome this screen could
+   produce is handing somebody an address that belongs to a different account than the one they just
+   opened. *@
 
-<p>
-    Send XRP to the address below, from any wallet. The account appears on the ledger once it holds
-    its reserve.
-</p>
-
-@if (Model.Message is not null)
+@if (!_ready)
 {
-    <div class="alert alert-warning">@Model.Message</div>
+    <p>Loading&hellip;</p>
 }
-
-@if (Model.Address is { } address)
+else
 {
-    <p><code class="user-select-all">@address</code></p>
+    <h1 class="h3">Fund this account</h1>
 
-    <div style="-webkit-touch-callout: none; display: inline-block;">
-        <canvas @ref="_qrCanvas"></canvas>
-    </div>
-
-    <div class="mt-2">
-        <button type="button" class="btn btn-outline-secondary" disabled="@_copying" @onclick="CopyAsync">
-            Copy address
-        </button>
-    </div>
-
-    <p class="mt-3">
-        @if (Model.AccountExists)
-        {
-            <span>Balance: @Model.BalanceDrops.ToString("N0") drops</span>
-        }
-        else
-        {
-            <span class="text-muted">Not funded yet.</span>
-        }
+    <p>
+        Send XRP to the address below, from any wallet. The account appears on the ledger once it
+        holds its reserve.
     </p>
+
+    @if (Model.Message is not null)
+    {
+        <div class="alert alert-warning">@Model.Message</div>
+    }
+
+    @if (Model.Address is { } address)
+    {
+        <p><code class="user-select-all">@address</code></p>
+
+        <div style="-webkit-touch-callout: none; display: inline-block;">
+            <canvas @ref="_qrCanvas"></canvas>
+        </div>
+
+        <div class="mt-2">
+            <button type="button" class="btn btn-outline-secondary" disabled="@_copying" @onclick="CopyAsync">
+                Copy address
+            </button>
+        </div>
+
+        <p class="mt-3">
+            @if (Model.AccountExists)
+            {
+                <span>Balance: @Model.BalanceDrops.ToString("N0") drops</span>
+            }
+            else
+            {
+                <span class="text-muted">Not funded yet.</span>
+            }
+        </p>
+    }
 }
 
 <div class="mt-3">
@@ -62,6 +80,7 @@
     private ElementReference _qrCanvas;
     private bool[][]? _pendingMatrix;
     private bool _copying;
+    private bool _ready;
 
     protected override async Task OnInitializedAsync()
     {
@@ -69,6 +88,7 @@
         await Model.RefreshAsync(_cts.Token);
 
         _pendingMatrix = Model.QrPayload is { } payload ? QrMatrix.Build(payload) : null;
+        _ready = true;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

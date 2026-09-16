@@ -6,14 +6,20 @@
    address both only ever reach Model.ChooseDestination, and nothing is confirmable before
    Model.PreflightAsync has actually run (G5).
 
+   The account this whole screen is about to destroy is named up front -- label and address, from
+   Model.AccountLabel/AccountAddress, plus its balance once a preflight has read it -- because this
+   is reached from a list of near-identical throwaway rows and the destination side alone being done
+   properly does not tell a person which source account they are looking at.
+
    Once Model.Preview says Ready, the confirmation shows the destination address in full -- never
    truncated, since a truncated address hides exactly the characters a typo lives in -- its current
    balance, which is how a person recognises the account they meant (G6), what will arrive, and the
    fee, plus fixed copy that the account will cease to exist and this cannot be undone. When the
-   outcome is NotYet this screen shows the ledger it becomes possible from and offers no second
-   button: waiting is never a reason to talk somebody into leaving the reserve behind forever (G11).
-   Every other outcome is already a sentence in Model.Message -- CloseErrorMessages, not this markup,
-   decides what a refusal means. *@
+   outcome is NotYet this screen shows the ledger it becomes possible from and how many ledgers that
+   is from here (Model.LedgersRemaining -- a ledger number alone gives a person only one of the two
+   numbers the wait needs), and offers no second button: waiting is never a reason to talk somebody
+   into leaving the reserve behind forever (G11). Every other outcome is already a sentence in
+   Model.Message -- CloseErrorMessages, not this markup, decides what a refusal means. *@
 
 @if (Model.Closed is { } closed)
 {
@@ -31,6 +37,14 @@ else
 {
     <h1 class="h3">Close account</h1>
 
+    <div class="alert alert-secondary">
+        <strong>@Model.AccountLabel</strong> &mdash; <span class="user-select-all">@Model.AccountAddress</span>
+        @if (Model.Preview is { } holding)
+        {
+            <span>(currently holds @holding.BalanceDrops.ToString("N0") drops)</span>
+        }
+    </div>
+
     <p>
         Closing sends everything this account holds to a destination you choose.
         <strong>The account will cease to exist, and this cannot be undone.</strong>
@@ -46,22 +60,23 @@ else
 
         @if (Model.Candidates.Count > 0)
         {
-            <ul class="list-group mb-2">
+            <div class="list-group mb-2">
                 @foreach (VaultEntryInfo candidate in Model.Candidates)
                 {
-                    <li class="list-group-item @(string.Equals(Model.Destination, candidate.Address, StringComparison.Ordinal) ? "active" : "")"
-                        @onclick="() => Model.ChooseDestination(candidate.Address)">
+                    <button type="button"
+                            class="list-group-item list-group-item-action @(string.Equals(Model.Destination, candidate.Address, StringComparison.Ordinal) ? "active" : "")"
+                            @onclick="() => Model.ChooseDestination(candidate.Address)">
                         @candidate.Label &mdash; @candidate.Address (@candidate.Network)
-                    </li>
+                    </button>
                 }
-            </ul>
+            </div>
         }
 
         <input class="form-control" placeholder="Or type an address" disabled="@_busy"
                value="@Model.Destination" @oninput="e => Model.ChooseDestination((string)e.Value!)" />
     </div>
 
-    <button type="button" class="btn btn-outline-primary" disabled="@(Model.Destination is null || _busy)"
+    <button type="button" class="btn btn-outline-primary" disabled="@(!Model.CanPreflight || _busy)"
             @onclick="PreflightAsync">
         Check
     </button>
@@ -88,10 +103,16 @@ else
     }
     else if (Model.Preview is { Outcome: DeletionOutcome.NotYet } notYet)
     {
-        <div class="alert alert-secondary mt-3">
-            It cannot be closed yet. It becomes possible from ledger
-            <strong>@notYet.DeletableFromLedger</strong>.
-        </div>
+        @if (notYet.DeletableFromLedger is { } deletableFrom)
+        {
+            <div class="alert alert-secondary mt-3">
+                <p>It cannot be closed yet. It becomes possible from ledger <strong>@deletableFrom</strong>.</p>
+                @if (Model.LedgersRemaining is { } remaining)
+                {
+                    <p>About @remaining.ToString("N0") ledgers remaining.</p>
+                }
+            </div>
+        }
     }
 
     <div class="mt-3">

@@ -19,6 +19,16 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     /// <summary>The vault's other keys, offered as destinations. Never this account itself.</summary>
     public IReadOnlyList<VaultEntryInfo> Candidates { get; private set; } = [];
 
+    /// <summary>
+    /// The label of the account being closed — set as soon as <see cref="SelectAsync"/> resolves it,
+    /// with no node round trip, so the screen can say which account it is about to destroy before it
+    /// has asked anything of a ledger.
+    /// </summary>
+    public string? AccountLabel { get; private set; }
+
+    /// <summary>The address of the account being closed. See <see cref="AccountLabel"/>.</summary>
+    public string? AccountAddress { get; private set; }
+
     public string? Destination { get; private set; }
 
     /// <summary>What the destination holds now — how a person recognises the account they meant (design G6).</summary>
@@ -27,6 +37,15 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     /// <summary>What the deletion would do, as the library computed it. Null until a preflight has run.</summary>
     public DeletionResult? Preview { get; private set; }
 
+    /// <summary>
+    /// How many ledgers remain before a <see cref="DeletionOutcome.NotYet"/> preview becomes
+    /// closable, read alongside the preflight itself. Null until a preflight has run, and also null
+    /// when the preview did not name a <see cref="DeletionResult.DeletableFromLedger"/> to count
+    /// down to (design 5's "how long the wait is, not just when it ends" — a ledger number on its
+    /// own gives a person only one of the two numbers the subtraction needs).
+    /// </summary>
+    public long? LedgersRemaining { get; private set; }
+
     public string? Message { get; private set; }
 
     /// <summary>The closure this screen recorded, once one happened.</summary>
@@ -34,15 +53,22 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
 
     public bool CanClose => Preview is { Outcome: DeletionOutcome.Ready } && Destination is not null;
 
+    /// <summary>Whether a preflight can be run at all — a destination has been named. The screen
+    /// reads this rather than comparing <see cref="Destination"/> to null itself.</summary>
+    public bool CanPreflight => Destination is not null;
+
     public async Task SelectAsync(string reference, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(reference);
 
         Message = null;
         Preview = null;
+        LedgersRemaining = null;
         Destination = null;
         DestinationBalanceDrops = 0;
         Closed = null;
+        AccountLabel = null;
+        AccountAddress = null;
         _reference = null;
         _network = null;
 
@@ -60,6 +86,8 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
 
             _reference = reference;
             _network = entry.Network;
+            AccountLabel = entry.Label;
+            AccountAddress = entry.Address;
 
             // Three ways an offered entry could not actually work as a destination: it is this same
             // account under a second reference, it is on a network this deletion cannot reach, or it
@@ -89,6 +117,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     {
         Destination = string.IsNullOrWhiteSpace(address) ? null : address.Trim();
         Preview = null;
+        LedgersRemaining = null;
         DestinationBalanceDrops = 0;
         Message = null;
     }
@@ -97,6 +126,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     {
         Message = null;
         Preview = null;
+        LedgersRemaining = null;
 
         if (_reference is null || _network is null || Destination is null)
         {
@@ -120,8 +150,18 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             AccountState home = await connection.Source
                 .AccountStateAsync(Destination, cancellationToken).ConfigureAwait(false);
 
+            // Mirrors AccountsModel.RefreshFromLedgerAsync's own Math.Max(0, deletableFrom -
+            // current): "not yet" without a count of how long is meaningless to a person weighing
+            // whether to wait, since DeletableFromLedger alone names where the wait ends but not
+            // how far away that is from here. Read after the preview so this connection's own
+            // reserve of round trips buys one more rather than a second connection.
+            long current = await connection.Source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+
             Preview = preview;
             DestinationBalanceDrops = home.BalanceDrops;
+            LedgersRemaining = preview.DeletableFromLedger is { } deletableFrom
+                ? Math.Max(0, deletableFrom - current)
+                : null;
 
             if (preview.Outcome != DeletionOutcome.Ready)
             {
@@ -167,6 +207,12 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             DeletionResult result = await account.DeleteAsync(Destination, cancellationToken).ConfigureAwait(false);
 
             Preview = result;
+
+            // Stale from whatever the last preflight measured against a ledger that has since
+            // moved on: CanClose required Ready, which never carries a DeletableFromLedger, so
+            // this was already null every time this line runs — cleared explicitly anyway so nothing
+            // here depends on that coincidence if DeleteAsync's own internal preview ever disagrees.
+            LedgersRemaining = null;
             Message = CloseErrorMessages.For(result.Outcome);
 
             // Recorded only for a deletion a ledger actually took. A queued one has not happened:

@@ -174,6 +174,28 @@ public sealed class CloseAccountModelTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_preflight_that_is_not_yet_ready_exposes_ledgers_remaining_matching_the_ledger_it_names()
+    {
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);
+        _connections.Ledger.Balances[Home] = 5_000_000;
+
+        // OpenAsync's default sequence (10) plus DeletionSequenceDelta (254) puts the deletable
+        // ledger at 264; a current ledger short of that forces NotYet on the sequence threshold
+        // specifically -- not the balance-too-low branch, which never names a DeletableFromLedger
+        // for LedgersRemaining to be measured against.
+        _connections.Ledger.CurrentLedger = 200;
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        model.ChooseDestination(Home);
+        await model.PreflightAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(DeletionOutcome.NotYet, model.Preview!.Outcome);
+        Assert.Equal(264, model.Preview.DeletableFromLedger);
+        Assert.Equal(model.Preview.DeletableFromLedger!.Value - 200, model.LedgersRemaining);
+        Assert.Equal(64, model.LedgersRemaining);
+    }
+
+    [Fact]
     public async Task A_destination_the_ledger_does_not_carry_refuses_and_will_not_close()
     {
         (CloseAccountModel model, _, string reference, _) =

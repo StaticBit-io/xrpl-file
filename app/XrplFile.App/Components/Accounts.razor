@@ -73,7 +73,11 @@
                                             break;
 
                                         case AccountStage.Funded:
-                                            <span>@row.BalanceDrops.GetValueOrDefault().ToString("N0") drops</span>
+                                            @* Guaranteed non-null on this branch (AccountsModel only reaches Funded
+                                               once a node has actually answered); the null-forgiving operator states
+                                               that invariant rather than GetValueOrDefault() quietly standing in for
+                                               an answer nobody gave, which is exactly the zero design G8 forbids. *@
+                                            <span>@row.BalanceDrops!.Value.ToString("N0") drops</span>
                                             break;
 
                                         case AccountStage.Closable:
@@ -92,11 +96,11 @@
                                     }
                                 </td>
                                 <td class="text-end">
-                                    @if (row.Stage != AccountStage.Closed)
+                                    @if (row.HasActions)
                                     {
                                         <div class="btn-group btn-group-sm">
                                             <button type="button" class="btn btn-outline-secondary"
-                                                    disabled="@(_checkingReference == row.Reference)"
+                                                    disabled="@(string.Equals(_checkingReference, row.Reference, StringComparison.Ordinal))"
                                                     @onclick="() => CheckAsync(row.Reference)">
                                                 Check
                                             </button>
@@ -148,6 +152,7 @@
     private readonly CancellationTokenSource _cts = new();
     private Timer? _pollTimer;
     private bool _disposed;
+    private bool _fundingPollInFlight;
     private SubView _view = SubView.List;
     private string? _activeReference;
     private string? _checkingReference;
@@ -173,12 +178,35 @@
                 return;
             }
 
-            if (_view == SubView.Funding)
+            // FundingModel.RefreshAsync opens a ledger connection and can outlast one second
+            // against a slow node; without this guard, a tick that fires while the previous one is
+            // still awaiting would start a second connection racing the first one's writes to the
+            // same fields, and a third would stack on top of that. Only one refresh is ever allowed
+            // in flight -- a tick that finds one already running simply redraws this render's own
+            // state and waits for the next.
+            if (_view == SubView.Funding && !_fundingPollInFlight)
             {
-                await FundingModel.RefreshAsync(_cts.Token);
+                _fundingPollInFlight = true;
+                try
+                {
+                    await FundingModel.RefreshAsync(_cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Dispose() cancels _cts while this tick may be mid-await -- the ordinary way
+                    // this screen is ever left, on this tab above all, not a fault to surface.
+                    return;
+                }
+                finally
+                {
+                    _fundingPollInFlight = false;
+                }
             }
 
-            StateHasChanged();
+            if (!_disposed)
+            {
+                StateHasChanged();
+            }
         });
     }
 
