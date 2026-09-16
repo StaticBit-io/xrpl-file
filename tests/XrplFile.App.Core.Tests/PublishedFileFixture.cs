@@ -62,7 +62,22 @@ public static class PublishedFileFixture
         {
             // Matches PublicationSessionTests.Dispose() and ReadModelTests.Dispose() -- state files
             // are per-call scratch, not something a repeated local run should be left to accumulate.
-            Directory.Delete(stateDirectory, recursive: true);
+            // Swallowed because this runs in a finally: a delete that fails on a file the operating
+            // system still holds would replace whatever the publish above threw, hiding the failure
+            // a test was written to diagnose behind an unrelated one from the cleanup.
+            try
+            {
+                if (Directory.Exists(stateDirectory))
+                {
+                    Directory.Delete(stateDirectory, recursive: true);
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
         }
     }
 }
