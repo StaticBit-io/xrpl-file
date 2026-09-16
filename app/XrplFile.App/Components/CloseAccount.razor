@@ -37,13 +37,17 @@ else
 {
     <h1 class="h3">Close account</h1>
 
-    <div class="alert alert-secondary">
-        <strong>@Model.AccountLabel</strong> &mdash; <span class="user-select-all">@Model.AccountAddress</span>
-        @if (Model.Preview is { } holding)
-        {
-            <span>(currently holds @holding.BalanceDrops.ToString("N0") drops)</span>
-        }
-    </div>
+    @if (Model.AccountAddress is { } accountAddress)
+    {
+        <div class="alert alert-secondary">
+            <strong>Closing:</strong> @Model.AccountLabel &mdash;
+            <span class="user-select-all">@accountAddress</span>
+            @if (Model.Preview is { } holding)
+            {
+                <span>(currently holds @holding.BalanceDrops.ToString("N0") drops)</span>
+            }
+        </div>
+    }
 
     <p>
         Closing sends everything this account holds to a destination you choose.
@@ -63,7 +67,7 @@ else
             <div class="list-group mb-2">
                 @foreach (VaultEntryInfo candidate in Model.Candidates)
                 {
-                    <button type="button"
+                    <button type="button" disabled="@_busy"
                             class="list-group-item list-group-item-action @(string.Equals(Model.Destination, candidate.Address, StringComparison.Ordinal) ? "active" : "")"
                             @onclick="() => Model.ChooseDestination(candidate.Address)">
                         @candidate.Label &mdash; @candidate.Address (@candidate.Network)

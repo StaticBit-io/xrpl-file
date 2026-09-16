@@ -11,32 +11,34 @@
 
    FundingModel is a singleton, and SelectAsync deliberately assigns Address only once the lookup
    has actually resolved -- its own remarks explain why: a failed or slow lookup must not blank
-   whatever the previous selection left on screen. That is correct for FundingModel itself, but it
-   means Model.Address can still be the PREVIOUS row's address for as long as this component's own
-   OnInitializedAsync is awaiting SelectAsync, and Blazor renders once before an awaited
-   OnInitializedAsync completes. Rendering nothing at all until _ready is set -- after SelectAsync
-   and the first RefreshAsync have both returned for THIS component's own Reference -- is what keeps
-   that stale address, and its live Copy button, off the screen: the worst outcome this screen could
-   produce is handing somebody an address that belongs to a different account than the one they just
-   opened. *@
+   whatever the previous selection left on screen. That means Model.Address can be a PREVIOUS row's
+   address even after this component's own SelectAsync call has returned, if that call itself was
+   the one that failed (a locked vault between two visits, an entry that vanished) -- waiting for
+   the call to return, which an earlier version of this file did, closes only the render race, not
+   this one: a failed select still leaves Address, and a live Copy button over it, on screen with
+   nothing saying anything went wrong. Ready below waits for the OUTCOME instead, by comparing
+   Model.CurrentReference -- which FundingModel sets only once a select actually resolves for a
+   given reference -- to this component's own Reference. Model.Message is still shown unconditionally
+   above, failed select included, so the explanation a failed select set is not hidden behind Ready
+   being false. *@
 
-@if (!_ready)
+<h1 class="h3">Fund this account</h1>
+
+@if (Model.Message is not null)
+{
+    <div class="alert alert-warning">@Model.Message</div>
+}
+
+@if (!Ready)
 {
     <p>Loading&hellip;</p>
 }
 else
 {
-    <h1 class="h3">Fund this account</h1>
-
     <p>
         Send XRP to the address below, from any wallet. The account appears on the ledger once it
         holds its reserve.
     </p>
-
-    @if (Model.Message is not null)
-    {
-        <div class="alert alert-warning">@Model.Message</div>
-    }
 
     @if (Model.Address is { } address)
     {
@@ -80,15 +82,28 @@ else
     private ElementReference _qrCanvas;
     private bool[][]? _pendingMatrix;
     private bool _copying;
-    private bool _ready;
+
+    /// <summary>
+    /// Whether Model's data is actually resolved for THIS component's own Reference, read live off
+    /// the model rather than cached in a field set once at the end of OnInitializedAsync -- a cached
+    /// flag would say "ready" forever after a successful select even though nothing re-checks it,
+    /// and would need its own careful reset on every failure path. Comparing live costs nothing and
+    /// cannot drift out of step with the model.
+    /// </summary>
+    private bool Ready => string.Equals(Model.CurrentReference, Reference, StringComparison.Ordinal);
 
     protected override async Task OnInitializedAsync()
     {
         await Model.SelectAsync(Reference, _cts.Token);
+
+        if (!Ready)
+        {
+            return;
+        }
+
         await Model.RefreshAsync(_cts.Token);
 
         _pendingMatrix = Model.QrPayload is { } payload ? QrMatrix.Build(payload) : null;
-        _ready = true;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

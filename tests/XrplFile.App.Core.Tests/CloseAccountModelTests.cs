@@ -56,6 +56,21 @@ public sealed class CloseAccountModelTests : VaultHarness
     }
 
     [Fact]
+    public async Task CanPreflight_follows_whether_a_destination_has_been_named()
+    {
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        Assert.False(model.CanPreflight);
+
+        model.ChooseDestination(Home);
+        Assert.True(model.CanPreflight);
+
+        model.ChooseDestination(string.Empty);
+        Assert.False(model.CanPreflight);
+    }
+
+    [Fact]
     public async Task The_other_keys_in_the_vault_are_offered_as_destinations_and_this_account_is_not()
     {
         (CloseAccountModel model, KeyVault vault, string reference, XrplWallet wallet) =
@@ -193,6 +208,32 @@ public sealed class CloseAccountModelTests : VaultHarness
         Assert.Equal(264, model.Preview.DeletableFromLedger);
         Assert.Equal(model.Preview.DeletableFromLedger!.Value - 200, model.LedgersRemaining);
         Assert.Equal(64, model.LedgersRemaining);
+    }
+
+    [Fact]
+    public async Task A_failed_countdown_read_does_not_lose_a_notyet_preview()
+    {
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);
+        _connections.Ledger.Balances[Home] = 5_000_000;
+        _connections.Ledger.CurrentLedger = 200; // forces NotYet on the sequence threshold, as above
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        model.ChooseDestination(Home);
+
+        // ThrowawayAccount.PreviewDeletionAsync's own threshold read is the first call this fake
+        // sees and must still succeed, or NotYet would never come back with a DeletableFromLedger to
+        // count down from at all; only PreflightAsync's own second, independent read -- the one that
+        // exists purely for the countdown -- is made to fail.
+        _connections.Ledger.CurrentLedgerFailure = new XrplFileException(XrplFileError.NodeUnreachable, "no answer");
+        _connections.Ledger.CurrentLedgerFailsFromCall = 2;
+
+        await model.PreflightAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(model.Preview);
+        Assert.Equal(DeletionOutcome.NotYet, model.Preview.Outcome);
+        Assert.Equal(264, model.Preview.DeletableFromLedger);
+        Assert.Null(model.LedgersRemaining);
+        Assert.Equal(CloseErrorMessages.For(DeletionOutcome.NotYet), model.Message);
     }
 
     [Fact]

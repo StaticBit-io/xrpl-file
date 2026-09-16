@@ -28,10 +28,23 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
     public string? Message { get; private set; }
 
     /// <summary>
+    /// The reference the data above actually belongs to — set only once <see cref="SelectAsync"/>
+    /// has resolved it, and cleared whenever a select fails to. <see cref="Address"/> alone cannot
+    /// say this: a failed lookup deliberately leaves it holding whatever the previous selection put
+    /// there (see <see cref="SelectAsync"/>'s own remarks), so a caller that wants to know "is this
+    /// really the account I just opened, or is it what an earlier screen left behind" has to compare
+    /// this property to the reference it asked for, not read <see cref="Address"/> on faith.
+    /// </summary>
+    public string? CurrentReference { get; private set; }
+
+    /// <summary>
     /// Resolves <paramref name="reference"/> before touching anything shown, so a failed or empty
     /// lookup leaves the previous selection on screen rather than blanking it. The address may be
     /// the one thing a person is halfway through copying when, say, the vault locks itself between
     /// two visits to this screen — a lookup that cannot answer must not be the reason it disappears.
+    /// <see cref="CurrentReference"/> still moves to <see langword="null"/> on a failure, though: the
+    /// screen keeps showing the previous address, but nothing here vouches for it belonging to
+    /// <paramref name="reference"/> any more.
     /// </summary>
     public async Task SelectAsync(string reference, CancellationToken cancellationToken)
     {
@@ -48,12 +61,14 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
         catch (VaultException ex)
         {
             Message = VaultErrorMessages.For(ex.Error);
+            CurrentReference = null;
             return;
         }
 
         if (entry is null)
         {
             Message = "That key is no longer in the vault.";
+            CurrentReference = null;
             return;
         }
 
@@ -61,13 +76,23 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
         Network = entry.Network;
         BalanceDrops = 0;
         AccountExists = false;
+        CurrentReference = reference;
     }
 
+    /// <summary>
+    /// Does nothing when <see cref="CurrentReference"/> is null: either nothing has resolved a
+    /// selection yet, or the last <see cref="SelectAsync"/> failed and left <see cref="Address"/>
+    /// holding a previous selection this method has no business querying the ledger about — and,
+    /// just as importantly, clearing <see cref="Message"/> in that state would erase the very
+    /// explanation the failed select just set.
+    /// </summary>
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
+        if (CurrentReference is null || Address is null || Network is null) return;
+
         Message = null;
 
-        if (Address is null || Network is null) return;
+        string reference = CurrentReference;
 
         try
         {
@@ -77,11 +102,20 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
             AccountState state = await connection.Source
                 .AccountStateAsync(Address, cancellationToken).ConfigureAwait(false);
 
+            // The selection can change while this call is in flight -- a later SelectAsync, for a
+            // different reference, resolving before this one's own network round trip does. Writing
+            // this answer in that case would land the PREVIOUS account's balance under whatever
+            // address is now on screen, which is exactly the failure CurrentReference exists to let
+            // this method notice and refuse.
+            if (!string.Equals(CurrentReference, reference, StringComparison.Ordinal)) return;
+
             BalanceDrops = state.BalanceDrops;
             AccountExists = state.BalanceDrops > 0;
         }
         catch (XrplFileException ex)
         {
+            if (!string.Equals(CurrentReference, reference, StringComparison.Ordinal)) return;
+
             Message = PublishErrorMessages.For(ex);
         }
     }

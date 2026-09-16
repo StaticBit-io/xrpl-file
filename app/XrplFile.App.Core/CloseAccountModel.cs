@@ -150,22 +150,41 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             AccountState home = await connection.Source
                 .AccountStateAsync(Destination, cancellationToken).ConfigureAwait(false);
 
-            // Mirrors AccountsModel.RefreshFromLedgerAsync's own Math.Max(0, deletableFrom -
-            // current): "not yet" without a count of how long is meaningless to a person weighing
-            // whether to wait, since DeletableFromLedger alone names where the wait ends but not
-            // how far away that is from here. Read after the preview so this connection's own
-            // reserve of round trips buys one more rather than a second connection.
-            long current = await connection.Source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
-
+            // Assigned as soon as the node has actually answered both calls a confirmation needs --
+            // before the extra read below, which is a nice-to-have on top of a preflight that is
+            // already good. A node that answers these two and then drops the countdown read must not
+            // lose the preflight it already gave: the catch around this whole method would otherwise
+            // leave Preview null and show a generic error in place of a confirmation the node had
+            // already earned.
             Preview = preview;
             DestinationBalanceDrops = home.BalanceDrops;
-            LedgersRemaining = preview.DeletableFromLedger is { } deletableFrom
-                ? Math.Max(0, deletableFrom - current)
-                : null;
 
             if (preview.Outcome != DeletionOutcome.Ready)
             {
                 Message = CloseErrorMessages.For(preview.Outcome);
+            }
+
+            // Mirrors AccountsModel.RefreshFromLedgerAsync's own Math.Max(0, deletableFrom -
+            // current): "not yet" without a count of how long is meaningless to a person weighing
+            // whether to wait, since DeletableFromLedger alone names where the wait ends but not how
+            // far away that is from here. Only attempted when there is a deletable ledger to count
+            // down to -- Ready never carries one, and neither does the balance-too-low NotYet. Its
+            // own failure is caught locally and leaves LedgersRemaining simply absent: a node flaky
+            // enough to answer the two calls above and then refuse this one is not a reason to throw
+            // away a preview it already gave.
+            if (preview.DeletableFromLedger is { } deletableFrom)
+            {
+                try
+                {
+                    long current = await connection.Source
+                        .CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+
+                    LedgersRemaining = Math.Max(0, deletableFrom - current);
+                }
+                catch (XrplFileException)
+                {
+                    LedgersRemaining = null;
+                }
             }
         }
         catch (XrplFileException ex)

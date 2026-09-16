@@ -226,7 +226,31 @@ public sealed class FakeLedgerSource : ILedgerSource
         }
     }
 
-    public Task<long> CurrentLedgerAsync(CancellationToken cancellationToken) => Task.FromResult(CurrentLedger);
+    private int _currentLedgerCalls;
+
+    /// <summary>Thrown by <see cref="CurrentLedgerAsync"/> from its <see cref="CurrentLedgerFailsFromCall"/>'th
+    /// call onward (1-based, counting every call this fake ever receives). Lets a test make an
+    /// earlier caller succeed -- <c>ThrowawayAccount.PreviewDeletionAsync</c>'s own threshold read,
+    /// say -- while a later, independent caller's own read fails, rather than failing every call the
+    /// way a single always-throw switch would.</summary>
+    public Exception? CurrentLedgerFailure { get; set; }
+
+    public int CurrentLedgerFailsFromCall { get; set; } = int.MaxValue;
+
+    public Task<long> CurrentLedgerAsync(CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            _currentLedgerCalls++;
+
+            if (CurrentLedgerFailure is { } failure && _currentLedgerCalls >= CurrentLedgerFailsFromCall)
+            {
+                return Task.FromException<long>(failure);
+            }
+
+            return Task.FromResult(_currentLedger);
+        }
+    }
 
     /// <summary>Destinations this fake ledger carries. Anything not here is <see cref="DestinationState.Absent"/>.</summary>
     public Dictionary<string, DestinationState> Destinations { get; } = new(StringComparer.Ordinal);

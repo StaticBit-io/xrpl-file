@@ -100,7 +100,7 @@
                                     {
                                         <div class="btn-group btn-group-sm">
                                             <button type="button" class="btn btn-outline-secondary"
-                                                    disabled="@(string.Equals(_checkingReference, row.Reference, StringComparison.Ordinal))"
+                                                    disabled="@Model.IsChecking(row.Reference)"
                                                     @onclick="() => CheckAsync(row.Reference)">
                                                 Check
                                             </button>
@@ -155,7 +155,6 @@
     private bool _fundingPollInFlight;
     private SubView _view = SubView.List;
     private string? _activeReference;
-    private string? _checkingReference;
 
     protected override async Task OnInitializedAsync()
     {
@@ -184,7 +183,15 @@
             // same fields, and a third would stack on top of that. Only one refresh is ever allowed
             // in flight -- a tick that finds one already running simply redraws this render's own
             // state and waits for the next.
-            if (_view == SubView.Funding && !_fundingPollInFlight)
+            //
+            // FundingModel.CurrentReference == _activeReference guards a second race: a tick started
+            // while THIS account's funding screen was open can still be in flight after somebody has
+            // since backed out and opened a DIFFERENT account's funding screen. FundingModel itself
+            // now refuses to apply a stale answer once its own CurrentReference has moved on (see its
+            // own remarks), so this check is not what keeps the fields correct -- it is what keeps
+            // this screen from starting a refresh for an account it is not even showing any more.
+            if (_view == SubView.Funding && !_fundingPollInFlight
+                && string.Equals(FundingModel.CurrentReference, _activeReference, StringComparison.Ordinal))
             {
                 _fundingPollInFlight = true;
                 try
@@ -224,16 +231,14 @@
 
     private async Task CheckAsync(string reference)
     {
-        _checkingReference = reference;
+        // Model.IsChecking(reference) flips to true synchronously, inside RefreshFromLedgerAsync,
+        // before that method's own first await -- capturing the Task and rendering once before
+        // awaiting it is what makes the button's disabled state visible for the whole call rather
+        // than only after it finishes.
+        Task refresh = Model.RefreshFromLedgerAsync(reference, _cts.Token);
         StateHasChanged();
-        try
-        {
-            await Model.RefreshFromLedgerAsync(reference, _cts.Token);
-        }
-        finally
-        {
-            _checkingReference = null;
-        }
+        await refresh;
+        StateHasChanged();
     }
 
     private async Task ReturnToListAsync()

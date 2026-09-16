@@ -11,11 +11,19 @@ namespace XrplFile.App.Core;
 public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connections)
 {
     private readonly Dictionary<string, AccountRow> _rows = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _checking = new(StringComparer.Ordinal);
 
     public IReadOnlyList<AccountRow> Rows { get; private set; } = [];
 
     /// <summary>Why the last read from a node came back with nothing, when it did.</summary>
     public string? Message { get; private set; }
+
+    /// <summary>
+    /// Whether <see cref="RefreshFromLedgerAsync"/> currently has a network round trip in flight for
+    /// this reference. The Accounts screen reads this to disable a row's own Check button rather than
+    /// tracking "which row I last clicked" as local, untestable state of its own.
+    /// </summary>
+    public bool IsChecking(string reference) => _checking.Contains(reference);
 
     /// <summary>Re-reads the vault. Contacts no node: a list must be drawable with no network at all.</summary>
     public async Task RefreshAsync(CancellationToken cancellationToken)
@@ -60,6 +68,7 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
 
         if (!_rows.TryGetValue(reference, out AccountRow? row) || row.Stage == AccountStage.Closed) return;
 
+        _checking.Add(reference);
         try
         {
             await using ILedgerConnection connection =
@@ -111,6 +120,10 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
         catch (VaultException ex)
         {
             Message = VaultErrorMessages.For(ex.Error);
+        }
+        finally
+        {
+            _checking.Remove(reference);
         }
     }
 }

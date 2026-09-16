@@ -144,4 +144,17 @@ public sealed class AccountsModelTests : VaultHarness
         Assert.Single(model.Rows);
         Assert.NotNull(model.Message);
     }
+
+    [Fact]
+    public void HasActions_is_true_for_every_stage_except_closed()
+    {
+        static AccountRow Row(AccountStage stage) =>
+            new("ref", "label", "rAddress", "1", stage, null, null, null, null);
+
+        Assert.True(Row(AccountStage.Unknown).HasActions);
+        Assert.True(Row(AccountStage.KeyOnly).HasActions);
+        Assert.True(Row(AccountStage.Funded).HasActions);
+        Assert.True(Row(AccountStage.Closable).HasActions);
+        Assert.False(Row(AccountStage.Closed).HasActions);
+    }
 }
