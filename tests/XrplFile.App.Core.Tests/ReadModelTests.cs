@@ -4,10 +4,30 @@ namespace XrplFile.App.Core.Tests;
 
 public sealed class ReadModelTests : IDisposable
 {
-    private readonly string _directory = Directory.CreateTempSubdirectory("xrpl-file-read-").FullName;
+    // Distinct from both ReadRun's own production prefix ("xrpl-file-read-", ReadRun.cs) and
+    // PublishedFileFixture's ("xrpl-file-read-fixture-"): sharing "xrpl-file-read-" with production
+    // made this fixture's own directories indistinguishable from a leaked temporary read in `ls
+    // "$TEMP"/xrpl-file-read-*` while measuring cleanup for the whole-branch review.
+    private readonly string _directory = Directory.CreateTempSubdirectory("xrpl-file-readmodeltests-").FullName;
     private readonly FakeConnectionFactory _connections = new();
 
-    public void Dispose() => Directory.Delete(_directory, recursive: true);
+    public void Dispose()
+    {
+        // Guarded the same way PublishedFileFixture's own teardown is (Ruling 10): an unguarded
+        // delete that throws from Dispose would replace whatever the test itself actually failed on
+        // with an unrelated teardown failure, and this directory holds only one small JSON file with
+        // no honest reason for a delete to fail here that is worth losing that diagnosis over.
+        try
+        {
+            Directory.Delete(_directory, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
 
     private ReadModel NewModel() =>
         new(_connections, new FileNodeSettingsStore(Path.Combine(_directory, "node-urls.json")));
