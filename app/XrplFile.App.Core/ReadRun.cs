@@ -38,9 +38,9 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
     /// this at its own start and only writes <c>_saved</c>/<c>_failure</c>/<c>_saving</c> back if it
     /// is still current, the same shape <see cref="PublicationRun"/>'s own generation protects its
     /// post-terminal writes with (see its remarks) and <see cref="ReadModel"/>'s protects a lookup
-    /// with. <see cref="Start"/> and <see cref="Reset"/> both also baseline <c>_saving</c> to
-    /// <see langword="false"/> for the generation they start, so a stale <see cref="SaveAsync"/>
-    /// call finding itself superseded never needs to touch it.
+    /// with. <see cref="Start"/>, <see cref="Reset"/> and <see cref="Dispose"/> all three also
+    /// baseline <c>_saving</c> to <see langword="false"/> for the generation they leave behind, so a
+    /// stale <see cref="SaveAsync"/> call finding itself superseded never needs to touch it.
     /// </summary>
     private int _generation;
 
