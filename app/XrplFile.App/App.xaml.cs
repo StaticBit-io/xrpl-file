@@ -6,9 +6,17 @@ namespace XrplFile.App;
 public partial class App : Application
 {
 	/// <summary>
-	/// How long a closing window waits for a running publication to stop. Bounded on purpose: a run
-	/// that will not stop must not hold the window open forever, and when this expires the lock
-	/// proceeds anyway — which is exactly C1's behaviour and no worse than it.
+	/// How long a closing window waits for a running publication to stop, and — since part C4 — how
+	/// long it then waits for a running read. Bounded on purpose: a run that will not stop must not
+	/// hold the window open forever, and when this expires the lock proceeds anyway — which is
+	/// exactly C1's behaviour and no worse than it.
+	/// <para>
+	/// The two waits are sequential, so a window closing over a publication and a read that both
+	/// refuse to stop can spend twice this before the vault locks. That is deliberate rather than
+	/// overlooked: the stops return the moment their run ends, so the ordinary case — nothing
+	/// running, which is most sessions — costs nothing at all, and the worst case needs two hung
+	/// runs at once while the window is already going.
+	/// </para>
 	/// </summary>
 	private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(10);
 

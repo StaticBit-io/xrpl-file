@@ -86,10 +86,13 @@ public static class MauiProgram
     /// window manager away) and the normal case on every other platform MAUI can target, where the
     /// OS backgrounds an app instead of killing its process. <c>App.xaml.cs</c> is where this is
     /// closed: its constructor takes <see cref="IKeyVault"/>, <see cref="VaultAutoLock"/> and
-    /// <see cref="PublicationRun"/> from this same DI container (MAUI resolves <c>App</c> through
-    /// it, exactly like every service registered here), and its <see cref="Window.Destroying"/>
-    /// handler stops a running publication (<see cref="PublicationRun.StopAsync"/>, bounded so a
-    /// run that will not stop cannot hold the window open forever — design F6) before it calls
+    /// <see cref="PublicationRun"/> and <see cref="ReadRun"/> from this same DI container (MAUI
+    /// resolves <c>App</c> through it, exactly like every service registered here), and its
+    /// <see cref="Window.Destroying"/> handler stops a running publication
+    /// (<see cref="PublicationRun.StopAsync"/>, bounded so a run that will not stop cannot hold the
+    /// window open forever — design F6) and then a running read (<see cref="ReadRun.StopAsync"/>,
+    /// bounded the same way, and deleting the temporary file it was writing to as part of stopping
+    /// — design H6) before it calls
     /// <see cref="IKeyVault.LockAsync"/> and then <see cref="VaultAutoLock.DisposeAsync"/>: locking
     /// first would land while the run was still going and kill it at its next signature with
     /// <c>VaultError.Locked</c>, mid batch, with money already spent.
