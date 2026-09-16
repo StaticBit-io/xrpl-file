@@ -250,6 +250,38 @@ public sealed class ReadRunTests : IDisposable
     }
 
     [Fact]
+    public async Task Resetting_a_run_that_is_still_going_changes_nothing()
+    {
+        // The decision History.razor's Read button leans on (design's Important 1 fix): pressing
+        // Read beside a row calls Reset() unconditionally, without checking State itself first, so
+        // Reset() has to be the one place that decides whether a genuinely running read may be
+        // discarded. It may not -- a running read must not be silently thrown away just because
+        // somebody pointed the Read tab at a different link -- and this is the test that proves
+        // Reset() actually refuses, not merely that the source reads as though it does.
+        (ReadRun _, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
+
+        GatedAccountTransactionsSource gate = new(_connections.Ledger);
+        ReadRun run = Track(new ReadRun(new GatedReadConnectionFactory(_connections, gate), _picker));
+
+        Assert.True(run.Start(link, manifest));
+        await gate.Reached;
+
+        string? temporary = run.TemporaryPathForTests;
+        Assert.NotNull(temporary);
+        Assert.True(File.Exists(temporary));
+
+        run.Reset();
+
+        Assert.Equal(ReadState.Running, run.Snapshot.State);
+        Assert.True(File.Exists(temporary));
+
+        gate.Release();
+        await run.Completion;
+
+        Assert.Equal(ReadState.Succeeded, run.Snapshot.State);
+    }
+
+    [Fact]
     public async Task A_second_read_while_one_is_going_is_refused()
     {
         (ReadRun run, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);

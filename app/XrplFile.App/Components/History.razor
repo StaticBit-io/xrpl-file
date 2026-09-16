@@ -1,16 +1,24 @@
 @implements IDisposable
 @inject HistoryModel Model
 @inject ReadModel ReadModel
+@inject ReadRun ReadRun
 @inject ShellModel Shell
 
 @* Design 4.5 and design 12. Every record and every word is HistoryModel's own; the sentence below
    about forgetting and clearing only changing this local list is fixed copy, not something computed
    from the model, so it stays even when there is nothing to forget yet.
 
-   The Read button hands the row's link to ReadModel and only then switches the shell to the Read
-   tab -- that ordering, not this markup, is what makes the tab open with a link already in hand
-   rather than empty. Which tab exists (AppTab.Read) and what a link is were both settled in Tasks 3
-   and 5; this is assignment and a call, not a decision. *@
+   The Read button puts away whatever an earlier read left behind, hands the row's link to
+   ReadModel, and only then switches the shell to the Read tab -- that ordering, not this markup, is
+   what makes the tab open with the row's own link and manifest rather than a previous read's
+   finished result. ReadRun is a singleton that keeps its terminal state until something clears it
+   (design H6), so without the reset this button could switch to a screen showing an earlier read's
+   success panel, Save button and all, still wired to that earlier read's own temporary file. The
+   reset itself is ReadRun.Reset's own decision, not this markup's: it already no-ops while a read is
+   genuinely running (Linux-tested in ReadRunTests, "Resetting a run that is still going changes
+   nothing"), which is the right behaviour for that case -- a running read must not be discarded
+   silently. Which tab exists (AppTab.Read) and what a link is were both settled in Tasks 3 and 5;
+   this is assignment and two calls, not a decision. *@
 
 <div class="container py-3">
     <div class="d-flex justify-content-between align-items-center">
@@ -84,6 +92,7 @@
 
     private void Read(PublicationRecord record)
     {
+        ReadRun.Reset();
         ReadModel.Link = record.Link;
         Shell.Show(AppTab.Read);
     }
