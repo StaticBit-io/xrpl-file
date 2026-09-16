@@ -208,6 +208,10 @@ public sealed class CloseAccountModelTests : VaultHarness
         Assert.Equal(264, model.Preview.DeletableFromLedger);
         Assert.Equal(model.Preview.DeletableFromLedger!.Value - 200, model.LedgersRemaining);
         Assert.Equal(64, model.LedgersRemaining);
+
+        // Design 5.2/6: how long the wait roughly is, not only how many ledgers remain.
+        Assert.Equal(LedgerTiming.Describe(LedgerTiming.Estimate(64)), model.TimeRemainingDescription);
+        Assert.NotNull(model.TimeRemainingDescription);
     }
 
     [Fact]
@@ -344,12 +348,141 @@ public sealed class CloseAccountModelTests : VaultHarness
 
         // Not PublishErrorMessages.For's own SubmitRefused sentence — that one is written for the
         // publishing tab, where a refusal costs the open-ledger fee rather than a whole owner reserve.
-        Assert.Equal(CloseErrorMessages.DeletionRefused, model.Message);
+        // tecTOO_SOON is a tec* result, which claims the fee -- true here.
+        Assert.Equal(CloseErrorMessages.DeletionRefused(feeClaimed: true), model.Message);
 
         // The node has just proved the preflight's Ready conclusion false: a second click must not
         // be able to submit again against the same stale conclusion and burn a second reserve.
         Assert.Null(model.Preview);
         Assert.False(model.CanClose);
+    }
+
+    [Fact]
+    public async Task A_refusal_that_never_applied_does_not_claim_a_fee_was_burned()
+    {
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);
+        // telINSUF_FEE_P is a local check, not a tec* result: it never reaches the ledger and never
+        // claims the fee. Saying otherwise would tell somebody an owner reserve was just burned
+        // proving what a typo, or a self-destination, already made obvious for free.
+        _connections.Sink.Refusals[0] = "telINSUF_FEE_P";
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        model.ChooseDestination(Home);
+        await model.PreflightAsync(TestContext.Current.CancellationToken);
+        await model.CloseAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(CloseErrorMessages.DeletionRefused(feeClaimed: false), model.Message);
+        Assert.Null(model.Preview);
+        Assert.False(model.CanClose);
+    }
+
+    [Fact]
+    public async Task Closing_an_account_to_its_own_address_is_refused_without_submitting()
+    {
+        (CloseAccountModel model, _, string reference, XrplWallet wallet) =
+            await OpenAsync(TestContext.Current.CancellationToken);
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        // Not one of Model.Candidates -- SelectAsync already excludes this account's own address --
+        // but nothing stops it from being typed in by hand, which is exactly how this is reached.
+        model.ChooseDestination(wallet.ClassicAddress);
+        await model.PreflightAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(DeletionOutcome.DestinationRefuses, model.Preview!.Outcome);
+        Assert.False(model.CanClose);
+        Assert.Empty(_connections.Sink.Submitted);
+    }
+
+    [Fact]
+    public async Task An_account_nobody_has_funded_is_checked_without_asking_the_node_for_its_sequence()
+    {
+        (CloseAccountModel model, _, string reference, _) =
+            await OpenAsync(TestContext.Current.CancellationToken, balanceDrops: 0);
+
+        // Makes this a real regression guard: if the balance gate inside
+        // ThrowawayAccount.PreviewDeletionAsync ever moved back after the sequence read, this fake
+        // would answer the RippledException a real node's actNotFound produces instead of NotYet.
+        _connections.Sink.ThrowForUnfundedAccounts = true;
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        model.ChooseDestination(Home);
+        await model.PreflightAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(DeletionOutcome.NotYet, model.Preview!.Outcome);
+        Assert.Null(model.Preview.DeletableFromLedger);
+        Assert.Null(model.LedgersRemaining);
+        Assert.Equal(CloseErrorMessages.For(DeletionOutcome.NotYet), model.Message);
+    }
+
+    [Fact]
+    public async Task A_non_refusal_failure_after_submitting_also_stops_a_second_click()
+    {
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);
+        // Not a refusal at all: the node accepted the submission or lost the connection right
+        // after, and this call never learned which. SubmitRefused is the only code
+        // ThrowawayAccount.DeleteAsync throws for an actual refusal -- everything else that can
+        // escape from inside it (NodeUnreachable above all) must be just as disqualifying for a
+        // second click, since a signed AccountDelete may already be on its way regardless of what
+        // this exception says.
+        _connections.Sink.Throws[0] = new XrplFileException(XrplFileError.NodeUnreachable, "the node vanished mid-submit");
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        model.ChooseDestination(Home);
+        await model.PreflightAsync(TestContext.Current.CancellationToken);
+        Assert.True(model.CanClose);
+
+        await model.CloseAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(PublishErrorMessages.For(XrplFileError.NodeUnreachable), model.Message);
+        Assert.Null(model.Preview);
+        Assert.False(model.CanClose);
+    }
+
+    [Fact]
+    public async Task A_cancellation_while_the_deletion_is_on_the_wire_leaves_an_explanation_not_silence()
+    {
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        model.ChooseDestination(Home);
+        await model.PreflightAsync(TestContext.Current.CancellationToken);
+        Assert.True(model.CanClose);
+
+        // Long enough that the cancellation below reliably lands while FakeLedgerSink.SubmitAsync's
+        // own delay is still in flight -- i.e. after DeleteAsync has already signed and started
+        // submitting, the case this catch exists for.
+        _connections.Sink.SubmitDelay = TimeSpan.FromMilliseconds(300);
+        using CancellationTokenSource cts = new();
+        Task closing = model.CloseAsync(cts.Token);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        cts.Cancel();
+
+        // Must complete, not fault or cancel: a Razor component's Dispose() is exactly where this
+        // token gets cancelled from, and a screen tearing down is not a place an unhandled
+        // cancellation can be usefully observed.
+        await closing;
+
+        Assert.Null(model.Preview);
+        Assert.False(model.CanClose);
+        Assert.Contains("interrupted", model.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CurrentReference_is_set_only_once_a_select_has_actually_resolved()
+    {
+        (CloseAccountModel model, KeyVault vault, string reference, _) =
+            await OpenAsync(TestContext.Current.CancellationToken);
+        Assert.Null(model.CurrentReference);
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        Assert.Equal(reference, model.CurrentReference);
+
+        await vault.LockAsync();
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+
+        // A failed select must not leave CurrentReference pointing at data that no longer belongs
+        // to this reference -- this is the whole guard the closing screen renders behind.
+        Assert.Null(model.CurrentReference);
+        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
     }
 
     /// <summary>

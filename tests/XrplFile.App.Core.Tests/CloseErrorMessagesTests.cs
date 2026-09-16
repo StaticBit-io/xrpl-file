@@ -31,4 +31,28 @@ public sealed class CloseErrorMessagesTests
         Assert.NotEqual(CloseErrorMessages.For(DeletionOutcome.NotYet), CloseErrorMessages.For(DeletionOutcome.DestinationRefuses));
         Assert.NotEqual(CloseErrorMessages.For(DeletionOutcome.DestinationMissing), CloseErrorMessages.For(DeletionOutcome.DestinationRefuses));
     }
+
+    [Fact]
+    public void DeletionRefused_says_a_fee_was_claimed_only_when_one_was()
+    {
+        string claimed = CloseErrorMessages.DeletionRefused(feeClaimed: true);
+        string notClaimed = CloseErrorMessages.DeletionRefused(feeClaimed: false);
+
+        Assert.NotEqual(claimed, notClaimed);
+        Assert.Contains("claimed", claimed, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("claimed", notClaimed, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("tecTOO_SOON", true)]
+    [InlineData("tecDST_TAG_NEEDED", true)]
+    [InlineData("temDST_IS_SRC", false)]
+    [InlineData("tefPAST_SEQ", false)]
+    [InlineData("telINSUF_FEE_P", false)]
+    [InlineData("terQUEUED", false)]
+    [InlineData(null, false)]
+    public void ClaimsFee_reads_only_tec_results_as_having_claimed_one(string? engineResult, bool expected)
+    {
+        Assert.Equal(expected, CloseErrorMessages.ClaimsFee(engineResult));
+    }
 }

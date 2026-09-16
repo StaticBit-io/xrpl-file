@@ -46,6 +46,15 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     /// </summary>
     public long? LedgersRemaining { get; private set; }
 
+    /// <summary>
+    /// Roughly how long <see cref="LedgersRemaining"/> is, in words — "not yet" without a sense of
+    /// scale is indistinguishable from "never" to someone deciding whether to wait (design 5.2, 6:
+    /// "how many ledgers remain and roughly how long that is"). Null under the same conditions
+    /// <see cref="LedgersRemaining"/> is. The arithmetic and the wording both live here rather than
+    /// in the screen that shows them — a component holds no decisions.
+    /// </summary>
+    public string? TimeRemainingDescription => LedgerTiming.Describe(LedgerTiming.Estimate(LedgersRemaining));
+
     public string? Message { get; private set; }
 
     /// <summary>The closure this screen recorded, once one happened.</summary>
@@ -56,6 +65,17 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     /// <summary>Whether a preflight can be run at all — a destination has been named. The screen
     /// reads this rather than comparing <see cref="Destination"/> to null itself.</summary>
     public bool CanPreflight => Destination is not null;
+
+    /// <summary>
+    /// The reference every property above actually belongs to — set only once <see cref="SelectAsync"/>
+    /// has resolved it for that reference, mirroring <see cref="FundingModel.CurrentReference"/> and
+    /// for the same reason: a screen freshly mounted for one account must not paint even one frame
+    /// built from whatever a previous account's close left behind in this model, which nothing about
+    /// a synchronous-looking field reset guarantees on every rendering host. The screen reads this
+    /// rather than trusting that a completed <see cref="SelectAsync"/> call means its own data is on
+    /// screen.
+    /// </summary>
+    public string? CurrentReference { get; private set; }
 
     public async Task SelectAsync(string reference, CancellationToken cancellationToken)
     {
@@ -71,6 +91,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
         AccountAddress = null;
         _reference = null;
         _network = null;
+        CurrentReference = null;
 
         try
         {
@@ -102,6 +123,11 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
                     && string.Equals(info.Network, entry.Network, StringComparison.Ordinal)
                     && info.Closure is null),
             ];
+
+            // Assigned last, once every field above it has actually been set: a caller comparing
+            // this to the reference it asked for is trusting that a match means all of it belongs
+            // to that account, not merely that the lookup found an entry.
+            CurrentReference = reference;
         }
         catch (VaultException ex)
         {
@@ -267,29 +293,47 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
         }
         catch (XrplFileException ex)
         {
-            // ThrowawayAccount.DeleteAsync throws this only for XrplFileError.SubmitRefused, and only
-            // after signing and submitting: PublishErrorMessages.For's own sentence for that code is
-            // written for the publishing tab, where a refusal costs the open-ledger fee. A refused
-            // AccountDelete costs one owner reserve instead, and deserves to say so.
-            if (ex.Error == XrplFileError.SubmitRefused)
-            {
-                // The node itself has just proved the preflight's Ready conclusion false — that is
-                // what a refusal after signing and submitting means. Leaving Preview (and so
-                // CanClose) as it was would let a second click submit again against the same stale
-                // conclusion and burn a second owner reserve to be refused a second time. Clearing it
-                // forces a fresh preflight, which is also the only way to learn whether the reason
-                // changed.
-                Preview = null;
-                Message = CloseErrorMessages.DeletionRefused;
-            }
-            else
-            {
-                Message = PublishErrorMessages.For(ex);
-            }
+            // Whatever this is, it came out of the try block above — after DeleteAsync was already
+            // called, which means the node may already have seen a signed AccountDelete. Leaving
+            // Preview (and so CanClose) as it was would let a second click submit again against a
+            // Ready conclusion this exception has already made unreliable, whether or not the node
+            // actually refused: a NodeUnreachable, say, does not say the node never received the
+            // blob, only that this call never learned what happened to it. Clearing it forces a
+            // fresh preflight either way, which is also the only way to learn what is actually true
+            // now.
+            Preview = null;
+
+            // ThrowawayAccount.DeleteAsync throws XrplFileError.SubmitRefused only after signing and
+            // submitting, carrying the node's own engine result: PublishErrorMessages.For's own
+            // sentence for that code is written for the publishing tab, where a refusal costs the
+            // open-ledger fee, and it says nothing about whether a fee was actually claimed. A
+            // refused AccountDelete can cost one owner reserve instead — but only when the node's
+            // answer was a tec* result; CloseErrorMessages.ClaimsFee is what tells the two apart, so
+            // this cannot claim a fee was burned when the node's own answer says otherwise (temDST_IS_SRC
+            // above all, which never reaches the ledger and never costs anything).
+            Message = ex.Error == XrplFileError.SubmitRefused
+                ? CloseErrorMessages.DeletionRefused(CloseErrorMessages.ClaimsFee(ex.EngineResult))
+                : PublishErrorMessages.For(ex);
         }
         catch (VaultException ex)
         {
             Message = VaultErrorMessages.For(ex.Error);
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation reaching here started somewhere inside ThrowawayAccount.DeleteAsync's own
+            // call, which by then may already have signed and put the AccountDelete on the wire — a
+            // submit request the node received but whose answer this call never waited for is not
+            // "nothing happened": the deletion may already have applied. The model's own reasoning
+            // for writing the closure record with CancellationToken.None above applies one await
+            // earlier here: a submission already on the wire must not be abandoned in silence just
+            // because the screen showing it was torn down. Preview is discarded for the same reason
+            // the XrplFileException branch discards it — its Ready conclusion can no longer be
+            // trusted either way — and the person is told to check rather than left looking at a
+            // screen that simply stopped responding.
+            Preview = null;
+            Message = "The close was interrupted before it could be confirmed either way. Press Check " +
+                "again before retrying — the account may already have been closed.";
         }
         finally
         {

@@ -11,17 +11,41 @@
    is reached from a list of near-identical throwaway rows and the destination side alone being done
    properly does not tell a person which source account they are looking at.
 
+   CloseAccountModel is a singleton, like FundingModel, and can still be holding a PREVIOUS account's
+   Closed outcome (or Preview, or AccountAddress) at the moment this component first paints for a
+   new one -- SelectAsync resets those fields, but nothing about a synchronous-looking reset is a
+   render-ordering guarantee on every host this runs on. Ready mirrors Funding.razor's own gate for
+   exactly that reason: it compares Model.CurrentReference, set only once SelectAsync has actually
+   resolved data for THIS component's own Reference, so the previous account's success panel cannot
+   render even for one frame. Model.Message is still shown unconditionally above that gate, the same
+   way Funding.razor shows its own, so a failed select's explanation is never hidden behind it.
+
    Once Model.Preview says Ready, the confirmation shows the destination address in full -- never
    truncated, since a truncated address hides exactly the characters a typo lives in -- its current
    balance, which is how a person recognises the account they meant (G6), what will arrive, and the
    fee, plus fixed copy that the account will cease to exist and this cannot be undone. When the
-   outcome is NotYet this screen shows the ledger it becomes possible from and how many ledgers that
-   is from here (Model.LedgersRemaining -- a ledger number alone gives a person only one of the two
-   numbers the wait needs), and offers no second button: waiting is never a reason to talk somebody
-   into leaving the reserve behind forever (G11). Every other outcome is already a sentence in
-   Model.Message -- CloseErrorMessages, not this markup, decides what a refusal means. *@
+   outcome is NotYet this screen shows the ledger it becomes possible from, how many ledgers that is
+   from here, and roughly how long that is (Model.LedgersRemaining / Model.TimeRemainingDescription
+   -- a ledger number alone gives a person only one of the two numbers the wait needs, and "not yet"
+   without a sense of scale reads as "never"), and offers no second button: waiting is never a reason
+   to talk somebody into leaving the reserve behind forever (G11). Every other outcome is already a
+   sentence in Model.Message -- CloseErrorMessages, not this markup, decides what a refusal means.
 
-@if (Model.Closed is { } closed)
+   Every button that can start a network round trip is disabled while _busy, Back to accounts
+   included: this is the one screen in the application where letting a person navigate away mid-call
+   is not merely inconvenient -- CloseAsync may already have put a signed AccountDelete on the wire,
+   and disposing this component cancels the token it is awaiting on. *@
+
+@if (Model.Message is not null)
+{
+    <div class="alert alert-warning">@Model.Message</div>
+}
+
+@if (!Ready)
+{
+    <p>Loading&hellip;</p>
+}
+else if (Model.Closed is { } closed)
 {
     <div class="alert alert-success">
         <p>
@@ -31,7 +55,7 @@
         <p>Transaction hash: <code class="user-select-all">@closed.TxHash</code></p>
     </div>
 
-    <button type="button" class="btn btn-link" @onclick="BackAsync">Back to accounts</button>
+    <button type="button" class="btn btn-link" disabled="@_busy" @onclick="BackAsync">Back to accounts</button>
 }
 else
 {
@@ -53,11 +77,6 @@ else
         Closing sends everything this account holds to a destination you choose.
         <strong>The account will cease to exist, and this cannot be undone.</strong>
     </p>
-
-    @if (Model.Message is not null)
-    {
-        <div class="alert alert-warning">@Model.Message</div>
-    }
 
     <div class="mb-3">
         <label class="form-label">Send the remainder to</label>
@@ -113,14 +132,20 @@ else
                 <p>It cannot be closed yet. It becomes possible from ledger <strong>@deletableFrom</strong>.</p>
                 @if (Model.LedgersRemaining is { } remaining)
                 {
-                    <p>About @remaining.ToString("N0") ledgers remaining.</p>
+                    <p>
+                        About @remaining.ToString("N0") ledgers remaining
+                        @if (Model.TimeRemainingDescription is { } timeRemaining)
+                        {
+                            <text> (@timeRemaining)</text>
+                        }
+                    </p>
                 }
             </div>
         }
     }
 
     <div class="mt-3">
-        <button type="button" class="btn btn-link" @onclick="BackAsync">Back to accounts</button>
+        <button type="button" class="btn btn-link" disabled="@_busy" @onclick="BackAsync">Back to accounts</button>
     </div>
 }
 
@@ -133,6 +158,13 @@ else
 
     private readonly CancellationTokenSource _cts = new();
     private bool _busy;
+
+    /// <summary>
+    /// Whether Model's data is actually resolved for THIS component's own Reference -- read live off
+    /// the model, the same way Funding.razor's own Ready is, rather than cached in a field set once
+    /// at the end of OnInitializedAsync.
+    /// </summary>
+    private bool Ready => string.Equals(Model.CurrentReference, Reference, StringComparison.Ordinal);
 
     protected override async Task OnInitializedAsync() => await Model.SelectAsync(Reference, _cts.Token);
 
