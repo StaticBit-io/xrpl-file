@@ -155,7 +155,10 @@ public sealed class ReadRunTests : IDisposable
         await run.Completion;
         await run.SaveAsync(TestContext.Current.CancellationToken);
 
-        Assert.False(string.IsNullOrWhiteSpace(_picker.SavedStreamName));
+        // Pinned to the actual fallback rather than merely "not blank": that weaker assertion would
+        // still pass if the suggestion regressed to the MIME type, the link, or any other non-empty
+        // string that is not the name ReadRun.cs actually picks.
+        Assert.Equal("xrpl-file.bin", _picker.SavedStreamName);
     }
 
     [Fact]
