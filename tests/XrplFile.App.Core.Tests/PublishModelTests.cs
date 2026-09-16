@@ -8,8 +8,24 @@ public sealed class FakeFilePicker : IFilePickerService
 {
     public string? PathToReturn { get; set; }
 
+    public byte[]? SavedStream { get; private set; }
+
+    public string? SavedStreamName { get; private set; }
+
+    public bool SaveStreamResult { get; set; } = true;
+
     public Task<bool> SaveFileAsync(string suggestedFileName, byte[] content, CancellationToken cancellationToken) =>
         throw new NotSupportedException("the publish screen never saves a file");
+
+    public async Task<bool> SaveStreamAsync(string suggestedFileName, Stream content, CancellationToken cancellationToken)
+    {
+        using MemoryStream buffer = new();
+        await content.CopyToAsync(buffer, cancellationToken);
+
+        SavedStreamName = suggestedFileName;
+        SavedStream = buffer.ToArray();
+        return SaveStreamResult;
+    }
 
     public Task<byte[]?> PickFileAsync(CancellationToken cancellationToken) =>
         throw new NotSupportedException("the publish screen picks a path, not bytes");

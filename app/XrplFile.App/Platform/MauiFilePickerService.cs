@@ -50,6 +50,39 @@ public sealed class MauiFilePickerService : IFilePickerService
     }
 
     /// <inheritdoc/>
+    public async Task<bool> SaveStreamAsync(string suggestedFileName, Stream content, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(suggestedFileName);
+        ArgumentNullException.ThrowIfNull(content);
+
+        FileSavePicker picker = new()
+        {
+            SuggestedFileName = suggestedFileName,
+        };
+
+        string extension = Path.GetExtension(suggestedFileName) is { Length: > 0 } value ? value : ".bin";
+        picker.FileTypeChoices.Add("File", [extension]);
+
+        InitializeWithWindow.Initialize(picker, GetActiveWindowHandle());
+
+        StorageFile? file = await picker.PickSaveFileAsync().AsTask(cancellationToken).ConfigureAwait(false);
+
+        if (file is null)
+        {
+            return false;
+        }
+
+        // OpenStreamForWriteAsync rather than FileIO.WriteBytesAsync: the caller's content is
+        // already a file on disk, and bringing a whole file into an array to hand it over would
+        // undo the reason it was streamed there in the first place.
+        await using Stream destination = await file.OpenStreamForWriteAsync().ConfigureAwait(false);
+        destination.SetLength(0);
+        await content.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
+
+        return true;
+    }
+
+    /// <inheritdoc/>
     public async Task<byte[]?> PickFileAsync(CancellationToken cancellationToken)
     {
         FileOpenPicker picker = new();
