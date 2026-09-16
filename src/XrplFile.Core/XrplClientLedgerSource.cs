@@ -141,10 +141,23 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             drops, (int)(Number(data, "OwnerCount") ?? 0), (int)(Number(data, "TicketCount") ?? 0));
     }
 
+    /// <summary>
+    /// The node error codes that mean "no such destination" rather than "the node could not be
+    /// read": actNotFound for an address the ledger genuinely does not carry, and actMalformed for
+    /// one that could never be carried because it does not decode at all. A destination is the one
+    /// address in this library a person types rather than reads off a key the application
+    /// generated, and a classic address carries a checksum -- a typo almost never lands on a
+    /// different real account, it fails to decode, and rippled answers actMalformed rather than
+    /// actNotFound for it. Both read the same to a person deciding what to do next ("check the
+    /// address"), and conflating either with NodeUnreachable would send them to check the node URL
+    /// in Settings instead.
+    /// </summary>
+    private static readonly string[] DestinationAbsentCodes = [XrplErrorCodes.ActNotFound, XrplErrorCodes.ActMalformed];
+
     public async Task<DestinationState> DestinationAsync(string account, CancellationToken cancellationToken)
     {
         JsonElement? answer = await AskOrAbsentAsync(
-            new AccountInfoRequest(account), "account_info", XrplErrorCodes.ActNotFound, cancellationToken).ConfigureAwait(false);
+            new AccountInfoRequest(account), "account_info", DestinationAbsentCodes, cancellationToken).ConfigureAwait(false);
 
         if (answer is not { } found || !found.TryGetProperty("account_data", out JsonElement data))
         {
@@ -263,15 +276,24 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
     /// <summary>
     /// One request where a single node error code is itself an answer -- "nothing here" -- rather
-    /// than a failure to read, in whichever of the two shapes it can arrive: thrown by
+    /// than a failure to read. See the <see cref="IReadOnlyList{T}"/> overload for the two shapes
+    /// that code can arrive in and why both branches have to agree on it.
+    /// </summary>
+    private Task<JsonElement?> AskOrAbsentAsync(BaseRequest request, string command, string absentCode, CancellationToken cancellationToken) =>
+        AskOrAbsentAsync(request, command, [absentCode], cancellationToken);
+
+    /// <summary>
+    /// One request where any of several node error codes is itself an answer -- "nothing here" --
+    /// rather than a failure to read, in whichever of the two shapes it can arrive: thrown by
     /// <see cref="RequestManager"/> before this class ever sees a JSON answer, or embedded as the
-    /// <c>error</c> member of one it does see. Both branches must agree on <paramref name="absentCode"/>
+    /// <c>error</c> member of one it does see. Both branches must agree on <paramref name="absentCodes"/>
     /// or a caller polling for "does this exist yet" (a fresh account, a not-yet-validated tx) can
     /// see the live-node shape turn into NodeUnreachable instead of the null/zero the test-only
     /// shape returns -- which is exactly the regression this helper exists to make impossible to
     /// reintroduce by editing only one of the two.
     /// </summary>
-    private async Task<JsonElement?> AskOrAbsentAsync(BaseRequest request, string command, string absentCode, CancellationToken cancellationToken)
+    private async Task<JsonElement?> AskOrAbsentAsync(
+        BaseRequest request, string command, IReadOnlyList<string> absentCodes, CancellationToken cancellationToken)
     {
         JsonElement answer;
 
@@ -279,8 +301,7 @@ public sealed class XrplClientLedgerSource : ILedgerSource
         {
             answer = await _request(request, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception e) when (e is not OperationCanceledException
-            && string.Equals(e.Classify().RawError, absentCode, StringComparison.Ordinal))
+        catch (Exception e) when (e is not OperationCanceledException && IsAbsent(e.Classify().RawError, absentCodes))
         {
             return null;
         }
@@ -291,12 +312,24 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
         if (answer.TryGetProperty("error", out JsonElement error))
         {
-            return string.Equals(error.GetString(), absentCode, StringComparison.Ordinal)
+            return IsAbsent(error.GetString(), absentCodes)
                 ? null
                 : throw Answered(command, error);
         }
 
         return answer;
+    }
+
+    private static bool IsAbsent(string? code, IReadOnlyList<string> absentCodes)
+    {
+        if (code is null) return false;
+
+        foreach (string absentCode in absentCodes)
+        {
+            if (string.Equals(code, absentCode, StringComparison.Ordinal)) return true;
+        }
+
+        return false;
     }
 
     /// <summary>

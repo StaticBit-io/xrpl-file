@@ -331,6 +331,52 @@ public class XrplClientLedgerSourceTests
     }
 
     [Fact]
+    public async Task A_destination_the_node_does_not_carry_is_absent()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"error":"actNotFound"}""");
+
+        DestinationState state = await new XrplClientLedgerSource(node.HandleAsync)
+            .DestinationAsync("rNobody", TestContext.Current.CancellationToken);
+
+        Assert.Equal(DestinationState.Absent, state);
+    }
+
+    [Fact]
+    public async Task A_malformed_destination_address_is_absent_not_an_unreachable_node()
+    {
+        // A classic address carries a checksum: a typo does not usually resolve to a different
+        // real account, it fails to decode, and rippled answers actMalformed rather than
+        // actNotFound. Design G12 keeps "that destination does not exist" apart from "the node did
+        // not answer" -- the commonest destination mistake there is must land on the first sentence,
+        // not send a person to check their node URL in Settings for what was actually a typo.
+        ScriptedNode answered = new();
+        answered.Answer("""{"error":"actMalformed"}""");
+        ScriptedNode threw = new();
+        threw.Throw(new Xrpl.Client.Exceptions.RippledException(
+            "actMalformed", new Xrpl.Models.Subscriptions.ErrorResponse { Error = "actMalformed" }));
+
+        Assert.Equal(
+            DestinationState.Absent,
+            await new XrplClientLedgerSource(answered.HandleAsync).DestinationAsync("rNot-an-address", TestContext.Current.CancellationToken));
+        Assert.Equal(
+            DestinationState.Absent,
+            await new XrplClientLedgerSource(threw.HandleAsync).DestinationAsync("rNot-an-address", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task A_node_error_other_than_absent_leaves_the_destination_lookup_unreachable()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"error":"noNetwork"}""");
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => new XrplClientLedgerSource(node.HandleAsync).DestinationAsync("rWriter", TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+    }
+
+    [Fact]
     public async Task A_node_error_other_than_act_not_found_leaves_the_balance_lookup_unreachable()
     {
         // "actNotFoundToo" is not a real rippled error code -- it stands in for whatever unrelated
