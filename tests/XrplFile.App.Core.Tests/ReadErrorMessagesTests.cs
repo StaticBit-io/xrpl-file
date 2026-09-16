@@ -26,8 +26,10 @@ public sealed class ReadErrorMessagesTests
         // and telling them apart would be dishonest about that. Excluded here and represented by
         // one of them (SubmitRefused) instead, so the shared sentence is still checked for
         // distinctness against the ten reading actually produces, without failing on its own
-        // repetition. Coverage of the excluded seven and of the shared wording itself comes from
-        // Every_error_has_a_sentence and A_failure_reading_cannot_cause_says_so.
+        // repetition. Excluding six of the seven here is safe only because
+        // The_seven_publishing_only_errors_share_one_sentence pins all seven to that one shared
+        // string directly -- if one of them ever drifted to its own wording, that test would fail
+        // even though this one would not notice.
         XrplFileError[] readingErrors =
         [
             XrplFileError.InvalidLink,
@@ -45,6 +47,27 @@ public sealed class ReadErrorMessagesTests
         string[] all = [.. readingErrors.Select(ReadErrorMessages.For)];
 
         Assert.Equal(all.Length, all.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public void The_seven_publishing_only_errors_share_one_sentence()
+    {
+        // What Every_sentence_is_its_own's exclusion comment relies on: the group's shared-ness is
+        // pinned here directly, rather than merely asserted in a comment, so a future change that
+        // gives one of these seven its own wording fails this test even though it would not disturb
+        // the distinctness check above (which only ever looks at one representative, SubmitRefused).
+        XrplFileError[] publishingOnlyErrors =
+        [
+            XrplFileError.InsufficientBalance,
+            XrplFileError.BudgetExceeded,
+            XrplFileError.FeeMismatch,
+            XrplFileError.SubmitRefused,
+            XrplFileError.ValidationTimeout,
+            XrplFileError.ResumeMismatch,
+            XrplFileError.SessionAlreadyRun,
+        ];
+
+        Assert.Single(publishingOnlyErrors.Select(ReadErrorMessages.For).Distinct(StringComparer.Ordinal));
     }
 
     [Fact]
