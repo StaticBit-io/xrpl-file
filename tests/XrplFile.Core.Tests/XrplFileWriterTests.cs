@@ -42,6 +42,79 @@ public class XrplFileWriterTests
         Assert.Equal(5015, read.Blocks[1].FirstLedger);
     }
 
+    /// <summary>
+    /// The writer adapts a strategy's per-memo count into its own stage report, and that adapter
+    /// must run on the strategy's thread rather than posting to the thread pool. A caller passes
+    /// its own <see cref="IProgress{T}"/> precisely to choose where reports land; a
+    /// <see cref="Progress{T}"/> in the middle of the chain takes that choice away, and the
+    /// desktop application's idle lock — touched on every report — then sees signs of life arrive
+    /// arbitrarily late under load and locks a vault out from under a running publication.
+    /// </summary>
+    /// <remarks>
+    /// The probe sits where nothing else can: a strategy decorator sees the adapter the writer
+    /// passes down, so it can report through it and then ask, before its own <c>Report</c> call has
+    /// returned, whether the caller heard. A posted report answers no. Reintroducing
+    /// <see cref="Progress{T}"/> here would fail this almost every time rather than every time —
+    /// the pool could in principle win the race — which is the strongest a test can be about
+    /// something that is only ever late, never absent.
+    /// </remarks>
+    [Fact]
+    public async Task A_strategys_progress_reaches_the_caller_before_the_report_returns()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        int heard = 0;
+
+        await using SequenceStrategy inner = new(sink, Signer, new SequenceStrategyOptions { BatchSize = 200 });
+        ProbingStrategy strategy = new(inner, () => Volatile.Read(ref heard));
+        XrplFileWriter writer = new(strategy, ledger);
+
+        await writer.PublishAsync(
+            VectorStream.Bytes("inline", 4096), "application/octet-stream", "inline.bin",
+            Wallet.ClassicAddress, "testnet", null,
+            new InlineCounter(() => Interlocked.Increment(ref heard)), TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, strategy.HeardDuringReport);
+    }
+
+    /// <summary>
+    /// Wraps a real strategy and, once, reports through the adapter the writer handed down, then
+    /// records how many reports the caller had heard by the time that call returned.
+    /// </summary>
+    private sealed class ProbingStrategy(ISubmissionStrategy inner, Func<int> heard) : ISubmissionStrategy
+    {
+        /// <summary>Reports the caller heard while the probing <c>Report</c> was on the stack, or -1 if it never ran.</summary>
+        public int HeardDuringReport { get; private set; } = -1;
+
+        public long FeeDropsPerTransaction => inner.FeeDropsPerTransaction;
+
+        public string Account => inner.Account;
+
+        public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
+            IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
+        {
+            IReadOnlyList<SubmittedMemo> landed =
+                await inner.SubmitAllAsync(memos, submitted, cancellationToken).ConfigureAwait(false);
+
+            if (submitted is not null && HeardDuringReport < 0)
+            {
+                int before = heard();
+                submitted.Report(landed.Count);
+                HeardDuringReport = heard() - before;
+            }
+
+            return landed;
+        }
+
+        public ValueTask DisposeAsync() => inner.DisposeAsync();
+    }
+
+    /// <summary>A caller's progress that counts reports on whatever thread they arrive on.</summary>
+    private sealed class InlineCounter(Action heard) : IProgress<PublishProgress>
+    {
+        public void Report(PublishProgress value) => heard();
+    }
+
     [Fact]
     public async Task A_batch_of_submissions_waits_for_validation_before_the_next_batch()
     {

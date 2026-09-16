@@ -53,6 +53,19 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
     private readonly ILedgerSource _source = source;
     private readonly WriterOptions _options = options ?? new WriterOptions();
 
+    /// <param name="progress">
+    /// Where stage reports go, or <see langword="null"/> for none. Every report is made on the
+    /// thread that produced it, synchronously: nothing here posts one somewhere else first, so a
+    /// caller that wants reports marshalled — onto a UI thread, or onto the pool — passes an
+    /// implementation that does that, and a caller that wants them where they happen passes one
+    /// that does not. Handing this a <see cref="Progress{T}"/> is the first of those and is a fine
+    /// thing to do; what this method will not do is make that choice on a caller's behalf.
+    /// <para>
+    /// Reports are frequent on the chunk and list stages — one per submitted memo — so an
+    /// implementation that blocks blocks the publication. The stage a report names only ever moves
+    /// forward, and the same stage is reported many times.
+    /// </para>
+    /// </param>
     public async Task<PublishResult> PublishAsync(
         ReadOnlyMemory<byte> file, string type, string? name, string writer, string network,
         LandedMemos? alreadyLanded, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
@@ -152,7 +165,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
             IReadOnlyList<SubmittedMemo> sent = await _strategy.SubmitAllAsync(
                 missingMemos,
-                new Progress<int>(done => progress?.Report(new PublishProgress("chunks", carried + done, chunkMemos.Count))),
+                new InlineProgress(done => progress?.Report(new PublishProgress("chunks", carried + done, chunkMemos.Count))),
                 cancellationToken).ConfigureAwait(false);
 
             foreach (SubmittedMemo memo in sent)
@@ -235,7 +248,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
                 IReadOnlyList<SubmittedMemo> listsLanded = await _strategy.SubmitAllAsync(
                     missingLists,
-                    new Progress<int>(done => progress?.Report(new PublishProgress("lists", carried + done, listMemos.Count))),
+                    new InlineProgress(done => progress?.Report(new PublishProgress("lists", carried + done, listMemos.Count))),
                     cancellationToken).ConfigureAwait(false);
 
                 foreach (SubmittedMemo memo in listsLanded)
@@ -300,6 +313,26 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
         progress?.Report(new PublishProgress("manifest", 1, 1));
 
         return new PublishResult(new XrplFileLink(network, manifestHash), manifest, writer, chunkHashes, listHashes, manifestHash);
+    }
+
+    /// <summary>
+    /// Adapts the per-memo count a strategy reports into this class's own stage report, and does
+    /// it on the strategy's own thread.
+    ///
+    /// <see cref="Progress{T}"/> would be the obvious way to write this and is the wrong one. Built
+    /// without a <see cref="SynchronizationContext"/> — which is every context this library runs
+    /// in — it posts each report to the thread pool, so what a caller passed as its
+    /// <see cref="IProgress{T}"/> is invoked at some later, unpredictable time on a thread of the
+    /// pool's choosing. That throws away the synchronisation the caller chose by supplying its own
+    /// implementation, and it is the only place this class did it: the stage reports around these
+    /// two calls have always gone straight to <c>progress</c>. It matters beyond tidiness — a
+    /// caller that treats a report as a sign of life (the desktop application touches its vault's
+    /// idle lock on every one) sees those signs arrive late under load, and acts on a run it
+    /// believes has stalled.
+    /// </summary>
+    private sealed class InlineProgress(Action<int> report) : IProgress<int>
+    {
+        public void Report(int value) => report(value);
     }
 
     private async Task<long> LedgerOfAsync(string hash, CancellationToken cancellationToken)
