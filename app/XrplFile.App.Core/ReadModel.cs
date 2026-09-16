@@ -18,10 +18,13 @@ public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore
     /// </summary>
     public static readonly long MaxBytes = new ReaderOptions().MaxBytes;
 
+    private static readonly ReadLookupSnapshot Empty = new(null, null, null, null);
+
     private readonly Lock _gate = new();
 
     private long _ceiling = MaxBytes;
     private string _link = string.Empty;
+    private ReadLookupSnapshot _snapshot = Empty;
 
     /// <summary>
     /// Bumped by anything that makes an in-flight <see cref="LookUpAsync"/> answer stale: the
@@ -58,16 +61,40 @@ public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore
         }
     }
 
-    public XrplFileLink? Parsed { get; private set; }
+    /// <summary>
+    /// One consistent view of the last lookup (design 4.1). A caller takes this once rather than
+    /// reading <see cref="Parsed"/>, <see cref="Manifest"/>, <see cref="NodeUrl"/> and
+    /// <see cref="Message"/> one property at a time — <see cref="LookUpAsync"/> publishes all four
+    /// together, from a thread-pool continuation, and separate unsynchronised reads of them could
+    /// otherwise land on different instants of the same or even different lookups. See
+    /// <see cref="ReadLookupSnapshot"/>'s own remarks.
+    /// </summary>
+    public ReadLookupSnapshot Snapshot
+    {
+        get { lock (_gate) return _snapshot; }
+    }
 
-    public ManifestRecord? Manifest { get; private set; }
+    /// <summary>
+    /// Whether <see cref="LookUpAsync"/> is currently running. Read.razor's "Look up" button disables
+    /// itself off this, the same way it already disables ReadRun's Save button off
+    /// <see cref="ReadSnapshot.Saving"/> — a second click while one is already in flight does nothing
+    /// today (<see cref="LookUpAsync"/> refuses it outright), which without this flag a person had no
+    /// way to tell apart from the button simply not working.
+    /// </summary>
+    public bool LookingUp
+    {
+        get { lock (_gate) return _lookingUp; }
+    }
 
-    /// <summary>The node the manifest came from, which is also the node the blocks will come from.</summary>
-    public string? NodeUrl { get; private set; }
+    public XrplFileLink? Parsed => Snapshot.Parsed;
 
-    public string? Message { get; private set; }
+    public ManifestRecord? Manifest => Snapshot.Manifest;
 
-    public bool CanRead => Manifest is not null && Message is null;
+    public string? NodeUrl => Snapshot.NodeUrl;
+
+    public string? Message => Snapshot.Message;
+
+    public bool CanRead => Snapshot.CanRead;
 
     /// <summary>The ceiling, so a size refusal can be tested without publishing a large file.</summary>
     internal void SetCeilingForTests(long ceiling) => _ceiling = ceiling;
@@ -77,13 +104,10 @@ public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore
         lock (_gate) InvalidateLocked();
     }
 
-    /// <summary>Clears every derived field and bumps <see cref="_generation"/>. Call under <see cref="_gate"/>.</summary>
+    /// <summary>Clears the published snapshot and bumps <see cref="_generation"/>. Call under <see cref="_gate"/>.</summary>
     private void InvalidateLocked()
     {
-        Parsed = null;
-        Manifest = null;
-        NodeUrl = null;
-        Message = null;
+        _snapshot = Empty;
         ++_generation;
     }
 
@@ -179,13 +203,13 @@ public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore
                 _lookingUp = false;
 
                 // Nothing else moved the link (or cleared the model) while this call was running:
-                // this call's answer is still the one the screen is waiting for.
+                // this call's answer is still the one the screen is waiting for. Written as one
+                // record rather than four separate field writes, so a reader taking Snapshot under
+                // the same lock can never observe three of these fields from this lookup sitting
+                // next to a fourth from whatever InvalidateLocked or an earlier lookup left behind.
                 if (completed && _generation == generation)
                 {
-                    Parsed = parsedResult;
-                    Manifest = manifestResult;
-                    NodeUrl = nodeUrlResult;
-                    Message = messageResult;
+                    _snapshot = new ReadLookupSnapshot(parsedResult, manifestResult, nodeUrlResult, messageResult);
                 }
             }
         }

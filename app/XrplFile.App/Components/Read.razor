@@ -93,6 +93,12 @@ else if (snapshot.IsFinished)
 }
 else
 {
+    // Taken once, the same reason Snapshot is taken once at the top of this whole render (see the
+    // block comment above): ReadModel.LookUpAsync publishes Parsed, Manifest, NodeUrl and Message
+    // together from a thread-pool continuation, and reading them one property at a time here could
+    // land on different instants of the same or different lookups.
+    ReadLookupSnapshot lookup = Model.Snapshot;
+
     <div class="container py-3">
         <h1 class="h3">Read a file</h1>
 
@@ -101,14 +107,16 @@ else
             <input class="form-control" @bind="Model.Link" @bind:event="oninput" />
         </div>
 
-        <button type="button" class="btn btn-outline-primary" @onclick="LookUpAsync">Look up</button>
+        <button type="button" class="btn btn-outline-primary" disabled="@Model.LookingUp" @onclick="LookUpAsync">
+            Look up
+        </button>
 
-        @if (Model.Message is not null)
+        @if (lookup.Message is not null)
         {
-            <div class="alert alert-warning mt-3">@Model.Message</div>
+            <div class="alert alert-warning mt-3">@lookup.Message</div>
         }
 
-        @if (Model.Manifest is { } manifest)
+        @if (lookup.Manifest is { } manifest)
         {
             <div class="mt-3">
                 <p class="mb-1">@(manifest.Manifest.Name ?? "(no name)")</p>
@@ -116,10 +124,10 @@ else
                 <p class="mb-1">@manifest.Manifest.Type</p>
                 <p class="mb-1">Written by @manifest.Writer</p>
                 <p class="mb-1">@manifest.Manifest.Blocks block(s)</p>
-                <p class="mb-1">Node: @Model.NodeUrl</p>
+                <p class="mb-1">Node: @lookup.NodeUrl</p>
             </div>
 
-            <button type="button" class="btn btn-primary" disabled="@(!Model.CanRead)" @onclick="StartRead">
+            <button type="button" class="btn btn-primary" disabled="@(!lookup.CanRead)" @onclick="StartRead">
                 Read
             </button>
         }
@@ -160,12 +168,22 @@ else
 
     private Task LookUpAsync() => Model.LookUpAsync(_cts.Token);
 
-    // Model.CanRead is what gates this button (disabled unless it is true), and CanRead is defined
-    // as Manifest is not null && Message is null -- LookUpAsync's own finally block only ever writes
-    // Parsed and Manifest together, never one without the other, so CanRead being true is already the
-    // model's guarantee that both are set. The null-forgiving operators below assert exactly that
-    // guarantee rather than repeating it as a second check this markup would otherwise be inventing.
-    private void StartRead() => Run.Start(Model.Parsed!, Model.Manifest!);
+    // CanRead is what gates this button (disabled unless it is true), and CanRead is defined as
+    // Manifest is not null && Message is null. That alone does not guarantee Parsed is set too --
+    // LookUpAsync's "no node URL configured" refusal, for one, sets Message and returns with Parsed
+    // set but Manifest still null, which CanRead already reads as false. What actually backs the
+    // null-forgiving operators below is ordering, not pairing: LookUpAsync's finally only ever
+    // assigns Manifest after it has already assigned Parsed (ReadModel.cs), so Manifest being non-null
+    // is itself proof Parsed was set first. CanRead being true (Manifest is not null) therefore already
+    // is the model's guarantee that Parsed is set too. Read through Model.Snapshot rather than
+    // Model.Parsed/Model.Manifest separately, so this call sees the same lookup the button that
+    // triggered it was drawn from, not two independent reads that could straddle a lookup that landed
+    // in between.
+    private void StartRead()
+    {
+        ReadLookupSnapshot lookup = Model.Snapshot;
+        Run.Start(lookup.Parsed!, lookup.Manifest!);
+    }
 
     private void Cancel() => Run.Cancel();
 

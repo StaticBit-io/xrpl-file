@@ -152,6 +152,30 @@ public sealed class ReadModelTests : IDisposable
     }
 
     [Fact]
+    public async Task LookingUp_is_true_only_while_a_lookup_is_in_flight()
+    {
+        // Read.razor disables the "Look up" button off this flag, the same reason it already
+        // disables ReadRun's Save button off ReadSnapshot.Saving (Saving_is_true_only_while_the_
+        // save_dialog_is_open in ReadRunTests). Proven reachable, not merely present in the source,
+        // using the same gated-connection shape the generation test below holds a lookup open with.
+        GatedConnectFactory gated = new(_connections);
+        ReadModel model = new(gated, new FileNodeSettingsStore(Path.Combine(_directory, "node-urls.json")));
+        model.Link = "xrpl-file://testnet/" + new string('A', 64);
+
+        Assert.False(model.LookingUp);
+
+        Task lookup = model.LookUpAsync(TestContext.Current.CancellationToken);
+        await gated.Reached;
+
+        Assert.True(model.LookingUp);
+
+        gated.Release();
+        await lookup;
+
+        Assert.False(model.LookingUp);
+    }
+
+    [Fact]
     public async Task A_second_lookup_while_one_is_in_flight_is_refused()
     {
         GatedConnectFactory gated = new(_connections);
