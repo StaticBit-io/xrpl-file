@@ -92,7 +92,16 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
 
         Message = null;
 
+        // Captured together, at entry, before any await: reference is what the guard below checks
+        // against, and address is what the query itself is issued for. Reading Address live after
+        // the first await (ConnectAsync) -- as this used to do -- pins neither: a select for a
+        // different account resolving during that first await, then reverting back to this one
+        // during the second, would have this method read the OTHER account's address for the query
+        // while the guard, checked only after, sees the reference has already settled back to this
+        // one and passes -- the wrong balance landing under the right address. Capturing address
+        // here closes that the same way capturing reference already closes the reference race.
         string reference = CurrentReference;
+        string address = Address;
 
         try
         {
@@ -100,7 +109,7 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
                 await connections.ConnectAsync(Network, cancellationToken).ConfigureAwait(false);
 
             AccountState state = await connection.Source
-                .AccountStateAsync(Address, cancellationToken).ConfigureAwait(false);
+                .AccountStateAsync(address, cancellationToken).ConfigureAwait(false);
 
             // The selection can change while this call is in flight -- a later SelectAsync, for a
             // different reference, resolving before this one's own network round trip does. Writing
