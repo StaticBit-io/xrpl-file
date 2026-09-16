@@ -28,16 +28,19 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
     private string? _name;
     private string? _failure;
     private bool _saved;
+    private bool _saving;
     private string? _temporary;
     private bool _disposed;
 
     /// <summary>
     /// Bumped by <see cref="Start"/>, <see cref="Reset"/> and <see cref="Dispose"/> — anything that
     /// makes a write <see cref="SaveAsync"/> is about to make stale. <see cref="SaveAsync"/> pins
-    /// this at its own start and only writes <c>_saved</c>/<c>_failure</c> back if it is still
-    /// current, the same shape <see cref="PublicationRun"/>'s own generation protects its
+    /// this at its own start and only writes <c>_saved</c>/<c>_failure</c>/<c>_saving</c> back if it
+    /// is still current, the same shape <see cref="PublicationRun"/>'s own generation protects its
     /// post-terminal writes with (see its remarks) and <see cref="ReadModel"/>'s protects a lookup
-    /// with.
+    /// with. <see cref="Start"/> and <see cref="Reset"/> both also baseline <c>_saving</c> to
+    /// <see langword="false"/> for the generation they start, so a stale <see cref="SaveAsync"/>
+    /// call finding itself superseded never needs to touch it.
     /// </summary>
     private int _generation;
 
@@ -60,7 +63,7 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
             lock (_gate)
             {
                 return new ReadSnapshot(
-                    _state, _blocksDone, _blocksTotal, _bytesDone, _bytesTotal, _name, _failure, _saved);
+                    _state, _blocksDone, _blocksTotal, _bytesDone, _bytesTotal, _name, _failure, _saved, _saving);
             }
         }
     }
@@ -106,6 +109,7 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
             _name = manifest.Manifest.Name;
             _failure = null;
             _saved = false;
+            _saving = false;
             ++_generation;
             _completion = Task.Run(() => RunAsync(link, manifest, cancellation.Token));
         }
@@ -173,6 +177,13 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
             // Running), and without this the write below could land on a run the person has already
             // put away, or on a different read entirely.
             generation = _generation;
+
+            // Set under the same lock as the pin above, and cleared below only once this call's own
+            // generation is confirmed still current -- so a Reset() or Start() that runs while this
+            // dialog is still open is what actually clears it (both already baseline it to false for
+            // their own, newer generation), not this call racing back in to stamp a stale false over
+            // a save that generation now owns.
+            _saving = true;
         }
 
         bool saved = false;
@@ -203,7 +214,8 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
         lock (_gate)
         {
             // The run this save was about has since been reset or superseded by a new one: nothing
-            // here belongs on its snapshot any more.
+            // here belongs on its snapshot any more -- including _saving, which Reset()/Start() have
+            // already baselined to false for whatever generation is current now.
             if (_generation != generation) return;
 
             _saved = saved;
@@ -212,6 +224,11 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
             // has to clear a sentence a previous, failed attempt on this same run left behind, or
             // Saved: true could sit next to an error that no longer describes anything real.
             _failure = failure;
+
+            // Cleared on every outcome that reaches here -- success, failure and a cancelled dialog
+            // alike -- so the Save button Read.razor disables while this is true never stays disabled
+            // past the call that set it.
+            _saving = false;
         }
     }
 
@@ -231,6 +248,7 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
             _name = null;
             _failure = null;
             _saved = false;
+            _saving = false;
             ++_generation;
 
             // Already disposed and nulled by RunAsync's own terminal-state publication once the run

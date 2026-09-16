@@ -3,13 +3,23 @@
 @inject ReadRun Run
 
 @* Design 4.1 and 4.2: the Read tab. It draws exactly one of four things, and which one is entirely
-   Snapshot.State's and Model's own decision -- this markup only names the branch, never computes it.
-   A running read is its own branch (progress and Cancel); Succeeded, Failed and Cancelled share a
-   second branch the way Run.razor's own IsFinished block shares one Dismiss button across its three
-   outcomes, because all three are "the read is over, offer a way back" and differ only in what they
-   say; the fourth branch is Idle, where Model itself decides between "no manifest yet" (Model.Manifest
-   is null) and "a manifest with a Read button" (CanRead already folds in both the manifest and any
-   message the lookup produced).
+   Snapshot's and Model's own decision -- this markup only names the branch, never computes it. A
+   running read is its own branch (progress and Cancel); Succeeded, Failed and Cancelled share a
+   second branch, selected by Snapshot.IsFinished rather than by comparing State against three named
+   values here, the same way RunModel.IsFinished decides that question for Run.razor (design C2) --
+   moved onto ReadSnapshot itself, since this screen has no wrapping model of its own the way
+   Run.razor has RunModel, and every field on that shared branch still differs only in what it says:
+   all three are "the read is over, offer a way back". The fourth branch is Idle, where Model itself
+   decides between "no manifest yet" (Model.Manifest is null) and "a manifest with a Read button"
+   (CanRead already folds in both the manifest and any message the lookup produced).
+
+   A save that throws while the read itself succeeded leaves State at Succeeded with Failure set
+   (ReadRun.SaveAsync never writes State) -- the Succeeded branch draws that sentence exactly like
+   the Failed branch draws its own, because the only other control next to a silent failure here is
+   Dismiss, which deletes the one copy of the file that was just read. The Save button is disabled
+   while Snapshot.Saving is true, straight off the run: nothing destructive happens from a second
+   click (SaveAsync's own generation guard, see its remarks), but a control is not left enabled for
+   the duration of an operation this screen already knows is running.
 
    Snapshot is taken once, at the top of this render, into a local -- not read field by field -- for
    the same reason Run.razor takes RunModel.Capture() once: ReadRun runs the block loop on a
@@ -47,7 +57,7 @@
         <button type="button" class="btn btn-outline-secondary mt-3" @onclick="Cancel">Cancel</button>
     </div>
 }
-else if (snapshot.State is ReadState.Succeeded or ReadState.Failed or ReadState.Cancelled)
+else if (snapshot.IsFinished)
 {
     <div class="container py-3">
         <h1 class="h3">Reading</h1>
@@ -56,10 +66,16 @@ else if (snapshot.State is ReadState.Succeeded or ReadState.Failed or ReadState.
         {
             <div class="alert alert-success">
                 <p class="mb-2">@(snapshot.Name is { } name ? $"Read \"{name}\" successfully." : "Read successfully.")</p>
-                <button type="button" class="btn btn-outline-secondary" @onclick="SaveAsync">Save&hellip;</button>
+                <button type="button" class="btn btn-outline-secondary" disabled="@snapshot.Saving" @onclick="SaveAsync">
+                    Save&hellip;
+                </button>
                 @if (snapshot.Saved)
                 {
                     <p class="mt-2 mb-0">Saved.</p>
+                }
+                @if (snapshot.Failure is not null)
+                {
+                    <div class="alert alert-danger mt-2 mb-0">@snapshot.Failure</div>
                 }
             </div>
         }
