@@ -41,10 +41,20 @@ public sealed class XrplFileException : Exception
     /// <summary>The block the failure is about, for BlockMismatch and ChunkMissing; otherwise null.</summary>
     public int? Block { get; }
 
-    public XrplFileException(XrplFileError error, string message, int? block = null, Exception? inner = null)
+    /// <summary>
+    /// The node's own engine result for <see cref="XrplFileError.SubmitRefused"/> — <c>"tecTOO_SOON"</c>,
+    /// <c>"temDST_IS_SRC"</c>, and so on — or null when this exception was not raised from a refused
+    /// submission. Only a <c>tec*</c> code actually claims a fee; a caller that has to say whether an
+    /// attempt cost anything needs this rather than the bare fact that it was refused.
+    /// </summary>
+    public string? EngineResult { get; }
+
+    public XrplFileException(
+        XrplFileError error, string message, int? block = null, Exception? inner = null, string? engineResult = null)
         : base(message, inner)
     {
         Error = error;
         Block = block;
+        EngineResult = engineResult;
     }
 }

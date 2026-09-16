@@ -31,7 +31,15 @@ public sealed class ThrowawayAccountDeletionTests
             ledger.Destinations[Home] = new DestinationState(Exists: true, RequiresDestinationTag: false, AuthorisesDepositors: false);
         }
 
-        FakeLedgerSink sink = new(ledger);
+        FakeLedgerSink sink = new(ledger)
+        {
+            // Every test in this class either funds Writer (the default 30,000,000 above) or sets
+            // its own balanceDrops explicitly, so this is safe here and makes every one of them
+            // pin, for free, that PreviewDeletionAsync never asks this account's sequence before it
+            // has checked the account can even cover the fee -- see the dedicated unfunded test
+            // below for the account this is actually guarding.
+            ThrowForUnfundedAccounts = true,
+        };
         sink.SetSequence(sequence);
         if (validatedSequence is not null) sink.SetValidatedSequence(validatedSequence);
 
@@ -190,5 +198,100 @@ public sealed class ThrowawayAccountDeletionTests
         // threshold -- so naming a ledger would point at a moment that is not the actual reason
         // for the wait.
         Assert.Null(result.DeletableFromLedger);
+    }
+
+    [Fact]
+    public async Task An_account_nobody_has_funded_is_refused_without_asking_the_node_for_its_sequence()
+    {
+        // Sequence 100 clears the threshold against ledger 5,000 -- if this test reached the
+        // sequence read at all, it would say Ready, not NotYet. Instead the balance gate must stop
+        // it before that: a zero balance is the state a freshly generated key is in until somebody
+        // funds it, which is exactly when the Accounts tab's Check button gets pressed for real.
+        // Ready's own sink already asks the node for the sequence of any account it does not
+        // recognise as funded (ThrowForUnfundedAccounts), so if PreviewDeletionAsync ever regressed
+        // to read the sequence before checking the balance, this test would fail with the
+        // RippledException a real node's actNotFound produces, not with a wrong Outcome.
+        (ThrowawayAccount account, _, FakeLedgerSink sink) = Ready(balanceDrops: 0);
+
+        DeletionResult result = await account.DeleteAsync(Home, TestContext.Current.CancellationToken);
+
+        Assert.Equal(DeletionOutcome.NotYet, result.Outcome);
+        Assert.Null(result.DeletableFromLedger);
+        Assert.Empty(sink.Submitted);
+    }
+
+    [Fact]
+    public async Task Closing_an_account_to_itself_is_refused_without_submitting()
+    {
+        // The candidate list the closing screen offers already excludes the account being closed,
+        // but nothing stops a typed address from being that same account -- an address that exists,
+        // carries no awkward flags, and would otherwise sail through every check here to Ready. The
+        // node would answer temDST_IS_SRC, a tem* that never applies and never claims the fee.
+        (ThrowawayAccount account, _, FakeLedgerSink sink) = Ready();
+
+        DeletionResult result = await account.DeleteAsync(Writer, TestContext.Current.CancellationToken);
+
+        Assert.Equal(DeletionOutcome.DestinationRefuses, result.Outcome);
+        Assert.Empty(sink.Submitted);
+    }
+
+    [Fact]
+    public async Task A_refusal_that_never_applied_carries_the_node_s_engine_result_on_the_exception()
+    {
+        // temDST_IS_SRC, tefPAST_SEQ, telINSUF_FEE_P and every ter* result never reach the ledger
+        // and never claim the fee -- unlike a tec* result, which does. A caller deciding whether to
+        // say "the attempt still claimed the fee" needs the actual code, not just the fact of a
+        // refusal.
+        (ThrowawayAccount account, _, FakeLedgerSink sink) = Ready();
+        sink.Refusals[0] = "telINSUF_FEE_P";
+
+        XrplFileException refused = await Assert.ThrowsAsync<XrplFileException>(
+            () => account.DeleteAsync(Home, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.SubmitRefused, refused.Error);
+        Assert.Equal("telINSUF_FEE_P", refused.EngineResult);
+    }
+
+    [Fact]
+    public async Task A_deletion_signs_with_exactly_the_sequence_its_own_preflight_measured_against()
+    {
+        // A sink that answers a DIFFERENT sequence on a second, independent read: if DeleteAsync
+        // still asked the sink a second time after its own internal preview had already measured
+        // 100 against the threshold, it would sign with 999 instead -- a value the preview never
+        // actually checked. The fix is that DeleteAsync's transaction carries the same sequence its
+        // own preview read, not a fresh one.
+        FakeLedgerSource ledger = new() { CurrentLedger = 5_000 };
+        ledger.Balances[Writer] = 30_000_000;
+        ledger.Destinations[Home] = new DestinationState(Exists: true, RequiresDestinationTag: false, AuthorisesDepositors: false);
+
+        FakeLedgerSink inner = new(ledger) { ThrowForUnfundedAccounts = true };
+        DriftingSequenceSink sink = new(inner, first: 100, thereafter: 999);
+        ThrowawayAccount account = new(sink, ledger, Signer);
+
+        DeletionResult result = await account.DeleteAsync(Home, TestContext.Current.CancellationToken);
+
+        Assert.Equal(DeletionOutcome.Submitted, result.Outcome);
+        Dictionary<string, object> submitted = Assert.Single(inner.Submitted);
+        Assert.Equal(100u, Convert.ToUInt32(submitted["Sequence"], CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>Answers a caller-chosen sequence on its first unvalidated read, and a different one on every read after that.</summary>
+    private sealed class DriftingSequenceSink(ILedgerSink inner, uint first, uint thereafter) : ILedgerSink
+    {
+        private int _unvalidatedReads;
+
+        public Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken)
+        {
+            if (!validated)
+            {
+                _unvalidatedReads++;
+                return Task.FromResult(_unvalidatedReads == 1 ? first : thereafter);
+            }
+
+            return inner.SequenceAsync(account, validated, cancellationToken);
+        }
+
+        public Task<SubmitOutcome> SubmitAsync(Dictionary<string, object> transaction, ITransactionSigner signer, CancellationToken cancellationToken) =>
+            inner.SubmitAsync(transaction, signer, cancellationToken);
     }
 }

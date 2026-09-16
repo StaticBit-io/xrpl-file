@@ -176,10 +176,35 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
         lock (_gate) _validatedSequenceOverride = sequence;
     }
 
+    /// <summary>
+    /// Makes <see cref="SequenceAsync"/> throw the way a real node's account_info does — actNotFound
+    /// — for any address <see cref="FakeLedgerSource.Balances"/> does not show as funded (absent
+    /// entirely, or present at zero or less, the same "does not exist" signal
+    /// <see cref="AccountState.Absent"/> uses everywhere else in this fake).
+    ///
+    /// Off by default: answering a number for any address regardless of whether it was ever funded
+    /// is this fake being wrong about the node, and <c>AccountsModel.RefreshFromLedgerAsync</c> and
+    /// <c>ThrowawayAccount.PreviewDeletionAsync</c> both used to call this unconditionally,
+    /// unguarded, and unnoticed until a freshly generated key hit it for real — but making the check
+    /// unconditional here as well breaks every test in this repository (TicketStrategyTests,
+    /// XrplFileWriterTests, SequenceStrategyTests above all) that signs through an account it never
+    /// bothered to fund because minting and submitting mechanics, not reserve accounting, are what
+    /// those tests are about. Opt in from the tests that are actually about an unfunded account:
+    /// ThrowawayAccountDeletionTests, AccountsModelTests, and this fake's own test of the property.
+    /// </summary>
+    public bool ThrowForUnfundedAccounts { get; set; }
+
     public Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken)
     {
         lock (_gate)
         {
+            if (ThrowForUnfundedAccounts
+                && (!ledger.Balances.TryGetValue(account, out long balance) || balance <= 0))
+            {
+                throw new Xrpl.Client.Exceptions.RippledException(
+                    "actNotFound", new Xrpl.Models.Subscriptions.ErrorResponse { Error = "actNotFound" });
+            }
+
             if (validated)
             {
                 if (ValidatedQueryTimeouts > 0)

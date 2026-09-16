@@ -1,3 +1,4 @@
+using Xrpl.Client.Exceptions;
 using Xrpl.Wallet;
 using Xunit;
 
@@ -44,5 +45,60 @@ public class FakeLedgerSinkTests
         // signature taken.
         Assert.Empty(sink.Submitted);
         Assert.Equal(0, sink.Signatures);
+    }
+
+    [Fact]
+    public async Task With_ThrowForUnfundedAccounts_an_account_nobody_has_funded_refuses_a_sequence_read()
+    {
+        // A real node's account_info answers actNotFound for an account it does not carry, and
+        // this is the shape XrplClientLedgerSink.SequenceAsync lets that escape as: a
+        // RippledException nothing in that class catches. Off by default (see the property's own
+        // remarks on why), but a test that turns it on must see exactly this.
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger) { ThrowForUnfundedAccounts = true };
+
+        Xrpl.Client.Exceptions.RippledException error = await Assert.ThrowsAsync<Xrpl.Client.Exceptions.RippledException>(
+            () => sink.SequenceAsync(Wallet.ClassicAddress, validated: false, TestContext.Current.CancellationToken));
+
+        Assert.Equal("actNotFound", error.Classify().RawError);
+    }
+
+    [Fact]
+    public async Task With_ThrowForUnfundedAccounts_a_balance_of_zero_still_refuses_a_sequence_read()
+    {
+        // Zero drops is this fake's own convention for "does not exist" everywhere else
+        // (AccountState.Absent), and an explicit zero-balance entry must mean the same thing here
+        // as no entry at all.
+        FakeLedgerSource ledger = new();
+        ledger.Balances[Wallet.ClassicAddress] = 0;
+        FakeLedgerSink sink = new(ledger) { ThrowForUnfundedAccounts = true };
+
+        await Assert.ThrowsAsync<Xrpl.Client.Exceptions.RippledException>(
+            () => sink.SequenceAsync(Wallet.ClassicAddress, validated: false, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Without_ThrowForUnfundedAccounts_an_unfunded_account_still_answers_a_sequence()
+    {
+        // The default: every other test in this repository that signs through an account it never
+        // bothered to fund relies on this being lenient unless a test opts into the stricter check.
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+
+        uint sequence = await sink.SequenceAsync(Wallet.ClassicAddress, validated: false, TestContext.Current.CancellationToken);
+
+        Assert.Equal(10u, sequence);
+    }
+
+    [Fact]
+    public async Task With_ThrowForUnfundedAccounts_a_funded_account_still_answers_a_sequence()
+    {
+        FakeLedgerSource ledger = new();
+        ledger.Balances[Wallet.ClassicAddress] = 1;
+        FakeLedgerSink sink = new(ledger) { ThrowForUnfundedAccounts = true };
+
+        uint sequence = await sink.SequenceAsync(Wallet.ClassicAddress, validated: false, TestContext.Current.CancellationToken);
+
+        Assert.Equal(10u, sequence);
     }
 }

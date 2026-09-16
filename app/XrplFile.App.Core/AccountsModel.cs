@@ -30,30 +30,37 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
     {
         Message = null;
 
-        IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(cancellationToken).ConfigureAwait(false);
-
-        List<AccountRow> rows = [];
-        foreach (VaultEntryInfo info in listed.Where(entry => entry.Kind == VaultEntryKind.Generated))
+        try
         {
-            // A row already refreshed from a node keeps what it learned. A new one — or one no
-            // node has ever been asked about — starts as Unknown: a cached DeletableFromLedger may
-            // still ride along for display (it is what it is for), but it is not an answer, and
-            // claiming KeyOnly from the vault alone would say "nothing on the ledger" about an
-            // account that cache could only exist for if something had once been funded. Closed is
-            // the one stage the vault gets to declare outright — a closure is a fact it owns, and
-            // no node is needed to confirm it.
-            rows.Add(_rows.TryGetValue(info.Reference, out AccountRow? known) && info.Closure is null
-                ? known with { Label = info.Label, Closure = info.Closure }
-                : new AccountRow(
-                    info.Reference, info.Label, info.Address, info.Network,
-                    info.Closure is null ? AccountStage.Unknown : AccountStage.Closed,
-                    null, info.DeletableFromLedger, null, info.Closure));
+            IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(cancellationToken).ConfigureAwait(false);
+
+            List<AccountRow> rows = [];
+            foreach (VaultEntryInfo info in listed.Where(entry => entry.Kind == VaultEntryKind.Generated))
+            {
+                // A row already refreshed from a node keeps what it learned. A new one — or one no
+                // node has ever been asked about — starts as Unknown: a cached DeletableFromLedger may
+                // still ride along for display (it is what it is for), but it is not an answer, and
+                // claiming KeyOnly from the vault alone would say "nothing on the ledger" about an
+                // account that cache could only exist for if something had once been funded. Closed is
+                // the one stage the vault gets to declare outright — a closure is a fact it owns, and
+                // no node is needed to confirm it.
+                rows.Add(_rows.TryGetValue(info.Reference, out AccountRow? known) && info.Closure is null
+                    ? known with { Label = info.Label, Closure = info.Closure }
+                    : new AccountRow(
+                        info.Reference, info.Label, info.Address, info.Network,
+                        info.Closure is null ? AccountStage.Unknown : AccountStage.Closed,
+                        null, info.DeletableFromLedger, null, info.Closure));
+            }
+
+            _rows.Clear();
+            foreach (AccountRow row in rows) _rows[row.Reference] = row;
+
+            Rows = rows;
         }
-
-        _rows.Clear();
-        foreach (AccountRow row in rows) _rows[row.Reference] = row;
-
-        Rows = rows;
+        catch (VaultException ex)
+        {
+            Message = VaultErrorMessages.For(ex.Error);
+        }
     }
 
     /// <summary>
@@ -68,6 +75,13 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
 
         if (!_rows.TryGetValue(reference, out AccountRow? row) || row.Stage == AccountStage.Closed) return;
 
+        void Apply(AccountRow updated)
+        {
+            _rows[reference] = updated;
+            Rows = [.. Rows.Select(existing =>
+                string.Equals(existing.Reference, reference, StringComparison.Ordinal) ? updated : existing)];
+        }
+
         _checking.Add(reference);
         try
         {
@@ -76,6 +90,29 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
 
             AccountState state = await connection.Source
                 .AccountStateAsync(row.Address, cancellationToken).ConfigureAwait(false);
+
+            if (state.BalanceDrops == 0)
+            {
+                // Nobody has funded this address yet -- the state a freshly generated key is in
+                // until somebody pays into it, and the ordinary reason Check gets pressed at all.
+                // The account does not exist on the ledger, and XrplClientLedgerSink.SequenceAsync
+                // has no absent-account handling of its own -- unlike ILedgerSource, whose
+                // AskOrAbsentAsync treats actNotFound as an answer -- so asking it for this
+                // account's sequence would let a RippledException escape uncaught instead of the
+                // KeyOnly stage this row already has. There is also nothing to compute: an account
+                // that does not exist has no sequence to count 254 ledgers from, so a cached
+                // countdown from an earlier session is retired here rather than carried forward as
+                // if it still meant something (design G8).
+                Apply(row with
+                {
+                    Stage = AccountStage.KeyOnly,
+                    BalanceDrops = 0,
+                    DeletableFromLedger = null,
+                    LedgersRemaining = null,
+                });
+
+                return;
+            }
 
             long current = await connection.Source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
             uint sequence = await connection.Sink
@@ -90,21 +127,15 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
             // on the closing screen is the authority on whether a close will actually go through,
             // and it will answer NotYet with the real reason when this stage alone would have said
             // yes. This is a rough "worth trying" signal for the list, not a promise.
-            AccountStage stage = state.BalanceDrops == 0
-                ? AccountStage.KeyOnly
-                : remaining == 0 ? AccountStage.Closable : AccountStage.Funded;
+            AccountStage stage = remaining == 0 ? AccountStage.Closable : AccountStage.Funded;
 
-            AccountRow updated = row with
+            Apply(row with
             {
                 Stage = stage,
                 BalanceDrops = state.BalanceDrops,
                 DeletableFromLedger = deletableFrom,
                 LedgersRemaining = remaining,
-            };
-
-            _rows[reference] = updated;
-            Rows = [.. Rows.Select(existing =>
-                string.Equals(existing.Reference, reference, StringComparison.Ordinal) ? updated : existing)];
+            });
 
             // Kept on the entry so the next launch can say roughly how long is left before the node
             // has answered. Never read back to decide anything (design G8).

@@ -310,7 +310,21 @@ public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, ITr
     /// without the transaction.
     /// </summary>
     /// <exception cref="ArgumentException">No destination. Nothing is ever assumed — see <see cref="RefundAsync"/>.</exception>
-    public async Task<DeletionResult> PreviewDeletionAsync(string destination, CancellationToken cancellationToken)
+    public async Task<DeletionResult> PreviewDeletionAsync(string destination, CancellationToken cancellationToken) =>
+        (await PreviewDeletionCoreAsync(destination, cancellationToken).ConfigureAwait(false)).Result;
+
+    /// <summary>
+    /// <see cref="PreviewDeletionAsync"/>'s own body, plus the sequence it measured the threshold
+    /// against -- kept out of the public <see cref="DeletionResult"/> because nothing outside this
+    /// class has a use for a raw ledger sequence, but needed by <see cref="DeleteAsync"/>, which
+    /// must sign with exactly the value this method already checked rather than asking the sink a
+    /// second time and risking a different answer (see the remarks on the sequence read below).
+    /// The returned sequence is meaningless outside a <see cref="DeletionOutcome.Ready"/> result —
+    /// every refusal reached before that read happens at all returns <c>0</c> for it, which
+    /// <see cref="DeleteAsync"/> never looks at because it only signs once the outcome is Ready.
+    /// </summary>
+    private async Task<(DeletionResult Result, uint Sequence)> PreviewDeletionCoreAsync(
+        string destination, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(destination))
         {
@@ -337,6 +351,29 @@ public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, ITr
         DeletionResult Refused(DeletionOutcome outcome, long? deletableFrom = null) =>
             new(destination, state.BalanceDrops, fee, 0, string.Empty, deletableFrom, outcome);
 
+        // rippled answers temDST_IS_SRC for an AccountDelete whose Destination is the account being
+        // deleted -- a tem*, never applied and never charged. Caught here rather than left to the
+        // node: the candidate list the closing screen offers already excludes this account, but a
+        // typed address does not, and a person who pastes their own throwaway address would
+        // otherwise be refused only after signing and submitting. Checked before any read that
+        // exists only to measure the sequence threshold, so a self-destination never pays for those
+        // either.
+        if (string.Equals(destination, Address, StringComparison.Ordinal))
+        {
+            return (Refused(DeletionOutcome.DestinationRefuses), 0);
+        }
+
+        // Moved ahead of the sequence and current-ledger reads below, which exist only to measure
+        // the threshold: an account nobody has funded yet -- state.BalanceDrops == 0, the ordinary
+        // state a freshly generated key is in until somebody pays into it -- cannot cover the fee
+        // either way, and asking the sink for its sequence would ask the node about an account it
+        // does not carry. XrplClientLedgerSink.SequenceAsync has no absent-account handling of its
+        // own -- unlike ILedgerSource, whose AskOrAbsentAsync treats actNotFound as an answer -- so
+        // that ask would let the node's actNotFound escape as a raw, uncaught RippledException
+        // instead of the NotYet this screen already has a sentence for. Reached most often from the
+        // Accounts tab's own Check button, pressed on a key before anybody has funded its address.
+        if (state.BalanceDrops <= fee) return (Refused(DeletionOutcome.NotYet), 0);
+
         // The threshold has to be measured against the sequence the transaction will actually
         // carry -- the account's *unvalidated* sequence, the one SequenceAsync(validated: false)
         // hands the sink for signing -- and not DeletableFromLedgerAsync's validated: true read.
@@ -349,54 +386,54 @@ public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, ITr
         // and then submit with the transaction's now-higher sequence -- refused again, burning a
         // second owner reserve on a second tecTOO_SOON.
         //
+        // Read exactly once: DeleteAsync signs with this same value rather than asking the sink
+        // again once this method answers Ready, so nothing between the two calls -- another
+        // transaction landing, a node answering a slightly later ledger -- can hand DeleteAsync a
+        // sequence this method never actually checked against the threshold.
+        //
         // Pinned by ThrowawayAccountDeletionTests's
         // The_gate_uses_the_sequence_the_transaction_will_carry_not_the_validated_one, which puts
         // the two reads in disagreement via FakeLedgerSink.SetValidatedSequence: a validated
-        // sequence that clears the threshold against a ledger the unvalidated one does not.
+        // sequence that clears the threshold against a ledger the unvalidated one does not; and by
+        // A_deletion_signs_with_exactly_the_sequence_its_own_preflight_measured_against, which fails
+        // a sink that would answer a second, different sequence if this method asked for one.
         uint sequence = await _sink.SequenceAsync(Address, validated: false, cancellationToken).ConfigureAwait(false);
         long deletableFrom = sequence + DeletionSequenceDelta;
         long current = await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
 
-        if (current < deletableFrom) return Refused(DeletionOutcome.NotYet, deletableFrom);
-
-        // A balance that cannot cover the fee cannot be deleted now either. It is the same sentence
-        // to the person -- not yet -- and inventing a separate outcome for it would split one
-        // remedy in two. The sequence rule is not what is refusing here -- the check above already
-        // passed -- so DeletableFromLedger stays null rather than naming a ledger that is not the
-        // reason for the wait.
-        if (state.BalanceDrops <= fee) return Refused(DeletionOutcome.NotYet);
+        if (current < deletableFrom) return (Refused(DeletionOutcome.NotYet, deletableFrom), sequence);
 
         DestinationState home = await _source.DestinationAsync(destination, cancellationToken).ConfigureAwait(false);
 
-        if (!home.Exists) return Refused(DeletionOutcome.DestinationMissing);
+        if (!home.Exists) return (Refused(DeletionOutcome.DestinationMissing), sequence);
 
         if (home.RequiresDestinationTag || home.AuthorisesDepositors)
         {
-            return Refused(DeletionOutcome.DestinationRefuses);
+            return (Refused(DeletionOutcome.DestinationRefuses), sequence);
         }
 
-        return new DeletionResult(
-            destination, state.BalanceDrops, fee, arriving, string.Empty, null, DeletionOutcome.Ready);
+        return (
+            new DeletionResult(destination, state.BalanceDrops, fee, arriving, string.Empty, null, DeletionOutcome.Ready),
+            sequence);
     }
 
     /// <summary>
     /// Closes the account, sending everything it holds less the fee to the named destination.
-    /// Runs <see cref="PreviewDeletionAsync"/> first and submits nothing unless it answers
-    /// <see cref="DeletionOutcome.Ready"/>: a <c>tec</c> result claims the fee, and this fee is one
-    /// owner reserve — the same amount this whole operation exists to recover.
+    /// Runs the same checks <see cref="PreviewDeletionAsync"/> does and submits nothing unless they
+    /// answer <see cref="DeletionOutcome.Ready"/>: a <c>tec</c> result claims the fee, and this fee
+    /// is one owner reserve — the same amount this whole operation exists to recover.
     /// </summary>
     /// <exception cref="ArgumentException">No destination.</exception>
     /// <exception cref="XrplFileException">
-    /// <see cref="XrplFileError.SubmitRefused"/> when the node answered something other than
-    /// <c>tesSUCCESS</c> or <c>terQUEUED</c>.
+    /// <see cref="XrplFileError.SubmitRefused"/>, carrying the node's engine result, when the node
+    /// answered something other than <c>tesSUCCESS</c> or <c>terQUEUED</c>.
     /// </exception>
     public async Task<DeletionResult> DeleteAsync(string destination, CancellationToken cancellationToken)
     {
-        DeletionResult preview = await PreviewDeletionAsync(destination, cancellationToken).ConfigureAwait(false);
+        (DeletionResult preview, uint sequence) =
+            await PreviewDeletionCoreAsync(destination, cancellationToken).ConfigureAwait(false);
 
         if (preview.Outcome != DeletionOutcome.Ready) return preview;
-
-        uint sequence = await _sink.SequenceAsync(Address, validated: false, cancellationToken).ConfigureAwait(false);
 
         Dictionary<string, object> deletion = new(StringComparer.Ordinal)
         {
@@ -413,7 +450,8 @@ public sealed class ThrowawayAccount(ILedgerSink sink, ILedgerSource source, ITr
         if (outcome.EngineResult is not ("tesSUCCESS" or "terQUEUED"))
         {
             throw new XrplFileException(XrplFileError.SubmitRefused,
-                $"the node answered {outcome.EngineResult} to the deletion of {Address} to {destination}");
+                $"the node answered {outcome.EngineResult} to the deletion of {Address} to {destination}",
+                engineResult: outcome.EngineResult);
         }
 
         DeletionOutcome reached = string.Equals(outcome.EngineResult, "terQUEUED", StringComparison.Ordinal)
