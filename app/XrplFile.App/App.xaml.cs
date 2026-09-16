@@ -15,13 +15,15 @@ public partial class App : Application
 	private readonly IKeyVault _vault;
 	private readonly VaultAutoLock _autoLock;
 	private readonly PublicationRun _run;
+	private readonly ReadRun _read;
 
-	public App(IKeyVault vault, VaultAutoLock autoLock, PublicationRun run)
+	public App(IKeyVault vault, VaultAutoLock autoLock, PublicationRun run, ReadRun read)
 	{
 		InitializeComponent();
 		_vault = vault;
 		_autoLock = autoLock;
 		_run = run;
+		_read = read;
 	}
 
 	protected override Window CreateWindow(IActivationState? activationState)
@@ -124,16 +126,27 @@ public partial class App : Application
 			{
 				try
 				{
-					// Before the lock, not after. Locking first would land while a publication was
-					// still going, and the run would die at its next signature with
-					// VaultError.Locked -- mid batch, with tickets live and money already spent.
-					// Stopping first leaves the state file part A writes, so the run is in the
-					// unfinished list next time the application opens.
-					await _run.StopAsync(StopTimeout).ConfigureAwait(false);
+					try
+					{
+						// Before the lock, not after. Locking first would land while a publication was
+						// still going, and the run would die at its next signature with
+						// VaultError.Locked -- mid batch, with tickets live and money already spent.
+						// Stopping first leaves the state file part A writes, so the run is in the
+						// unfinished list next time the application opens.
+						await _run.StopAsync(StopTimeout).ConfigureAwait(false);
+					}
+					finally
+					{
+						// Runs even if the publication's stop above threw, for the same reason that
+						// stop's own guard exists: a read that outlives the window is no better than a
+						// publication that does, and its own StopAsync deletes the temporary file it
+						// was writing to as part of stopping -- nothing else here is needed for that.
+						await _read.StopAsync(StopTimeout).ConfigureAwait(false);
+					}
 				}
 				finally
 				{
-					// Runs even if the stop above threw -- cancelling a token propagates whatever a
+					// Runs even if either stop above threw -- cancelling a token propagates whatever a
 					// registered callback throws, and a data key that outlives a failed stop with
 					// the idle timer already disposed (below) would have nothing left to reclaim it.
 					// The lock belongs on every path out of this handler, not only the one where the
