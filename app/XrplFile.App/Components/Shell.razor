@@ -1,5 +1,6 @@
 @implements IDisposable
 @inject UnlockModel Model
+@inject ShellModel Tabs
 
 @* One window, no router (design section 6). What renders is entirely the model's own Stage --
    this component switches on it but never sets it, and never composes a word of its own.
@@ -34,42 +35,42 @@
             <div class="d-flex justify-content-between align-items-center border-bottom px-3 py-2">
                 <div class="btn-group">
                     <button type="button"
-                            class="btn btn-outline-primary @(_unlockedView == UnlockedView.KeyList ? "active" : "")"
-                            @onclick="() => _unlockedView = UnlockedView.KeyList">
+                            class="btn btn-outline-primary @(Tabs.Tab == AppTab.Keys ? "active" : "")"
+                            @onclick="() => Tabs.Show(AppTab.Keys)">
                         Keys
                     </button>
                     <button type="button"
-                            class="btn btn-outline-primary @(_unlockedView == UnlockedView.Publish ? "active" : "")"
-                            @onclick="() => _unlockedView = UnlockedView.Publish">
+                            class="btn btn-outline-primary @(Tabs.Tab == AppTab.Publish ? "active" : "")"
+                            @onclick="() => Tabs.Show(AppTab.Publish)">
                         Publish
                     </button>
                     <button type="button"
-                            class="btn btn-outline-primary @(_unlockedView == UnlockedView.Settings ? "active" : "")"
-                            @onclick="() => _unlockedView = UnlockedView.Settings">
+                            class="btn btn-outline-primary @(Tabs.Tab == AppTab.Settings ? "active" : "")"
+                            @onclick="() => Tabs.Show(AppTab.Settings)">
                         Settings
                     </button>
                     <button type="button"
-                            class="btn btn-outline-primary @(_unlockedView == UnlockedView.Accounts ? "active" : "")"
-                            @onclick="() => _unlockedView = UnlockedView.Accounts">
+                            class="btn btn-outline-primary @(Tabs.Tab == AppTab.Accounts ? "active" : "")"
+                            @onclick="() => Tabs.Show(AppTab.Accounts)">
                         Accounts
                     </button>
                 </div>
                 <button type="button" class="btn btn-outline-secondary" @onclick="LockAsync">Lock</button>
             </div>
 
-            @if (_unlockedView == UnlockedView.KeyList)
+            @if (Tabs.Tab == AppTab.Keys)
             {
                 <KeyList />
             }
-            else if (_unlockedView == UnlockedView.Publish)
+            else if (Tabs.Tab == AppTab.Publish)
             {
                 <Publish />
             }
-            else if (_unlockedView == UnlockedView.Settings)
+            else if (Tabs.Tab == AppTab.Settings)
             {
                 <Settings />
             }
-            else
+            else if (Tabs.Tab == AppTab.Accounts)
             {
                 <Accounts />
             }
@@ -84,14 +85,6 @@ else
 }
 
 @code {
-    private enum UnlockedView
-    {
-        KeyList,
-        Publish,
-        Settings,
-        Accounts,
-    }
-
     /// <summary>
     /// How often the shell asks whether the vault has been shut behind it. One second, matching
     /// RevealSeed.razor, so the two screens notice a lock at the same moment rather than one of
@@ -103,7 +96,6 @@ else
     private Timer? _lockPollTimer;
     private bool _disposed;
     private bool _ready;
-    private UnlockedView _unlockedView = UnlockedView.KeyList;
 
     protected override async Task OnInitializedAsync()
     {
@@ -127,7 +119,7 @@ else
                 return;
             }
 
-            _unlockedView = UnlockedView.KeyList;
+            Tabs.Show(AppTab.Keys);
 
             // One file read, here, rather than one per tick: NoticeLock deliberately leaves
             // DeviceUnlockOffered alone, and the unlock screen this is about to show needs it.
@@ -139,7 +131,7 @@ else
     private async Task LockAsync()
     {
         await Model.LockAsync();
-        _unlockedView = UnlockedView.KeyList;
+        Tabs.Show(AppTab.Keys);
         StateHasChanged();
     }
 
