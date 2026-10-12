@@ -238,8 +238,9 @@ Against the fake ledger, on Linux, as the rest of the library and the applicatio
 - `tefNO_TICKET` drops the ticket without costing the memo an attempt, the memo still lands, and
   that ticket is not picked up again by the same instance;
 - a transaction carrying the right marker and different data is neither recorded nor seen;
-- the tidy-up counts a ticket as released only on a validated `tesSUCCESS`, as already gone on
-  `tefNO_TICKET`, and as not released otherwise; it leaves foreign tickets alone; it stops at its
+- the tidy-up counts a ticket as released only on a validated `tesSUCCESS`, as already gone only
+  once the ledger no longer lists it, and as not released otherwise — a `tefNO_TICKET` answer for a
+  ticket still listed included; it leaves foreign tickets alone; it stops at its
   deadline; a tidy-up that throws leaves the publication successful and says so on the report;
 - the estimate subtracts only this library's tickets, treats every other live ticket as an occupied
   slot, and refuses a ticketed run when no slot is left;
