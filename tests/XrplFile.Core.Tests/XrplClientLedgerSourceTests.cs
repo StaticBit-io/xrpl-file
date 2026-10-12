@@ -446,11 +446,12 @@ public class XrplClientLedgerSourceTests
             {"account":"rWriter","account_objects":[
               {"LedgerEntryType":"Ticket","TicketSequence":11,"PreviousTxnID":"aa11","Account":"rWriter"},
               {"LedgerEntryType":"Ticket","TicketSequence":12,"PreviousTxnID":"aa11","Account":"rWriter"}],
-             "marker":"next-page"}
+             "ledger_index":77,"validated":true,"marker":"next-page"}
             """);
         node.Answer("""
             {"account":"rWriter","account_objects":[
-              {"LedgerEntryType":"Ticket","TicketSequence":40,"PreviousTxnID":"bb40","Account":"rWriter"}]}
+              {"LedgerEntryType":"Ticket","TicketSequence":40,"PreviousTxnID":"bb40","Account":"rWriter"}],
+             "ledger_index":77,"validated":true}
             """);
 
         IReadOnlyList<LiveTicket> tickets = await new XrplClientLedgerSource(node.HandleAsync)
@@ -461,16 +462,55 @@ public class XrplClientLedgerSourceTests
             tickets);
         Assert.Equal(["account_objects", "account_objects"], node.Commands);
 
-        // What was asked matters as much as what came back: only tickets, from the validated
-        // ledger, and the second page asked for by the marker the first one carried.
+        // What was asked matters as much as what came back: only tickets, the first page from the
+        // validated ledger and every later one from that same ledger, asked for by the marker the
+        // page before it carried.
         Xrpl.Models.Methods.AccountObjectsRequest[] asked = [.. node.Requests.Cast<Xrpl.Models.Methods.AccountObjectsRequest>()];
-        Assert.All(asked, request =>
-        {
-            Assert.Equal(Xrpl.Models.LedgerEntryType.Ticket, request.Type);
-            Assert.Equal(Xrpl.Models.Ledger.LedgerIndexType.Validated, request.LedgerIndex.LedgerIndexType);
-        });
+        Assert.All(asked, request => Assert.Equal(Xrpl.Models.LedgerEntryType.Ticket, request.Type));
+        Assert.Null(asked[0].LedgerIndex.Index);
+        Assert.Equal(Xrpl.Models.Ledger.LedgerIndexType.Validated, asked[0].LedgerIndex.LedgerIndexType);
+        Assert.Equal(77u, asked[1].LedgerIndex.Index);
         Assert.Null(asked[0].Marker);
         Assert.Equal("next-page", Assert.IsType<JsonElement>(asked[1].Marker).GetString());
+    }
+
+    [Fact]
+    public async Task A_null_marker_ends_the_ticket_list()
+    {
+        ScriptedNode node = new();
+        node.Answer("""
+            {"account":"rWriter","account_objects":[
+              {"LedgerEntryType":"Ticket","TicketSequence":11,"PreviousTxnID":"aa11","Account":"rWriter"}],
+             "ledger_index":77,"marker":null}
+            """);
+
+        IReadOnlyList<LiveTicket> tickets = await new XrplClientLedgerSource(node.HandleAsync)
+            .LiveTicketsAsync("rWriter", TestContext.Current.CancellationToken);
+
+        Assert.Equal([new LiveTicket(11, "AA11")], tickets);
+        Assert.Equal(["account_objects"], node.Commands);
+    }
+
+    [Fact]
+    public async Task A_marker_repeated_by_the_node_is_a_failure_not_a_loop()
+    {
+        ScriptedNode node = new();
+        node.Answer("""
+            {"account":"rWriter","account_objects":[
+              {"LedgerEntryType":"Ticket","TicketSequence":11,"PreviousTxnID":"aa11","Account":"rWriter"}],
+             "ledger_index":77,"marker":"stuck"}
+            """);
+        node.Answer("""
+            {"account":"rWriter","account_objects":[
+              {"LedgerEntryType":"Ticket","TicketSequence":11,"PreviousTxnID":"aa11","Account":"rWriter"}],
+             "ledger_index":77,"marker":"stuck"}
+            """);
+
+        XrplFileException failure = await Assert.ThrowsAsync<XrplFileException>(() => new XrplClientLedgerSource(node.HandleAsync)
+            .LiveTicketsAsync("rWriter", TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, failure.Error);
+        Assert.Equal(["account_objects", "account_objects"], node.Commands);
     }
 
     [Fact]

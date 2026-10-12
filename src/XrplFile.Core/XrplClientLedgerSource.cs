@@ -145,16 +145,19 @@ public sealed class XrplClientLedgerSource : ILedgerSource
     {
         List<LiveTicket> tickets = [];
         object? marker = null;
+        string? previousMarker = null;
+
+        // Validated, not current: a ticket a strategy picks up or a tidy-up spends has to be one
+        // the ledger has committed to, and a ticket an open ledger shows may yet vanish.
+        LedgerIndex ledger = new(LedgerIndexType.Validated);
 
         while (true)
         {
-            // Validated, not current: a ticket a strategy picks up or a tidy-up spends has to be one
-            // the ledger has committed to, and a ticket an open ledger shows may yet vanish.
             JsonElement? page = await AskOrAbsentAsync(
                 new AccountObjectsRequest(account)
                 {
                     Type = Xrpl.Models.LedgerEntryType.Ticket,
-                    LedgerIndex = new LedgerIndex(LedgerIndexType.Validated),
+                    LedgerIndex = ledger,
                     Limit = _pageSize,
                     Marker = marker,
                 },
@@ -166,10 +169,33 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
             tickets.AddRange(ParseTickets(answer));
 
-            // The marker goes back to the node as it came; its shape is the node's business.
-            marker = answer.TryGetProperty("marker", out JsonElement next) ? next.Clone() : null;
+            // Every later page comes from the ledger the first one was read from: "validated" moves
+            // between pages, and a marker is only meaningful in the ledger that issued it, so pages
+            // from two ledgers could skip a ticket or list one twice. An answer that does not say
+            // which ledger it read leaves nothing to pin, and asking "validated" again is the best
+            // this listing can do.
+            if (ledger.Index is null && Number(answer, "ledger_index") is { } read and > 0 and <= uint.MaxValue)
+            {
+                ledger = new LedgerIndex((uint)read);
+            }
 
-            if (marker is null) return tickets;
+            // The marker goes back to the node as it came; its shape is the node's business. One
+            // present but null is the same as none.
+            if (!answer.TryGetProperty("marker", out JsonElement next) || next.ValueKind == JsonValueKind.Null) return tickets;
+
+            string raw = next.GetRawText();
+
+            // A node that hands back the marker it was just given would page forever; a listing it
+            // cannot finish is a node that cannot be read, not an empty one.
+            if (string.Equals(raw, previousMarker, StringComparison.Ordinal))
+            {
+                throw new XrplFileException(
+                    XrplFileError.NodeUnreachable,
+                    "the node answered account_objects with the same marker twice; the ticket listing cannot be completed");
+            }
+
+            previousMarker = raw;
+            marker = next.Clone();
         }
     }
 
