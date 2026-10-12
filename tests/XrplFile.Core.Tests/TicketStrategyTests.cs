@@ -486,4 +486,152 @@ public class TicketStrategyTests
         Assert.False(memo.TryGetProperty("MemoData", out _));
         Assert.False(memo.TryGetProperty("MemoFormat", out _));
     }
+
+    private static uint[] Ridden(FakeLedgerSink sink) =>
+        [.. sink.Submitted.Where(tx => tx.ContainsKey("TicketSequence")).Select(tx => Convert.ToUInt32(tx["TicketSequence"]))];
+
+    private static uint[] Minted(FakeLedgerSink sink) =>
+        [.. sink.Submitted.Where(tx => (string)tx["TransactionType"] == "TicketCreate").Select(tx => Convert.ToUInt32(tx["TicketCount"]))];
+
+    [Fact]
+    public async Task A_strategy_spends_this_librarys_leftovers_before_it_mints()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> leftovers = sink.LeaveTickets(Wallet.ClassicAddress, 3, marked: true);
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(5), null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(5, landed.Count);
+        Assert.All(leftovers, ticket => Assert.Contains(ticket, Ridden(sink)));
+        // The mint covered only the shortfall.
+        Assert.Equal([2u], Minted(sink));
+        Assert.Empty(sink.LiveTickets);
+    }
+
+    [Fact]
+    public async Task Unmarked_tickets_and_tickets_of_unknown_origin_are_left_alone()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> unmarked = sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: false);
+        sink.LeakTickets(Wallet.ClassicAddress, 2);
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
+
+        uint[] ridden = Ridden(sink);
+        Assert.All(unmarked, ticket => Assert.DoesNotContain(ticket, ridden));
+        Assert.DoesNotContain(1_000_000u, ridden);
+        Assert.DoesNotContain(1_000_001u, ridden);
+        Assert.Equal([3u], Minted(sink));
+        Assert.Equal(4, sink.LiveTickets.Count);
+    }
+
+    [Fact]
+    public async Task Tickets_picked_up_by_one_call_are_never_picked_up_again_by_the_next()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeaveTickets(Wallet.ClassicAddress, 5, marked: true);
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        // Picks up all five, spends two, and keeps three in hand.
+        await strategy.SubmitAllAsync(Memos(2), null, TestContext.Current.CancellationToken);
+
+        // A stopped run's mint that validated after this instance first looked (spec I4).
+        sink.LeaveTickets(Wallet.ClassicAddress, 4, marked: true);
+
+        await strategy.SubmitAllAsync(Memos(7, from: 2), null, TestContext.Current.CancellationToken);
+
+        uint[] ridden = Ridden(sink);
+        Assert.Equal(9, ridden.Length);
+        Assert.Equal(ridden.Length, ridden.Distinct().Count());
+        Assert.Empty(Minted(sink));
+        Assert.Empty(sink.LiveTickets);
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task A_ticket_that_is_gone_costs_its_memo_no_attempt_and_is_not_picked_up_again()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> leftovers = sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: true);
+        sink.AnswersGone.Add(leftovers[0]);
+
+        // One attempt per memo, and a batch timeout far beyond the test's own: a strategy that
+        // counted the gone ticket as an attempt fails, and one that swept for the memo the gone
+        // ticket never carried times the test out.
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
+        {
+            TicketsPerBatch = 100,
+            MaxAttemptsPerMemo = 1,
+            SweepPoll = TimeSpan.FromMilliseconds(1),
+            BatchTimeout = TimeSpan.FromMinutes(1),
+            ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
+
+        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+        Assert.Single(landed);
+
+        // The gone ticket is still listed, so the next call's look finds it again — and must not ride it.
+        sink.CloseLedger();
+        await strategy.SubmitAllAsync(Memos(1, from: 1), null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, Ridden(sink).Count(ticket => ticket == leftovers[0]));
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task A_memo_that_draws_several_gone_tickets_in_a_row_still_lands()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> leftovers = sink.LeaveTickets(Wallet.ClassicAddress, 4, marked: true);
+        sink.AnswersGone.UnionWith(leftovers.Take(3));
+
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
+        {
+            TicketsPerBatch = 100,
+            MaxAttemptsPerMemo = 1,
+            SweepPoll = TimeSpan.FromMilliseconds(1),
+            BatchTimeout = TimeSpan.FromMinutes(1),
+            ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
+
+        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+
+        Assert.Single(landed);
+        Assert.Equal([.. leftovers], Ridden(sink));
+        Assert.Empty(Minted(sink));
+    }
+
+    [Fact]
+    public async Task A_dispatched_ticket_still_listed_is_never_picked_up_again()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> leftovers = sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: true);
+
+        // Position 0 is the first memo, riding the first leftover: the node answers terQUEUED and
+        // never applies it, so that ticket is dispatched and still listed.
+        sink.Refusals[0] = "terQUEUED";
+
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
+        {
+            TicketsPerBatch = 100,
+            SweepPoll = TimeSpan.FromMilliseconds(1),
+            BatchTimeout = TimeSpan.FromMilliseconds(100),
+            ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
+
+        await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+
+        // One more leftover makes the ledger hold more than the instance accounts for, so the next
+        // call looks again — and finds the dispatched ticket listed among this library's.
+        sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true);
+        await strategy.SubmitAllAsync(Memos(1, from: 1), null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, Ridden(sink).Count(ticket => ticket == leftovers[0]));
+    }
 }

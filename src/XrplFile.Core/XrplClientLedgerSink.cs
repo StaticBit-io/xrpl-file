@@ -94,8 +94,11 @@ public sealed class XrplClientLedgerSink : ILedgerSink
             }
 
             // The sequence is spent: an earlier copy of this very blob landed. What matters is not
-            // the refusal but what that copy did, so the node is asked about the hash.
-            if (outcome is "tefPAST_SEQ" or "tefALREADY")
+            // the refusal but what that copy did, so the node is asked about the hash. A ticketed
+            // copy that already landed is answered tefNO_TICKET rather than tefALREADY — the ticket
+            // is checked first — so that answer is asked about too; a ticket somebody else consumed
+            // leaves the hash unknown and the answer stands.
+            if (outcome is "tefPAST_SEQ" or "tefALREADY" or "tefNO_TICKET")
             {
                 string? landed = await ResultOfAsync(hash, cancellationToken).ConfigureAwait(false);
                 if (landed is not null) return new SubmitOutcome(landed, hash);
