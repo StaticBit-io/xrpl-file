@@ -34,6 +34,10 @@ public sealed class FakeLedgerSource : ILedgerSource
     /// </summary>
     private readonly Dictionary<string, HashSet<string>> _alsoAffects = new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, IReadOnlyList<LiveTicket>> _liveTickets = new(StringComparer.Ordinal);
+
+    private int _transactionLookups;
+
     private long _currentLedger = 1;
 
     public long? EarliestLedger { get; set; } = 1;
@@ -116,6 +120,8 @@ public sealed class FakeLedgerSource : ILedgerSource
 
     public Task<LedgerTransaction?> TransactionAsync(string hash, CancellationToken cancellationToken)
     {
+        Interlocked.Increment(ref _transactionLookups);
+
         lock (_gate)
         {
             return Task.FromResult(_transactions.FirstOrDefault(tx => string.Equals(tx.Hash, hash, StringComparison.OrdinalIgnoreCase)));
@@ -203,6 +209,29 @@ public sealed class FakeLedgerSource : ILedgerSource
     /// strategy asking the ledger how much room is left gets the answer a node would give.
     /// </summary>
     public Dictionary<string, int> TicketCounts { get; } = [];
+
+    /// <summary>
+    /// How many times <see cref="TransactionAsync"/> was asked. Lets a test hold the library to one
+    /// creator lookup per mint rather than one per ticket.
+    /// </summary>
+    public int TransactionLookups => Volatile.Read(ref _transactionLookups);
+
+    /// <summary>
+    /// Replaces what <see cref="LiveTicketsAsync"/> answers for an account. <see cref="FakeLedgerSink"/>
+    /// calls it whenever it mints or spends a ticket; a test that has no sink sets it directly.
+    /// </summary>
+    public void SetLiveTickets(string account, IReadOnlyList<LiveTicket> tickets)
+    {
+        lock (_gate) _liveTickets[account] = tickets;
+    }
+
+    public Task<IReadOnlyList<LiveTicket>> LiveTicketsAsync(string account, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(_liveTickets.TryGetValue(account, out IReadOnlyList<LiveTicket>? tickets) ? tickets : []);
+        }
+    }
 
     public long CurrentLedger
     {

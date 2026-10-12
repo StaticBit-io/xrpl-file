@@ -22,6 +22,17 @@ public sealed record AccountState(long BalanceDrops, int OwnerCount, int TicketC
     public static AccountState Absent { get; } = new(0, 0, 0);
 }
 
+/// <summary>
+/// One live ticket on an account, as the validated ledger holds it.
+/// </summary>
+/// <param name="Sequence">The ticket's number: what a transaction names in <c>TicketSequence</c> to spend it.</param>
+/// <param name="CreatedBy">
+/// The hash of the transaction that created it, read from the Ticket entry's <c>PreviousTxnID</c>.
+/// A ticket is created only by <c>TicketCreate</c> and is not modified until it is spent, so this
+/// names its mint — which is how a ticket this library minted is told from anybody else's.
+/// </param>
+public sealed record LiveTicket(uint Sequence, string CreatedBy);
+
 /// <summary>The questions a reader asks a node. Everything else in the library is pure.</summary>
 public interface ILedgerSource
 {
@@ -52,6 +63,13 @@ public interface ILedgerSource
     /// a balance may actually be spent needs both, and needs them from the same read.
     /// </summary>
     Task<AccountState> AccountStateAsync(string account, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Every live ticket the account holds in the latest validated ledger, with the transaction
+    /// that created each one, followed through the node's pagination until the list is complete.
+    /// An account the node does not know holds none, which is an answer and not a failure.
+    /// </summary>
+    Task<IReadOnlyList<LiveTicket>> LiveTicketsAsync(string account, CancellationToken cancellationToken);
 
     /// <summary>The index of the latest validated ledger.</summary>
     Task<long> CurrentLedgerAsync(CancellationToken cancellationToken);

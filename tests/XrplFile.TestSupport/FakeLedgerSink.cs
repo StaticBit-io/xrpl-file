@@ -40,6 +40,12 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     private int _peakInFlight;
     private int _signatures;
 
+    /// <summary>Which transaction created each ticket this fake has ever minted or been given.</summary>
+    private readonly Dictionary<uint, string> _creators = [];
+
+    /// <summary>Tickets a transaction has ridden. A node answers tefNO_TICKET for any of them afterwards.</summary>
+    private readonly HashSet<uint> _consumed = [];
+
     /// <summary>
     /// How many signatures this sink has asked its signer for and actually received, refusals —
     /// a locked vault, an unencodable transaction, anything the signer throws — not counted: the
@@ -71,6 +77,18 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     public HashSet<uint> LiveTickets { get; } = [];
 
     /// <summary>
+    /// What the listing names as the creator of a ticket that has none on this fake ledger — a hash
+    /// nothing here holds, which is exactly what a node with truncated history shows.
+    /// </summary>
+    public const string UnknownCreator = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF";
+
+    /// <summary>
+    /// Tickets the node answers <c>tefNO_TICKET</c> for while the validated ledger still lists them:
+    /// consumed in an open ledger by a transaction that has not validated. Spec I5's harder case.
+    /// </summary>
+    public HashSet<uint> AnswersGone { get; } = [];
+
+    /// <summary>
     /// Puts tickets on the account that no strategy instance knows about — what an interrupted run
     /// leaves behind, since nothing on the XRPL cancels a ticket and DisposeAsync only drops the
     /// queue. Numbered well above anything a mint here will issue, so they cannot be mistaken for
@@ -82,7 +100,7 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
         {
             for (uint ticket = 1_000_000; ticket < 1_000_000 + (uint)count; ticket++) LiveTickets.Add(ticket);
 
-            ledger.TicketCounts[account] = LiveTickets.Count;
+            PublishTickets(account);
         }
     }
 
@@ -311,11 +329,15 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
                 // has to notice.
                 if (!mintFailed)
                 {
-                    for (uint ticket = at + 1; ticket <= at + count; ticket++) LiveTickets.Add(ticket);
+                    for (uint ticket = at + 1; ticket <= at + count; ticket++)
+                    {
+                        LiveTickets.Add(ticket);
+                        _creators[ticket] = hash;
+                    }
                 }
 
                 _nextSequence = mintFailed ? at + 1 : at + count + 1;
-                ledger.TicketCounts[(string)transaction["Account"]] = LiveTickets.Count;
+                PublishTickets((string)transaction["Account"]);
 
                 Events.Add("mint");
 
@@ -336,10 +358,19 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
             {
                 uint ticket = Convert.ToUInt32(ticketField);
 
-                // A node refuses a ticket it does not hold, which is what terPRE_TICKET says.
-                if (!LiveTickets.Remove(ticket)) return new SubmitOutcome("terPRE_TICKET", hash);
+                if (AnswersGone.Contains(ticket)) return new SubmitOutcome("tefNO_TICKET", hash);
 
-                ledger.TicketCounts[(string)transaction["Account"]] = LiveTickets.Count;
+                // rippled's own split for a ticket it does not hold: one that was consumed, or that
+                // lies below the account's sequence, is gone (tefNO_TICKET, measured on xrpld 3.3.0);
+                // one at or above the sequence has not been created yet (terPRE_TICKET).
+                if (!LiveTickets.Remove(ticket))
+                {
+                    return new SubmitOutcome(
+                        _consumed.Contains(ticket) || ticket < _nextSequence ? "tefNO_TICKET" : "terPRE_TICKET", hash);
+                }
+
+                _consumed.Add(ticket);
+                PublishTickets((string)transaction["Account"]);
             }
             else
             {
@@ -384,5 +415,12 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
 
             return new SubmitOutcome("tesSUCCESS", hash);
         }
+    }
+
+    /// <summary>Keeps the fake source's two views of this account's tickets — the count and the listing — in step. Called under <see cref="_gate"/>.</summary>
+    private void PublishTickets(string account)
+    {
+        ledger.TicketCounts[account] = LiveTickets.Count;
+        ledger.SetLiveTickets(account, [.. LiveTickets.Order().Select(ticket => new LiveTicket(ticket, _creators.GetValueOrDefault(ticket, UnknownCreator)))]);
     }
 }

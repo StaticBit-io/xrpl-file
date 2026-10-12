@@ -697,6 +697,9 @@ public sealed class ReadRunTests : IDisposable
         public Task<AccountState> AccountStateAsync(string account, CancellationToken cancellationToken) =>
             inner.AccountStateAsync(account, cancellationToken);
 
+        public Task<IReadOnlyList<LiveTicket>> LiveTicketsAsync(string account, CancellationToken cancellationToken) =>
+            inner.LiveTicketsAsync(account, cancellationToken);
+
         public Task<long> CurrentLedgerAsync(CancellationToken cancellationToken) =>
             inner.CurrentLedgerAsync(cancellationToken);
 

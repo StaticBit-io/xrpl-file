@@ -141,6 +141,56 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             drops, (int)(Number(data, "OwnerCount") ?? 0), (int)(Number(data, "TicketCount") ?? 0));
     }
 
+    public async Task<IReadOnlyList<LiveTicket>> LiveTicketsAsync(string account, CancellationToken cancellationToken)
+    {
+        List<LiveTicket> tickets = [];
+        object? marker = null;
+
+        while (true)
+        {
+            // Validated, not current: a ticket a strategy picks up or a tidy-up spends has to be one
+            // the ledger has committed to, and a ticket an open ledger shows may yet vanish.
+            JsonElement? page = await AskOrAbsentAsync(
+                new AccountObjectsRequest(account)
+                {
+                    Type = Xrpl.Models.LedgerEntryType.Ticket,
+                    LedgerIndex = new LedgerIndex(LedgerIndexType.Validated),
+                    Limit = _pageSize,
+                    Marker = marker,
+                },
+                "account_objects",
+                XrplErrorCodes.ActNotFound,
+                cancellationToken).ConfigureAwait(false);
+
+            if (page is not { } answer) return tickets;
+
+            tickets.AddRange(ParseTickets(answer));
+
+            // The marker goes back to the node as it came; its shape is the node's business.
+            marker = answer.TryGetProperty("marker", out JsonElement next) ? next.Clone() : null;
+
+            if (marker is null) return tickets;
+        }
+    }
+
+    /// <summary>The Ticket entries of one account_objects page. Anything else, or a ticket missing a field this needs, is skipped.</summary>
+    internal static IReadOnlyList<LiveTicket> ParseTickets(JsonElement answer)
+    {
+        if (!answer.TryGetProperty("account_objects", out JsonElement objects) || objects.ValueKind != JsonValueKind.Array) return [];
+
+        List<LiveTicket> parsed = [];
+
+        foreach (JsonElement entry in objects.EnumerateArray())
+        {
+            if (!string.Equals(Text(entry, "LedgerEntryType"), "Ticket", StringComparison.Ordinal)) continue;
+            if (Number(entry, "TicketSequence") is not { } sequence || Text(entry, "PreviousTxnID") is not { } creator) continue;
+
+            parsed.Add(new LiveTicket((uint)sequence, creator.ToUpperInvariant()));
+        }
+
+        return parsed;
+    }
+
     /// <summary>
     /// The node error codes that mean "no such destination" rather than "the node could not be
     /// read": actNotFound for an address the ledger genuinely does not carry, and actMalformed for
@@ -357,8 +407,9 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             ServerInfoRequest info => _client!.GRequest<object, ServerInfoRequest>(info, cancellationToken),
             ServerStateRequest state => _client!.GRequest<object, ServerStateRequest>(state, cancellationToken),
             AccountInfoRequest accountInfo => _client!.GRequest<object, AccountInfoRequest>(accountInfo, cancellationToken),
+            AccountObjectsRequest objects => _client!.GRequest<object, AccountObjectsRequest>(objects, cancellationToken),
             LedgerRequest ledger => _client!.GRequest<object, LedgerRequest>(ledger, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Command, "this source sends tx, account_tx, server_info, server_state, account_info and ledger, nothing else"),
+            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Command, "this source sends tx, account_tx, server_info, server_state, account_info, account_objects and ledger, nothing else"),
         };
 
         XrplResponse<object> response = await pending.ConfigureAwait(false);

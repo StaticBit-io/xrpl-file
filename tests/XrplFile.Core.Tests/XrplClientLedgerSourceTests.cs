@@ -438,12 +438,72 @@ public class XrplClientLedgerSourceTests
         return transactions;
     }
 
+    [Fact]
+    public async Task Live_tickets_are_read_page_by_page_with_their_creators()
+    {
+        ScriptedNode node = new();
+        node.Answer("""
+            {"account":"rWriter","account_objects":[
+              {"LedgerEntryType":"Ticket","TicketSequence":11,"PreviousTxnID":"aa11","Account":"rWriter"},
+              {"LedgerEntryType":"Ticket","TicketSequence":12,"PreviousTxnID":"aa11","Account":"rWriter"}],
+             "marker":"next-page"}
+            """);
+        node.Answer("""
+            {"account":"rWriter","account_objects":[
+              {"LedgerEntryType":"Ticket","TicketSequence":40,"PreviousTxnID":"bb40","Account":"rWriter"}]}
+            """);
+
+        IReadOnlyList<LiveTicket> tickets = await new XrplClientLedgerSource(node.HandleAsync)
+            .LiveTicketsAsync("rWriter", TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            [new LiveTicket(11, "AA11"), new LiveTicket(12, "AA11"), new LiveTicket(40, "BB40")],
+            tickets);
+        Assert.Equal(["account_objects", "account_objects"], node.Commands);
+
+        // What was asked matters as much as what came back: only tickets, from the validated
+        // ledger, and the second page asked for by the marker the first one carried.
+        Xrpl.Models.Methods.AccountObjectsRequest[] asked = [.. node.Requests.Cast<Xrpl.Models.Methods.AccountObjectsRequest>()];
+        Assert.All(asked, request =>
+        {
+            Assert.Equal(Xrpl.Models.LedgerEntryType.Ticket, request.Type);
+            Assert.Equal(Xrpl.Models.Ledger.LedgerIndexType.Validated, request.LedgerIndex.LedgerIndexType);
+        });
+        Assert.Null(asked[0].Marker);
+        Assert.Equal("next-page", Assert.IsType<JsonElement>(asked[1].Marker).GetString());
+    }
+
+    [Fact]
+    public async Task An_account_the_node_does_not_know_holds_no_tickets()
+    {
+        ScriptedNode answered = new();
+        answered.Answer("""{"error":"actNotFound"}""");
+
+        Assert.Empty(await new XrplClientLedgerSource(answered.HandleAsync)
+            .LiveTicketsAsync("rNobody", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public void An_entry_that_is_not_a_ticket_or_lacks_its_fields_is_not_read_as_one()
+    {
+        JsonElement answer = JsonDocument.Parse("""
+            {"account_objects":[
+              {"LedgerEntryType":"Offer","PreviousTxnID":"cc"},
+              {"LedgerEntryType":"Ticket","PreviousTxnID":"dd"},
+              {"LedgerEntryType":"Ticket","TicketSequence":7}]}
+            """).RootElement;
+
+        Assert.Empty(XrplClientLedgerSource.ParseTickets(answer));
+    }
+
     /// <summary>A node whose answers are scripted, in call order.</summary>
     private sealed class ScriptedNode
     {
         private readonly Queue<Func<JsonElement>> _answers = new();
 
         public List<string> Commands { get; } = [];
+
+        public List<Xrpl.Models.Methods.BaseRequest> Requests { get; } = [];
 
         public void Answer(string json) => _answers.Enqueue(() => JsonDocument.Parse(json).RootElement);
 
@@ -452,6 +512,7 @@ public class XrplClientLedgerSourceTests
         public Task<JsonElement> HandleAsync(Xrpl.Models.Methods.BaseRequest request, CancellationToken cancellationToken)
         {
             Commands.Add(request.Command);
+            Requests.Add(request);
 
             if (_answers.Count == 0) throw new InvalidOperationException("the script ran out of answers");
 
