@@ -1,3 +1,4 @@
+using Xrpl.Wallet;
 using Xunit;
 
 namespace XrplFile.Tests;
@@ -78,5 +79,145 @@ public class LeftoverTicketsTests
         Assert.Empty(census.Ours);
         Assert.Equal(0, census.Others);
         Assert.Equal(0, ledger.TransactionLookups);
+    }
+
+    private static readonly XrplWallet Wallet = XrplWallet.Generate();
+    private static readonly ITransactionSigner Signer = new WalletSigner(Wallet);
+
+    private static TicketStrategy Strategy(FakeLedgerSink sink, FakeLedgerSource ledger) =>
+        new(sink, ledger, Signer, new TicketStrategyOptions
+        {
+            SweepPoll = TimeSpan.FromMilliseconds(1),
+            BatchTimeout = TimeSpan.FromSeconds(5),
+            ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
+
+    [Fact]
+    public async Task The_tidy_up_spends_this_librarys_tickets_on_transactions_that_do_nothing()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> ours = sink.LeaveTickets(Wallet.ClassicAddress, 3, marked: true);
+        IReadOnlyList<uint> unmarked = sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: false);
+        sink.LeakTickets(Wallet.ClassicAddress, 2);
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new TicketRelease(3, 0, 0), release);
+        Assert.Equal([unmarked[0], 1_000_000u, 1_000_001u], sink.LiveTickets.Order().ToArray());
+
+        Assert.Equal(3, sink.Submitted.Count);
+        Assert.All(sink.Submitted, tx =>
+        {
+            Assert.Equal("AccountSet", tx["TransactionType"]);
+            Assert.Contains(Convert.ToUInt32(tx["TicketSequence"]), ours);
+            Assert.False(tx.ContainsKey("Memos"));
+            Assert.False(tx.ContainsKey("SetFlag"));
+            Assert.False(tx.ContainsKey("ClearFlag"));
+        });
+    }
+
+    [Fact]
+    public async Task An_account_with_no_leftovers_sees_no_tidy_up_transaction()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeakTickets(Wallet.ClassicAddress, 2);
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(TicketRelease.None, release);
+        Assert.Empty(sink.Submitted);
+    }
+
+    [Fact]
+    public async Task A_ticket_the_node_calls_gone_is_counted_as_already_gone()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> ours = sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: true);
+        sink.AnswersGone.Add(ours[0]);
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new TicketRelease(1, 1, 0), release);
+    }
+
+    [Fact]
+    public async Task A_spend_that_validates_as_failed_is_not_a_release_but_the_ticket_is_gone()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true);
+        sink.FailsAs.Add(0);
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
+
+        // A tec consumes the ticket without succeeding: nothing short of tesSUCCESS is "released",
+        // and a ticket the ledger no longer lists holds no reserve however it went (spec 4.6).
+        Assert.Equal(new TicketRelease(0, 1, 0), release);
+        Assert.Empty(sink.LiveTickets);
+    }
+
+    [Fact]
+    public async Task A_spend_the_node_refuses_leaves_the_ticket_not_released()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> ours = sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true);
+        sink.Refusals[0] = "telINSUF_FEE_P";
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new TicketRelease(0, 0, 1), release);
+        Assert.Contains(ours[0], sink.LiveTickets);
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task The_tidy_up_stops_at_its_deadline_and_counts_what_did_not_settle()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger) { QueueEverything = true };
+        sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: true);
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        deadline.CancelAfter(TimeSpan.FromMilliseconds(200));
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(deadline.Token);
+
+        Assert.Equal(new TicketRelease(0, 0, 2), release);
+    }
+
+    [Fact]
+    public async Task A_sequence_strategy_tidies_up_too_when_it_can_read_the_ledger()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: true);
+        await using SequenceStrategy strategy = new(sink, Signer, new SequenceStrategyOptions { ValidationPoll = TimeSpan.FromMilliseconds(1) }, ledger);
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new TicketRelease(2, 0, 0), release);
+        Assert.Empty(sink.LiveTickets);
+    }
+
+    [Fact]
+    public async Task A_sequence_strategy_without_a_ledger_source_releases_nothing()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: true);
+        await using SequenceStrategy strategy = new(sink, Signer);
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(TicketRelease.None, release);
+        Assert.Empty(sink.Submitted);
     }
 }

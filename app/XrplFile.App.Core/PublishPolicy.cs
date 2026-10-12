@@ -77,6 +77,6 @@ public static class PublishPolicy
                 connection.Source,
                 signer,
                 new TicketStrategyOptions { FeeDrops = fee, TicketsPerBatch = TicketsPerBatch })
-            : new SequenceStrategy(connection.Sink, signer, new SequenceStrategyOptions { FeeDrops = fee });
+            : new SequenceStrategy(connection.Sink, signer, new SequenceStrategyOptions { FeeDrops = fee }, connection.Source);
     }
 }

@@ -27,11 +27,19 @@ public sealed class SequenceStrategyOptions
 /// lists, manifest) now re-reads the account's unvalidated sequence at its own start, where the
 /// old writer read it once for the whole publication.
 /// </summary>
-public sealed class SequenceStrategy(ILedgerSink sink, ITransactionSigner signer, SequenceStrategyOptions? options = null) : ISubmissionStrategy
+public sealed class SequenceStrategy(
+    ILedgerSink sink, ITransactionSigner signer, SequenceStrategyOptions? options = null, ILedgerSource? source = null) : ISubmissionStrategy
 {
     private readonly ILedgerSink _sink = sink;
     private readonly ITransactionSigner _signer = signer;
     private readonly SequenceStrategyOptions _options = options ?? new SequenceStrategyOptions();
+
+    /// <summary>
+    /// What the tidy-up reads the account's tickets from (spec I7). Optional so that a caller with
+    /// no source keeps compiling, but without it this strategy cannot find a leftover ticket and
+    /// releases none — <c>PublishPolicy</c> in the application always passes one.
+    /// </summary>
+    private readonly ILedgerSource? _source = source;
 
     public long FeeDropsPerTransaction => _options.FeeDrops;
 
@@ -62,6 +70,11 @@ public sealed class SequenceStrategy(ILedgerSink sink, ITransactionSigner signer
 
         return landed;
     }
+
+    public async Task<TicketRelease> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken) =>
+        _source is null
+            ? TicketRelease.None
+            : await LeftoverTickets.ReleaseAsync(_sink, _source, _signer, _options.FeeDrops, _options.ValidationPoll, cancellationToken).ConfigureAwait(false);
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 

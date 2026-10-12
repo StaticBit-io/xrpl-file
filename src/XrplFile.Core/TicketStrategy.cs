@@ -223,6 +223,15 @@ public sealed class TicketStrategy(
         return [.. landed.OrderBy(pair => pair.Key).Select(pair => new SubmittedMemo(pair.Key, pair.Value))];
     }
 
+    public Task<TicketRelease> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken)
+    {
+        // Whatever this instance still holds is about to be spent by the tidy-up, so nothing here
+        // may ride it afterwards.
+        lock (_ticketLock) _tickets.Clear();
+
+        return LeftoverTickets.ReleaseAsync(_sink, _source, _signer, _options.FeeDrops, _options.ValidationPoll, cancellationToken);
+    }
+
     public ValueTask DisposeAsync()
     {
         // Dropping the queue is all this can do. A ticket still in it stays live on the account,

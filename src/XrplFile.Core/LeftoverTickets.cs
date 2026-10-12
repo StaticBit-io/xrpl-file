@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using System.Globalization;
+
 namespace XrplFile;
 
 /// <summary>An account's live tickets, split into the ones this library minted and everybody else's.</summary>
@@ -60,4 +63,114 @@ internal static class LeftoverTickets
         creator is { Validated: true, Succeeded: true }
         && string.Equals(creator.Account, account, StringComparison.Ordinal)
         && string.Equals(creator.MemoTypeHex, MemoLayout.TicketMarkerHex, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>How many tidy-up spends are in the air at once, the same ceiling the ticket strategy's own batches use by default.</summary>
+    private const int MaxInFlight = 25;
+
+    /// <summary>
+    /// Finds this library's tickets afresh from the validated ledger, spends each on an AccountSet
+    /// that sets nothing, and waits for the outcomes (spec 4.6). Cancellation is the deadline: it
+    /// ends the wait and leaves every unsettled ticket counted as not released.
+    /// </summary>
+    public static async Task<TicketRelease> ReleaseAsync(
+        ILedgerSink sink, ILedgerSource source, ITransactionSigner signer, long feeDrops, TimeSpan poll, CancellationToken cancellationToken)
+    {
+        string account = signer.Account;
+        TicketCensus census;
+
+        try
+        {
+            census = await FindAsync(source, account, null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return TicketRelease.None;
+        }
+
+        if (census.Ours.Count == 0) return TicketRelease.None;
+
+        ConcurrentDictionary<uint, string> waiting = new();
+        ConcurrentDictionary<uint, bool> gone = new();
+        HashSet<uint> released = [];
+
+        try
+        {
+            await Parallel.ForEachAsync(
+                census.Ours,
+                new ParallelOptions { MaxDegreeOfParallelism = MaxInFlight, CancellationToken = cancellationToken },
+                async (ticket, token) =>
+                {
+                    SubmitOutcome outcome = await sink
+                        .SubmitAsync(Spend(account, signer.PublicKey, ticket, feeDrops), signer, token).ConfigureAwait(false);
+
+                    if (string.Equals(outcome.EngineResult, "tefNO_TICKET", StringComparison.Ordinal)) gone[ticket] = true;
+                    else if (Reached(outcome.EngineResult)) waiting[ticket] = outcome.TxHash;
+                }).ConfigureAwait(false);
+
+            // One listing a round rather than one lookup per ticket: a spend settles when its ticket
+            // leaves the validated ledger, and only then is its own transaction asked what it did.
+            // A spend that loses its ticket to a straggler and never validates still settles — as
+            // gone — instead of holding the report until the deadline, and a public node sees one
+            // account_objects a round, not two hundred and fifty tx requests.
+            while (true)
+            {
+                IReadOnlyList<LiveTicket> still = await source.LiveTicketsAsync(account, cancellationToken).ConfigureAwait(false);
+                HashSet<uint> listed = [.. still.Select(ticket => ticket.Sequence)];
+
+                foreach ((uint ticket, string hash) in waiting.ToArray())
+                {
+                    if (listed.Contains(ticket)) continue;
+
+                    LedgerTransaction? tx = await source.TransactionAsync(hash, cancellationToken).ConfigureAwait(false);
+                    waiting.TryRemove(ticket, out _);
+
+                    // Nothing short of its own validated tesSUCCESS is a release; a ticket that left
+                    // the ledger any other way — a tec on the spend, a straggler first — is gone,
+                    // and its reserve is free either way.
+                    if (tx is { Validated: true, Succeeded: true }) released.Add(ticket);
+                    else gone[ticket] = true;
+                }
+
+                if (waiting.IsEmpty)
+                {
+                    // A spend the node refused left its ticket alone — unless something else took
+                    // it in the meantime, which the same listing shows.
+                    foreach (uint ticket in census.Ours)
+                    {
+                        if (!released.Contains(ticket) && !listed.Contains(ticket)) gone[ticket] = true;
+                    }
+
+                    break;
+                }
+
+                await Task.Delay(poll, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The deadline, or the caller's own cancellation: the counts stand as they are, and
+            // everything not yet settled is not released (spec 4.6).
+        }
+
+        int alreadyGone = gone.Keys.Count(ticket => !released.Contains(ticket));
+
+        return new TicketRelease(released.Count, alreadyGone, census.Ours.Count - released.Count - alreadyGone);
+    }
+
+    /// <summary>The answers that put a submission in front of a ledger: it may yet spend its ticket.</summary>
+    private static bool Reached(string engineResult) =>
+        engineResult.StartsWith("tes", StringComparison.Ordinal)
+        || engineResult.StartsWith("tec", StringComparison.Ordinal)
+        || string.Equals(engineResult, "terQUEUED", StringComparison.Ordinal);
+
+    /// <summary>An AccountSet that sets nothing, riding one ticket: the cheapest transaction that frees its owner reserve.</summary>
+    private static Dictionary<string, object> Spend(string account, string publicKey, uint ticket, long feeDrops) => new()
+    {
+        ["TransactionType"] = "AccountSet",
+        ["Account"] = account,
+        ["Sequence"] = 0u,
+        ["TicketSequence"] = ticket,
+        ["Fee"] = feeDrops.ToString(CultureInfo.InvariantCulture),
+        ["SigningPubKey"] = publicKey,
+    };
 }

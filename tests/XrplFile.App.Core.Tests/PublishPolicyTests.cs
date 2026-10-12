@@ -1,3 +1,5 @@
+using Xrpl.Wallet;
+using XrplFile.Tests;
 using Xunit;
 
 namespace XrplFile.App.Core.Tests;
@@ -56,5 +58,19 @@ public sealed class PublishPolicyTests
 
         Assert.True(estimate.Transactions > PublishPolicy.TicketThreshold);
         Assert.False(PublishPolicy.UsesTickets(estimate));
+    }
+
+    [Fact]
+    public async Task A_sequence_strategy_built_by_the_policy_tidies_up_leftovers()
+    {
+        FakeConnectionFactory connections = new();
+        XrplWallet wallet = XrplWallet.Generate();
+        connections.Sink.LeaveTickets(wallet.ClassicAddress, 2, marked: true);
+        ILedgerConnection connection = await connections.ConnectAsync("1", TestContext.Current.CancellationToken);
+
+        await using ISubmissionStrategy strategy = PublishPolicy.Create(Estimate(chunks: 3, lists: 0), connection, new WalletSigner(wallet));
+
+        Assert.IsType<SequenceStrategy>(strategy);
+        Assert.Equal(2, (await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken)).Released);
     }
 }
