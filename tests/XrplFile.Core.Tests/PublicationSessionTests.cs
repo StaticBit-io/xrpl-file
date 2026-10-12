@@ -783,6 +783,127 @@ public class PublicationSessionTests : IDisposable
         Assert.NotNull(listed.Unreadable);
     }
 
+    /// <summary>A strategy that publishes through <paramref name="inner"/> and tidies up however the test says.</summary>
+    private sealed class ScriptedReleaseStrategy(ISubmissionStrategy inner, Func<CancellationToken, Task<TicketRelease>> release) : ISubmissionStrategy
+    {
+        public bool ReleaseCalled { get; private set; }
+
+        public long FeeDropsPerTransaction => inner.FeeDropsPerTransaction;
+
+        public string Account => inner.Account;
+
+        public Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
+            IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken) =>
+            inner.SubmitAllAsync(memos, submitted, cancellationToken);
+
+        public Task<TicketRelease> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken)
+        {
+            ReleaseCalled = true;
+            return release(cancellationToken);
+        }
+
+        public ValueTask DisposeAsync() => inner.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task A_publication_spends_the_leftovers_it_finds_and_says_so_on_the_report()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: true);
+        await using SequenceStrategy strategy = new(sink, Signer, new SequenceStrategyOptions { FeeDrops = NodeFeeDrops, ValidationPoll = TimeSpan.FromMilliseconds(1) }, ledger);
+
+        PublicationSession session = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", "s.txt",
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
+
+        PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, report.TicketsReleased);
+        Assert.Equal(0, report.TicketsAlreadyGone);
+        Assert.Equal(0, report.TicketsNotReleased);
+        Assert.Null(report.TicketReleaseFailure);
+        Assert.Empty(sink.LiveTickets);
+    }
+
+    [Fact]
+    public async Task A_tidy_up_that_throws_leaves_the_publication_successful_and_says_so()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using ScriptedReleaseStrategy strategy = new(
+            new SequenceStrategy(sink, Signer, StrategyOptions),
+            _ => throw new InvalidOperationException("the tidy-up broke"));
+
+        PublicationSession session = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", "s.txt",
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
+
+        PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(report.ManifestHash, report.Link.TxHash);
+        Assert.Equal("the tidy-up broke", Assert.IsType<InvalidOperationException>(report.TicketReleaseFailure).Message);
+        Assert.Empty(PublicationSession.Unfinished(_stateDirectory));
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task A_tidy_up_that_does_not_finish_in_time_does_not_hold_the_report_back()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using ScriptedReleaseStrategy strategy = new(
+            new SequenceStrategy(sink, Signer, StrategyOptions),
+            async token =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return TicketRelease.None;
+            });
+
+        SessionOptions options = new()
+        {
+            StateDirectory = _stateDirectory,
+            TicketsPerBatch = 100,
+            TicketReleaseTimeout = TimeSpan.FromMilliseconds(100),
+        };
+
+        PublicationSession session = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", "s.txt",
+            Wallet.ClassicAddress, "key-1", "testnet", options, TestContext.Current.CancellationToken);
+
+        PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(report.ManifestHash, report.Link.TxHash);
+        Assert.Null(report.TicketReleaseFailure);
+    }
+
+    [Fact]
+    public async Task A_cancelled_publication_does_not_tidy_up()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> leftovers = sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: true);
+
+        // A ticket strategy, because it checks the token before every batch: the writer and the
+        // sequence strategy never look at an already-cancelled token against this fake.
+        await using ScriptedReleaseStrategy strategy = new(
+            new TicketStrategy(sink, ledger, Signer, new TicketStrategyOptions { FeeDrops = NodeFeeDrops }),
+            _ => Task.FromResult(TicketRelease.None));
+
+        PublicationSession session = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", "s.txt",
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
+
+        using CancellationTokenSource cancelled = new();
+        await cancelled.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => session.RunAsync(null, cancelled.Token));
+
+        // The leftovers are exactly what a resume will pick up; spending them would charge fees
+        // for a run the person stopped.
+        Assert.False(strategy.ReleaseCalled);
+        Assert.All(leftovers, ticket => Assert.Contains(ticket, sink.LiveTickets));
+    }
+
     /// <summary>The ledger a transaction is in, for a test that has to know where a memo landed.</summary>
     private static async Task<long> LedgerOfAsync(FakeLedgerSource ledger, string hash) =>
         (await ledger.TransactionAsync(hash, TestContext.Current.CancellationToken))!.LedgerIndex;

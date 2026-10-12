@@ -35,6 +35,12 @@ public sealed class SessionOptions
     public int TicketsPerBatch { get; init; } = 100;
 
     public bool ReadBack { get; init; } = true;
+
+    /// <summary>
+    /// How long the tidy-up after a successful publication may take before what it has not settled
+    /// is left as it is (spec I8). Linked to the publication's own cancellation.
+    /// </summary>
+    public TimeSpan TicketReleaseTimeout { get; init; } = TimeSpan.FromMinutes(2);
 }
 
 /// <summary>
@@ -387,6 +393,10 @@ public sealed class PublicationSession
 
             Advance("done", result.Manifest.Root, result.ChunkHashes);
 
+            // After "done" and never before: the manifest is in the ledger, so nothing the tidy-up
+            // does — or fails to do — can cost the person their link (spec I8).
+            (TicketRelease release, Exception? releaseFailure) = await ReleaseLeftoverTicketsAsync(cancellationToken).ConfigureAwait(false);
+
             long transactions = result.ChunkHashes.Count + result.ListHashes.Count + 1 + _mints;
 
             // Priced from the fee the estimate was approved against (see the remarks on
@@ -399,6 +409,10 @@ public sealed class PublicationSession
                 result.ChunkHashes, result.ListHashes, result.ManifestHash)
             {
                 StateSaveFailure = StateSaveFailure,
+                TicketsReleased = release.Released,
+                TicketsAlreadyGone = release.AlreadyGone,
+                TicketsNotReleased = release.NotReleased,
+                TicketReleaseFailure = releaseFailure,
             };
         }
         finally
@@ -406,6 +420,32 @@ public sealed class PublicationSession
             // A run that threw is over too. Its money is spent, and starting again from the top is
             // a decision for a caller who has re-checked the account, not for a retry loop.
             Interlocked.Exchange(ref _run, 2);
+        }
+    }
+
+    /// <summary>
+    /// Spends this library's leftover tickets under its own deadline, linked to the publication's
+    /// token. A cancellation or the deadline ends it with the counts it reached; an exception is
+    /// caught and returned. Neither fails the publication (spec I8).
+    /// </summary>
+    private async Task<(TicketRelease Release, Exception? Failure)> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken)
+    {
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(_options.TicketReleaseTimeout);
+
+        try
+        {
+            // WaitAsync is what makes the bound the session's own (spec I8): a strategy, or a sink
+            // under it, that does not observe the token still cannot hold the report back.
+            return (await _strategy.ReleaseLeftoverTicketsAsync(deadline.Token).WaitAsync(deadline.Token).ConfigureAwait(false), null);
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        {
+            return (TicketRelease.None, null);
+        }
+        catch (Exception failure)
+        {
+            return (TicketRelease.None, failure);
         }
     }
 

@@ -102,6 +102,16 @@ one `AccountSet` at a time on the account's own sequence; it needs no reserve be
 account already holds, which is what to reach for when the account cannot carry a batch of
 tickets.
 
+Every ticket this library mints carries a mark, so an interrupted publication's leftovers are not
+lost: the next ticketed publication from the same account spends them before it mints, and any
+successful publication — on either strategy — spends whatever is still left on transactions that
+do nothing, within `SessionOptions.TicketReleaseTimeout` (two minutes by default). The report says
+how many were released (`TicketsReleased`), had already gone (`TicketsAlreadyGone`) or are still
+live (`TicketsNotReleased`), and why the tidy-up failed if it did (`TicketReleaseFailure`); the
+publication itself never fails because of it. Tickets without the mark — minted by anything else,
+or by a version of this library from before the mark — are never touched. A `SequenceStrategy`
+tidies up only when it is given the ledger source: `new SequenceStrategy(sink, signer, options, source)`.
+
 The session writes a state file before the first transaction. If the process dies mid-run,
 `PublicationSession.ResumeAsync` picks it back up from that file — but the file is where to look,
 not what to believe: a resume reconciles against the ledger itself (the same `account_tx` sweep a

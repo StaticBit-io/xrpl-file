@@ -68,4 +68,20 @@ public sealed record PublicationReport(
     /// run is unfinished, and <see cref="PublicationSession.Unfinished"/> will go on listing it.
     /// </summary>
     public Exception? StateSaveFailure { get; init; }
+
+    /// <summary>Leftover tickets of this library's that the tidy-up after the publication spent (spec 4.6).</summary>
+    public int TicketsReleased { get; init; }
+
+    /// <summary>Leftover tickets the tidy-up found already consumed by something else. Their reserve is free.</summary>
+    public int TicketsAlreadyGone { get; init; }
+
+    /// <summary>Leftover tickets still live after the tidy-up — refused, or unsettled when its time ran out.</summary>
+    public int TicketsNotReleased { get; init; }
+
+    /// <summary>
+    /// Why the tidy-up failed, or null. The publication succeeded regardless: the manifest is in the
+    /// ledger and the link works (spec I8), the same way a state file that could not be saved does
+    /// not cost the report.
+    /// </summary>
+    public Exception? TicketReleaseFailure { get; init; }
 }
