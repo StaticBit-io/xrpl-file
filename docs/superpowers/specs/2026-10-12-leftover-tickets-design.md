@@ -143,8 +143,11 @@ It finds this library's tickets afresh from the validated ledger, submits one `A
 and waits for the results to validate. Each ticket ends in exactly one of three counts:
 
 - **released** — its `AccountSet` validated with `tesSUCCESS`. Nothing short of validation counts.
-- **already gone** — the node answered `tefNO_TICKET`, or the ticket was no longer listed when the
-  results were checked. Some other transaction consumed it; the reserve is free either way.
+- **already gone** — the ticket was no longer listed when the results were checked, and the
+  tidy-up's own `AccountSet` did not validate with `tesSUCCESS`. Some other transaction consumed it;
+  the reserve is free either way. A `tefNO_TICKET` answer alone is not enough: a ticket consumed in
+  an open ledger by a transaction that never validates is still live (I5), and while the validated
+  ledger lists it, it counts as not released.
 - **not released** — any other outcome, or no outcome before the tidy-up's time ran out.
 
 Whether a ticket is held by a transaction still in the node's queue is not predicted; it is
