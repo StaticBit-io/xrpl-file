@@ -101,7 +101,10 @@ public sealed class TicketStrategy(
         /// <summary>The node took it: the ticket is presumed spent until the sweep says otherwise.</summary>
         Spent,
 
-        /// <summary>The node answered <c>tefNO_TICKET</c>: somebody else's transaction has the ticket.</summary>
+        /// <summary>
+        /// The node answered <c>tefNO_TICKET</c>: another transaction has the ticket — a stopped
+        /// run's straggler, or this strategy's own earlier submission whose answer was lost.
+        /// </summary>
         Gone,
     }
 
@@ -530,10 +533,11 @@ public sealed class TicketStrategy(
         // does spend the ticket — it is invisible here, arriving only when the ledger closes, but
         // the sweep sees it. A terQUEUED is holding the ticket pending and may yet land.
         //
-        // Everything else — tem, every tef but tefNO_TICKET, tel, and every ter that is not terQUEUED — never reached a
-        // ledger, so the ticket is untouched and still ours. A telINSUF_FEE_P or a
-        // telCAN_NOT_QUEUE_FULL is exactly what a hundred-wide burst gets from a loaded node, and
-        // treating one as a spent ticket loses an owner reserve per refusal, permanently.
+        // Everything else — tem, every tef but tefNO_TICKET, tel, and every ter that is not
+        // terQUEUED — never reached a ledger, so the ticket is untouched and still ours. A
+        // telINSUF_FEE_P or a telCAN_NOT_QUEUE_FULL is exactly what a hundred-wide burst gets from
+        // a loaded node, and treating one as a spent ticket loses an owner reserve per refusal,
+        // permanently.
         return outcome.EngineResult.StartsWith("tes", StringComparison.Ordinal)
             || outcome.EngineResult.StartsWith("tec", StringComparison.Ordinal)
             || string.Equals(outcome.EngineResult, "terQUEUED", StringComparison.Ordinal)

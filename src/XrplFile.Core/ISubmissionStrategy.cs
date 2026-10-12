@@ -53,6 +53,10 @@ public interface ISubmissionStrategy : IAsyncDisposable
     ///
     /// Cancellation ends it early and is not an error: what settled is counted and everything else
     /// is <see cref="TicketRelease.NotReleased"/>. Any other failure is thrown.
+    ///
+    /// It has no time bound of its own: it waits until every spend settles or the token is
+    /// cancelled. A caller supplies the deadline through the token, as
+    /// <see cref="PublicationSession"/> does with <see cref="SessionOptions.TicketReleaseTimeout"/>.
     /// </summary>
     Task<TicketRelease> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken);
 }

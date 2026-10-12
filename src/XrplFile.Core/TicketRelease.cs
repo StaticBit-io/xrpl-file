@@ -12,6 +12,11 @@ namespace XrplFile;
 /// still lists the ticket.
 /// </param>
 /// <param name="NotReleased">Any other outcome, or no outcome before the tidy-up's time ran out. Still live and still locking an owner reserve.</param>
+/// <remarks>
+/// All three counts zero means nothing was found <em>or nothing was settled</em>: a tidy-up cut off
+/// before its census finished, or one that failed (see <see cref="PublicationReport.TicketReleaseFailure"/>),
+/// also reports zeros. Zeros alone do not say the account holds none of this library's tickets.
+/// </remarks>
 public sealed record TicketRelease(int Released, int AlreadyGone, int NotReleased)
 {
     /// <summary>Nothing found, or nothing tried.</summary>
