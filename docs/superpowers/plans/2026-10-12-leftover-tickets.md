@@ -28,7 +28,7 @@
 
 ## Review Focus
 
-1. **A ticket picked up twice.** A strategy that holds picked-up tickets across passes and then looks again must not enqueue a ticket it already holds, has dispatched, or found gone; a double-dispatched ticket turns one memo into a `tefNO_TICKET` and the other into a silent hole. Pinned in Task 3 (`Tickets_picked_up_by_one_call_are_never_picked_up_again_by_the_next`).
+1. **A ticket picked up twice.** A strategy that holds picked-up tickets across passes and then looks again must not enqueue a ticket it already holds, has dispatched, or found gone; a double-dispatched ticket turns one memo into a `tefNO_TICKET` and the other into a silent hole. Pinned in Task 3: held by `Tickets_picked_up_by_one_call_are_never_picked_up_again_by_the_next`, dispatched by `A_dispatched_ticket_still_listed_is_never_picked_up_again`, gone by `A_ticket_that_is_gone_costs_its_memo_no_attempt_and_is_not_picked_up_again`.
 2. **A memo that draws several gone tickets in a row.** It must still land, with `MaxAttemptsPerMemo = 1`, without waiting for a sweep of a memo that was never applied. Pinned in Task 3 (`A_memo_that_draws_several_gone_tickets_in_a_row_still_lands`).
 3. **A tidy-up with nothing to do.** An account holding no tickets of this library's must see no submission at all after a publication — not one fee for nothing. Pinned in Task 5 (`An_account_with_no_leftovers_sees_no_tidy_up_transaction`).
 4. **A cancelled publication.** Cancelling must not start a tidy-up: the leftovers are exactly what a resume will pick up, and spending them would charge fees for a run the person stopped. Pinned in Task 6 (`A_cancelled_publication_does_not_tidy_up`).
@@ -75,10 +75,10 @@ All paths are relative to `E:\GIT\XRPL\xrpl-file`. Run every command from there.
 - Modify: `tests/XrplFile.TestSupport/FakeLedgerSource.cs`
 - Modify: `tests/XrplFile.TestSupport/FakeLedgerSink.cs`
 - Modify (delegation only): `tests/XrplFile.App.Core.Tests/PublicationRunTests.cs` (`ClockAdvancingSource`), `tests/XrplFile.App.Core.Tests/ReadRunTests.cs` (`GatedAccountTransactionsSource`)
-- Test: `tests/XrplFile.Core.Tests/XrplClientLedgerSourceTests.cs`, `tests/XrplFile.Core.Tests/FakeLedgerSinkTests.cs`
+- Test: `tests/XrplFile.Core.Tests/XrplClientLedgerSourceTests.cs`, `tests/XrplFile.Core.Tests/FakeLedgerSinkTests.cs`; create `tests/XrplFile.Core.Tests/LiveTicketsStandaloneTests.cs`
 
 **Interfaces:**
-- Produces: `public sealed record LiveTicket(uint Sequence, string CreatedBy)` in namespace `XrplFile`; `Task<IReadOnlyList<LiveTicket>> ILedgerSource.LiveTicketsAsync(string account, CancellationToken cancellationToken)`; `public static IReadOnlyList<LiveTicket> XrplClientLedgerSource.ParseTickets(JsonElement answer)`; `FakeLedgerSource.SetLiveTickets(string account, IReadOnlyList<LiveTicket> tickets)`, `FakeLedgerSource.TransactionLookups` (int); `FakeLedgerSink.AnswersGone` (`HashSet<uint>`); `FakeLedgerSink.UnknownCreator` (const string). The fake sink answers `tefNO_TICKET` for a ticket it consumed or one below its sequence that it never held, and `terPRE_TICKET` only for one above its sequence.
+- Produces: `public sealed record LiveTicket(uint Sequence, string CreatedBy)` in namespace `XrplFile`; `Task<IReadOnlyList<LiveTicket>> ILedgerSource.LiveTicketsAsync(string account, CancellationToken cancellationToken)`; `internal static IReadOnlyList<LiveTicket> XrplClientLedgerSource.ParseTickets(JsonElement answer)`; `ScriptedNode.Requests` in `XrplClientLedgerSourceTests` (the request objects, in call order); `FakeLedgerSource.SetLiveTickets(string account, IReadOnlyList<LiveTicket> tickets)`, `FakeLedgerSource.TransactionLookups` (int); `FakeLedgerSink.AnswersGone` (`HashSet<uint>`); `FakeLedgerSink.UnknownCreator` (const string). The fake sink answers `tefNO_TICKET` for a ticket it consumed or one below its sequence that it never held, and `terPRE_TICKET` only for one above its sequence.
 
 - [ ] **Step 1: Write the failing tests for the client source**
 
@@ -107,6 +107,17 @@ Append to `tests/XrplFile.Core.Tests/XrplClientLedgerSourceTests.cs`, inside the
             [new LiveTicket(11, "AA11"), new LiveTicket(12, "AA11"), new LiveTicket(40, "BB40")],
             tickets);
         Assert.Equal(["account_objects", "account_objects"], node.Commands);
+
+        // What was asked matters as much as what came back: only tickets, from the validated
+        // ledger, and the second page asked for by the marker the first one carried.
+        Xrpl.Models.Methods.AccountObjectsRequest[] asked = [.. node.Requests.Cast<Xrpl.Models.Methods.AccountObjectsRequest>()];
+        Assert.All(asked, request =>
+        {
+            Assert.Equal(Xrpl.Models.LedgerEntryType.Ticket, request.Type);
+            Assert.Equal(Xrpl.Models.Ledger.LedgerIndexType.Validated, request.LedgerIndex.LedgerIndexType);
+        });
+        Assert.Null(asked[0].Marker);
+        Assert.Equal("next-page", Assert.IsType<JsonElement>(asked[1].Marker).GetString());
     }
 
     [Fact]
@@ -131,6 +142,18 @@ Append to `tests/XrplFile.Core.Tests/XrplClientLedgerSourceTests.cs`, inside the
 
         Assert.Empty(XrplClientLedgerSource.ParseTickets(answer));
     }
+```
+
+In the same file's nested `ScriptedNode`, record the request objects as well as their commands: add the property
+
+```csharp
+        public List<Xrpl.Models.Methods.BaseRequest> Requests { get; } = [];
+```
+
+and, in `HandleAsync`, next to `Commands.Add(request.Command);`:
+
+```csharp
+            Requests.Add(request);
 ```
 
 - [ ] **Step 2: Write the failing tests for the fake sink's ticket answers**
@@ -287,7 +310,7 @@ In `src/XrplFile.Core/XrplClientLedgerSource.cs`, after `AccountStateAsync`:
     }
 
     /// <summary>The Ticket entries of one account_objects page. Anything else, or a ticket missing a field this needs, is skipped.</summary>
-    public static IReadOnlyList<LiveTicket> ParseTickets(JsonElement answer)
+    internal static IReadOnlyList<LiveTicket> ParseTickets(JsonElement answer)
     {
         if (!answer.TryGetProperty("account_objects", out JsonElement objects) || objects.ValueKind != JsonValueKind.Array) return [];
 
@@ -304,6 +327,14 @@ In `src/XrplFile.Core/XrplClientLedgerSource.cs`, after `AccountStateAsync`:
         return parsed;
     }
 ```
+
+In the same file, `SendAsync` dispatches by request type and throws for anything it does not list. Without this the real source never sends `account_objects` at all, and the unit tests above cannot notice: they drive the internal delegate, not `SendAsync`. Add the case after the `AccountInfoRequest` arm:
+
+```csharp
+            AccountObjectsRequest objects => _client!.GRequest<object, AccountObjectsRequest>(objects, cancellationToken),
+```
+
+and change the default arm's message to `"this source sends tx, account_tx, server_info, server_state, account_info, account_objects and ledger, nothing else"`.
 
 - [ ] **Step 6: Implement the listing on the fake source**
 
@@ -467,10 +498,70 @@ Expected: PASS.
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -trait- "Category=Integration"` and `dotnet run --project tests/XrplFile.App.Core.Tests`
 Expected: PASS. If a test outside this task now fails because the fake answers `tefNO_TICKET` where it used to answer `terPRE_TICKET`, stop and report it: that test was relying on the fake being more forgiving than the node.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 10: Prove the listing against a node**
+
+The unit tests above go through the internal request delegate and cannot see whether the public constructor's `SendAsync` sends `account_objects` at all. Create `tests/XrplFile.Core.Tests/LiveTicketsStandaloneTests.cs`:
+
+```csharp
+using Xrpl.Client;
+using Xrpl.Wallet;
+using Xunit;
+
+namespace XrplFile.Tests;
+
+/// <summary>The ticket listing against a node: the request shape, the pagination and the creator field are the node's, not a script's.</summary>
+[Trait("Category", "Integration")]
+[Collection("Standalone")]
+public class LiveTicketsStandaloneTests
+{
+    private static string Endpoint =>
+        Environment.GetEnvironmentVariable("XRPL_FILE_NODE_URL") is { Length: > 0 } url ? url : "ws://localhost:6006";
+
+    [Fact]
+    public async Task A_minted_ticket_is_listed_with_the_mint_that_made_it()
+    {
+        using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(5));
+        CancellationToken token = timeout.Token;
+
+        IXrplClient client = new XrplClient(Endpoint);
+        await client.Connect(token);
+
+        try
+        {
+            XrplClientLedgerSink sink = new(client);
+            XrplClientLedgerSource source = new(client);
+            XrplWallet wallet = await StandaloneFixture.FundedAccountAsync(client, sink, 100_000_000, token);
+            NetworkFees fees = await source.FeesAsync(token);
+
+            Assert.Empty(await source.LiveTicketsAsync(wallet.ClassicAddress, token));
+
+            await StandaloneFixture.MintTicketsAsync(sink, source, wallet, 3, fees.OpenLedgerFeeDrops, token);
+
+            IReadOnlyList<LiveTicket> tickets = await source.LiveTicketsAsync(wallet.ClassicAddress, token);
+
+            Assert.Equal(3, tickets.Count);
+            Assert.Single(tickets.Select(ticket => ticket.CreatedBy).Distinct());
+
+            LedgerTransaction? mint = await source.TransactionAsync(tickets[0].CreatedBy, token);
+            Assert.NotNull(mint);
+            Assert.Equal(wallet.ClassicAddress, mint!.Account);
+            Assert.True(mint.Succeeded);
+        }
+        finally
+        {
+            await client.Disconnect();
+        }
+    }
+}
+```
+
+Run (stand up — see Task 10, Step 1): `dotnet run --project tests/XrplFile.Core.Tests -- -class "XrplFile.Tests.LiveTicketsStandaloneTests"`
+Expected: PASS. Without the `SendAsync` case it fails with `ArgumentOutOfRangeException`.
+
+- [ ] **Step 11: Commit**
 
 ```bash
-git add src/XrplFile.Core/ILedgerSource.cs src/XrplFile.Core/XrplClientLedgerSource.cs tests/XrplFile.TestSupport/FakeLedgerSource.cs tests/XrplFile.TestSupport/FakeLedgerSink.cs tests/XrplFile.Core.Tests/XrplClientLedgerSourceTests.cs tests/XrplFile.Core.Tests/FakeLedgerSinkTests.cs tests/XrplFile.App.Core.Tests/PublicationRunTests.cs tests/XrplFile.App.Core.Tests/ReadRunTests.cs
+git add src/XrplFile.Core/ILedgerSource.cs src/XrplFile.Core/XrplClientLedgerSource.cs tests/XrplFile.TestSupport/FakeLedgerSource.cs tests/XrplFile.TestSupport/FakeLedgerSink.cs tests/XrplFile.Core.Tests/XrplClientLedgerSourceTests.cs tests/XrplFile.Core.Tests/FakeLedgerSinkTests.cs tests/XrplFile.Core.Tests/LiveTicketsStandaloneTests.cs tests/XrplFile.App.Core.Tests/PublicationRunTests.cs tests/XrplFile.App.Core.Tests/ReadRunTests.cs
 git commit -m "feat(core): list an account's live tickets with the mint that made each"
 ```
 
@@ -488,7 +579,7 @@ git commit -m "feat(core): list an account's live tickets with the mint that mad
 
 **Interfaces:**
 - Consumes: `LiveTicket`, `ILedgerSource.LiveTicketsAsync`, `FakeLedgerSource.SetLiveTickets`, `FakeLedgerSource.TransactionLookups`, `FakeLedgerSink.UnknownCreator` (Task 1).
-- Produces: `internal const string MemoLayout.TicketMarker = "xf/t"`, `internal static string MemoLayout.TicketMarkerHex`; `internal sealed record TicketCensus(IReadOnlyList<uint> Ours, int Others)` with `TicketCensus.Empty`; `internal static Task<TicketCensus> LeftoverTickets.FindAsync(ILedgerSource source, string account, IDictionary<string, bool>? verdicts, CancellationToken cancellationToken)` — `Ours` sorted ascending; `verdicts` is an optional per-caller cache of creator hash → "is ours". `FakeLedgerSink.LeaveTickets(string account, int count, bool marked)` returning `IReadOnlyList<uint>` (numbers from 2,000,000 up, ascending). The fake sink records a `TicketCreate`'s first memo on the ledger copy.
+- Produces: `internal const string MemoLayout.TicketMarker = "xf/t"`, `internal static string MemoLayout.TicketMarkerHex`; `internal sealed record TicketCensus(IReadOnlyList<uint> Ours, int Others)` with `TicketCensus.Empty`; `internal static Task<TicketCensus> LeftoverTickets.FindAsync(ILedgerSource source, string account, IDictionary<string, bool>? verdicts, CancellationToken cancellationToken)` — `Ours` sorted ascending; `verdicts` is an optional per-caller cache of creator hash → "is ours". `FakeLedgerSink.LeaveTickets(string account, int count, bool marked)` returning `IReadOnlyList<uint>` (ascending; the leftover mint takes the fake's next sequence, so the tickets are numbered as a real mint's would be and the sequence moves past them). The fake sink records a `TicketCreate`'s first memo on the ledger copy.
 
 - [ ] **Step 1: Write the failing census tests**
 
@@ -759,27 +850,25 @@ In `tests/XrplFile.TestSupport/FakeLedgerSink.cs`:
 Add after the `_consumed` field:
 
 ```csharp
-    /// <summary>Where <see cref="LeaveTickets"/> numbers the next ticket: far from mints and from <see cref="LeakTickets"/>.</summary>
-    private uint _nextLeftover = 2_000_000;
-```
-
 Add after `LeakTickets`:
 
 ```csharp
     /// <summary>
     /// Puts tickets on the account from a mint already validated in an earlier ledger, the way a
     /// stopped run leaves them: <paramref name="marked"/> says whether that mint carried this
-    /// library's mark. Closes a ledger, as the mint's validation did, so a sweep anchored after it
-    /// cannot meet the mint's own ledger.
+    /// library's mark. The mint takes the account's next sequence exactly as a real one does, so
+    /// its tickets lie below the sequence afterwards, as a node's would. Closes a ledger, as the
+    /// mint's validation did, so a sweep anchored after it cannot meet the mint's own ledger.
     /// </summary>
     public IReadOnlyList<uint> LeaveTickets(string account, int count, bool marked)
     {
         lock (_gate)
         {
-            uint first = _nextLeftover;
-            _nextLeftover += (uint)count;
+            uint at = _nextSequence;
+            uint first = at + 1;
+            _nextSequence = at + (uint)count + 1;
 
-            string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"fake:leftover:{first}")));
+            string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"fake:leftover:{at}")));
 
             ledger.Add(new LedgerTransaction(
                 hash, firstLedger + _submitted.Count / 100 + _ledgersClosed, account,
@@ -864,8 +953,8 @@ git commit -m "feat(core): mark every ticket mint and tell this library's ticket
 ### Task 3: Picking up leftovers and dropping tickets that are gone
 
 **Files:**
-- Modify: `src/XrplFile.Core/TicketStrategy.cs`
-- Test: `tests/XrplFile.Core.Tests/TicketStrategyTests.cs`
+- Modify: `src/XrplFile.Core/TicketStrategy.cs`, `src/XrplFile.Core/XrplClientLedgerSink.cs` (one condition)
+- Test: `tests/XrplFile.Core.Tests/TicketStrategyTests.cs`, `tests/XrplFile.Core.Tests/XrplClientLedgerSinkTests.cs`
 
 **Interfaces:**
 - Consumes: `LeftoverTickets.FindAsync`, `TicketCensus` (Task 2); `FakeLedgerSink.LeaveTickets`, `FakeLedgerSink.AnswersGone`, `FakeLedgerSink.LeakTickets` (Tasks 1–2).
@@ -994,12 +1083,41 @@ Append to `tests/XrplFile.Core.Tests/TicketStrategyTests.cs`, inside the class:
         Assert.Equal([.. leftovers], Ridden(sink));
         Assert.Empty(Minted(sink));
     }
+
+    [Fact]
+    public async Task A_dispatched_ticket_still_listed_is_never_picked_up_again()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> leftovers = sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: true);
+
+        // Position 0 is the first memo, riding the first leftover: the node answers terQUEUED and
+        // never applies it, so that ticket is dispatched and still listed.
+        sink.Refusals[0] = "terQUEUED";
+
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
+        {
+            TicketsPerBatch = 100,
+            SweepPoll = TimeSpan.FromMilliseconds(1),
+            BatchTimeout = TimeSpan.FromMilliseconds(100),
+            ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
+
+        await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+
+        // One more leftover makes the ledger hold more than the instance accounts for, so the next
+        // call looks again — and finds the dispatched ticket listed among this library's.
+        sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true);
+        await strategy.SubmitAllAsync(Memos(1, from: 1), null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, Ridden(sink).Count(ticket => ticket == leftovers[0]));
+    }
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class "XrplFile.Tests.TicketStrategyTests"`
-Expected: the five new tests FAIL (the first three because nothing is picked up and a mint covers every memo; the last two by timeout or "did not reach the ledger in 1 attempts").
+Expected: five of the six new tests FAIL, each on its assertions about which tickets were ridden or minted: before this task nothing is picked up and a mint covers every memo. `Unmarked_tickets_and_tickets_of_unknown_origin_are_left_alone` already PASSES — it is a regression guard for the pick-up this task adds, not a test of something missing.
 
 - [ ] **Step 3: Add the gone set, the verdict cache and the outcome type**
 
@@ -1234,18 +1352,76 @@ with
 
 (Task 4 changes the `SweepAsync` call's first argument; leave it as `wanted.Keys` here.)
 
-- [ ] **Step 7: Run the tests to verify they pass, then the suite**
+- [ ] **Step 7: Update the class summary**
 
-Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class "XrplFile.Tests.TicketStrategyTests"`
-Expected: PASS, the whole class.
+In `TicketStrategy`'s class summary, replace the paragraph beginning "Minting is exact:" with:
+
+```csharp
+/// Minting is exact: a batch asks for one ticket per memo it is about to send, because nothing on
+/// the XRPL cancels a ticket and an unspent one locks an owner reserve for as long as the account
+/// lives. Before minting, a batch takes this library's leftover tickets already on the account —
+/// all of them, not only as many as it needs — so the queue can carry a surplus from one call to
+/// the next; whatever is still unspent when the publication succeeds goes in the tidy-up.
+```
+
+- [ ] **Step 8: Let the real sink recognise its own landed blob behind `tefNO_TICKET`**
+
+`XrplClientLedgerSink.SubmitAsync` resubmits the same signed blob after a timeout and already asks the node about its own hash when the answer is `tefPAST_SEQ` or `tefALREADY`. For a ticketed blob whose first copy landed, rippled's preclaim checks the ticket before the duplicate, so the answer can be `tefNO_TICKET`; without the same lookup that memo would be classified gone and sent again, and a tidy-up spend counted already gone instead of released.
+
+Append to `tests/XrplFile.Core.Tests/XrplClientLedgerSinkTests.cs`, inside the class:
+
+```csharp
+    [Fact]
+    public async Task A_ticket_gone_because_this_very_blob_landed_reports_what_the_blob_did()
+    {
+        ScriptedNode node = new();
+        node.Throw(new Xrpl.Client.Exceptions.TimeoutException("submit timed out"));
+        node.Answer("""{"error":"txnNotFound"}""");
+        node.Answer("""{"engine_result":"tefNO_TICKET"}""");
+        node.Answer("""{"validated":true,"meta":{"TransactionResult":"tesSUCCESS"}}""");
+
+        SubmitOutcome outcome = await Submit(node);
+
+        Assert.Equal("tesSUCCESS", outcome.EngineResult);
+        Assert.Equal(["submit", "tx", "submit", "tx"], node.Requests.Select(r => r.Command).ToArray());
+    }
+
+    [Fact]
+    public async Task A_ticket_somebody_else_consumed_stays_gone()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"engine_result":"tefNO_TICKET"}""");
+        node.Answer("""{"error":"txnNotFound"}""");
+
+        SubmitOutcome outcome = await Submit(node);
+
+        Assert.Equal("tefNO_TICKET", outcome.EngineResult);
+    }
+```
+
+Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class "XrplFile.Tests.XrplClientLedgerSinkTests"`
+Expected: both new tests FAIL (the sink returns `tefNO_TICKET` without asking about its hash).
+
+In `src/XrplFile.Core/XrplClientLedgerSink.cs`, change `if (outcome is "tefPAST_SEQ" or "tefALREADY")` to:
+
+```csharp
+            if (outcome is "tefPAST_SEQ" or "tefALREADY" or "tefNO_TICKET")
+```
+
+and extend the comment above it: "A ticketed copy that already landed is answered tefNO_TICKET rather than tefALREADY — the ticket is checked first — so that answer is asked about too; a ticket somebody else consumed leaves the hash unknown and the answer stands."
+
+- [ ] **Step 9: Run the tests to verify they pass, then the suite**
+
+Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class "XrplFile.Tests.TicketStrategyTests" -class "XrplFile.Tests.XrplClientLedgerSinkTests"`
+Expected: PASS, both classes.
 
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -trait- "Category=Integration"`
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add src/XrplFile.Core/TicketStrategy.cs tests/XrplFile.Core.Tests/TicketStrategyTests.cs
+git add src/XrplFile.Core/TicketStrategy.cs src/XrplFile.Core/XrplClientLedgerSink.cs tests/XrplFile.Core.Tests/TicketStrategyTests.cs tests/XrplFile.Core.Tests/XrplClientLedgerSinkTests.cs
 git commit -m "feat(core): spend this library's leftover tickets before minting, drop tickets that are gone"
 ```
 
@@ -1274,7 +1450,8 @@ Append to `tests/XrplFile.Core.Tests/TicketStrategyTests.cs`, inside the class:
 
         // Position 0 is the mint, position 1 the memo: what lands under the memo's marker carries
         // other data — a straggler of another file's publication, as far as the sweep can tell.
-        sink.StoredAs[1] = _ => "00";
+        // Memos(1) carries "00", so the planted copy must carry anything else.
+        sink.StoredAs[1] = _ => "FF";
 
         await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
         {
@@ -1298,7 +1475,7 @@ Append to `tests/XrplFile.Core.Tests/TicketStrategyTests.cs`, inside the class:
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -method "XrplFile.Tests.TicketStrategyTests.A_transaction_with_the_right_marker_and_other_data_is_not_taken_for_the_memo"`
-Expected: FAIL — `reported.MemoDataHex` is `"00"` and only one memo was ridden.
+Expected: FAIL — `reported.MemoDataHex` is `"FF"` and only one memo was ridden.
 
 - [ ] **Step 3: Match marker and data**
 
@@ -1415,7 +1592,7 @@ Append to `tests/XrplFile.Core.Tests/LeftoverTicketsTests.cs` (add `using Xrpl.W
         TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(new TicketRelease(3, 0, 0), release);
-        Assert.Equal([1_000_000u, 1_000_001u, unmarked[0]], sink.LiveTickets.Order().ToArray());
+        Assert.Equal([unmarked[0], 1_000_000u, 1_000_001u], sink.LiveTickets.Order().ToArray());
 
         Assert.Equal(3, sink.Submitted.Count);
         Assert.All(sink.Submitted, tx =>
@@ -1531,7 +1708,7 @@ Append to `tests/XrplFile.Core.Tests/LeftoverTicketsTests.cs` (add `using Xrpl.W
     }
 ```
 
-Append to `tests/XrplFile.App.Core.Tests/PublishPolicyTests.cs` (add `using Xrpl.Wallet;` at the top), inside the class:
+Append to `tests/XrplFile.App.Core.Tests/PublishPolicyTests.cs` (add `using Xrpl.Wallet;` and `using XrplFile.Tests;` at the top — `FakeConnectionFactory`'s types and, in Task 9, `FakeLedgerSource` live in `XrplFile.Tests`), inside the class:
 
 ```csharp
     [Fact]
@@ -1647,31 +1824,43 @@ In `src/XrplFile.Core/LeftoverTickets.cs`, add `using System.Collections.Concurr
                     else if (Reached(outcome.EngineResult)) waiting[ticket] = outcome.TxHash;
                 }).ConfigureAwait(false);
 
-            while (!waiting.IsEmpty)
+            // One listing a round rather than one lookup per ticket: a spend settles when its ticket
+            // leaves the validated ledger, and only then is its own transaction asked what it did.
+            // A spend that loses its ticket to a straggler and never validates still settles — as
+            // gone — instead of holding the report until the deadline, and a public node sees one
+            // account_objects a round, not two hundred and fifty tx requests.
+            while (true)
             {
+                IReadOnlyList<LiveTicket> still = await source.LiveTicketsAsync(account, cancellationToken).ConfigureAwait(false);
+                HashSet<uint> listed = [.. still.Select(ticket => ticket.Sequence)];
+
                 foreach ((uint ticket, string hash) in waiting.ToArray())
                 {
+                    if (listed.Contains(ticket)) continue;
+
                     LedgerTransaction? tx = await source.TransactionAsync(hash, cancellationToken).ConfigureAwait(false);
-
-                    if (tx is not { Validated: true }) continue;
-
                     waiting.TryRemove(ticket, out _);
 
-                    if (tx.Succeeded) released.Add(ticket);
+                    // Nothing short of its own validated tesSUCCESS is a release; a ticket that left
+                    // the ledger any other way — a tec on the spend, a straggler first — is gone,
+                    // and its reserve is free either way.
+                    if (tx is { Validated: true, Succeeded: true }) released.Add(ticket);
+                    else gone[ticket] = true;
                 }
 
-                if (!waiting.IsEmpty) await Task.Delay(poll, cancellationToken).ConfigureAwait(false);
-            }
+                if (waiting.IsEmpty)
+                {
+                    // A spend the node refused left its ticket alone — unless something else took
+                    // it in the meantime, which the same listing shows.
+                    foreach (uint ticket in census.Ours)
+                    {
+                        if (!released.Contains(ticket) && !listed.Contains(ticket)) gone[ticket] = true;
+                    }
 
-            // A ticket neither released nor answered gone may still have gone some other way — a tec
-            // on the spend itself, or a straggler validating first. The ledger no longer listing it is
-            // the proof its reserve is free, however it went.
-            IReadOnlyList<LiveTicket> still = await source.LiveTicketsAsync(account, cancellationToken).ConfigureAwait(false);
-            HashSet<uint> listed = [.. still.Select(ticket => ticket.Sequence)];
+                    break;
+                }
 
-            foreach (uint ticket in census.Ours)
-            {
-                if (!released.Contains(ticket) && !listed.Contains(ticket)) gone[ticket] = true;
+                await Task.Delay(poll, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1918,7 +2107,7 @@ Append to `tests/XrplFile.Core.Tests/PublicationSessionTests.cs`, inside the cla
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class "XrplFile.Tests.PublicationSessionTests"`
-Expected: build FAILS — `TicketsReleased`, `TicketReleaseFailure`, `TicketReleaseTimeout` do not exist.
+Expected: build FAILS — `TicketsReleased`, `TicketReleaseFailure`, `TicketReleaseTimeout` do not exist. (`A_cancelled_publication_does_not_tidy_up` is a regression guard: it would pass on the old code if that compiled, since nothing tidies up yet.)
 
 - [ ] **Step 3: Add the report properties**
 
@@ -1989,7 +2178,9 @@ Add the private method after `RunAsync`:
 
         try
         {
-            return (await _strategy.ReleaseLeftoverTicketsAsync(deadline.Token).ConfigureAwait(false), null);
+            // WaitAsync is what makes the bound the session's own (spec I8): a strategy, or a sink
+            // under it, that does not observe the token still cannot hold the report back.
+            return (await _strategy.ReleaseLeftoverTicketsAsync(deadline.Token).WaitAsync(deadline.Token).ConfigureAwait(false), null);
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
@@ -2010,10 +2201,26 @@ Expected: PASS.
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -trait- "Category=Integration"` and `dotnet run --project tests/XrplFile.App.Core.Tests`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Say it in the README**
+
+In `README.md`, after the paragraph that begins "`TicketStrategy` mints tickets and rides them" (it ends "…cannot carry a batch of tickets."), add:
+
+```markdown
+Every ticket this library mints carries a mark, so an interrupted publication's leftovers are not
+lost: the next ticketed publication from the same account spends them before it mints, and any
+successful publication — on either strategy — spends whatever is still left on transactions that
+do nothing, within `SessionOptions.TicketReleaseTimeout` (two minutes by default). The report says
+how many were released (`TicketsReleased`), had already gone (`TicketsAlreadyGone`) or are still
+live (`TicketsNotReleased`), and why the tidy-up failed if it did (`TicketReleaseFailure`); the
+publication itself never fails because of it. Tickets without the mark — minted by anything else,
+or by a version of this library from before the mark — are never touched. A `SequenceStrategy`
+tidies up only when it is given the ledger source: `new SequenceStrategy(sink, signer, options, source)`.
+```
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/XrplFile.Core/PublicationSession.cs src/XrplFile.Core/PublicationReport.cs tests/XrplFile.Core.Tests/PublicationSessionTests.cs
+git add src/XrplFile.Core/PublicationSession.cs src/XrplFile.Core/PublicationReport.cs tests/XrplFile.Core.Tests/PublicationSessionTests.cs README.md
 git commit -m "feat(core): a successful publication spends this library's leftover tickets"
 ```
 
@@ -2438,7 +2645,7 @@ Append to `tests/XrplFile.App.Core.Tests/PublicationRunTests.cs`, inside the cla
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `dotnet run --project tests/XrplFile.App.Core.Tests -- -class "XrplFile.App.Core.Tests.RunModelTests" -class "XrplFile.App.Core.Tests.PublicationRunTests"`
-Expected: build FAILS — `UsesTickets`, `OwnerReserveDrops`, `CloseConfirmation` do not exist.
+Expected: build FAILS — `UsesTickets`, `OwnerReserveDrops`, `CloseConfirmation` do not exist. (`A_running_publication_without_tickets_says_so_on_its_snapshot` is a regression guard: `UsesTickets` defaults to false, so it passes as soon as it compiles.)
 
 - [ ] **Step 3: Carry the two facts on the snapshot**
 
@@ -2524,7 +2731,7 @@ In `app/XrplFile.App.Core/RunModel.cs`, add `using System.Globalization;` at the
             ? string.Create(CultureInfo.InvariantCulture,
                 $"\"{name}\" is still publishing. Closing now stops the run; it can be resumed later. The tickets it "
                 + $"reserved stay on this account, each holding {snapshot.OwnerReserveDrops:N0} drops of owner reserve, "
-                + "until a later publication from this account spends them or the account is closed. Close anyway?")
+                + $"until a later publication from this account spends them or the account is closed. Close anyway?")
             : $"\"{name}\" is still publishing. Closing now will stop the run; it can be resumed later. Close anyway?";
     }
 ```
@@ -2644,7 +2851,7 @@ Append to `tests/XrplFile.App.Core.Tests/UnfinishedModelTests.cs`, inside the cl
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `dotnet run --project tests/XrplFile.App.Core.Tests -- -class "XrplFile.App.Core.Tests.PublishPolicyTests" -class "XrplFile.App.Core.Tests.UnfinishedModelTests"`
-Expected: build FAILS — `UsesTickets(long)`, `ShowsTicketNoteFor`, `TicketNote` do not exist.
+Expected: build FAILS — `UsesTickets(long)`, `ShowsTicketNoteFor`, `TicketNote` do not exist. (`A_list_without_a_ticketed_run_has_no_ticket_note` is a regression guard against a note shown too eagerly.)
 
 - [ ] **Step 3: Decide tickets from the size alone**
 
@@ -2728,6 +2935,8 @@ git commit -m "feat(app): the unfinished-runs list says what deleting a ticketed
 Run: `docker compose -p xrpl-file-ci -f .ci-config/docker-compose.ci.yml ps`
 Expected: the `xrpl-file-ci` services listed as running. If not: `docker compose -p xrpl-file-ci -f .ci-config/docker-compose.ci.yml up -d`. Never start, stop or touch any other compose project.
 
+The tests default to `ws://localhost:6006`. Another stand on this machine may hold that port; if the `xrpl-file-ci` stand was raised with `.ci-config/docker-compose.local-ports.yml` or any other port override, set `XRPL_FILE_NODE_URL` to its admin WebSocket before every test run below, or the tests run against somebody else's node.
+
 - [ ] **Step 2: Write the tests**
 
 Create `tests/XrplFile.Core.Tests/LeftoverTicketsStandaloneTests.cs`:
@@ -2742,7 +2951,9 @@ namespace XrplFile.Tests;
 /// <summary>
 /// What spec section 1 did by hand, against a node: a ticketed publication stopped part-way leaves
 /// tickets on its account, and what comes after spends every one of them while leaving the
-/// account's own ticket alone.
+/// account's own ticket alone. The account's own ticket is minted before the stopped run rather
+/// than after it, as spec 7 orders it; the two are equivalent, and minting first keeps
+/// <see cref="StandaloneFixture.MintTicketsAsync"/>'s owner-count check true.
 /// </summary>
 [Trait("Category", "Integration")]
 [Collection("Standalone")]
@@ -2869,8 +3080,11 @@ public class LeftoverTicketsStandaloneTests : IDisposable
 
             (XrplWallet writer, uint foreign, string statePath, int fee) = await StrandedAsync(client, sink, source, file, options, token);
 
+            // At least sixty: a counted submission that was cancelled before it reached the socket
+            // leaves its ticket live too. What is invariant is that every ticket of the first batch
+            // either carried a chunk that landed or is still here.
             TicketCensus stranded = await LeftoverTickets.FindAsync(source, writer.ClassicAddress, null, token);
-            Assert.Equal(100 - ForwardedBeforeStop, stranded.Ours.Count);
+            Assert.InRange(stranded.Ours.Count, 100 - ForwardedBeforeStop, 100);
             Assert.Equal(1, stranded.Others);
 
             MintCountingSink counting = new(sink);
@@ -2883,8 +3097,11 @@ public class LeftoverTicketsStandaloneTests : IDisposable
             ReadResult read = await new XrplFileReader(source).ReadAsync(report.Link, token);
             Assert.Equal(file, read.Bytes);
 
-            // Eighty chunks were left and one manifest; sixty tickets were already on the account.
-            Assert.Equal(120 - ForwardedBeforeStop + 1 - stranded.Ours.Count, counting.Minted);
+            // The resume needs a ticket for every chunk that did not land, and one for the manifest.
+            // Every ticket of the first batch either carried a chunk that landed or is still on the
+            // account, so landed + stranded = 100, and what is left to mint is 120 - 100 + 1 = 21
+            // however many submissions the stop actually caught.
+            Assert.Equal(21, counting.Minted);
 
             TicketCensus after = await LeftoverTickets.FindAsync(source, writer.ClassicAddress, null, token);
             Assert.Empty(after.Ours);
@@ -2952,7 +3169,7 @@ public class LeftoverTicketsStandaloneTests : IDisposable
 - [ ] **Step 3: Run the new integration tests**
 
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class "XrplFile.Tests.LeftoverTicketsStandaloneTests"`
-Expected: PASS, both. If the first fails on `Assert.Equal(60, …)` or the minted count, report the observed numbers: the stand answering a forwarded memo with something other than a spend changes the arithmetic, and that is worth knowing before touching the assertion.
+Expected: PASS, both. If the first fails on the stranded range or the minted count, report the observed numbers before touching an assertion: the invariant they rest on (a first-batch ticket either carried a landed chunk or is still live) is the thing under test.
 
 - [ ] **Step 4: Run every suite**
 

@@ -134,7 +134,10 @@ as seen.
 `AccountSet` that sets nothing. Both strategies implement it; there is no default implementation,
 so a strategy written later has to decide what it does with leftovers. `SequenceStrategy` today has
 no ledger source, and finding tickets needs one, so it gains one; `PublishPolicy`, which builds
-both strategies, already holds the connection that provides it.
+both strategies, already holds the connection that provides it. The parameter is optional, last in
+the constructor: some seventy existing call sites, nearly all tests, build a sequence strategy with
+no ledger at hand, and one built that way finds no tickets and releases none. The application
+always passes it; the README says what leaving it out costs.
 
 It finds this library's tickets afresh from the validated ledger, submits one `AccountSet` on each,
 and waits for the results to validate. Each ticket ends in exactly one of three counts:
@@ -158,9 +161,12 @@ established — so the record's positional constructor does not change.
 
 `XrplFile.Core` has not been released, but its public surface becomes a commitment once it is, so
 the additions are listed here: one method on `ILedgerSource` and the record it returns; one member
-on `ISubmissionStrategy` and the record it returns; one constructor parameter on
-`SequenceStrategy`; init-only properties on `PublicationReport`. Every implementation of the two
-interfaces in this repository, test doubles included, gains the new member.
+on `ISubmissionStrategy` and the record it returns; one optional constructor parameter on
+`SequenceStrategy`; init-only properties on `PublicationReport`; `SessionOptions.TicketReleaseTimeout`,
+the tidy-up's deadline; two init-only properties on `PublicationEstimate` — the reusable tickets and
+the free slots of section 5 — and `PublicationEstimator.RequireTicketSlot`, the refusal that goes
+with them. Every implementation of the two interfaces in this repository, test doubles included,
+gains the new member.
 
 ## 5. The estimate
 
@@ -258,6 +264,18 @@ live always resolve the same way in the node's queue is not something this desig
 
 It does not support two writers publishing from one account at the same time. That was never
 supported.
+
+It does not tell the window apart while the tidy-up runs. The tidy-up happens after the manifest,
+inside the run, so for up to its deadline the run still counts as publishing, and closing the window
+then shows the ticketed close sentence, whose "it can be resumed later" is no longer true: the file
+is finished. Closing at that moment costs nothing beyond what the sentence says — the tickets the
+tidy-up had not spent stay, and the next publication spends them — so the sentence is left as it is
+rather than given a third form for a two-minute window.
+
+The session refuses a ticketed run with no free slot by checking whether the strategy it was given
+is a `TicketStrategy`. A strategy that wraps one is not recognised and is not refused there; it
+stops at its first batch instead, as it does today. The application builds its strategies
+undecorated, and its estimate screen applies the same refusal by the memo count.
 
 It does not address accounts that chain prepared transactions with `AccountTxnID`. Every
 transaction a publication sends already changes that account's last transaction, the tidy-up
