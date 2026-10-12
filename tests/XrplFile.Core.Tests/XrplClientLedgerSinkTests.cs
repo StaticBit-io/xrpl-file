@@ -178,6 +178,7 @@ public class XrplClientLedgerSinkTests
         SubmitOutcome outcome = await Submit(node);
 
         Assert.Equal("tefNO_TICKET", outcome.EngineResult);
+        Assert.Equal(["submit", "tx"], node.Requests.Select(r => r.Command).ToArray());
     }
 
     /// <summary>A node whose answers to "submit" and "tx" are scripted, in call order.</summary>

@@ -805,6 +805,32 @@ public class PublicationSessionTests : IDisposable
         public ValueTask DisposeAsync() => inner.DisposeAsync();
     }
 
+    /// <summary>
+    /// A strategy that closes a fake ledger after each of the writer's calls. On a node the ledger a
+    /// sweep has seen validated is closed, so the writer's next call cannot land in it; this fake
+    /// closes a ledger only every hundred submissions, and a call that mints nothing anchors its
+    /// sweep one past the validated ledger, where the fake would never put its memo.
+    /// </summary>
+    private sealed class LedgerClosingStrategy(ISubmissionStrategy inner, FakeLedgerSink sink) : ISubmissionStrategy
+    {
+        public long FeeDropsPerTransaction => inner.FeeDropsPerTransaction;
+
+        public string Account => inner.Account;
+
+        public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
+            IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
+        {
+            IReadOnlyList<SubmittedMemo> landed = await inner.SubmitAllAsync(memos, submitted, cancellationToken);
+            sink.CloseLedger();
+            return landed;
+        }
+
+        public Task<TicketRelease> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken) =>
+            inner.ReleaseLeftoverTicketsAsync(cancellationToken);
+
+        public ValueTask DisposeAsync() => inner.DisposeAsync();
+    }
+
     [Fact]
     public async Task A_publication_spends_the_leftovers_it_finds_and_says_so_on_the_report()
     {
@@ -1013,6 +1039,96 @@ public class PublicationSessionTests : IDisposable
 
         Assert.Equal(XrplFileError.SubmitRefused, error.Error);
         Assert.Empty(sink.Submitted);
+    }
+
+    [Fact]
+    public async Task A_resumed_ticketed_run_with_no_free_slot_never_starts()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        byte[] file = VectorStream.Bytes("s", 2500);
+
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
+            Options(), TestContext.Current.CancellationToken);
+
+        sink.LeakTickets(Wallet.ClassicAddress, TicketStrategy.MaxLiveTickets);
+
+        await using TicketStrategy resumed = new(sink, ledger, Signer, new TicketStrategyOptions { FeeDrops = NodeFeeDrops });
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            resumed, ledger, file, first.StatePath, Options(), TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.SubmitRefused, error.Error);
+        Assert.Empty(sink.Submitted);
+    }
+
+    [Fact]
+    public async Task A_ticketed_publication_spends_the_leftovers_it_picked_up_but_did_not_need()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeaveTickets(Wallet.ClassicAddress, 10, marked: true);
+        await using LedgerClosingStrategy strategy = new(
+            new TicketStrategy(sink, ledger, Signer, new TicketStrategyOptions
+            {
+                FeeDrops = NodeFeeDrops,
+                SweepPoll = TimeSpan.FromMilliseconds(1),
+                BatchTimeout = TimeSpan.FromSeconds(5),
+                ValidationPoll = TimeSpan.FromMilliseconds(1),
+            }),
+            sink);
+
+        PublicationSession session = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", "s.txt",
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
+
+        PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
+
+        // Three chunks and a manifest ride four of the ten; the tidy-up spends the other six, so
+        // the run leaves no ticket of its own behind and mints none.
+        Assert.DoesNotContain(sink.Submitted, tx => (string)tx["TransactionType"] == "TicketCreate");
+        Assert.Equal(6, report.TicketsReleased);
+        Assert.Equal(0, report.TicketsAlreadyGone);
+        Assert.Equal(0, report.TicketsNotReleased);
+        Assert.Empty(sink.LiveTickets);
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task A_caller_cancelling_during_the_tidy_up_still_gets_the_report()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        using CancellationTokenSource caller = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        await using ScriptedReleaseStrategy strategy = new(
+            new SequenceStrategy(sink, Signer, StrategyOptions),
+            async token =>
+            {
+                // The manifest is in: a person closing the window now stops the tidy-up, not the
+                // publication they already paid for (spec I8).
+                await caller.CancelAsync();
+
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                return new TicketRelease(0, 0, 3);
+            });
+
+        PublicationSession session = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", "s.txt",
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
+
+        PublicationReport report = await session.RunAsync(null, caller.Token);
+
+        Assert.Equal(report.ManifestHash, report.Link.TxHash);
+        Assert.Equal(0, report.TicketsReleased);
+        Assert.Equal(0, report.TicketsAlreadyGone);
+        Assert.Equal(3, report.TicketsNotReleased);
     }
 
     /// <summary>The ledger a transaction is in, for a test that has to know where a memo landed.</summary>
