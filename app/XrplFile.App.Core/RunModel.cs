@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>
@@ -32,6 +34,25 @@ public sealed class RunModel(PublicationRun run)
     /// <see cref="Snapshot"/>.State to <see cref="PublicationRunState.Idle"/> in its own markup.
     /// </summary>
     public bool IsActive => Snapshot.State != PublicationRunState.Idle;
+
+    /// <summary>
+    /// What the window asks before closing over a running publication (spec 6.1, I11). A ticketed
+    /// run names the only two ways its tickets ever go, and promises neither: a later publication
+    /// tries, and closing the account always removes them. A run without tickets reads as it always did.
+    /// </summary>
+    public static string CloseConfirmation(RunSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        string name = snapshot.Name ?? "the file";
+
+        return snapshot.UsesTickets
+            ? string.Create(CultureInfo.InvariantCulture,
+                $"\"{name}\" is still publishing. Closing now stops the run; it can be resumed later. The tickets it "
+                + $"reserved stay on this account, each holding {snapshot.OwnerReserveDrops:N0} drops of owner reserve, "
+                + $"until a later publication from this account spends them or the account is closed. Close anyway?")
+            : $"\"{name}\" is still publishing. Closing now will stop the run; it can be resumed later. Close anyway?";
+    }
 
     public bool CanCancel => Snapshot.State == PublicationRunState.Running;
 

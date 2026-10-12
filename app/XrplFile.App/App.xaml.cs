@@ -96,10 +96,9 @@ public partial class App : Application
 					confirming = true;
 					try
 					{
-						string name = snapshot.Name ?? "the file";
 						bool confirmed = window.Page is null || await window.Page.DisplayAlertAsync(
 							"Publication in progress",
-							$"\"{name}\" is still publishing. Closing now will stop the run; it can be resumed later. Close anyway?",
+							RunModel.CloseConfirmation(snapshot),
 							"Close",
 							"Cancel");
 
