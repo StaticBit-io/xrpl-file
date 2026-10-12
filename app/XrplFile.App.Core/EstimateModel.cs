@@ -67,7 +67,7 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         {
             Message =
                 $"This account already holds the {TicketStrategy.MaxLiveTickets} tickets the XRP Ledger allows, none of them "
-                + "left by this application, so a file this size has nowhere to put its own. Publish a smaller file, "
+                + "recognisably left by this application, so a file this size has nowhere to put its own. Publish a smaller file, "
                 + "which needs no tickets, or use another account.";
             return;
         }

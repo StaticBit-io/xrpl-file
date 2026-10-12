@@ -177,7 +177,7 @@ public static class PublicationEstimator
 
         throw new XrplFileException(XrplFileError.SubmitRefused,
             $"the account already holds the {TicketStrategy.MaxLiveTickets} live tickets the protocol allows and none of "
-            + "them was minted by this library, so a ticketed run has nowhere to mint and nothing it may reuse");
+            + "them recognisably this library's, so a ticketed run has nowhere to mint and nothing it may reuse");
     }
 
     /// <summary>
