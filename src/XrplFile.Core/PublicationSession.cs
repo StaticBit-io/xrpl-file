@@ -182,8 +182,10 @@ public sealed class PublicationSession
                 + "budget and balance checks describe a run nobody is going to submit");
         }
 
-        PublicationEstimator.Require(estimate, options.BudgetDrops);
+        // The slot before the balance: a run with nowhere to mint cannot go however much the
+        // account holds, and a balance refusal would send the person to top it up for nothing.
         if (strategy is TicketStrategy) PublicationEstimator.RequireTicketSlot(estimate);
+        PublicationEstimator.Require(estimate, options.BudgetDrops);
 
         long startedIn = await source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
 
@@ -298,8 +300,8 @@ public sealed class PublicationSession
                 + "budget and balance checks describe a run nobody is going to submit");
         }
 
-        PublicationEstimator.Require(estimate, options.BudgetDrops);
         if (strategy is TicketStrategy) PublicationEstimator.RequireTicketSlot(estimate);
+        PublicationEstimator.Require(estimate, options.BudgetDrops);
 
         PublicationSession session = new(
             strategy, source, file, state, statePath, options, estimate.FeeDropsPerTransaction, estimate.Mints);
