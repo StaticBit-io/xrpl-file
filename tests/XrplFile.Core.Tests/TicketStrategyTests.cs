@@ -634,4 +634,33 @@ public class TicketStrategyTests
 
         Assert.Equal(1, Ridden(sink).Count(ticket => ticket == leftovers[0]));
     }
+
+    [Fact]
+    public async Task A_transaction_with_the_right_marker_and_other_data_is_not_taken_for_the_memo()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+
+        // Position 0 is the mint, position 1 the memo: what lands under the memo's marker carries
+        // other data — a straggler of another file's publication, as far as the sweep can tell.
+        // Memos(1) carries "00", so the planted copy must carry anything else.
+        sink.StoredAs[1] = _ => "FF";
+
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
+        {
+            TicketsPerBatch = 100,
+            SweepPoll = TimeSpan.FromMilliseconds(1),
+            BatchTimeout = TimeSpan.FromMilliseconds(200),
+            ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
+
+        IReadOnlyList<MemoSubmission> memos = Memos(1);
+        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(memos, null, TestContext.Current.CancellationToken);
+
+        LedgerTransaction? reported = await ledger.TransactionAsync(Assert.Single(landed).TxHash, TestContext.Current.CancellationToken);
+        Assert.Equal(memos[0].MemoDataHex, reported!.MemoDataHex);
+
+        // The copy carrying other data was neither recorded nor counted as seen, so the memo went out again.
+        Assert.Equal(2, Ridden(sink).Length);
+    }
 }

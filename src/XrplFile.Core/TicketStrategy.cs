@@ -125,9 +125,10 @@ public sealed class TicketStrategy(
 
         foreach (MemoSubmission memo in memos)
         {
-            // A memo is recognised in the ledger by its marker and nothing else, so two memos
-            // wearing the same one cannot be told apart afterwards. Refusing here keeps that
-            // ambiguity off the ledger — and keeps a raw ArgumentException out of the contract.
+            // A memo is recognised in the ledger by its marker and its data, so two memos wearing
+            // the same marker could still be told apart by data — but not if their data is equal,
+            // and the writer never sends two such memos. Refusing here keeps the ambiguity off the
+            // ledger — and keeps a raw ArgumentException out of the contract.
             if (!markers.Add(memo.MemoTypeHex))
             {
                 throw new XrplFileException(XrplFileError.SubmitRefused,
@@ -191,7 +192,9 @@ public sealed class TicketStrategy(
 
             SweepResult swept = wanted.Count == 0
                 ? SweepResult.Empty
-                : await SweepAsync(wanted.Keys, sweepFrom.Value, batchFrom, cancellationToken).ConfigureAwait(false);
+                : await SweepAsync(
+                    wanted.ToDictionary(pair => pair.Key, pair => memos[pair.Value].MemoDataHex, StringComparer.Ordinal),
+                    sweepFrom.Value, batchFrom, cancellationToken).ConfigureAwait(false);
 
             foreach ((string marker, string hash) in swept.Landed)
             {
@@ -531,16 +534,18 @@ public sealed class TicketStrategy(
 
     /// <summary>
     /// Reads the account forward from this call's first possible ledger until every marker has
-    /// been seen or the batch's deadline passes. <paramref name="batchFrom"/> is the same window
-    /// narrowed to this batch, and it decides only whether a ticket was spent: an earlier
-    /// attempt's tec sits below it and was accounted for when that attempt was swept.
+    /// been seen or the batch's deadline passes. A transaction counts for a memo only when it
+    /// carries both the memo's marker and its data (spec I12): a marker names an index, not a
+    /// file, and a straggler of another file's publication can wear it. <paramref name="batchFrom"/>
+    /// is the same window narrowed to this batch, and it decides only whether a ticket was spent:
+    /// an earlier attempt's tec sits below it and was accounted for when that attempt was swept.
     /// </summary>
+    /// <param name="markers">Marker → the data the memo wearing it carries.</param>
     private async Task<SweepResult> SweepAsync(
-        IReadOnlyCollection<string> markers, long from, long batchFrom, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, string> markers, long from, long batchFrom, CancellationToken cancellationToken)
     {
         Dictionary<string, string> found = new(StringComparer.Ordinal);
         HashSet<string> seen = new(StringComparer.Ordinal);
-        HashSet<string> wanted = new(markers, StringComparer.Ordinal);
         DateTimeOffset deadline = DateTimeOffset.UtcNow + _options.BatchTimeout;
 
         while (true)
@@ -552,7 +557,8 @@ public sealed class TicketStrategy(
                 .ConfigureAwait(false))
             {
                 if (!tx.Validated || tx.MemoTypeHex is null) continue;
-                if (!wanted.Contains(tx.MemoTypeHex)) continue;
+                if (!markers.TryGetValue(tx.MemoTypeHex, out string? data)) continue;
+                if (!string.Equals(tx.MemoDataHex, data, StringComparison.OrdinalIgnoreCase)) continue;
 
                 if (tx.LedgerIndex >= batchFrom) seen.Add(tx.MemoTypeHex);
 
@@ -563,7 +569,7 @@ public sealed class TicketStrategy(
                 found.TryAdd(tx.MemoTypeHex, tx.Hash);
             }
 
-            if (found.Count == wanted.Count) return new SweepResult(found, seen);
+            if (found.Count == markers.Count) return new SweepResult(found, seen);
             if (DateTimeOffset.UtcNow >= deadline) return new SweepResult(found, seen);
 
             await Task.Delay(_options.SweepPoll, cancellationToken).ConfigureAwait(false);
