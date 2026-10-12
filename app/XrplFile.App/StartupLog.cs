@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace XrplFile.App;
 
 /// <summary>
@@ -90,6 +92,62 @@ public static class StartupLog
         {
             // Last resort: the temporary directory always exists and is always writable.
             return System.IO.Path.Combine(System.IO.Path.GetTempPath(), "xrpl-file-startup.log");
+        }
+    }
+}
+
+/// <summary>
+/// Sends what this application logs to <see cref="StartupLog"/>, so that it is written down
+/// somewhere rather than nowhere.
+///
+/// <para>
+/// This exists because of a failure seen in a running window: a file dialog threw, Blazor caught
+/// it the way it catches every exception from a component's event handler, and the screen showed
+/// its generic "An unhandled error has occurred" bar. Nothing reached
+/// <see cref="AppDomain.UnhandledException"/> — Blazor had handled it — and nothing reached a
+/// file, because the only logging provider this application had was <c>AddDebug()</c> under
+/// <c>#if DEBUG</c>. The person is told something broke and neither they nor anybody helping them
+/// can find out what.
+/// </para>
+/// </summary>
+public sealed class StartupLogLoggerProvider : ILoggerProvider
+{
+    /// <inheritdoc/>
+    public ILogger CreateLogger(string categoryName) => new StartupLogLogger(categoryName);
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+    }
+
+    private sealed class StartupLogLogger(string category) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        /// <summary>
+        /// Warnings and worse only. This file is a last resort somebody reads after something went
+        /// wrong, not a trace: filling it with routine chatter would bury the one line that matters.
+        /// </summary>
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Warning;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (!IsEnabled(logLevel))
+            {
+                return;
+            }
+
+            string message = $"{logLevel} {category}: {formatter(state, exception)}";
+
+            if (exception is null)
+            {
+                StartupLog.Write(message);
+            }
+            else
+            {
+                StartupLog.Write(message, exception);
+            }
         }
     }
 }

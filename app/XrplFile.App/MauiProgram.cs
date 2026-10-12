@@ -43,6 +43,10 @@ public static class MauiProgram
 
         builder.Services.AddMauiBlazorWebView();
 
+        // Unconditional, unlike AddDebug() below: a window that fails on somebody else's machine
+        // has to leave a record, and a debugger sink leaves none.
+        builder.Logging.AddProvider(new StartupLogLoggerProvider());
+
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
         builder.Logging.AddDebug();
