@@ -140,7 +140,14 @@ no ledger at hand, and one built that way finds no tickets and releases none. Th
 always passes it; the README says what leaving it out costs.
 
 It finds this library's tickets afresh from the validated ledger, submits one `AccountSet` on each,
-and waits for the results to validate. Each ticket ends in exactly one of three counts:
+and waits for the results to validate. A spend the node refused for a passing reason before any ledger
+saw it — a `tel`, or a `ter` other than `terQUEUED` — left its ticket intact and claimed no fee, so
+it is sent again in the next round, up to five times in all, while time remains (a `tem` would be
+refused the same way every time and is not sent again): a burst of up to 250
+spends is exactly what a loaded node answers with `telCAN_NOT_QUEUE` and its kin, and giving up on
+the first refusal would leave most of an interrupted run's tickets locked. A round in which the
+node could not be read is skipped rather than ending the tidy-up and losing what it had settled.
+Each ticket ends in exactly one of three counts:
 
 - **released** — its `AccountSet` validated with `tesSUCCESS`. Nothing short of validation counts.
 - **already gone** — the ticket was no longer listed when the results were checked, and the
@@ -190,8 +197,10 @@ batch. Spendable is unchanged: it already subtracts the reserve of every object 
 live tickets included.
 
 The count of mints is left as it is. The estimate goes on assuming every pass mints from an empty
-queue, which overstates the fee by at most a mint or two when tickets are picked up. That keeps it
-a worst case, which is what it is named.
+queue in batches of the configured size. That overstates it when tickets are picked up, and
+understates it when few slots are free and the run has to mint in more, smaller batches; neither
+error is large next to the worst-case fee, which multiplies every transaction by the attempts
+allowed and adds the tidy-up, and which is what the approval is checked against.
 
 The worst-case fee gains the tidy-up: at most `MaxLiveTickets` transactions (I10). The displayed
 transaction count is the publication's own and does not include the tidy-up. Any publication may
