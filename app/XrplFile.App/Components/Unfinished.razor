@@ -17,6 +17,10 @@
             Deleting does not undo what a run already spent &mdash; only finishing it, by resuming,
             does not pay those fees again.
         </p>
+        @if (Model.ShowsTicketNote)
+        {
+            <p class="text-body-secondary">@UnfinishedModel.TicketNote</p>
+        }
     }
 
     @if (Model.Message is not null)

@@ -73,4 +73,27 @@ public sealed class PublishPolicyTests
         Assert.IsType<SequenceStrategy>(strategy);
         Assert.Equal(2, (await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken)).Released);
     }
+
+    [Theory]
+    [InlineData(1L)]
+    [InlineData(98_000L)]
+    [InlineData(98_001L)]
+    [InlineData(99_000L)]
+    [InlineData(1_024_001L)]
+    [InlineData(3_145_728L)]
+    public async Task The_size_alone_decides_tickets_exactly_as_the_estimate_does(long fileBytes)
+    {
+        FakeLedgerSource node = new();
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            node, "rWriter", fileBytes, PublishPolicy.TicketsPerBatch, TestContext.Current.CancellationToken);
+
+        Assert.Equal(PublishPolicy.UsesTickets(estimate), PublishPolicy.UsesTickets(fileBytes));
+    }
+
+    [Fact]
+    public void The_threshold_falls_between_98000_and_98001_bytes()
+    {
+        Assert.False(PublishPolicy.UsesTickets(98_000L));
+        Assert.True(PublishPolicy.UsesTickets(98_001L));
+    }
 }

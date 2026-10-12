@@ -22,9 +22,28 @@ public sealed record UnfinishedRow(
 /// </summary>
 public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePickerService picker)
 {
+    /// <summary>What the list adds when a run in it uses tickets (spec 6.2).</summary>
+    public const string TicketNote =
+        "Deleting a run leaves the tickets it reserved on this account, each holding an owner reserve, until a "
+        + "later publication from this account spends them or the account is closed.";
+
     public IReadOnlyList<UnfinishedRow> Rows { get; private set; } = [];
 
     public string? Message { get; private set; }
+
+    /// <summary>Whether <see cref="TicketNote"/> belongs under the current rows.</summary>
+    public bool ShowsTicketNote => ShowsTicketNoteFor(Rows);
+
+    /// <summary>
+    /// True when any readable row is a ticketed run, decided by the threshold <see cref="PublishPolicy"/>
+    /// applies rather than a copy of it. An unreadable row knows no size and says nothing either way.
+    /// </summary>
+    public static bool ShowsTicketNoteFor(IEnumerable<UnfinishedRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        return rows.Any(row => row.Unreadable is null && PublishPolicy.UsesTickets(row.Size));
+    }
 
     public void Refresh()
     {

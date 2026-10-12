@@ -331,4 +331,29 @@ public sealed class UnfinishedModelTests : VaultHarness
         await resumingRun.Completion;
         Assert.Equal(PublicationRunState.Succeeded, resumingRun.Snapshot.State);
     }
+
+    private static UnfinishedRow Row(long size, string? unreadable = null) =>
+        new("state.json", "1", "rWriter", "ref", "application/octet-stream", "file.bin", size, "chunks", 0, unreadable);
+
+    [Fact]
+    public void A_ticketed_run_in_the_list_brings_the_ticket_note()
+    {
+        Assert.True(UnfinishedModel.ShowsTicketNoteFor([Row(4096), Row(3_145_728)]));
+    }
+
+    [Fact]
+    public void A_list_without_a_ticketed_run_has_no_ticket_note()
+    {
+        Assert.False(UnfinishedModel.ShowsTicketNoteFor([Row(4096), Row(0, unreadable: "newer format")]));
+        Assert.False(UnfinishedModel.ShowsTicketNoteFor([]));
+    }
+
+    [Fact]
+    public void The_ticket_note_reads_as_the_design_says()
+    {
+        Assert.Equal(
+            "Deleting a run leaves the tickets it reserved on this account, each holding an owner reserve, until a "
+            + "later publication from this account spends them or the account is closed.",
+            UnfinishedModel.TicketNote);
+    }
 }
