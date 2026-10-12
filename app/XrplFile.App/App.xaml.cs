@@ -27,6 +27,7 @@ public partial class App : Application
 
 	public App(IKeyVault vault, VaultAutoLock autoLock, PublicationRun run, ReadRun read)
 	{
+		StartupLog.Write("App: constructing");
 		InitializeComponent();
 		_vault = vault;
 		_autoLock = autoLock;
@@ -36,7 +37,11 @@ public partial class App : Application
 
 	protected override Window CreateWindow(IActivationState? activationState)
 	{
-		Window window = new(new MainPage()) { Title = "XrplFile.App" };
+		StartupLog.Write("CreateWindow: constructing MainPage");
+		MainPage page = new();
+		StartupLog.Write("CreateWindow: MainPage constructed");
+
+		Window window = new(page) { Title = "XrplFile.App" };
 
 		// The one teardown hook this application has, and the reason it is wired here rather than
 		// left to VaultAutoLock's idle timer to eventually catch up (see MauiProgram's remarks on
@@ -47,6 +52,7 @@ public partial class App : Application
 		AttachClosingConfirmation(window);
 #endif
 
+		StartupLog.Write($"CreateWindow: returning; log at {StartupLog.Location}");
 		return window;
 	}
 

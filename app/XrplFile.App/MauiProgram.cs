@@ -17,6 +17,22 @@ public static class MauiProgram
 
     public static MauiApp CreateMauiApp()
     {
+        StartupLog.CatchEverythingElse();
+        StartupLog.Write("CreateMauiApp: entered");
+
+        try
+        {
+            return BuildApp();
+        }
+        catch (Exception e)
+        {
+            StartupLog.Write("CreateMauiApp: failed", e);
+            throw;
+        }
+    }
+
+    private static MauiApp BuildApp()
+    {
         MauiAppBuilder builder = MauiApp.CreateBuilder();
         builder
             .UseMauiApp<App>()
@@ -38,7 +54,10 @@ public static class MauiProgram
         // anything unlocks the vault. It needs no eager resolve here to achieve that any more:
         // RegisterVault constructs it outright and registers the instance, so it is already
         // running by the time this method returns, whether or not anything ever asks for it.
-        return builder.Build();
+        StartupLog.Write("CreateMauiApp: services registered, building");
+        MauiApp app = builder.Build();
+        StartupLog.Write("CreateMauiApp: built");
+        return app;
     }
 
     /// <summary>

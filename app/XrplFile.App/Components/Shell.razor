@@ -1,4 +1,5 @@
 @implements IDisposable
+@using XrplFile.App
 @inject UnlockModel Model
 @inject ShellModel Tabs
 
@@ -15,7 +16,16 @@
    second -- one property read, no file touched -- and the model, not this markup, is what decides
    that a shut vault behind an unlocked screen means the screen is stale. *@
 
-@if (_ready)
+@if (_failure is not null)
+{
+    <div class="container py-4">
+        <div class="alert alert-danger" role="alert">
+            <p>This application could not start.</p>
+            <p class="mb-0"><small>@_failure</small></p>
+        </div>
+    </div>
+}
+else if (_ready)
 {
     @switch (Model.Stage)
     {
@@ -106,9 +116,29 @@ else
     private bool _disposed;
     private bool _ready;
 
+    /// <summary>
+    /// Why the shell could not start, or <see langword="null"/>. Without this the gate below has
+    /// no false branch worth drawing: a refresh that throws leaves _ready false for good, and the
+    /// window then shows an empty page for the rest of its life with nothing said anywhere.
+    /// </summary>
+    private string? _failure;
+
     protected override async Task OnInitializedAsync()
     {
-        await Model.RefreshAsync(_cts.Token);
+        StartupLog.Write("Shell: OnInitializedAsync entered");
+
+        try
+        {
+            await Model.RefreshAsync(_cts.Token);
+        }
+        catch (Exception e)
+        {
+            StartupLog.Write("Shell: RefreshAsync failed", e);
+            _failure = e.Message;
+            return;
+        }
+
+        StartupLog.Write($"Shell: refreshed, stage {Model.Stage}");
         _ready = true;
 
         // Started only once the first refresh has run, so a tick can never race the initial Stage.
