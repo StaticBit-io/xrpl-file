@@ -37,8 +37,12 @@ public sealed class FakeFilePicker : IFilePickerService
     public Task<byte[]?> PickFileAsync(CancellationToken cancellationToken) =>
         throw new NotSupportedException("the publish screen picks a path, not bytes");
 
+    /// <summary>When set, <see cref="PickExistingFilePathAsync"/> throws this: the dialog failing to
+    /// open at all, which is what Windows does for a process running as administrator.</summary>
+    public Exception? PickThrows { get; set; }
+
     public Task<string?> PickExistingFilePathAsync(CancellationToken cancellationToken) =>
-        Task.FromResult(PathToReturn);
+        PickThrows is { } failure ? Task.FromException<string?>(failure) : Task.FromResult(PathToReturn);
 }
 
 public sealed class PublishModelTests : VaultHarness
@@ -295,9 +299,90 @@ public sealed class PublishModelTests : VaultHarness
     [Fact]
     public async Task IsSelected_is_false_for_every_key_before_any_is_chosen()
     {
+        // Two keys, not one: with a single key the model now chooses it itself (see
+        // With_one_key_it_is_chosen_without_asking), so "before any is chosen" needs a choice to exist.
+        (PublishModel model, KeyVault vault, string reference) =
+            await OpenAsync(TestContext.Current.CancellationToken, network: "testnet");
+        string otherReference = await vault.StoreAsync(
+            Entry("other key") with { Network = "testnet" }, TestContext.Current.CancellationToken);
+        await model.RefreshKeysAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(model.IsSelected(model.Keys.Single(key => key.Reference == reference)));
+        Assert.False(model.IsSelected(model.Keys.Single(key => key.Reference == otherReference)));
+    }
+
+    [Fact]
+    public async Task With_one_key_it_is_chosen_without_asking()
+    {
         (PublishModel model, _, string reference) =
             await OpenAsync(TestContext.Current.CancellationToken, network: "testnet");
 
-        Assert.False(model.IsSelected(model.Keys.Single(key => key.Reference == reference)));
+        Assert.True(model.IsSelected(model.Keys.Single(key => key.Reference == reference)));
+    }
+
+    [Fact]
+    public async Task With_two_keys_none_is_chosen_until_the_person_chooses()
+    {
+        (PublishModel model, KeyVault vault, _) =
+            await OpenAsync(TestContext.Current.CancellationToken, network: "testnet");
+        await vault.StoreAsync(Entry("other key") with { Network = "testnet" }, TestContext.Current.CancellationToken);
+
+        await model.RefreshKeysAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(model.SelectedKey);
+    }
+
+    [Fact]
+    public async Task A_key_the_person_chose_stays_chosen_when_a_second_appears()
+    {
+        (PublishModel model, KeyVault vault, string reference) =
+            await OpenAsync(TestContext.Current.CancellationToken, network: "testnet");
+        model.SelectKey(reference);
+        await vault.StoreAsync(Entry("other key") with { Network = "testnet" }, TestContext.Current.CancellationToken);
+
+        await model.RefreshKeysAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(reference, model.SelectedKey?.Reference);
+    }
+
+    [Fact]
+    public async Task A_file_dialog_that_fails_says_so_instead_of_throwing()
+    {
+        (PublishModel model, _, _) = await OpenAsync(TestContext.Current.CancellationToken);
+        InvalidOperationException failure = new("no window to attach a dialog to");
+        _picker.PickThrows = failure;
+
+        await model.PickFileAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("The file dialog could not be opened.", model.Message);
+        Assert.Same(failure, model.LastPickerFailure);
+        Assert.Null(model.FileName);
+    }
+
+    [Fact]
+    public async Task A_dialog_that_opens_after_one_that_failed_forgets_the_failure()
+    {
+        (PublishModel model, _, _) = await OpenAsync(TestContext.Current.CancellationToken);
+        _picker.PickThrows = new InvalidOperationException("first attempt");
+        await model.PickFileAsync(TestContext.Current.CancellationToken);
+
+        _picker.PickThrows = null;
+        WriteFile("second.bin", 10);
+        await model.PickFileAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(model.LastPickerFailure);
+        Assert.Equal("second.bin", model.FileName);
+    }
+
+    [Fact]
+    public async Task Cancelling_the_dialog_is_not_reported_as_a_failure()
+    {
+        (PublishModel model, _, _) = await OpenAsync(TestContext.Current.CancellationToken);
+        _picker.PickThrows = new OperationCanceledException();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => model.PickFileAsync(TestContext.Current.CancellationToken));
+
+        Assert.Null(model.LastPickerFailure);
     }
 }

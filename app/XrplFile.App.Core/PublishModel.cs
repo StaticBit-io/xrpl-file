@@ -111,12 +111,58 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
         // would answer null while SelectedReference still named it.
         if (SelectedKey is null) SelectedReference = null;
 
+        // One key and nothing chosen: a list of one unselected row read, in a running window, as a
+        // field already showing its value, while the screen asked the person to choose. There is
+        // nothing to choose between, and nothing is spent here -- the estimate names the paying
+        // account and still has to be confirmed with its own button.
+        //
+        // With two or more keys the choice stays the person's, and that includes a choice this model
+        // made while there was only one: left in place, a second key appearing would leave the first
+        // highlighted as though somebody had picked it from two. A choice the person made survives.
+        if (_chosenByModel && Keys.Count != 1)
+        {
+            SelectedReference = null;
+            _chosenByModel = false;
+        }
+
+        if (SelectedReference is null && Keys.Count == 1)
+        {
+            SelectedReference = Keys[0].Reference;
+            _chosenByModel = true;
+        }
+
         Describe();
     }
 
+    /// <summary>
+    /// What went wrong the last time the file dialog failed to open, or <see langword="null"/>.
+    /// The person is shown <see cref="Message"/>; this is kept so the platform layer can write the
+    /// cause somewhere, because once this model catches the exception nothing else will see it.
+    /// </summary>
+    public Exception? LastPickerFailure { get; private set; }
+
+    /// <summary>Whether <see cref="SelectedReference"/> was set by this model rather than by the person.</summary>
+    private bool _chosenByModel;
+
     public async Task PickFileAsync(CancellationToken cancellationToken)
     {
-        string? path = await picker.PickExistingFilePathAsync(cancellationToken).ConfigureAwait(false);
+        string? path;
+
+        try
+        {
+            path = await picker.PickExistingFilePathAsync(cancellationToken).ConfigureAwait(false);
+            LastPickerFailure = null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The dialog itself failing, as opposed to the person cancelling it (a null path). Seen
+            // in a running window: Windows refuses to show this dialog to a process running as
+            // administrator, and the exception went straight to Blazor's anonymous error bar.
+            LastPickerFailure = ex;
+            Message = "The file dialog could not be opened.";
+            return;
+        }
+
         if (path is null) return;
 
         try
@@ -143,6 +189,7 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
         ArgumentException.ThrowIfNullOrEmpty(reference);
 
         SelectedReference = reference;
+        _chosenByModel = false;
         Describe();
     }
 

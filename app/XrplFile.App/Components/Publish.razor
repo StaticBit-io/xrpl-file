@@ -1,3 +1,4 @@
+@using XrplFile.App
 @implements IDisposable
 @inject PublishModel Model
 @inject RunModel Run
@@ -108,7 +109,15 @@ else
         });
     }
 
-    private async Task PickAsync() => await Model.PickFileAsync(_cts.Token);
+    private async Task PickAsync()
+    {
+        await Model.PickFileAsync(_cts.Token);
+
+        if (Model.LastPickerFailure is { } failure)
+        {
+            StartupLog.Write("Publish: the file dialog failed", failure);
+        }
+    }
 
     private async Task EstimateAsync()
     {
