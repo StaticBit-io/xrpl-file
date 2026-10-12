@@ -31,4 +31,32 @@ public sealed class ShellModelTests
             Assert.Equal(tab, model.Tab);
         }
     }
+
+    /// <summary>
+    /// The publications list's Read button changes the tab from another component, and the shell
+    /// only redraws if it is told. Without this the button loaded its link onto a tab nobody showed.
+    /// </summary>
+    [Fact]
+    public void Changing_the_tab_says_so()
+    {
+        ShellModel model = new();
+        int raised = 0;
+        model.Changed += () => raised++;
+
+        model.Show(AppTab.Read);
+
+        Assert.Equal(1, raised);
+    }
+
+    [Fact]
+    public void Showing_the_tab_already_shown_says_nothing()
+    {
+        ShellModel model = new();
+        int raised = 0;
+        model.Changed += () => raised++;
+
+        model.Show(AppTab.Keys);
+
+        Assert.Equal(0, raised);
+    }
 }

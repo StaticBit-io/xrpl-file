@@ -30,5 +30,26 @@ public sealed class ShellModel
     /// one of its members by name, and the shell's render chain names each tab it draws rather than
     /// falling through to a default, so a member nothing has taught it to draw draws nothing.
     /// </param>
-    public void Show(AppTab tab) => Tab = tab;
+    public void Show(AppTab tab)
+    {
+        if (Tab == tab)
+        {
+            return;
+        }
+
+        Tab = tab;
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Raised after <see cref="Tab"/> changes, and only then.
+    /// </summary>
+    /// <remarks>
+    /// The shell's own tab buttons never needed this: a click on a component's own markup re-renders
+    /// that component. A caller anywhere else -- the publications list's Read button, in another
+    /// component -- changed <see cref="Tab"/> and nothing drew it, so the button loaded its link and
+    /// appeared to do nothing at all. That was found in a running window; no test in this repository
+    /// can see whether a component redraws.
+    /// </remarks>
+    public event Action? Changed;
 }

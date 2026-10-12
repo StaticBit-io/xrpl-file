@@ -123,6 +123,21 @@ else
     /// </summary>
     private string? _failure;
 
+    protected override void OnInitialized() => Tabs.Changed += OnTabChanged;
+
+    /// <summary>
+    /// Redraws when something outside this component changes the tab. Through InvokeAsync and
+    /// behind the same _disposed check the lock poll uses, so a change arriving as the window closes
+    /// cannot render a disposed component.
+    /// </summary>
+    private void OnTabChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
+    });
+
     protected override async Task OnInitializedAsync()
     {
         StartupLog.Write("Shell: OnInitializedAsync entered");
@@ -178,6 +193,7 @@ else
     {
         // Set before the timer is disposed, for the reason RevealSeed.razor's own Dispose explains.
         _disposed = true;
+        Tabs.Changed -= OnTabChanged;
         _lockPollTimer?.Dispose();
         _cts.Cancel();
         _cts.Dispose();
