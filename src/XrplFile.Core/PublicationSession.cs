@@ -79,6 +79,12 @@ public sealed class PublicationSession
     private readonly ISubmissionStrategy _strategy;
     private readonly ILedgerSource _source;
     private readonly ReadOnlyMemory<byte> _file;
+    /// <summary>
+    /// How long a tidy-up past its deadline is given to unwind and report what it settled before
+    /// the session stops waiting for it.
+    /// </summary>
+    private static readonly TimeSpan TicketReleaseGrace = TimeSpan.FromSeconds(5);
+
     private readonly SessionOptions _options;
     private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
 
@@ -431,13 +437,36 @@ public sealed class PublicationSession
     private async Task<(TicketRelease Release, Exception? Failure)> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken)
     {
         using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(_options.TicketReleaseTimeout);
+        using CancellationTokenSource giveUp = new();
+        using CancellationTokenRegistration graceStart = deadline.Token.Register(
+            static state => ((CancellationTokenSource)state!).CancelAfter(TicketReleaseGrace), giveUp);
+        Task<TicketRelease>? release = null;
 
         try
         {
-            // WaitAsync is what makes the bound the session's own (spec I8): a strategy, or a sink
-            // under it, that does not observe the token still cannot hold the report back.
-            return (await _strategy.ReleaseLeftoverTicketsAsync(deadline.Token).WaitAsync(deadline.Token).ConfigureAwait(false), null);
+            // Inside the try so a timeout CancelAfter refuses is recorded as the tidy-up's failure
+            // rather than thrown after the manifest has landed (spec I8).
+            deadline.CancelAfter(_options.TicketReleaseTimeout);
+
+            release = _strategy.ReleaseLeftoverTicketsAsync(deadline.Token);
+
+            // The deadline is the strategy's cue to stop and report what it settled; the wait is
+            // only abandoned once the grace after it has run out too, so a strategy that honours the
+            // token keeps its counts and one that ignores it still cannot hold the report back
+            // (spec I8).
+            return (await release.WaitAsync(giveUp.Token).ConfigureAwait(false), null);
+        }
+        catch (OperationCanceledException) when (giveUp.IsCancellationRequested)
+        {
+            if (release is not null)
+            {
+                _ = release.ContinueWith(
+                    static task => _ = task.Exception,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+            }
+
+            return (TicketRelease.None, new TimeoutException(
+                $"the tidy-up did not stop within {TicketReleaseGrace} of its {_options.TicketReleaseTimeout} deadline; tickets it had not released stay on the account"));
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {

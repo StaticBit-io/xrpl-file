@@ -876,6 +876,83 @@ public class PublicationSessionTests : IDisposable
         Assert.Null(report.TicketReleaseFailure);
     }
 
+    [Fact(Timeout = 10_000)]
+    public async Task A_tidy_up_cut_off_by_its_deadline_keeps_the_counts_it_reached()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using ScriptedReleaseStrategy strategy = new(
+            new SequenceStrategy(sink, Signer, StrategyOptions),
+            async token =>
+            {
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                return new TicketRelease(1, 0, 2);
+            });
+
+        PublicationReport report = await RunWithReleaseTimeoutAsync(strategy, ledger, TimeSpan.FromMilliseconds(100), TestContext.Current.CancellationToken);
+
+        Assert.Equal(report.ManifestHash, report.Link.TxHash);
+        Assert.Equal(1, report.TicketsReleased);
+        Assert.Equal(0, report.TicketsAlreadyGone);
+        Assert.Equal(2, report.TicketsNotReleased);
+        Assert.Null(report.TicketReleaseFailure);
+    }
+
+    [Fact(Timeout = 30_000)]
+    public async Task A_tidy_up_that_ignores_its_deadline_cannot_hold_the_report_back()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using ScriptedReleaseStrategy strategy = new(
+            new SequenceStrategy(sink, Signer, StrategyOptions),
+            _ => new TaskCompletionSource<TicketRelease>().Task);
+
+        PublicationReport report = await RunWithReleaseTimeoutAsync(strategy, ledger, TimeSpan.FromMilliseconds(100), TestContext.Current.CancellationToken);
+
+        Assert.Equal(report.ManifestHash, report.Link.TxHash);
+        Assert.Equal(0, report.TicketsReleased);
+        Assert.Equal(0, report.TicketsAlreadyGone);
+        Assert.Equal(0, report.TicketsNotReleased);
+        Assert.IsType<TimeoutException>(report.TicketReleaseFailure);
+    }
+
+    [Fact]
+    public async Task A_tidy_up_timeout_that_is_not_a_time_span_does_not_cost_the_publication()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
+
+        PublicationReport report = await RunWithReleaseTimeoutAsync(strategy, ledger, TimeSpan.FromMilliseconds(-5), TestContext.Current.CancellationToken);
+
+        Assert.Equal(report.ManifestHash, report.Link.TxHash);
+        Assert.IsType<ArgumentOutOfRangeException>(report.TicketReleaseFailure);
+    }
+
+    private async Task<PublicationReport> RunWithReleaseTimeoutAsync(
+        ISubmissionStrategy strategy, FakeLedgerSource ledger, TimeSpan releaseTimeout, CancellationToken cancellationToken)
+    {
+        SessionOptions options = new()
+        {
+            StateDirectory = _stateDirectory,
+            TicketsPerBatch = 100,
+            TicketReleaseTimeout = releaseTimeout,
+        };
+
+        PublicationSession session = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", "s.txt",
+            Wallet.ClassicAddress, "key-1", "testnet", options, cancellationToken);
+
+        return await session.RunAsync(null, cancellationToken);
+    }
+
     [Fact]
     public async Task A_cancelled_publication_does_not_tidy_up()
     {
