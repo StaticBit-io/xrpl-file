@@ -63,9 +63,10 @@ public class PublicationEstimateTests
         Assert.Equal(4 * 200_000, estimate.PeakReserveDrops);
         Assert.Equal(1_000_000, estimate.BaseReserveDrops);
         // A computed literal, not the sum of the instance's own fields: 6 transactions * 3
-        // default max attempts * 10 drops fee = 180 worst-case fee, plus the 800,000-drop peak
-        // reserve and the 1,000,000-drop base reserve.
-        Assert.Equal(1_800_180, estimate.RequiredDrops);
+        // default max attempts * 10 drops, plus a tidy-up of up to 250 transactions * 10 drops,
+        // is 2,680 worst-case fee; plus the 800,000-drop peak reserve and the 1,000,000-drop base
+        // reserve.
+        Assert.Equal(1_802_680, estimate.RequiredDrops);
     }
 
     [Fact]
@@ -102,9 +103,11 @@ public class PublicationEstimateTests
             Node(100_000_000, fee: 15), "rWriter", fileBytes: 2500, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, estimate.MaxAttempts);
-        // 6 transactions * 3 max attempts * 15 drops fee.
-        Assert.Equal(270, estimate.FeeDropsWorstCase);
-        Assert.Equal(estimate.Transactions * estimate.MaxAttempts * estimate.FeeDropsPerTransaction, estimate.FeeDropsWorstCase);
+        // 6 transactions * 3 max attempts * 15 drops, plus the tidy-up's 250 transactions * 15 drops.
+        Assert.Equal(4_020, estimate.FeeDropsWorstCase);
+        Assert.Equal(
+            (estimate.Transactions * estimate.MaxAttempts + TicketStrategy.MaxLiveTickets) * estimate.FeeDropsPerTransaction,
+            estimate.FeeDropsWorstCase);
         // FeeDropsTotal keeps its present meaning: the run as it goes, nothing retried.
         Assert.Equal(90, estimate.FeeDropsTotal);
     }
@@ -116,8 +119,8 @@ public class PublicationEstimateTests
             Node(100_000_000), "rWriter", fileBytes: 2500, ticketsPerBatch: 100, TestContext.Current.CancellationToken, maxAttempts: 5);
 
         Assert.Equal(5, estimate.MaxAttempts);
-        // 6 transactions * 5 max attempts * 10 drops fee.
-        Assert.Equal(300, estimate.FeeDropsWorstCase);
+        // 6 transactions * 5 max attempts * 10 drops, plus the tidy-up's 250 transactions * 10 drops.
+        Assert.Equal(2_800, estimate.FeeDropsWorstCase);
         // What is shown to a person does not move just because the worst case grew.
         Assert.Equal(60, estimate.FeeDropsTotal);
     }
@@ -150,7 +153,7 @@ public class PublicationEstimateTests
     [Fact]
     public async Task A_run_above_the_callers_ceiling_is_refused_before_the_balance_is_blamed()
     {
-        // The balance here is also short of RequiredDrops (1,800,180 at these defaults), so a
+        // The balance here is also short of RequiredDrops (1,802,680 at these defaults), so a
         // Require that checked the balance first would throw InsufficientBalance instead. This
         // only passes when the ceiling really is checked before the balance.
         PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
@@ -167,7 +170,7 @@ public class PublicationEstimateTests
     public async Task A_balance_the_accounts_own_objects_already_lock_does_not_cover_the_run()
     {
         // A mainnet-shaped account: five trust lines, one XRP of owner reserve locked out of a
-        // balance that clears RequiredDrops (1,800,180 here) on its face. Comparing the raw
+        // balance that clears RequiredDrops (1,802,680 here) on its face. Comparing the raw
         // balance passes the gate and the first TicketCreate is answered tecINSUFFICIENT_RESERVE,
         // with chunks already paid for.
         FakeLedgerSource node = Node(2_000_000);
@@ -260,5 +263,71 @@ public class PublicationEstimateTests
     {
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => PublicationEstimator.EstimateAsync(
             Node(100_000_000), "rWriter", fileBytes: 0, ticketsPerBatch: 100, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task This_librarys_leftovers_stand_in_for_tickets_the_run_would_mint()
+    {
+        FakeLedgerSource node = Node(100_000_000);
+        FakeLedgerSink sink = new(node);
+        sink.LeaveTickets("rWriter", 3, marked: true);
+
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            node, "rWriter", fileBytes: 2500, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
+
+        // Four memos, three of them covered by tickets already on the account: one to mint.
+        Assert.Equal(3, estimate.ReusableTickets);
+        Assert.Equal(TicketStrategy.MaxLiveTickets, estimate.TicketSlots);
+        Assert.Equal(1 * 200_000, estimate.PeakReserveDrops);
+        // The count of mints stays the worst case: every pass is assumed to mint (spec 5).
+        Assert.Equal(2, estimate.Mints);
+    }
+
+    [Fact]
+    public async Task Somebody_elses_tickets_take_slots_and_replace_nothing()
+    {
+        FakeLedgerSource node = Node(100_000_000);
+        FakeLedgerSink sink = new(node);
+        sink.LeakTickets("rWriter", 3);
+
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            node, "rWriter", fileBytes: 2500, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, estimate.ReusableTickets);
+        Assert.Equal(TicketStrategy.MaxLiveTickets - 3, estimate.TicketSlots);
+        Assert.Equal(4 * 200_000, estimate.PeakReserveDrops);
+    }
+
+    [Fact]
+    public async Task The_peak_is_capped_by_the_slots_somebody_elses_tickets_leave()
+    {
+        FakeLedgerSource node = Node(500_000_000);
+        FakeLedgerSink sink = new(node);
+        sink.LeakTickets("rWriter", TicketStrategy.MaxLiveTickets - 2);
+
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            node, "rWriter", fileBytes: 1_024_001, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, estimate.TicketSlots);
+        Assert.Equal(2 * 200_000, estimate.PeakReserveDrops);
+    }
+
+    [Fact]
+    public async Task No_free_slot_refuses_a_ticketed_run_with_that_reason()
+    {
+        FakeLedgerSource node = Node(500_000_000);
+        FakeLedgerSink sink = new(node);
+        sink.LeakTickets("rWriter", TicketStrategy.MaxLiveTickets);
+
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            node, "rWriter", fileBytes: 1_024_001, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, estimate.TicketSlots);
+        Assert.Equal(0, estimate.PeakReserveDrops);
+
+        XrplFileException error = Assert.Throws<XrplFileException>(() => PublicationEstimator.RequireTicketSlot(estimate));
+
+        Assert.Equal(XrplFileError.SubmitRefused, error.Error);
+        Assert.Contains("250", error.Message, StringComparison.Ordinal);
     }
 }

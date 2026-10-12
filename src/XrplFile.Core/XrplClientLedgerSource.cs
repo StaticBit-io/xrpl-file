@@ -141,6 +141,82 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             drops, (int)(Number(data, "OwnerCount") ?? 0), (int)(Number(data, "TicketCount") ?? 0));
     }
 
+    public async Task<IReadOnlyList<LiveTicket>> LiveTicketsAsync(string account, CancellationToken cancellationToken)
+    {
+        List<LiveTicket> tickets = [];
+        object? marker = null;
+        string? previousMarker = null;
+
+        // Validated, not current: a ticket a strategy picks up or a tidy-up spends has to be one
+        // the ledger has committed to, and a ticket an open ledger shows may yet vanish.
+        LedgerIndex ledger = new(LedgerIndexType.Validated);
+
+        while (true)
+        {
+            JsonElement? page = await AskOrAbsentAsync(
+                new AccountObjectsRequest(account)
+                {
+                    Type = Xrpl.Models.LedgerEntryType.Ticket,
+                    LedgerIndex = ledger,
+                    Limit = _pageSize,
+                    Marker = marker,
+                },
+                "account_objects",
+                XrplErrorCodes.ActNotFound,
+                cancellationToken).ConfigureAwait(false);
+
+            if (page is not { } answer) return tickets;
+
+            tickets.AddRange(ParseTickets(answer));
+
+            // Every later page comes from the ledger the first one was read from: "validated" moves
+            // between pages, and a marker is only meaningful in the ledger that issued it, so pages
+            // from two ledgers could skip a ticket or list one twice. An answer that does not say
+            // which ledger it read leaves nothing to pin, and asking "validated" again is the best
+            // this listing can do.
+            if (ledger.Index is null && Number(answer, "ledger_index") is { } read and > 0 and <= uint.MaxValue)
+            {
+                ledger = new LedgerIndex((uint)read);
+            }
+
+            // The marker goes back to the node as it came; its shape is the node's business. One
+            // present but null is the same as none.
+            if (!answer.TryGetProperty("marker", out JsonElement next) || next.ValueKind == JsonValueKind.Null) return tickets;
+
+            string raw = next.GetRawText();
+
+            // A node that hands back the marker it was just given would page forever; a listing it
+            // cannot finish is a node that cannot be read, not an empty one.
+            if (string.Equals(raw, previousMarker, StringComparison.Ordinal))
+            {
+                throw new XrplFileException(
+                    XrplFileError.NodeUnreachable,
+                    "the node answered account_objects with the same marker twice; the ticket listing cannot be completed");
+            }
+
+            previousMarker = raw;
+            marker = next.Clone();
+        }
+    }
+
+    /// <summary>The Ticket entries of one account_objects page. Anything else, or a ticket missing a field this needs, is skipped.</summary>
+    internal static IReadOnlyList<LiveTicket> ParseTickets(JsonElement answer)
+    {
+        if (!answer.TryGetProperty("account_objects", out JsonElement objects) || objects.ValueKind != JsonValueKind.Array) return [];
+
+        List<LiveTicket> parsed = [];
+
+        foreach (JsonElement entry in objects.EnumerateArray())
+        {
+            if (!string.Equals(Text(entry, "LedgerEntryType"), "Ticket", StringComparison.Ordinal)) continue;
+            if (Number(entry, "TicketSequence") is not { } sequence || Text(entry, "PreviousTxnID") is not { } creator) continue;
+
+            parsed.Add(new LiveTicket((uint)sequence, creator.ToUpperInvariant()));
+        }
+
+        return parsed;
+    }
+
     /// <summary>
     /// The node error codes that mean "no such destination" rather than "the node could not be
     /// read": actNotFound for an address the ledger genuinely does not carry, and actMalformed for
@@ -357,8 +433,9 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             ServerInfoRequest info => _client!.GRequest<object, ServerInfoRequest>(info, cancellationToken),
             ServerStateRequest state => _client!.GRequest<object, ServerStateRequest>(state, cancellationToken),
             AccountInfoRequest accountInfo => _client!.GRequest<object, AccountInfoRequest>(accountInfo, cancellationToken),
+            AccountObjectsRequest objects => _client!.GRequest<object, AccountObjectsRequest>(objects, cancellationToken),
             LedgerRequest ledger => _client!.GRequest<object, LedgerRequest>(ledger, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Command, "this source sends tx, account_tx, server_info, server_state, account_info and ledger, nothing else"),
+            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Command, "this source sends tx, account_tx, server_info, server_state, account_info, account_objects and ledger, nothing else"),
         };
 
         XrplResponse<object> response = await pending.ConfigureAwait(false);

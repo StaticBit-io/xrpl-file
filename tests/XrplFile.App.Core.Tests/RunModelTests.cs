@@ -253,4 +253,38 @@ public sealed class RunModelTests : VaultHarness
 
         return (run, request);
     }
+
+    [Fact]
+    public void Closing_over_a_ticketed_run_says_the_tickets_stay_and_what_each_one_holds()
+    {
+        RunSnapshot snapshot = new(PublicationRunState.Running, null, null, null, "big.bin", "1", null)
+        {
+            UsesTickets = true,
+            OwnerReserveDrops = 2_000_000,
+        };
+
+        Assert.Equal(
+            "\"big.bin\" is still publishing. Closing now stops the run; it can be resumed later. The tickets it "
+            + "reserved stay on this account, each holding 2,000,000 drops of owner reserve, until a later "
+            + "publication from this account spends them or the account is closed. Close anyway?",
+            RunModel.CloseConfirmation(snapshot));
+    }
+
+    [Fact]
+    public void Closing_over_a_run_without_tickets_reads_as_it_always_did()
+    {
+        RunSnapshot snapshot = new(PublicationRunState.Running, null, null, null, "small.txt", "1", null);
+
+        Assert.Equal(
+            "\"small.txt\" is still publishing. Closing now will stop the run; it can be resumed later. Close anyway?",
+            RunModel.CloseConfirmation(snapshot));
+    }
+
+    [Fact]
+    public void A_run_with_no_name_yet_is_called_the_file()
+    {
+        RunSnapshot snapshot = new(PublicationRunState.Running, null, null, null, null, null, null);
+
+        Assert.StartsWith("\"the file\" is still publishing.", RunModel.CloseConfirmation(snapshot), StringComparison.Ordinal);
+    }
 }

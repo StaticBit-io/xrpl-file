@@ -44,6 +44,22 @@ public static class PublishPolicy
     public static bool UsesTickets(PublicationEstimate estimate) => MemoCount(estimate) >= TicketThreshold;
 
     /// <summary>
+    /// The same decision from a file's size alone, for a run whose estimate is gone — an unfinished
+    /// one in the list. Exact, not approximate: a block list exists only past 1,024 chunks, far
+    /// above the threshold, so below it the chunks and the manifest are every memo there is, and
+    /// above it both forms are already true.
+    /// </summary>
+    public static bool UsesTickets(long fileBytes) =>
+        FileTree.ChunkCount(fileBytes, MemoLayout.ChunkBytes) + 1 >= TicketThreshold;
+
+    /// <summary>
+    /// Whether the run would use tickets on an account where none can be minted or reused: every
+    /// live-ticket slot is taken by tickets this application did not leave. A run that would not
+    /// use tickets is unaffected.
+    /// </summary>
+    public static bool HasNoTicketRoom(PublicationEstimate estimate) => UsesTickets(estimate) && estimate.TicketSlots == 0;
+
+    /// <summary>
     /// Builds the strategy for this estimate, priced from it.
     /// </summary>
     /// <remarks>
@@ -77,6 +93,6 @@ public static class PublishPolicy
                 connection.Source,
                 signer,
                 new TicketStrategyOptions { FeeDrops = fee, TicketsPerBatch = TicketsPerBatch })
-            : new SequenceStrategy(connection.Sink, signer, new SequenceStrategyOptions { FeeDrops = fee });
+            : new SequenceStrategy(connection.Sink, signer, new SequenceStrategyOptions { FeeDrops = fee }, connection.Source);
     }
 }

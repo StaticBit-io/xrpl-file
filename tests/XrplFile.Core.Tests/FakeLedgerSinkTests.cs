@@ -101,4 +101,115 @@ public class FakeLedgerSinkTests
 
         Assert.Equal(10u, sequence);
     }
+
+    private static Dictionary<string, object> Ride(uint ticket) => new()
+    {
+        ["TransactionType"] = "AccountSet",
+        ["Account"] = Wallet.ClassicAddress,
+        ["Sequence"] = 0u,
+        ["TicketSequence"] = ticket,
+        ["Fee"] = "10",
+        ["SigningPubKey"] = Wallet.PublicKey,
+    };
+
+    private static Dictionary<string, object> Mint(uint sequence, uint count) => new()
+    {
+        ["TransactionType"] = "TicketCreate",
+        ["Account"] = Wallet.ClassicAddress,
+        ["Sequence"] = sequence,
+        ["TicketCount"] = count,
+        ["Fee"] = "10",
+        ["SigningPubKey"] = Wallet.PublicKey,
+    };
+
+    [Fact]
+    public async Task A_ticket_that_was_already_ridden_is_answered_as_gone_the_way_a_node_answers_it()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+
+        await sink.SubmitAsync(Mint(10, 2), Signer, TestContext.Current.CancellationToken);
+        SubmitOutcome first = await sink.SubmitAsync(Ride(11), Signer, TestContext.Current.CancellationToken);
+        SubmitOutcome second = await sink.SubmitAsync(Ride(11), Signer, TestContext.Current.CancellationToken);
+
+        // Measured on xrpld 3.3.0: "Ticket is not in ledger". terPRE_TICKET here would send a
+        // strategy down its "the mint was not awaited" path for a ticket that is simply spent.
+        Assert.Equal("tesSUCCESS", first.EngineResult);
+        Assert.Equal("tefNO_TICKET", second.EngineResult);
+    }
+
+    [Fact]
+    public async Task A_ticket_above_the_accounts_sequence_does_not_exist_yet()
+    {
+        FakeLedgerSink sink = new(new FakeLedgerSource());
+
+        SubmitOutcome outcome = await sink.SubmitAsync(Ride(5_000), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("terPRE_TICKET", outcome.EngineResult);
+    }
+
+    [Fact]
+    public async Task Live_tickets_are_listed_with_the_mint_that_made_them()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+
+        SubmitOutcome mint = await sink.SubmitAsync(Mint(10, 2), Signer, TestContext.Current.CancellationToken);
+        sink.LeakTickets(Wallet.ClassicAddress, 1);
+
+        IReadOnlyList<LiveTicket> tickets = await ledger.LiveTicketsAsync(Wallet.ClassicAddress, TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            [new LiveTicket(11, mint.TxHash), new LiveTicket(12, mint.TxHash), new LiveTicket(1_000_000, FakeLedgerSink.UnknownCreator)],
+            tickets);
+    }
+
+    [Fact]
+    public async Task A_ticket_answered_as_gone_is_still_listed_until_its_consumer_validates()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+
+        await sink.SubmitAsync(Mint(10, 1), Signer, TestContext.Current.CancellationToken);
+        sink.AnswersGone.Add(11);
+
+        SubmitOutcome outcome = await sink.SubmitAsync(Ride(11), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("tefNO_TICKET", outcome.EngineResult);
+        Assert.Contains(await ledger.LiveTicketsAsync(Wallet.ClassicAddress, TestContext.Current.CancellationToken), ticket => ticket.Sequence == 11);
+    }
+
+    [Fact]
+    public async Task Tickets_a_marked_mint_made_are_found_as_ours()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+
+        Dictionary<string, object> mint = Mint(10, 2);
+        mint["Memos"] = new List<object>
+        {
+            new Dictionary<string, object> { ["Memo"] = new Dictionary<string, object> { ["MemoType"] = MemoLayout.TicketMarkerHex } },
+        };
+        await sink.SubmitAsync(mint, Signer, TestContext.Current.CancellationToken);
+
+        TicketCensus census = await LeftoverTickets.FindAsync(ledger, Wallet.ClassicAddress, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal([11u, 12u], census.Ours);
+    }
+
+    [Fact]
+    public async Task Tickets_left_marked_are_ours_and_tickets_left_unmarked_are_not()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+
+        IReadOnlyList<uint> marked = sink.LeaveTickets(Wallet.ClassicAddress, 3, marked: true);
+        sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: false);
+
+        TicketCensus census = await LeftoverTickets.FindAsync(ledger, Wallet.ClassicAddress, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(marked, census.Ours);
+        Assert.Equal(2, census.Others);
+        Assert.Equal(5, ledger.TicketCounts[Wallet.ClassicAddress]);
+    }
 }

@@ -15,7 +15,8 @@ public sealed record SubmittedMemo(int Index, string TxHash);
 /// nobody else's. A strategy is disposable because a ticketed one may hold tickets that were
 /// minted and never spent — a submission handed back its ticket, or the call was cut short — and
 /// disposing does not reclaim them: they stay live on the account, each locking an owner reserve,
-/// until something spends them or the account is deleted.
+/// until a later publication from the account picks them up or spends them in its tidy-up, or the
+/// account is deleted.
 /// </summary>
 public interface ISubmissionStrategy : IAsyncDisposable
 {
@@ -44,4 +45,18 @@ public interface ISubmissionStrategy : IAsyncDisposable
 
     Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Spends this library's live tickets on the account, each on an AccountSet that sets nothing,
+    /// and waits for the results (spec I6). Called after a publication succeeds, from either
+    /// strategy (spec I7): leftovers belong to the account, not to the run that left them.
+    ///
+    /// Cancellation ends it early and is not an error: what settled is counted and everything else
+    /// is <see cref="TicketRelease.NotReleased"/>. Any other failure is thrown.
+    ///
+    /// It has no time bound of its own: it waits until every spend settles or the token is
+    /// cancelled. A caller supplies the deadline through the token, as
+    /// <see cref="PublicationSession"/> does with <see cref="SessionOptions.TicketReleaseTimeout"/>.
+    /// </summary>
+    Task<TicketRelease> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken);
 }

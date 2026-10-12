@@ -14,8 +14,8 @@ namespace XrplFile;
 /// <param name="FeeDropsPerTransaction">The node's price at the moment of the estimate.</param>
 /// <param name="FeeDropsTotal">That price across <see cref="Transactions"/>: the run as it goes, nothing retried.</param>
 /// <param name="MaxAttempts">How many times one memo may be attempted before the run is called off. Defaults to <see cref="TicketStrategyOptions.MaxAttemptsPerMemo"/>'s own default; the two are independent knobs, kept in step by convention rather than by a shared constant.</param>
-/// <param name="FeeDropsWorstCase">The fee if every memo needed every one of <see cref="MaxAttempts"/> tries, including a remint each retry cycle: <see cref="Transactions"/> times <see cref="MaxAttempts"/> times <see cref="FeeDropsPerTransaction"/>. What <see cref="RequiredDrops"/> is actually built from.</param>
-/// <param name="PeakReserveDrops">What live tickets lock up at the worst moment: memos, capped at the protocol's own live-ticket ceiling (<see cref="TicketStrategy.MaxLiveTickets"/>), not the caller's batch size. A batch is what is normally live, but a ticket dispatched whose submission never reaches a ledger stays live for the run's lifetime, so the honest worst case is the protocol's cap.</param>
+/// <param name="FeeDropsWorstCase">The fee if every memo needed every one of <see cref="MaxAttempts"/> tries, plus a tidy-up of up to <see cref="TicketStrategy.MaxLiveTickets"/> transactions (spec I10): (<see cref="Transactions"/> × <see cref="MaxAttempts"/> + <see cref="TicketStrategy.MaxLiveTickets"/>) × <see cref="FeeDropsPerTransaction"/>. The tidy-up is not in <see cref="Transactions"/>: any publication may tidy up, so its cost is covered here rather than shown.</param>
+/// <param name="PeakReserveDrops">What live tickets the run mints lock up at the worst moment: the memos, capped at the live-ticket slots other tickets leave free (<see cref="TicketSlots"/>), less this library's leftovers already on the account (<see cref="ReusableTickets"/>), which the run spends instead of minting and whose reserve <see cref="OwnerCount"/> already carries.</param>
 /// <param name="BaseReserveDrops">What the account must hold to exist at all.</param>
 /// <param name="OwnerReserveDrops">What one owned object locks, as the node reports it now.</param>
 /// <param name="RequiredDrops">The worst case: <see cref="FeeDropsWorstCase"/>, <see cref="PeakReserveDrops"/> and <see cref="BaseReserveDrops"/>, added. An optimistic number here would let a run start that cannot finish.</param>
@@ -38,6 +38,19 @@ public sealed record PublicationEstimate(
     long BalanceDrops,
     int OwnerCount)
 {
+    /// <summary>
+    /// This library's live tickets already on the account, left by an earlier run: a ticketed run
+    /// spends them before it mints (spec I9).
+    /// </summary>
+    public int ReusableTickets { get; init; }
+
+    /// <summary>
+    /// How many of the protocol's <see cref="TicketStrategy.MaxLiveTickets"/> live-ticket slots the
+    /// account's other tickets — not this library's — leave free. Zero refuses a ticketed run
+    /// (<see cref="PublicationEstimator.RequireTicketSlot"/>).
+    /// </summary>
+    public int TicketSlots { get; init; } = TicketStrategy.MaxLiveTickets;
+
     /// <summary>What the objects the account already owns lock out of its balance.</summary>
     public long LockedReserveDrops => OwnerCount * OwnerReserveDrops;
 
@@ -106,21 +119,31 @@ public static class PublicationEstimator
         // is a run whose first mint is answered tecINSUFFICIENT_RESERVE after the chunks are paid.
         AccountState state = await source.AccountStateAsync(account, cancellationToken).ConfigureAwait(false);
 
-        long feeTotal = transactions * fees.OpenLedgerFeeDrops;
-        long feeWorstCase = transactions * maxAttempts * fees.OpenLedgerFeeDrops;
+        // Every live ticket takes one of the protocol's slots, but only this library's can stand in
+        // for one the run would otherwise mint (spec I9). Counting anybody else's as reusable would
+        // approve a run whose mints the account cannot afford.
+        TicketCensus census = await LeftoverTickets.FindAsync(source, account, null, cancellationToken).ConfigureAwait(false);
+        int slots = Math.Max(0, TicketStrategy.MaxLiveTickets - census.Others);
+        long toMint = Math.Max(0, Math.Min(memos, slots) - census.Ours.Count);
 
-        // TicketStrategy caps live tickets at the protocol's own ceiling (MaxLiveTickets), not at
-        // the batch size: a ticket dispatched whose submission never reaches a ledger stays
-        // counted as live for the strategy instance's lifetime (see TicketStrategy.DisposeAsync).
-        // A batch's worth is what is normally live at once; a ticket that never resolves is what
-        // makes the honest worst case the protocol's cap instead.
-        long peakReserve = Math.Min(memos, TicketStrategy.MaxLiveTickets) * fees.OwnerReserveDrops;
+        long feeTotal = transactions * fees.OpenLedgerFeeDrops;
+        // The tidy-up is at most one transaction per live ticket the protocol allows (spec I10).
+        long feeWorstCase = (transactions * maxAttempts + TicketStrategy.MaxLiveTickets) * fees.OpenLedgerFeeDrops;
+
+        // A ticket dispatched whose submission never reaches a ledger stays live for the strategy's
+        // lifetime, so the honest worst case is every slot the account has free, not the batch size.
+        // This library's leftovers fill some of those slots already and are not minted again.
+        long peakReserve = toMint * fees.OwnerReserveDrops;
         long required = feeWorstCase + peakReserve + fees.BaseReserveDrops;
 
         return new PublicationEstimate(
             chunks, blocks, lists, mints, transactions,
             fees.OpenLedgerFeeDrops, feeTotal, maxAttempts, feeWorstCase, peakReserve,
-            fees.BaseReserveDrops, fees.OwnerReserveDrops, required, state.BalanceDrops, state.OwnerCount);
+            fees.BaseReserveDrops, fees.OwnerReserveDrops, required, state.BalanceDrops, state.OwnerCount)
+        {
+            ReusableTickets = census.Ours.Count,
+            TicketSlots = slots,
+        };
     }
 
     /// <summary>
@@ -141,6 +164,20 @@ public static class PublicationEstimator
                 $"the run needs {estimate.RequiredDrops} drops and the account holds {estimate.BalanceDrops}, "
                 + $"of which {estimate.LockedReserveDrops} is locked by the {estimate.OwnerCount} objects it already owns");
         }
+    }
+
+    /// <summary>
+    /// Refuses a ticketed run on an account whose every live-ticket slot is taken by tickets that
+    /// are not this library's: there is nowhere to mint and nothing it may reuse, and the run would
+    /// stop at its first batch with fees already spent on nothing (spec 5).
+    /// </summary>
+    public static void RequireTicketSlot(PublicationEstimate estimate)
+    {
+        if (estimate.TicketSlots > 0) return;
+
+        throw new XrplFileException(XrplFileError.SubmitRefused,
+            $"the account already holds the {TicketStrategy.MaxLiveTickets} live tickets the protocol allows and none of "
+            + "them recognisably this library's, so a ticketed run has nowhere to mint and nothing it may reuse");
     }
 
     /// <summary>

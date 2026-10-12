@@ -1,3 +1,5 @@
+using Xrpl.Wallet;
+using XrplFile.Tests;
 using Xunit;
 
 namespace XrplFile.App.Core.Tests;
@@ -56,5 +58,42 @@ public sealed class PublishPolicyTests
 
         Assert.True(estimate.Transactions > PublishPolicy.TicketThreshold);
         Assert.False(PublishPolicy.UsesTickets(estimate));
+    }
+
+    [Fact]
+    public async Task A_sequence_strategy_built_by_the_policy_tidies_up_leftovers()
+    {
+        FakeConnectionFactory connections = new();
+        XrplWallet wallet = XrplWallet.Generate();
+        connections.Sink.LeaveTickets(wallet.ClassicAddress, 2, marked: true);
+        ILedgerConnection connection = await connections.ConnectAsync("1", TestContext.Current.CancellationToken);
+
+        await using ISubmissionStrategy strategy = PublishPolicy.Create(Estimate(chunks: 3, lists: 0), connection, new WalletSigner(wallet));
+
+        Assert.IsType<SequenceStrategy>(strategy);
+        Assert.Equal(2, (await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken)).Released);
+    }
+
+    [Theory]
+    [InlineData(1L)]
+    [InlineData(98_000L)]
+    [InlineData(98_001L)]
+    [InlineData(99_000L)]
+    [InlineData(1_024_001L)]
+    [InlineData(3_145_728L)]
+    public async Task The_size_alone_decides_tickets_exactly_as_the_estimate_does(long fileBytes)
+    {
+        FakeLedgerSource node = new();
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            node, "rWriter", fileBytes, PublishPolicy.TicketsPerBatch, TestContext.Current.CancellationToken);
+
+        Assert.Equal(PublishPolicy.UsesTickets(estimate), PublishPolicy.UsesTickets(fileBytes));
+    }
+
+    [Fact]
+    public void The_threshold_falls_between_98000_and_98001_bytes()
+    {
+        Assert.False(PublishPolicy.UsesTickets(98_000L));
+        Assert.True(PublishPolicy.UsesTickets(98_001L));
     }
 }

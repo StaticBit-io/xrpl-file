@@ -35,6 +35,12 @@ public sealed class SessionOptions
     public int TicketsPerBatch { get; init; } = 100;
 
     public bool ReadBack { get; init; } = true;
+
+    /// <summary>
+    /// How long the tidy-up after a successful publication may take before what it has not settled
+    /// is left as it is (spec I8). Linked to the publication's own cancellation.
+    /// </summary>
+    public TimeSpan TicketReleaseTimeout { get; init; } = TimeSpan.FromMinutes(2);
 }
 
 /// <summary>
@@ -73,6 +79,12 @@ public sealed class PublicationSession
     private readonly ISubmissionStrategy _strategy;
     private readonly ILedgerSource _source;
     private readonly ReadOnlyMemory<byte> _file;
+    /// <summary>
+    /// How long a tidy-up past its deadline is given to unwind and report what it settled before
+    /// the session stops waiting for it.
+    /// </summary>
+    private static readonly TimeSpan TicketReleaseGrace = TimeSpan.FromSeconds(5);
+
     private readonly SessionOptions _options;
     private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
 
@@ -170,6 +182,9 @@ public sealed class PublicationSession
                 + "budget and balance checks describe a run nobody is going to submit");
         }
 
+        // The slot before the balance: a run with nowhere to mint cannot go however much the
+        // account holds, and a balance refusal would send the person to top it up for nothing.
+        if (strategy is TicketStrategy) PublicationEstimator.RequireTicketSlot(estimate);
         PublicationEstimator.Require(estimate, options.BudgetDrops);
 
         long startedIn = await source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
@@ -285,6 +300,7 @@ public sealed class PublicationSession
                 + "budget and balance checks describe a run nobody is going to submit");
         }
 
+        if (strategy is TicketStrategy) PublicationEstimator.RequireTicketSlot(estimate);
         PublicationEstimator.Require(estimate, options.BudgetDrops);
 
         PublicationSession session = new(
@@ -387,6 +403,10 @@ public sealed class PublicationSession
 
             Advance("done", result.Manifest.Root, result.ChunkHashes);
 
+            // After "done" and never before: the manifest is in the ledger, so nothing the tidy-up
+            // does — or fails to do — can cost the person their link (spec I8).
+            (TicketRelease release, Exception? releaseFailure) = await ReleaseLeftoverTicketsAsync(cancellationToken).ConfigureAwait(false);
+
             long transactions = result.ChunkHashes.Count + result.ListHashes.Count + 1 + _mints;
 
             // Priced from the fee the estimate was approved against (see the remarks on
@@ -399,6 +419,10 @@ public sealed class PublicationSession
                 result.ChunkHashes, result.ListHashes, result.ManifestHash)
             {
                 StateSaveFailure = StateSaveFailure,
+                TicketsReleased = release.Released,
+                TicketsAlreadyGone = release.AlreadyGone,
+                TicketsNotReleased = release.NotReleased,
+                TicketReleaseFailure = releaseFailure,
             };
         }
         finally
@@ -406,6 +430,55 @@ public sealed class PublicationSession
             // A run that threw is over too. Its money is spent, and starting again from the top is
             // a decision for a caller who has re-checked the account, not for a retry loop.
             Interlocked.Exchange(ref _run, 2);
+        }
+    }
+
+    /// <summary>
+    /// Spends this library's leftover tickets under its own deadline, linked to the publication's
+    /// token. A cancellation or the deadline ends it with the counts it reached; an exception is
+    /// caught and returned. Neither fails the publication (spec I8).
+    /// </summary>
+    private async Task<(TicketRelease Release, Exception? Failure)> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken)
+    {
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using CancellationTokenSource giveUp = new();
+        using CancellationTokenRegistration graceStart = deadline.Token.Register(
+            static state => ((CancellationTokenSource)state!).CancelAfter(TicketReleaseGrace), giveUp);
+        Task<TicketRelease>? release = null;
+
+        try
+        {
+            // Inside the try so a timeout CancelAfter refuses is recorded as the tidy-up's failure
+            // rather than thrown after the manifest has landed (spec I8).
+            deadline.CancelAfter(_options.TicketReleaseTimeout);
+
+            release = _strategy.ReleaseLeftoverTicketsAsync(deadline.Token);
+
+            // The deadline is the strategy's cue to stop and report what it settled; the wait is
+            // only abandoned once the grace after it has run out too, so a strategy that honours the
+            // token keeps its counts and one that ignores it still cannot hold the report back
+            // (spec I8).
+            return (await release.WaitAsync(giveUp.Token).ConfigureAwait(false), null);
+        }
+        catch (OperationCanceledException) when (giveUp.IsCancellationRequested)
+        {
+            if (release is not null)
+            {
+                _ = release.ContinueWith(
+                    static task => _ = task.Exception,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+            }
+
+            return (TicketRelease.None, new TimeoutException(
+                $"the tidy-up did not stop within {TicketReleaseGrace} of its {_options.TicketReleaseTimeout} deadline; tickets it had not released stay on the account"));
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        {
+            return (TicketRelease.None, null);
+        }
+        catch (Exception failure)
+        {
+            return (TicketRelease.None, failure);
         }
     }
 

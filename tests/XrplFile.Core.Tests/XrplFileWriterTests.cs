@@ -106,6 +106,9 @@ public class XrplFileWriterTests
             return landed;
         }
 
+        public Task<TicketRelease> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken) =>
+            inner.ReleaseLeftoverTicketsAsync(cancellationToken);
+
         public ValueTask DisposeAsync() => inner.DisposeAsync();
     }
 

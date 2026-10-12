@@ -60,10 +60,12 @@ public sealed class XrplClientLedgerSink : ILedgerSink
     /// transaction may have gone through anyway. On a timeout the hash is looked up and the
     /// node's own result for it is returned; a lookup that answers <c>txnNotFound</c>, or that
     /// times out in its turn, means "not known yet" and the identical blob is resubmitted.
-    /// Resubmission is safe because it is idempotent by <c>Sequence</c> — a copy that did land
-    /// answers <c>tefPAST_SEQ</c>/<c>tefALREADY</c>, which is itself resolved by the same lookup
-    /// rather than reported as a refusal. When all three attempts pass without the node ever
-    /// answering, the node is unreachable and the caller is told so.
+    /// Resubmission is safe because it is idempotent by <c>Sequence</c>, or by
+    /// <c>TicketSequence</c> for a ticketed transaction — a copy that did land answers
+    /// <c>tefPAST_SEQ</c>/<c>tefALREADY</c>, or <c>tefNO_TICKET</c> when it rode a ticket, and each
+    /// is resolved by the same lookup of its own hash rather than reported as a refusal. When all
+    /// three attempts pass without the node ever answering, the node is unreachable and the caller
+    /// is told so.
     /// </summary>
     public async Task<SubmitOutcome> SubmitAsync(
         Dictionary<string, object> transaction, ITransactionSigner signer, CancellationToken cancellationToken)
@@ -94,8 +96,11 @@ public sealed class XrplClientLedgerSink : ILedgerSink
             }
 
             // The sequence is spent: an earlier copy of this very blob landed. What matters is not
-            // the refusal but what that copy did, so the node is asked about the hash.
-            if (outcome is "tefPAST_SEQ" or "tefALREADY")
+            // the refusal but what that copy did, so the node is asked about the hash. A ticketed
+            // copy that already landed is answered tefNO_TICKET rather than tefALREADY — the ticket
+            // is checked first — so that answer is asked about too; a ticket somebody else consumed
+            // leaves the hash unknown and the answer stands.
+            if (outcome is "tefPAST_SEQ" or "tefALREADY" or "tefNO_TICKET")
             {
                 string? landed = await ResultOfAsync(hash, cancellationToken).ConfigureAwait(false);
                 if (landed is not null) return new SubmitOutcome(landed, hash);

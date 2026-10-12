@@ -153,6 +153,34 @@ public class XrplClientLedgerSinkTests
         return sink.SubmitAsync(transaction, Signer, TestContext.Current.CancellationToken);
     }
 
+    [Fact]
+    public async Task A_ticket_gone_because_this_very_blob_landed_reports_what_the_blob_did()
+    {
+        ScriptedNode node = new();
+        node.Throw(new Xrpl.Client.Exceptions.TimeoutException("submit timed out"));
+        node.Answer("""{"error":"txnNotFound"}""");
+        node.Answer("""{"engine_result":"tefNO_TICKET"}""");
+        node.Answer("""{"validated":true,"meta":{"TransactionResult":"tesSUCCESS"}}""");
+
+        SubmitOutcome outcome = await Submit(node);
+
+        Assert.Equal("tesSUCCESS", outcome.EngineResult);
+        Assert.Equal(["submit", "tx", "submit", "tx"], node.Requests.Select(r => r.Command).ToArray());
+    }
+
+    [Fact]
+    public async Task A_ticket_somebody_else_consumed_stays_gone()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"engine_result":"tefNO_TICKET"}""");
+        node.Answer("""{"error":"txnNotFound"}""");
+
+        SubmitOutcome outcome = await Submit(node);
+
+        Assert.Equal("tefNO_TICKET", outcome.EngineResult);
+        Assert.Equal(["submit", "tx"], node.Requests.Select(r => r.Command).ToArray());
+    }
+
     /// <summary>A node whose answers to "submit" and "tx" are scripted, in call order.</summary>
     private sealed class ScriptedNode
     {

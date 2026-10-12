@@ -31,7 +31,17 @@ public sealed record RunSnapshot(
     string? Failure,
     string? Name,
     string? Network,
-    string? HistoryNote);
+    string? HistoryNote)
+{
+    /// <summary>
+    /// Whether the run publishes on tickets, as the estimate it was approved against decided.
+    /// False until that estimate is taken — and until then the run has minted nothing.
+    /// </summary>
+    public bool UsesTickets { get; init; }
+
+    /// <summary>What one ticket locks, in drops, from the same estimate. Zero until it is taken.</summary>
+    public long OwnerReserveDrops { get; init; }
+}
 
 /// <summary>
 /// The one publication this application can have going (design 8, F5). It holds the cancellation
@@ -59,6 +69,8 @@ public sealed class PublicationRun(
     private string? _name;
     private string? _network;
     private string? _historyNote;
+    private bool _usesTickets;
+    private long _ownerReserveDrops;
 
     /// <summary>
     /// Which run this is, counting from 1 at the first <see cref="Begin"/>. Exists only to pin a
@@ -98,7 +110,11 @@ public sealed class PublicationRun(
         {
             lock (_gate)
             {
-                return new RunSnapshot(_state, _progress, _report, _failure, _name, _network, _historyNote);
+                return new RunSnapshot(_state, _progress, _report, _failure, _name, _network, _historyNote)
+                {
+                    UsesTickets = _usesTickets,
+                    OwnerReserveDrops = _ownerReserveDrops,
+                };
             }
         }
     }
@@ -160,6 +176,8 @@ public sealed class PublicationRun(
             _name = null;
             _network = null;
             _historyNote = null;
+            _usesTickets = false;
+            _ownerReserveDrops = 0;
 
             // Bumped here, not only in Begin: Reset accepts on the same "not Running" state Begin
             // does, and a history append from the run just cleared can still be in flight when it
@@ -196,6 +214,8 @@ public sealed class PublicationRun(
             _report = null;
             _failure = null;
             _historyNote = null;
+            _usesTickets = false;
+            _ownerReserveDrops = 0;
             _name = request.Name;
             _network = request.Network;
             _completion = Task.Run(() => RunAsync(request, statePath, cancellation.Token, generation));
@@ -246,6 +266,17 @@ public sealed class PublicationRun(
                 if (estimate.FeeDropsPerTransaction > int.MaxValue)
                 {
                     throw new FeeTooLargeForApplicationException();
+                }
+
+                // Pinned to this run's generation, like every other write after Begin: a newer run's
+                // snapshot must not inherit this one's answer.
+                lock (_gate)
+                {
+                    if (_generation == generation)
+                    {
+                        _usesTickets = PublishPolicy.UsesTickets(estimate);
+                        _ownerReserveDrops = estimate.OwnerReserveDrops;
+                    }
                 }
 
                 SessionOptions options = new()

@@ -749,6 +749,9 @@ public sealed class PublicationRunTests : VaultHarness
         public Task<AccountState> AccountStateAsync(string account, CancellationToken cancellationToken) =>
             inner.AccountStateAsync(account, cancellationToken);
 
+        public Task<IReadOnlyList<LiveTicket>> LiveTicketsAsync(string account, CancellationToken cancellationToken) =>
+            inner.LiveTicketsAsync(account, cancellationToken);
+
         public Task<long> CurrentLedgerAsync(CancellationToken cancellationToken) =>
             inner.CurrentLedgerAsync(cancellationToken);
 
@@ -839,5 +842,44 @@ public sealed class PublicationRunTests : VaultHarness
         // the clock most of the way there three separate times.
         Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
         Assert.True(await vault.ListAsync(TestContext.Current.CancellationToken) is { Count: 1 });
+    }
+
+    [Fact]
+    public async Task A_running_ticketed_publication_says_so_on_its_snapshot()
+    {
+        GatedSubmitSink gate = new(_connections.Sink, gateAt: 1);
+        GatedConnectionFactory connections = new(_connections, gate);
+        (PublicationRun run, PublishRequest request) =
+            await ReadyAsync(TestContext.Current.CancellationToken, size: 100_000, connections: connections);
+
+        run.Start(request);
+        await WaitForGateAsync(gate, run);
+
+        RunSnapshot snapshot = run.Snapshot;
+        run.Cancel();
+        gate.Release();
+        await run.Completion;
+
+        Assert.True(snapshot.UsesTickets);
+        Assert.Equal(200_000, snapshot.OwnerReserveDrops);
+    }
+
+    [Fact]
+    public async Task A_running_publication_without_tickets_says_so_on_its_snapshot()
+    {
+        GatedSubmitSink gate = new(_connections.Sink, gateAt: 1);
+        GatedConnectionFactory connections = new(_connections, gate);
+        (PublicationRun run, PublishRequest request) =
+            await ReadyAsync(TestContext.Current.CancellationToken, connections: connections);
+
+        run.Start(request);
+        await WaitForGateAsync(gate, run);
+
+        RunSnapshot snapshot = run.Snapshot;
+        run.Cancel();
+        gate.Release();
+        await run.Completion;
+
+        Assert.False(snapshot.UsesTickets);
     }
 }

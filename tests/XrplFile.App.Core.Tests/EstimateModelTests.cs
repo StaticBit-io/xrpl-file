@@ -98,4 +98,31 @@ public sealed class EstimateModelTests : IDisposable
 
         Assert.True(model.Estimate!.Chunks > first);
     }
+
+    [Fact]
+    public async Task A_ticketed_file_on_an_account_whose_ticket_slots_are_all_taken_cannot_be_published()
+    {
+        _connections.Ledger.Balances["rWriter"] = 1_000_000_000;
+        _connections.Sink.LeakTickets("rWriter", TicketStrategy.MaxLiveTickets);
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(Request(size: 100_000), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(model.Estimate);
+        Assert.False(model.CanPublish);
+        Assert.Contains("250", model.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_small_file_is_still_publishable_when_every_ticket_slot_is_taken()
+    {
+        _connections.Ledger.Balances["rWriter"] = 1_000_000_000;
+        _connections.Sink.LeakTickets("rWriter", TicketStrategy.MaxLiveTickets);
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(Request(size: 4096), TestContext.Current.CancellationToken);
+
+        Assert.True(model.CanPublish);
+        Assert.Null(model.Message);
+    }
 }
