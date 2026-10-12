@@ -225,10 +225,41 @@ public sealed class FakeLedgerSource : ILedgerSource
         lock (_gate) _liveTickets[account] = tickets;
     }
 
+    private int _liveTicketsCalls;
+
+    /// <summary>
+    /// How many <see cref="LiveTicketsAsync"/> calls, from the <see cref="LiveTicketsFailFromCall"/>'th
+    /// onward, fail with <see cref="XrplFileError.NodeUnreachable"/> — a node that drops one
+    /// account_objects answer and then recovers. Each failing call takes one off this count.
+    /// </summary>
+    public int LiveTicketsFailures
+    {
+        get { lock (_gate) return _liveTicketsFailures; }
+        set { lock (_gate) _liveTicketsFailures = value; }
+    }
+
+    private int _liveTicketsFailures;
+
+    /// <summary>
+    /// The first <see cref="LiveTicketsAsync"/> call (1-based, counting every call this fake ever
+    /// receives) that may fail. Lets a test keep a census that lists first, then fail a later read.
+    /// </summary>
+    public int LiveTicketsFailFromCall { get; set; } = 1;
+
     public Task<IReadOnlyList<LiveTicket>> LiveTicketsAsync(string account, CancellationToken cancellationToken)
     {
         lock (_gate)
         {
+            _liveTicketsCalls++;
+
+            if (_liveTicketsFailures > 0 && _liveTicketsCalls >= LiveTicketsFailFromCall)
+            {
+                _liveTicketsFailures--;
+
+                return Task.FromException<IReadOnlyList<LiveTicket>>(
+                    new XrplFileException(XrplFileError.NodeUnreachable, "fake: account_objects did not answer"));
+            }
+
             return Task.FromResult(_liveTickets.TryGetValue(account, out IReadOnlyList<LiveTicket>? tickets) ? tickets : []);
         }
     }

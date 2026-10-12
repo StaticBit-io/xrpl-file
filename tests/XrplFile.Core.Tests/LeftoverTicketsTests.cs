@@ -183,18 +183,90 @@ public class LeftoverTicketsTests
     }
 
     [Fact]
+    public async Task A_spend_the_node_refuses_once_is_sent_again_and_released()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> ours = sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true);
+        sink.Refusals[0] = "telCAN_NOT_QUEUE";
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
+
+        // A tel left the ticket intact and claimed no fee, so the next round sends it again (spec 4.6).
+        Assert.Equal(new TicketRelease(1, 0, 0), release);
+        Assert.DoesNotContain(ours[0], sink.LiveTickets);
+        Assert.Equal(2, sink.Submitted.Count(tx => (string)tx["TransactionType"] == "AccountSet"));
+    }
+
+    [Fact]
     public async Task A_spend_the_node_refuses_leaves_the_ticket_not_released()
     {
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
         IReadOnlyList<uint> ours = sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true);
-        sink.Refusals[0] = "telINSUF_FEE_P";
+        for (int attempt = 0; attempt < 5; attempt++) sink.Refusals[attempt] = "telINSUF_FEE_P";
         await using TicketStrategy strategy = Strategy(sink, ledger);
 
         TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(new TicketRelease(0, 0, 1), release);
         Assert.Contains(ours[0], sink.LiveTickets);
+        Assert.Equal(5, sink.Submitted.Count);
+    }
+
+    [Fact]
+    public async Task A_malformed_spend_is_not_sent_again()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> ours = sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true);
+        sink.Refusals[0] = "temMALFORMED";
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
+
+        // A tem is refused the same way every time: sending it again only repeats the refusal.
+        Assert.Equal(new TicketRelease(0, 0, 1), release);
+        Assert.Contains(ours[0], sink.LiveTickets);
+        Assert.Single(sink.Submitted);
+    }
+
+    [Fact]
+    public async Task A_round_the_node_could_not_answer_is_skipped_not_fatal()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: true);
+
+        // The census is the first listing; the one after the spends is the one that fails.
+        ledger.LiveTicketsFailFromCall = 2;
+        ledger.LiveTicketsFailures = 1;
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new TicketRelease(2, 0, 0), release);
+        Assert.Equal(0, ledger.LiveTicketsFailures);
+        Assert.Empty(sink.LiveTickets);
+    }
+
+    [Fact]
+    public async Task A_spend_the_node_could_not_take_counts_as_an_attempt()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> ours = sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true);
+
+        // A throw takes no position, so position 0 throws on every attempt.
+        sink.Throws[0] = new XrplFileException(XrplFileError.NodeUnreachable, "fake: submit did not answer");
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new TicketRelease(0, 0, 1), release);
+        Assert.Contains(ours[0], sink.LiveTickets);
+        Assert.Equal(5, sink.Signatures);
     }
 
     [Fact(Timeout = 10_000)]
