@@ -104,6 +104,44 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
         }
     }
 
+    /// <summary>
+    /// Puts tickets on the account from a mint already validated in an earlier ledger, the way a
+    /// stopped run leaves them: <paramref name="marked"/> says whether that mint carried this
+    /// library's mark. The mint takes the account's next sequence exactly as a real one does, so
+    /// its tickets lie below the sequence afterwards, as a node's would. Closes a ledger, as the
+    /// mint's validation did, so a sweep anchored after it cannot meet the mint's own ledger.
+    /// </summary>
+    public IReadOnlyList<uint> LeaveTickets(string account, int count, bool marked)
+    {
+        lock (_gate)
+        {
+            uint at = _nextSequence;
+            uint first = at + 1;
+            _nextSequence = at + (uint)count + 1;
+
+            string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"fake:leftover:{at}")));
+
+            ledger.Add(new LedgerTransaction(
+                hash, firstLedger + _submitted.Count / 100 + _ledgersClosed, account,
+                Succeeded: true, Validated: true, Result: "tesSUCCESS",
+                MemoTypeHex: marked ? MemoLayout.TicketMarkerHex : null, MemoDataHex: null, MemoFormatHex: null));
+
+            List<uint> tickets = new(count);
+
+            for (uint ticket = first; ticket < first + (uint)count; ticket++)
+            {
+                LiveTickets.Add(ticket);
+                _creators[ticket] = hash;
+                tickets.Add(ticket);
+            }
+
+            _ledgersClosed++;
+            PublishTickets(account);
+
+            return tickets;
+        }
+    }
+
     /// <summary>Which submissions (by position) answer terQUEUED and land only on a later sweep.</summary>
     public Dictionary<int, int> QueuedUntilSweep { get; } = [];
 
@@ -349,7 +387,7 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
                         : tooMany ? "tecDIR_FULL"
                         : mintFailed ? "tecINSUFFICIENT_RESERVE"
                         : "tesSUCCESS",
-                    MemoTypeHex: null, MemoDataHex: null, MemoFormatHex: null));
+                    MemoTypeHex: FirstMemo(transaction).Type, MemoDataHex: null, MemoFormatHex: null));
 
                 return new SubmitOutcome("tesSUCCESS", hash);
             }
@@ -380,14 +418,7 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
                 _nextSequence = Convert.ToUInt32(transaction["Sequence"]) + 1;
             }
 
-            string? memoType = null, memoData = null, memoFormat = null;
-            if (transaction.TryGetValue("Memos", out object? memos))
-            {
-                JsonElement first = JsonSerializer.SerializeToElement(memos)[0].GetProperty("Memo");
-                memoType = first.TryGetProperty("MemoType", out JsonElement t) ? t.GetString() : null;
-                memoData = first.TryGetProperty("MemoData", out JsonElement d) ? d.GetString() : null;
-                memoFormat = first.TryGetProperty("MemoFormat", out JsonElement f) ? f.GetString() : null;
-            }
+            (string? memoType, string? memoData, string? memoFormat) = FirstMemo(transaction);
 
             if (memoData is not null && StoredAs.TryGetValue(position, out Func<string, string>? corrupt)) memoData = corrupt(memoData);
 
@@ -422,5 +453,17 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     {
         ledger.TicketCounts[account] = LiveTickets.Count;
         ledger.SetLiveTickets(account, [.. LiveTickets.Order().Select(ticket => new LiveTicket(ticket, _creators.GetValueOrDefault(ticket, UnknownCreator)))]);
+    }
+
+    private static (string? Type, string? Data, string? Format) FirstMemo(Dictionary<string, object> transaction)
+    {
+        if (!transaction.TryGetValue("Memos", out object? memos)) return (null, null, null);
+
+        JsonElement first = JsonSerializer.SerializeToElement(memos)[0].GetProperty("Memo");
+
+        return (
+            first.TryGetProperty("MemoType", out JsonElement t) ? t.GetString() : null,
+            first.TryGetProperty("MemoData", out JsonElement d) ? d.GetString() : null,
+            first.TryGetProperty("MemoFormat", out JsonElement f) ? f.GetString() : null);
     }
 }

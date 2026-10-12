@@ -281,6 +281,12 @@ public sealed class TicketStrategy(
                 ["TicketCount"] = (uint)mint,
                 ["Fee"] = _options.FeeDrops.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["SigningPubKey"] = _signer.PublicKey,
+                // The mark is how a later publication — or this one's tidy-up — knows these
+                // tickets are this library's to spend (spec I2). It carries no data.
+                ["Memos"] = new List<object>
+                {
+                    new Dictionary<string, object> { ["Memo"] = new Dictionary<string, object> { ["MemoType"] = MemoLayout.TicketMarkerHex } },
+                },
             };
 
             SubmitOutcome outcome = await _sink.SubmitAsync(transaction, _signer, cancellationToken).ConfigureAwait(false);

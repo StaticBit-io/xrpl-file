@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Xrpl.Wallet;
 using Xunit;
 
@@ -326,8 +327,9 @@ public class TicketStrategyTests
         IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, landed.Count);
-        // Three memos, three transactions. A queued one re-sent would make four.
-        Assert.Equal(3, sink.Submitted.Count(tx => tx.ContainsKey("Memos")));
+        // Three memos, three transactions (the mint carries a mark of its own, so it is not counted).
+        // A queued one re-sent would make four.
+        Assert.Equal(3, sink.Submitted.Count(tx => (string)tx["TransactionType"] != "TicketCreate" && tx.ContainsKey("Memos")));
     }
 
     [Fact]
@@ -466,5 +468,22 @@ public class TicketStrategyTests
         await strategy.SubmitAllAsync(Memos(4), new SynchronousProgress<int>(seen.Add), TestContext.Current.CancellationToken);
 
         Assert.Equal(4, seen.Max());
+    }
+
+    [Fact]
+    public async Task Every_mint_carries_the_librarys_mark_and_nothing_else()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        await strategy.SubmitAllAsync(Memos(2), null, TestContext.Current.CancellationToken);
+
+        Dictionary<string, object> mint = sink.Submitted.Single(tx => (string)tx["TransactionType"] == "TicketCreate");
+        JsonElement memo = Assert.Single(JsonSerializer.SerializeToElement(mint["Memos"]).EnumerateArray()).GetProperty("Memo");
+
+        Assert.Equal(MemoLayout.TicketMarkerHex, memo.GetProperty("MemoType").GetString());
+        Assert.False(memo.TryGetProperty("MemoData", out _));
+        Assert.False(memo.TryGetProperty("MemoFormat", out _));
     }
 }

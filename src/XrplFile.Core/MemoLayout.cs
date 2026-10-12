@@ -20,6 +20,12 @@ public static class MemoLayout
     public const int MaxMarkerBytes = 5 + MaxIndexDigits;
 
     public const string ManifestMarker = "xf/m";
+
+    /// <summary>
+    /// What every TicketCreate this library submits carries, and what tells its tickets from
+    /// anybody else's (spec I2). Internal on purpose: no reader and no other component needs it.
+    /// </summary>
+    internal const string TicketMarker = "xf/t";
     public const string JsonFormat = "application/json";
 
     public const int ChunkBytes = MaxMemoBytes - MemoTypeFraming - MaxMarkerBytes;
@@ -30,6 +36,8 @@ public static class MemoLayout
     private const string ListPrefix = "xf/b/";
 
     public static string ManifestMarkerHex { get; } = Utf8Hex(ManifestMarker);
+
+    internal static string TicketMarkerHex { get; } = Utf8Hex(TicketMarker);
 
     public static string JsonFormatHex { get; } = Utf8Hex(JsonFormat);
 
