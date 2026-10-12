@@ -103,8 +103,10 @@ internal static class LeftoverTickets
                     SubmitOutcome outcome = await sink
                         .SubmitAsync(Spend(account, signer.PublicKey, ticket, feeDrops), signer, token).ConfigureAwait(false);
 
-                    if (string.Equals(outcome.EngineResult, "tefNO_TICKET", StringComparison.Ordinal)) gone[ticket] = true;
-                    else if (Reached(outcome.EngineResult)) waiting[ticket] = outcome.TxHash;
+                    // tefNO_TICKET is not a verdict: the node may have seen the ticket consumed in an
+                    // open ledger by a transaction that never validates, which leaves it live. Only the
+                    // final listing settles such a ticket.
+                    if (Reached(outcome.EngineResult)) waiting[ticket] = outcome.TxHash;
                 }).ConfigureAwait(false);
 
             // One listing a round rather than one lookup per ticket: a spend settles when its ticket
@@ -133,8 +135,9 @@ internal static class LeftoverTickets
 
                 if (waiting.IsEmpty)
                 {
-                    // A spend the node refused left its ticket alone — unless something else took
-                    // it in the meantime, which the same listing shows.
+                    // A ticket this listing no longer shows and whose own spend did not validate with
+                    // tesSUCCESS is gone: a tefNO_TICKET answer, a refused spend, a spend that
+                    // validated as a tec. One it still shows holds its reserve, whatever the node said.
                     foreach (uint ticket in census.Ours)
                     {
                         if (!released.Contains(ticket) && !listed.Contains(ticket)) gone[ticket] = true;

@@ -89,6 +89,13 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     public HashSet<uint> AnswersGone { get; } = [];
 
     /// <summary>
+    /// A straggler that validated: tickets in <see cref="AnswersGone"/> that, once answered
+    /// <c>tefNO_TICKET</c>, are also dropped from <see cref="LiveTickets"/> so the ledger stops
+    /// listing them.
+    /// </summary>
+    public HashSet<uint> ConsumedOnGoneAnswer { get; } = [];
+
+    /// <summary>
     /// Puts tickets on the account that no strategy instance knows about — what an interrupted run
     /// leaves behind, since nothing on the XRPL cancels a ticket and DisposeAsync only drops the
     /// queue. Numbered well above anything a mint here will issue, so they cannot be mistaken for
@@ -396,7 +403,16 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
             {
                 uint ticket = Convert.ToUInt32(ticketField);
 
-                if (AnswersGone.Contains(ticket)) return new SubmitOutcome("tefNO_TICKET", hash);
+                if (AnswersGone.Contains(ticket))
+                {
+                    if (ConsumedOnGoneAnswer.Contains(ticket) && LiveTickets.Remove(ticket))
+                    {
+                        _consumed.Add(ticket);
+                        PublishTickets((string)transaction["Account"]);
+                    }
+
+                    return new SubmitOutcome("tefNO_TICKET", hash);
+                }
 
                 // rippled's own split for a ticket it does not hold: one that was consumed, or that
                 // lies below the account's sequence, is gone (tefNO_TICKET, measured on xrpld 3.3.0);

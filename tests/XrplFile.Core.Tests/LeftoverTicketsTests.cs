@@ -133,7 +133,7 @@ public class LeftoverTicketsTests
     }
 
     [Fact]
-    public async Task A_ticket_the_node_calls_gone_is_counted_as_already_gone()
+    public async Task A_ticket_the_node_calls_gone_but_the_ledger_still_lists_is_not_released()
     {
         FakeLedgerSource ledger = new();
         FakeLedgerSink sink = new(ledger);
@@ -143,7 +143,26 @@ public class LeftoverTicketsTests
 
         TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(new TicketRelease(1, 1, 0), release);
+        // The node's tefNO_TICKET alone frees nothing: the validated ledger still lists the ticket,
+        // so its reserve is still locked (spec 4.6, I5).
+        Assert.Equal(new TicketRelease(1, 0, 1), release);
+        Assert.Contains(ours[0], sink.LiveTickets);
+    }
+
+    [Fact]
+    public async Task A_ticket_the_node_calls_gone_and_the_ledger_no_longer_lists_is_already_gone()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        IReadOnlyList<uint> ours = sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true);
+        sink.AnswersGone.Add(ours[0]);
+        sink.ConsumedOnGoneAnswer.Add(ours[0]);
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new TicketRelease(0, 1, 0), release);
+        Assert.Empty(sink.LiveTickets);
     }
 
     [Fact]
