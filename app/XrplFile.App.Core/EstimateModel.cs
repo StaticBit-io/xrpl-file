@@ -18,7 +18,8 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
     public bool CanPublish =>
         Estimate is not null
         && Estimate.BalanceCovers
-        && Estimate.FeeDropsPerTransaction <= int.MaxValue;
+        && Estimate.FeeDropsPerTransaction <= int.MaxValue
+        && !PublishPolicy.HasNoTicketRoom(Estimate);
 
     public async Task EstimateAsync(PublishRequest request, CancellationToken cancellationToken)
     {
@@ -59,6 +60,15 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
             // wraps around. PublicationRun.RunAsync re-checks this same thing for itself before a
             // resume (which never reaches this model at all) and uses this exact sentence too.
             Message = PublishErrorMessages.FeeTooLargeForApplication;
+            return;
+        }
+
+        if (PublishPolicy.HasNoTicketRoom(Estimate))
+        {
+            Message =
+                $"This account already holds the {TicketStrategy.MaxLiveTickets} tickets the XRP Ledger allows, none of them "
+                + "left by this application, so a file this size has nowhere to put its own. Publish a smaller file, "
+                + "which needs no tickets, or use another account.";
             return;
         }
 

@@ -44,6 +44,13 @@ public static class PublishPolicy
     public static bool UsesTickets(PublicationEstimate estimate) => MemoCount(estimate) >= TicketThreshold;
 
     /// <summary>
+    /// Whether the run would use tickets on an account where none can be minted or reused: every
+    /// live-ticket slot is taken by tickets this application did not leave. A run that would not
+    /// use tickets is unaffected.
+    /// </summary>
+    public static bool HasNoTicketRoom(PublicationEstimate estimate) => UsesTickets(estimate) && estimate.TicketSlots == 0;
+
+    /// <summary>
     /// Builds the strategy for this estimate, priced from it.
     /// </summary>
     /// <remarks>

@@ -183,6 +183,7 @@ public sealed class PublicationSession
         }
 
         PublicationEstimator.Require(estimate, options.BudgetDrops);
+        if (strategy is TicketStrategy) PublicationEstimator.RequireTicketSlot(estimate);
 
         long startedIn = await source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
 
@@ -298,6 +299,7 @@ public sealed class PublicationSession
         }
 
         PublicationEstimator.Require(estimate, options.BudgetDrops);
+        if (strategy is TicketStrategy) PublicationEstimator.RequireTicketSlot(estimate);
 
         PublicationSession session = new(
             strategy, source, file, state, statePath, options, estimate.FeeDropsPerTransaction, estimate.Mints);

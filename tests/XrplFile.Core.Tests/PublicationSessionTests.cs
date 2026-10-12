@@ -981,6 +981,22 @@ public class PublicationSessionTests : IDisposable
         Assert.All(leftovers, ticket => Assert.Contains(ticket, sink.LiveTickets));
     }
 
+    [Fact]
+    public async Task A_ticketed_run_with_no_free_slot_never_starts()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeakTickets(Wallet.ClassicAddress, TicketStrategy.MaxLiveTickets);
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions { FeeDrops = NodeFeeDrops });
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("s", 100_000), "application/octet-stream", null,
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.SubmitRefused, error.Error);
+        Assert.Empty(sink.Submitted);
+    }
+
     /// <summary>The ledger a transaction is in, for a test that has to know where a memo landed.</summary>
     private static async Task<long> LedgerOfAsync(FakeLedgerSource ledger, string hash) =>
         (await ledger.TransactionAsync(hash, TestContext.Current.CancellationToken))!.LedgerIndex;
