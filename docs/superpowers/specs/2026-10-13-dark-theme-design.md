@@ -103,7 +103,7 @@ and disabled states (disabled = 45% opacity, as xrpl-vanity):
 | `.table` (7) | transparent cells, `--dark-gray` row rules, header in section-title style |
 | `.list-group`, `.list-group-item`, `-action` | `--box-bg` items, `--dark-gray` rules, hover `--chips` |
 | `.nav-tabs`, `.nav-link` | `--text-secondary`; active `--mint` with a 2 px `--mint` underline |
-| `.progress`, `.progress-bar` | `--chips` track, `--mint` bar, 8 px, fully rounded |
+| `.progress`, `.progress-bar` | `--chips` track, `--mint` bar, 20 px (the publishing bar carries its percentage as text, `#0D0D0D` on mint), fully rounded; the native `<progress>` on Read gets `accent-color: var(--mint)` |
 | `.badge`, `.text-bg-danger` | pill shape; danger as `--negative` fill with `#0D0D0D` text |
 | `.text-danger` (2) | `--negative`, only on `--bg` or `--box-bg` |
 
@@ -116,8 +116,10 @@ and disabled states (disabled = 45% opacity, as xrpl-vanity):
 | < 720 px | bottom tab bar: Publish, Read, History, Keys, More; More opens Accounts and Settings; a 56 px header bar holds the mark and Lock | one column, 16 px gutters; the screen's final action row, where section 5 names one, sits in an action bar above the tab bar |
 
 **Scrolling.** The window never scrolls; the content region does. The shell is a full-height grid
-(rail | content) or column (header | content | action bar | tab bar); the action bar and tab bar
-are rows of that column, not `position: fixed`, so content can never slide under them. Long
+(rail | content) or column (header bar | content | tab bar); the tab bar is a row of that column,
+not `position: fixed`. The action bar is the last element of the page inside the content region,
+`position: sticky; bottom: 0` with an opaque background, so it stays in view while the page scrolls
+and nothing can end up beneath it — it is the page's last element. Long
 content wraps: addresses, hashes, links and paths use `overflow-wrap: anywhere`; every grid and flex
 child gets `min-width: 0`. Only tables scroll horizontally, inside their own card. Under 720 px the
 tab bar's bottom padding includes `env(safe-area-inset-bottom)`.
@@ -147,9 +149,9 @@ component overrides, then the application's own classes. To keep clear of Bootst
   values right-aligned).
 - **Text:** `.xf-num` (tabular numerals; colour inherited), `.xf-figure` (`.xf-num` in `--beige`
   for a standalone count or amount), `.xf-mono`, `.xf-muted`.
-- **Status:** `.xf-pill` with `.xf-pill-active` (mint) and `.xf-pill-warn` (yellow).
-- **Motion:** `.xf-breathe` on a running publication's pill; every transition and animation is off
-  under `prefers-reduced-motion: reduce`.
+- **Vault screens:** `.xf-vault` (full-height centring around their card).
+- **Motion:** colour and border transitions of 180 ms; every transition and animation is off under
+  `prefers-reduced-motion: reduce`.
 
 All of it lives in `app.css`; no `.razor.css` file is added, so there is one place a rule can come
 from.
@@ -214,7 +216,8 @@ not one.
 
 ## 7. Testing
 
-- **Linux, App.Core:** the History tab; Publish no longer owning History; More opening, toggling
+- **Linux, App.Core:** the theme's token values and every contrast figure of section 2, read from
+  `wwwroot/app.css` itself; the History tab; More opening, toggling
   and closing on `Show`, on `CloseMore` and on a tab change; `IsMoreCurrent` for Accounts and
   Settings.
 - Every App.Core and Core suite stays green; the application builds without warnings.
