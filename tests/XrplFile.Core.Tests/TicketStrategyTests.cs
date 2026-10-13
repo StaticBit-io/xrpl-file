@@ -737,4 +737,83 @@ public class TicketStrategyTests
         // The copy carrying other data was neither recorded nor counted as seen, so the memo went out again.
         Assert.Equal(2, Ridden(sink).Length);
     }
+
+    [Fact]
+    public async Task A_straggler_with_the_right_marker_and_other_data_does_not_count_as_this_memos_ticket_spent()
+    {
+        FakeLedgerSource ledger = new();
+        PlantingSink sink = new(new FakeLedgerSink(ledger), ledger);
+        IReadOnlyList<uint> leftovers = sink.Inner.LeaveTickets(Wallet.ClassicAddress, 2, marked: true);
+
+        // The memo's own submission is taken and never applied, so its ticket stays live. In the
+        // ledger window of the same call lies another file's straggler wearing the memo's marker.
+        sink.Inner.Refusals[0] = "terQUEUED";
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
+        {
+            TicketsPerBatch = 100,
+            SweepPoll = TimeSpan.FromMilliseconds(1),
+            BatchTimeout = TimeSpan.FromMilliseconds(100),
+            ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
+
+        IReadOnlyList<MemoSubmission> memos = Memos(1);
+        sink.Straggler = new LedgerTransaction(
+            new string('5', 64), 0, Wallet.ClassicAddress, Succeeded: true, Validated: true, Result: "tesSUCCESS",
+            memos[0].MemoTypeHex, "FF", null);
+
+        await strategy.SubmitAllAsync(memos, null, TestContext.Current.CancellationToken);
+
+        // Had the straggler counted as the memo's copy being seen, its ticket would have been forgotten
+        // as spent, and the next look — one more leftover makes the ledger hold more than the instance
+        // accounts for — would find it listed and ride it a second time.
+        sink.Inner.LeaveTickets(Wallet.ClassicAddress, 1, marked: true);
+        await strategy.SubmitAllAsync(Memos(1, from: 1), null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, Ridden(sink.Inner).Count(ticket => ticket == leftovers[0]));
+    }
+
+    [Fact]
+    public async Task The_data_of_a_landed_memo_is_matched_ignoring_case()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true);
+
+        // A node may spell the hex it stores in lower case; the memo is the same memo.
+        sink.StoredAs[0] = data => data.ToLowerInvariant();
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
+        {
+            SweepPoll = TimeSpan.FromMilliseconds(1),
+            BatchTimeout = TimeSpan.FromMilliseconds(200),
+            ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
+
+        MemoSubmission memo = new(MemoLayout.ChunkMarkerHex(0), "ABCDEF", null);
+        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync([memo], null, TestContext.Current.CancellationToken);
+
+        Assert.Single(landed);
+        Assert.Single(Ridden(sink));
+    }
+
+    /// <summary>Plants <see cref="Straggler"/> in the ledger just before the first memo submission, one ledger past the window's floor.</summary>
+    private sealed class PlantingSink(FakeLedgerSink inner, FakeLedgerSource ledger) : ILedgerSink
+    {
+        public FakeLedgerSink Inner => inner;
+
+        public LedgerTransaction? Straggler { get; set; }
+
+        public Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken) =>
+            inner.SequenceAsync(account, validated, cancellationToken);
+
+        public Task<SubmitOutcome> SubmitAsync(Dictionary<string, object> transaction, ITransactionSigner signer, CancellationToken cancellationToken)
+        {
+            if (Straggler is { } planted && transaction.ContainsKey("TicketSequence"))
+            {
+                ledger.Add(planted with { LedgerIndex = ledger.CurrentLedger + 1 });
+                Straggler = null;
+            }
+
+            return inner.SubmitAsync(transaction, signer, cancellationToken);
+        }
+    }
 }

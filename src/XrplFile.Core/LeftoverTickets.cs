@@ -24,6 +24,20 @@ internal static class LeftoverTickets
     /// <param name="verdicts">
     /// Creator hash → whether it is this library's mint, kept by a caller that looks more than once.
     /// Null for a caller that wants every creator checked afresh.
+    /// <para>
+    /// A verdict is stored whichever way it fell, including "the node could not show this creator":
+    /// a lookup that found nothing — truncated history, a lagging backend — is kept as somebody
+    /// else's for as long as the cache lives. That is the conservative side and agrees with spec I3
+    /// (a wrong "foreign" costs one owner reserve, a wrong "ours" costs somebody else's
+    /// transaction), at the price that a cache outliving a recovered node keeps those tickets
+    /// foreign until the caller starts a new one. A lookup that could not be asked at all throws and
+    /// stores nothing.
+    /// </para>
+    /// <para>
+    /// The cache's comparer is the caller's, while this method groups tickets by creator ignoring
+    /// case, so a caller should build the dictionary with <see cref="StringComparer.OrdinalIgnoreCase"/>:
+    /// an ordinal one would look the same creator up again under another casing.
+    /// </para>
     /// </param>
     public static async Task<TicketCensus> FindAsync(
         ILedgerSource source, string account, IDictionary<string, bool>? verdicts, CancellationToken cancellationToken)

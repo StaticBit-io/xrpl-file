@@ -26,6 +26,7 @@ public static class MemoLayout
     /// anybody else's (spec I2). Internal on purpose: no reader and no other component needs it.
     /// </summary>
     internal const string TicketMarker = "xf/t";
+
     public const string JsonFormat = "application/json";
 
     public const int ChunkBytes = MaxMemoBytes - MemoTypeFraming - MaxMarkerBytes;

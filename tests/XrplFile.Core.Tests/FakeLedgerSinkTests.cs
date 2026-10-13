@@ -213,6 +213,20 @@ public class FakeLedgerSinkTests
         Assert.Equal(5, ledger.TicketCounts[Wallet.ClassicAddress]);
     }
 
+    [Fact]
+    public void Seeding_tickets_past_the_ceiling_is_refused_as_a_node_would_refuse_the_mint()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+
+        sink.LeaveTickets(Wallet.ClassicAddress, TicketStrategy.MaxLiveTickets - 1, marked: true);
+        sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: false);
+
+        Assert.Throws<InvalidOperationException>(() => sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true));
+        Assert.Throws<InvalidOperationException>(() => sink.LeakTickets(Wallet.ClassicAddress, 1));
+        Assert.Equal(TicketStrategy.MaxLiveTickets, sink.LiveTickets.Count);
+    }
+
     private static Dictionary<string, object> SpendOf(uint ticket, uint lastLedger) => new()
     {
         ["TransactionType"] = "AccountSet",

@@ -78,7 +78,13 @@ public sealed record PublicationReport(
     /// <summary>Leftover tickets the tidy-up found already consumed by something else. Their reserve is free.</summary>
     public int TicketsAlreadyGone { get; init; }
 
-    /// <summary>Leftover tickets still live after the tidy-up — refused, or unsettled when its time ran out.</summary>
+    /// <summary>
+    /// Leftover tickets still live after the tidy-up — refused, or unsettled when its time ran out.
+    /// All three counts zero with no <see cref="TicketReleaseFailure"/> means the tidy-up found
+    /// nothing <em>or</em> ran out of time before its census could be read (see
+    /// <see cref="TicketRelease"/>): the report cannot tell those apart, so zeros do not prove the
+    /// account holds none of this library's tickets.
+    /// </summary>
     public int TicketsNotReleased { get; init; }
 
     /// <summary>

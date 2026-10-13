@@ -76,15 +76,15 @@ public sealed class PublicationSession
     /// </summary>
     private static readonly string[] Stages = ["chunks", "lists", "read-back", "manifest", "done"];
 
-    private readonly ISubmissionStrategy _strategy;
-    private readonly ILedgerSource _source;
-    private readonly ReadOnlyMemory<byte> _file;
     /// <summary>
     /// How long a tidy-up past its deadline is given to unwind and report what it settled before
     /// the session stops waiting for it.
     /// </summary>
     private static readonly TimeSpan TicketReleaseGrace = TimeSpan.FromSeconds(5);
 
+    private readonly ISubmissionStrategy _strategy;
+    private readonly ILedgerSource _source;
+    private readonly ReadOnlyMemory<byte> _file;
     private readonly SessionOptions _options;
     private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
 
@@ -487,7 +487,7 @@ public sealed class PublicationSession
             }
 
             return (null, new TimeoutException(
-                $"the tidy-up did not stop within {TicketReleaseGrace} of its {_options.TicketReleaseTimeout} deadline; tickets it had not released stay on the account"));
+                $"the tidy-up did not stop within {Seconds(TicketReleaseGrace)} of its {Seconds(_options.TicketReleaseTimeout)} deadline; tickets it had not released stay on the account"));
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
@@ -498,6 +498,10 @@ public sealed class PublicationSession
             return (null, failure);
         }
     }
+
+    /// <summary>A span as a figure a person reads in a message: "5 s", "0.1 s", "120 s" — not "00:00:05".</summary>
+    private static string Seconds(TimeSpan span) =>
+        span.TotalSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + " s";
 
     /// <summary>
     /// Runs that were started and never finished. Money may be sitting on the accounts they name,

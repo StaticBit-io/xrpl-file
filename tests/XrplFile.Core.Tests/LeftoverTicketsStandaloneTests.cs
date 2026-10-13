@@ -156,16 +156,24 @@ public class LeftoverTicketsStandaloneTests : IDisposable
             // The resume needs a ticket for every chunk that did not land, and one for the manifest.
             // Every ticket of the first batch either carried a chunk that landed or is still on the
             // account, so landed + stranded = 100, and what is left to mint is 120 - 100 + 1 = 21
-            // however many submissions the stop actually caught.
+            // however many submissions the stop actually caught. The arithmetic holds because
+            // StrandedAsync closed two ledgers first: the forty forwarded memos had validated by the
+            // time the resume listed the account, so no ticket they rode was picked up a second time.
             Assert.Equal(21, counting.Minted);
+
+            // The resume rode every ticket it picked up and every one it minted, so the tidy-up had
+            // nothing of the library's to find: all counts are zero, and so is what it cost. A zero
+            // here is not a vacuous pass — the 21 mints above say the leftovers were used.
+            Assert.Equal(0, report.TicketsReleased);
+            Assert.Equal(0, report.TicketsAlreadyGone);
+            Assert.Equal(0, report.TicketsNotReleased);
+            Assert.Null(report.TicketReleaseFailure);
+            Assert.Equal(0, report.TicketReleaseFeeDrops);
+            Assert.Equal(0, report.TicketReleaseFeeDropsInDoubt);
 
             TicketCensus after = await LeftoverTickets.FindAsync(source, writer.ClassicAddress, null, token);
             Assert.Empty(after.Ours);
             Assert.Contains(await source.LiveTicketsAsync(writer.ClassicAddress, token), ticket => ticket.Sequence == foreign);
-            Assert.Equal(0, report.TicketsNotReleased);
-            Assert.Null(report.TicketReleaseFailure);
-            Assert.Equal(0, report.TicketReleaseFeeDropsInDoubt);
-            Assert.True(report.TicketReleaseFeeDrops >= report.TicketsReleased * (long)fee);
         }
         finally
         {

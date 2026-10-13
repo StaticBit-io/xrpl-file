@@ -127,6 +127,8 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     {
         lock (_gate)
         {
+            RequireRoomFor(count);
+
             for (uint ticket = 1_000_000; ticket < 1_000_000 + (uint)count; ticket++) LiveTickets.Add(ticket);
 
             PublishTickets(account);
@@ -139,11 +141,16 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     /// library's mark. The mint takes the account's next sequence exactly as a real one does, so
     /// its tickets lie below the sequence afterwards, as a node's would. Closes a ledger, as the
     /// mint's validation did, so a sweep anchored after it cannot meet the mint's own ledger.
+    /// Like <see cref="LeakTickets"/>, it refuses a seed that would take the account past the
+    /// protocol's ceiling of <see cref="TicketStrategy.MaxLiveTickets"/> live tickets, which is the
+    /// state no node can be in.
     /// </summary>
     public IReadOnlyList<uint> LeaveTickets(string account, int count, bool marked)
     {
         lock (_gate)
         {
+            RequireRoomFor(count);
+
             uint at = _nextSequence;
             uint first = at + 1;
             _nextSequence = at + (uint)count + 1;
@@ -168,6 +175,16 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
             PublishTickets(account);
 
             return tickets;
+        }
+    }
+
+    /// <summary>Called under <see cref="_gate"/>. A seeding helper may not describe an account no node could hold.</summary>
+    private void RequireRoomFor(int count)
+    {
+        if (LiveTickets.Count + count > TicketStrategy.MaxLiveTickets)
+        {
+            throw new InvalidOperationException(
+                $"seeding {count} tickets on top of {LiveTickets.Count} would pass the {TicketStrategy.MaxLiveTickets} an account may hold");
         }
     }
 

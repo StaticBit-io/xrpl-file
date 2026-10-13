@@ -574,6 +574,21 @@ public class XrplClientLedgerSourceTests
         Assert.Empty(XrplClientLedgerSource.ParseTickets(answer));
     }
 
+    [Fact]
+    public void A_ticket_sequence_outside_what_a_sequence_can_be_is_skipped_not_wrapped()
+    {
+        // 4294967297 wraps to 1 in an unchecked cast, and would be read as a ticket the account may
+        // hold; a ticket sequence is a 32-bit unsigned number, so anything else is not a ticket.
+        JsonElement answer = JsonDocument.Parse("""
+            {"account_objects":[
+              {"LedgerEntryType":"Ticket","TicketSequence":4294967297,"PreviousTxnID":"aa"},
+              {"LedgerEntryType":"Ticket","TicketSequence":-1,"PreviousTxnID":"bb"},
+              {"LedgerEntryType":"Ticket","TicketSequence":4294967295,"PreviousTxnID":"cc"}]}
+            """).RootElement;
+
+        Assert.Equal([new LiveTicket(uint.MaxValue, "CC")], XrplClientLedgerSource.ParseTickets(answer));
+    }
+
     /// <summary>A node whose answers are scripted, in call order.</summary>
     private sealed class ScriptedNode
     {

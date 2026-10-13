@@ -491,6 +491,49 @@ public class PublicationSessionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_resumed_run_tidies_up_the_leftovers_too()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        byte[] file = VectorStream.Bytes("resume", 2500);
+
+        sink.Refusals[3] = "tefBAD_AUTH";
+        await using (SequenceStrategy dying = new(sink, Signer, StrategyOptions))
+        {
+            PublicationSession first = await PublicationSession.StartAsync(
+                dying, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
+                Options(), TestContext.Current.CancellationToken);
+
+            await Assert.ThrowsAsync<XrplFileException>(() => first.RunAsync(null, TestContext.Current.CancellationToken));
+        }
+
+        sink.Refusals.Clear();
+
+        // What an earlier, interrupted ticketed run left on the account, and one ticket that is not
+        // this library's. The resume needs none of them: they are for the tidy-up (spec 4.6, I6).
+        IReadOnlyList<uint> ours = sink.LeaveTickets(Wallet.ClassicAddress, 3, marked: true);
+        IReadOnlyList<uint> foreign = sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: false);
+
+        string statePath = Directory.EnumerateFiles(_stateDirectory, "*.json").Single();
+
+        await using SequenceStrategy resumed = new(
+            sink, Signer, new SequenceStrategyOptions { FeeDrops = NodeFeeDrops, ValidationPoll = TimeSpan.FromMilliseconds(1) }, ledger);
+        PublicationSession second = await PublicationSession.ResumeAsync(
+            resumed, ledger, file, statePath, Options(), TestContext.Current.CancellationToken);
+
+        PublicationReport report = await second.RunAsync(null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, report.TicketsReleased);
+        Assert.Equal(0, report.TicketsAlreadyGone);
+        Assert.Equal(0, report.TicketsNotReleased);
+        Assert.Null(report.TicketReleaseFailure);
+        Assert.Equal(3 * NodeFeeDrops, report.TicketReleaseFeeDrops);
+        Assert.Equal(0, report.TicketReleaseFeeDropsInDoubt);
+        Assert.Equal([.. foreign], sink.LiveTickets.Order().ToArray());
+        Assert.All(ours, ticket => Assert.DoesNotContain(ticket, sink.LiveTickets));
+    }
+
+    [Fact]
     public async Task A_resume_with_a_different_file_is_refused()
     {
         FakeLedgerSource ledger = Node();
@@ -956,7 +999,8 @@ public class PublicationSessionTests : IDisposable
         Assert.Equal(0, report.TicketsReleased);
         Assert.Equal(0, report.TicketsAlreadyGone);
         Assert.Equal(0, report.TicketsNotReleased);
-        Assert.IsType<TimeoutException>(report.TicketReleaseFailure);
+        TimeoutException timeout = Assert.IsType<TimeoutException>(report.TicketReleaseFailure);
+        Assert.Contains("within 5 s of its 0.1 s deadline", timeout.Message, StringComparison.Ordinal);
         Assert.Null(report.TicketReleaseFeeDrops);
     }
 

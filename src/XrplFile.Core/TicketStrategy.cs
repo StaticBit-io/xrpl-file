@@ -195,6 +195,14 @@ public sealed class TicketStrategy(
             // A memo whose ticket was gone was never applied: there is nothing of it to sweep for,
             // and it did nothing to deserve an attempt (spec I5). It stays pending and goes out
             // again on the next ticket.
+            //
+            // Not sweeping for it can miss an earlier attempt of the same memo that lands late, and
+            // the memo then goes out a second time. That risk is accepted, not overlooked: an earlier
+            // attempt was itself swept for the whole BatchTimeout in its own batch, so what is missed
+            // is a landing in the few seconds this send took; a second copy carries the same data, so
+            // the reader takes the first and the read-back is unaffected — it costs one fee; and the
+            // only fix, sweeping for these memos here, waits out the whole BatchTimeout for a memo
+            // that was never sent in this batch, on every gone ticket.
             foreach (int index in sent.Gone)
             {
                 attempts[index]--;
@@ -588,6 +596,9 @@ public sealed class TicketStrategy(
                 if (!markers.TryGetValue(tx.MemoTypeHex, out string? data)) continue;
                 if (!string.Equals(tx.MemoDataHex, data, StringComparison.OrdinalIgnoreCase)) continue;
 
+                // Only a copy of this very memo says the ticket it rode is spent. A ledger copy of the
+                // memo with other data — which a real ledger never holds for a transaction this call
+                // signed — would leave that ticket counted as live in the instance until it is disposed.
                 if (tx.LedgerIndex >= batchFrom) seen.Add(tx.MemoTypeHex);
 
                 if (!tx.Succeeded) continue;

@@ -284,6 +284,42 @@ public class PublicationEstimateTests
     }
 
     [Fact]
+    public async Task More_leftovers_than_memos_mint_nothing_and_never_go_negative()
+    {
+        FakeLedgerSource node = Node(100_000_000);
+        FakeLedgerSink sink = new(node);
+        sink.LeaveTickets("rWriter", 10, marked: true);
+
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            node, "rWriter", fileBytes: 2500, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
+
+        // Four memos and ten tickets of ours: the run mints nothing, and the six it does not use are
+        // the tidy-up's, so they are still reported as reusable rather than clamped to the memo count.
+        Assert.Equal(10, estimate.ReusableTickets);
+        Assert.Equal(0, estimate.PeakReserveDrops);
+        Assert.Equal(TicketStrategy.MaxLiveTickets, estimate.TicketSlots);
+    }
+
+    [Fact]
+    public async Task Leftovers_that_fill_every_slot_the_others_leave_mint_nothing()
+    {
+        FakeLedgerSource node = Node(100_000_000);
+        FakeLedgerSink sink = new(node);
+        sink.LeakTickets("rWriter", TicketStrategy.MaxLiveTickets - 2);
+        sink.LeaveTickets("rWriter", 2, marked: true);
+
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            node, "rWriter", fileBytes: 2500, ticketsPerBatch: 100, TestContext.Current.CancellationToken);
+
+        // The account is full, but not refused: the two free slots are this library's own tickets,
+        // which stand in for two of the four memos' tickets, and the peak the slots allow is two.
+        Assert.Equal(2, estimate.ReusableTickets);
+        Assert.Equal(2, estimate.TicketSlots);
+        Assert.Equal(0, estimate.PeakReserveDrops);
+        PublicationEstimator.RequireTicketSlot(estimate);
+    }
+
+    [Fact]
     public async Task Somebody_elses_tickets_take_slots_and_replace_nothing()
     {
         FakeLedgerSource node = Node(100_000_000);

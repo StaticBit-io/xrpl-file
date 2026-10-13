@@ -70,6 +70,58 @@ public class LeftoverTicketsTests
     }
 
     [Fact]
+    public async Task A_foreign_verdict_is_cached_too_and_costs_no_second_lookup()
+    {
+        FakeLedgerSource ledger = new();
+        ledger.Add(Mint(Hash('B')));
+        ledger.SetLiveTickets(Account, [new LiveTicket(1, Hash('B'))]);
+        Dictionary<string, bool> verdicts = new(StringComparer.OrdinalIgnoreCase);
+
+        await LeftoverTickets.FindAsync(ledger, Account, verdicts, TestContext.Current.CancellationToken);
+        TicketCensus second = await LeftoverTickets.FindAsync(ledger, Account, verdicts, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, ledger.TransactionLookups);
+        Assert.Empty(second.Ours);
+        Assert.Equal(1, second.Others);
+    }
+
+    [Fact]
+    public async Task A_creator_the_node_could_not_show_stays_foreign_for_as_long_as_the_cache_lives()
+    {
+        FakeLedgerSource ledger = new();
+        ledger.SetLiveTickets(Account, [new LiveTicket(1, Hash('A'))]);
+        Dictionary<string, bool> verdicts = new(StringComparer.OrdinalIgnoreCase);
+
+        TicketCensus first = await LeftoverTickets.FindAsync(ledger, Account, verdicts, TestContext.Current.CancellationToken);
+
+        // The node recovers its history: the mint is there now, and marked.
+        ledger.Add(Mint(Hash('A'), memoType: MemoLayout.TicketMarkerHex));
+
+        TicketCensus cached = await LeftoverTickets.FindAsync(ledger, Account, verdicts, TestContext.Current.CancellationToken);
+        TicketCensus fresh = await LeftoverTickets.FindAsync(ledger, Account, null, TestContext.Current.CancellationToken);
+
+        // Conservative on purpose (spec I3): the cached "could not be shown" is not revisited, and a
+        // caller that wants the recovered answer starts a new cache.
+        Assert.Empty(first.Ours);
+        Assert.Empty(cached.Ours);
+        Assert.Equal([1u], fresh.Ours);
+        Assert.Equal(2, ledger.TransactionLookups);
+    }
+
+    [Fact]
+    public async Task A_cache_built_with_the_ignore_case_comparer_answers_for_a_creator_in_either_case()
+    {
+        FakeLedgerSource ledger = new();
+        ledger.SetLiveTickets(Account, [new LiveTicket(1, Hash('A'))]);
+        Dictionary<string, bool> verdicts = new(StringComparer.OrdinalIgnoreCase) { [Hash('a')] = true };
+
+        TicketCensus census = await LeftoverTickets.FindAsync(ledger, Account, verdicts, TestContext.Current.CancellationToken);
+
+        Assert.Equal([1u], census.Ours);
+        Assert.Equal(0, ledger.TransactionLookups);
+    }
+
+    [Fact]
     public async Task An_account_with_no_tickets_has_an_empty_census_and_costs_no_lookup()
     {
         FakeLedgerSource ledger = new();
@@ -132,7 +184,7 @@ public class LeftoverTicketsTests
         Assert.Empty(sink.Submitted);
     }
 
-    [Fact]
+    [Fact(Timeout = 10_000)]
     public async Task A_ticket_the_node_calls_gone_but_the_ledger_still_lists_is_not_released()
     {
         FakeLedgerSource ledger = new();
@@ -144,7 +196,8 @@ public class LeftoverTicketsTests
         TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
 
         // The node's tefNO_TICKET alone frees nothing: the validated ledger still lists the ticket,
-        // so its reserve is still locked (spec 4.6, I5).
+        // so its reserve is still locked (spec 4.6, I5). The ticket is never sent again, so nothing
+        // is left to wait for and the tidy-up ends on its own rather than at its deadline.
         Assert.Equal(new TicketRelease(1, 0, 1) { Charged = 1 }, release);
         Assert.Contains(ours[0], sink.LiveTickets);
     }
@@ -163,6 +216,66 @@ public class LeftoverTicketsTests
 
         Assert.Equal(new TicketRelease(0, 1, 0), release);
         Assert.Empty(sink.LiveTickets);
+    }
+
+    [Theory(Timeout = 10_000)]
+    [InlineData("telCAN_NOT_QUEUE")]
+    [InlineData("temMALFORMED")]
+    public async Task A_refused_spends_ticket_that_somebody_else_consumes_is_already_gone_and_not_sent_again(string refusal)
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink fake = new(ledger);
+        IReadOnlyList<uint> ours = fake.LeaveTickets(Wallet.ClassicAddress, 1, marked: true);
+        ConsumedWhileRefusedSink sink = new(fake, ledger, ours[0], refusal);
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions { ValidationPoll = TimeSpan.FromMilliseconds(1) });
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken);
+
+        // The refusal claimed no fee and left the ticket to be sent again, but the next listing no
+        // longer shows it: something else consumed it, its reserve is free, and sending a spend for
+        // it would only be refused tefNO_TICKET.
+        Assert.Equal(new TicketRelease(0, 1, 0), release);
+        Assert.Equal(1, sink.Sent);
+    }
+
+    [Theory(Timeout = 10_000)]
+    [InlineData(typeof(InvalidOperationException))]
+    [InlineData(typeof(XrplFileException))]
+    public async Task A_failure_that_is_not_an_unreachable_node_ends_the_tidy_up(Type failure)
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: true);
+
+        // A signer that refuses, a locked vault: only an unreachable node is survivable (spec 4.6).
+        sink.Throws[0] = failure == typeof(XrplFileException)
+            ? new XrplFileException(XrplFileError.SubmitRefused, "fake: the signer refused")
+            : new InvalidOperationException("fake: the signer refused");
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        Exception thrown = await Assert.ThrowsAnyAsync<Exception>(
+            () => strategy.ReleaseLeftoverTicketsAsync(TestContext.Current.CancellationToken));
+
+        Assert.IsType(failure, thrown);
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task A_census_cut_short_by_the_deadline_reads_the_same_as_nothing_to_tidy_up()
+    {
+        FakeLedgerSource ledger = new() { LiveTicketsFailures = int.MaxValue };
+        FakeLedgerSink sink = new(ledger);
+        sink.LeaveTickets(Wallet.ClassicAddress, 2, marked: true);
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        deadline.CancelAfter(TimeSpan.FromMilliseconds(300));
+
+        TicketRelease release = await strategy.ReleaseLeftoverTicketsAsync(deadline.Token);
+
+        // Documented on TicketRelease and PublicationReport: zeros do not prove the account is clean.
+        // The two cases are the same value, and this pins that they are, so nobody reads one into the other.
+        Assert.Equal(TicketRelease.None, release);
+        Assert.Empty(sink.Submitted);
+        Assert.Equal(2, sink.LiveTickets.Count);
     }
 
     [Fact]
@@ -962,6 +1075,30 @@ public class LeftoverTicketsTests
                 ledger.SetLiveTickets((string)transaction["Account"], [.. inner.LiveTickets.Order().Select(live => new LiveTicket(live, FakeLedgerSink.UnknownCreator))]);
                 throw;
             }
+        }
+    }
+
+    /// <summary>
+    /// Refuses the tidy-up's spend as <paramref name="refusal"/> while another transaction consumes
+    /// the ticket, so the next listing no longer shows it. Counts the spends it was asked to send.
+    /// </summary>
+    private sealed class ConsumedWhileRefusedSink(FakeLedgerSink inner, FakeLedgerSource ledger, uint ticket, string refusal) : ILedgerSink
+    {
+        private int _sent;
+
+        public int Sent => Volatile.Read(ref _sent);
+
+        public Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken) =>
+            inner.SequenceAsync(account, validated, cancellationToken);
+
+        public Task<SubmitOutcome> SubmitAsync(Dictionary<string, object> transaction, ITransactionSigner signer, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _sent);
+
+            inner.LiveTickets.Remove(ticket);
+            ledger.SetLiveTickets((string)transaction["Account"], [.. inner.LiveTickets.Order().Select(live => new LiveTicket(live, FakeLedgerSink.UnknownCreator))]);
+
+            return Task.FromResult(new SubmitOutcome(refusal, new string('7', 64)));
         }
     }
 }

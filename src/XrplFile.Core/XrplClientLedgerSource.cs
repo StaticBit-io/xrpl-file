@@ -209,7 +209,7 @@ public sealed class XrplClientLedgerSource : ILedgerSource
         }
     }
 
-    /// <summary>The Ticket entries of one account_objects page. Anything else, or a ticket missing a field this needs, is skipped.</summary>
+    /// <summary>The Ticket entries of one account_objects page. Anything else, or a ticket missing a field this needs or carrying a sequence no ticket can have, is skipped.</summary>
     internal static IReadOnlyList<LiveTicket> ParseTickets(JsonElement answer)
     {
         if (!answer.TryGetProperty("account_objects", out JsonElement objects) || objects.ValueKind != JsonValueKind.Array) return [];
@@ -220,6 +220,10 @@ public sealed class XrplClientLedgerSource : ILedgerSource
         {
             if (!string.Equals(Text(entry, "LedgerEntryType"), "Ticket", StringComparison.Ordinal)) continue;
             if (Number(entry, "TicketSequence") is not { } sequence || Text(entry, "PreviousTxnID") is not { } creator) continue;
+
+            // A sequence is a 32-bit unsigned number; an unchecked cast would wrap anything else into
+            // a ticket number the account may genuinely hold.
+            if (sequence is < 0 or > uint.MaxValue) continue;
 
             parsed.Add(new LiveTicket((uint)sequence, creator.ToUpperInvariant()));
         }
