@@ -24,6 +24,9 @@ public sealed class FakeLedgerSource : ILedgerSource
     /// </summary>
     private readonly List<(int RemainingSweeps, LedgerTransaction Tx)> _delayed = [];
 
+    /// <summary>Transactions applied but not yet validated, revealed by <see cref="AddUnvalidated"/>'s count of ledger reads.</summary>
+    private readonly List<(int RemainingReads, LedgerTransaction Tx)> _unvalidated = [];
+
     /// <summary>
     /// Accounts a transaction touches besides the one that signed it, by transaction hash.
     ///
@@ -138,6 +141,19 @@ public sealed class FakeLedgerSource : ILedgerSource
         return this;
     }
 
+    /// <summary>
+    /// Holds a transaction out of the validated ledger until the given number of further
+    /// <see cref="CurrentLedgerAsync"/> answers have gone by, then validates it: neither account_tx
+    /// nor the validated index shows it before then. A submission the node applied to its open
+    /// ledger, read by a caller before that ledger validates.
+    /// </summary>
+    public FakeLedgerSource AddUnvalidated(LedgerTransaction tx, int readsUntilValidated)
+    {
+        lock (_gate) _unvalidated.Add((Math.Max(readsUntilValidated, 0), tx));
+
+        return this;
+    }
+
     public FakeLedgerSource AddRange(IEnumerable<LedgerTransaction> transactions)
     {
         lock (_gate) _transactions.AddRange(transactions);
@@ -192,6 +208,16 @@ public sealed class FakeLedgerSource : ILedgerSource
         string account, long fromLedger, long toLedger, bool forward, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (AccountTransactionsFailure is { } failure) throw failure;
+
+        // rippled answers invalidLgrRange to a window that ends before it starts — min one past
+        // the validated ledger and max at it, measured on the stand — and the real source turns
+        // that into NodeUnreachable. A fake that answered such a window with nothing hid a sweep
+        // that asked for it before the next ledger validated.
+        if (fromLedger > toLedger)
+        {
+            throw new XrplFileException(XrplFileError.NodeUnreachable,
+                $"fake: the node answered invalidLgrRange to account_tx from {fromLedger} to {toLedger}");
+        }
 
         List<LedgerTransaction> ordered;
 
@@ -374,6 +400,22 @@ public sealed class FakeLedgerSource : ILedgerSource
                 _currentLedgerFailures--;
 
                 return Task.FromException<long>(new XrplFileException(XrplFileError.NodeUnreachable, "fake: ledger did not answer"));
+            }
+
+            for (int i = _unvalidated.Count - 1; i >= 0; i--)
+            {
+                (int remaining, LedgerTransaction tx) = _unvalidated[i];
+
+                if (remaining <= 0)
+                {
+                    _transactions.Add(tx);
+                    if (tx.LedgerIndex > _currentLedger) _currentLedger = tx.LedgerIndex;
+                    _unvalidated.RemoveAt(i);
+                }
+                else
+                {
+                    _unvalidated[i] = (remaining - 1, tx);
+                }
             }
 
             _currentLedger += LedgerAdvancePerRead;

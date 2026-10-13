@@ -175,6 +175,13 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     public Dictionary<int, int> QueuedUntilSweep { get; } = [];
 
     /// <summary>
+    /// Which submissions (by position) answer tesSUCCESS but stay out of the validated ledger until
+    /// that many further ledger reads have answered — applied to the open ledger, and read by a
+    /// caller before that ledger validates.
+    /// </summary>
+    public Dictionary<int, int> ValidatesAfterReads { get; } = [];
+
+    /// <summary>
     /// When set, every submission answers <c>terQUEUED</c> rather than reaching the ledger, however
     /// many of them there are — a node under enough load to queue everything a caller sends it,
     /// rather than one scripted submission picked out by position. Nothing else here expresses that
@@ -501,6 +508,12 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
             {
                 ledger.AddDelayed(stored, sweepsUntilVisible);
                 return new SubmitOutcome("terQUEUED", hash);
+            }
+
+            if (ValidatesAfterReads.TryGetValue(position, out int readsUntilValidated))
+            {
+                ledger.AddUnvalidated(stored, readsUntilValidated);
+                return new SubmitOutcome("tesSUCCESS", hash);
             }
 
             ledger.Add(stored);

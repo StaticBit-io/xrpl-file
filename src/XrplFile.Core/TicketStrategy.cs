@@ -574,9 +574,15 @@ public sealed class TicketStrategy(
         {
             long to = await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
 
-            await foreach (LedgerTransaction tx in _source
-                .AccountTransactionsAsync(_signer.Account, from, to, forward: true, cancellationToken)
-                .ConfigureAwait(false))
+            // A batch that minted nothing starts its window one past the ledger validated when it
+            // began, so until the next ledger validates the window ends before it starts. A node
+            // answers invalidLgrRange to that rather than an empty page, and nothing this call sent
+            // can be in a ledger that has not validated: the only thing to do is wait for one.
+            IAsyncEnumerable<LedgerTransaction> transactions = to < from
+                ? AsyncEnumerable.Empty<LedgerTransaction>()
+                : _source.AccountTransactionsAsync(_signer.Account, from, to, forward: true, cancellationToken);
+
+            await foreach (LedgerTransaction tx in transactions.ConfigureAwait(false))
             {
                 if (!tx.Validated || tx.MemoTypeHex is null) continue;
                 if (!markers.TryGetValue(tx.MemoTypeHex, out string? data)) continue;

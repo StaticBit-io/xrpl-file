@@ -659,6 +659,27 @@ public class TicketStrategyTests
         Assert.Empty(Minted(sink));
     }
 
+    [Fact(Timeout = 10_000)]
+    public async Task A_batch_on_picked_up_tickets_waits_for_the_ledger_its_sweep_starts_at()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true);
+
+        // No mint, so the sweep starts one past the validated ledger. The memo is the first
+        // submission, and its ledger is still open when the sweep first reads the validated index:
+        // the window from there to the validated ledger ends before it starts, and a node answers
+        // invalidLgrRange to it. Once the next ledger validates, the memo is in it.
+        sink.ValidatesAfterReads[0] = 1;
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+
+        Assert.Single(landed);
+        Assert.Empty(Minted(sink));
+        Assert.All(ledger.Calls, call => Assert.True(call.FromLedger <= call.ToLedger, $"swept {call.FromLedger}..{call.ToLedger}"));
+    }
+
     [Fact]
     public async Task A_dispatched_ticket_still_listed_is_never_picked_up_again()
     {
