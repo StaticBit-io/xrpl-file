@@ -14,7 +14,9 @@
    below. WasCancelled is its own branch for the same reason: PublicationRun leaves Failure null on a
    cancellation (cancelling was something the person did, not a fault), which used to leave this
    screen with neither Link nor Failure to show -- a frozen progress bar and a Dismiss button with no
-   outcome stated at all.
+   outcome stated at all. TicketNote and StateNote are RunModel's too, decided from the same view:
+   whether there is anything to say about the tidy-up or the state file, what it says, and whether
+   tickets may still hold a reserve (TicketsLocked, which picks the alert's colour).
 
    The poll matches Shell.razor's and Publish.razor's own shape and interval: PublicationRun runs on
    a background task this screen never awaits, so nothing repaints on progress without a render
@@ -65,6 +67,16 @@
         @if (view.HistoryNote is { } note)
         {
             <div class="alert alert-info mt-3">@note</div>
+        }
+
+        @if (view.TicketNote is { } ticketNote)
+        {
+            <div class="alert @(view.TicketsLocked ? "alert-warning" : "alert-info") mt-3">@ticketNote</div>
+        }
+
+        @if (view.StateNote is { } stateNote)
+        {
+            <div class="alert alert-info mt-3">@stateNote</div>
         }
 
         <button type="button" class="btn btn-primary mt-3" @onclick="Dismiss">Dismiss</button>

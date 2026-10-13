@@ -548,6 +548,63 @@ public sealed class PublicationRunTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_node_that_stops_answering_mid_run_is_not_reported_as_having_cost_nothing()
+    {
+        (PublicationRun run, PublishRequest request) = await ReadyAsync(TestContext.Current.CancellationToken);
+        _connections.Sink.Throws[1] = new XrplFileException(XrplFileError.NodeUnreachable, "no answer");
+
+        run.Start(request);
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
+        Assert.Equal(
+            PublishErrorMessages.ForRun(
+                new XrplFileException(XrplFileError.NodeUnreachable, "no answer"),
+                RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0),
+            run.Snapshot.Failure);
+        Assert.NotEmpty(PublicationSession.Unfinished(Paths.StateDirectory));
+    }
+
+    [Fact]
+    public async Task A_ticketed_run_that_loses_its_node_mid_run_names_its_tickets_reserve()
+    {
+        (PublicationRun run, PublishRequest request) =
+            await ReadyAsync(TestContext.Current.CancellationToken, size: 100_000);
+        _connections.Sink.Throws[1] = new XrplFileException(XrplFileError.NodeUnreachable, "no answer");
+
+        run.Start(request);
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
+        Assert.Equal(
+            PublishErrorMessages.ForRun(
+                new XrplFileException(XrplFileError.NodeUnreachable, "no answer"),
+                RunFailurePoint.WhileSubmitting, usesTickets: true, ownerReserveDrops: 200_000),
+            run.Snapshot.Failure);
+    }
+
+    [Fact]
+    public async Task A_resume_whose_node_does_not_answer_says_this_attempt_spent_nothing()
+    {
+        (PublicationRun run, PublishRequest request) = await ReadyAsync(TestContext.Current.CancellationToken);
+        _connections.Sink.Throws[1] = new XrplFileException(XrplFileError.NodeUnreachable, "no answer");
+        run.Start(request);
+        await run.Completion;
+        UnfinishedRun interrupted = Assert.Single(PublicationSession.Unfinished(Paths.StateDirectory));
+
+        _connections.ConnectThrows = new XrplFileException(XrplFileError.NodeUnreachable, "no answer");
+        run.Resume(interrupted.Path, request);
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
+        Assert.Equal(
+            PublishErrorMessages.ForRun(
+                new XrplFileException(XrplFileError.NodeUnreachable, "no answer"),
+                RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0),
+            run.Snapshot.Failure);
+    }
+
+    [Fact]
     public async Task A_failure_after_connecting_still_disposes_the_connection()
     {
         (PublicationRun run, PublishRequest request) = await ReadyAsync(TestContext.Current.CancellationToken);
@@ -881,5 +938,99 @@ public sealed class PublicationRunTests : VaultHarness
         await run.Completion;
 
         Assert.False(snapshot.UsesTickets);
+    }
+
+    [Fact]
+    public async Task Resetting_a_ticketed_run_clears_its_ticket_facts()
+    {
+        GatedSubmitSink gate = new(_connections.Sink, gateAt: 1);
+        GatedConnectionFactory connections = new(_connections, gate);
+        (PublicationRun run, PublishRequest request) =
+            await ReadyAsync(TestContext.Current.CancellationToken, size: 100_000, connections: connections);
+
+        run.Start(request);
+        await WaitForGateAsync(gate, run);
+        run.Cancel();
+        gate.Release();
+        await run.Completion;
+
+        Assert.True(run.Snapshot.UsesTickets);
+
+        run.Reset();
+
+        RunSnapshot snapshot = run.Snapshot;
+        Assert.Equal(PublicationRunState.Idle, snapshot.State);
+        Assert.False(snapshot.UsesTickets);
+        Assert.Equal(0, snapshot.OwnerReserveDrops);
+    }
+
+    /// <summary>
+    /// Holds the <paramref name="gateAt"/>-th <see cref="ConnectAsync"/> until <see cref="Release"/>,
+    /// so a test can look at a run that <see cref="PublicationRun.Start"/> has begun but whose
+    /// estimate has not been taken yet: everything on its snapshot then came from Begin alone.
+    /// </summary>
+    private sealed class GatedConnectFactory(IConnectionFactory inner, int gateAt) : IConnectionFactory
+    {
+        private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _count;
+
+        public Task Reached => _reached.Task;
+
+        public void Release() => _release.TrySetResult();
+
+        public async Task<ILedgerConnection> ConnectAsync(string network, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _count) == gateAt)
+            {
+                _reached.TrySetResult();
+                await _release.Task.ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            return await inner.ConnectAsync(network, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    [Fact]
+    public async Task A_run_started_after_a_ticketed_one_does_not_inherit_its_ticket_facts()
+    {
+        GatedSubmitSink submitGate = new(_connections.Sink, gateAt: 1);
+        GatedConnectFactory connectGate = new(new GatedConnectionFactory(_connections, submitGate), gateAt: 2);
+        (PublicationRun run, PublishRequest ticketed) =
+            await ReadyAsync(TestContext.Current.CancellationToken, size: 100_000, connections: connectGate);
+
+        run.Start(ticketed);
+        await WaitForGateAsync(submitGate, run);
+        run.Cancel();
+        submitGate.Release();
+        await run.Completion;
+        Assert.True(run.Snapshot.UsesTickets);
+
+        Assert.True(run.Start(ticketed with { File = new byte[4096] }));
+
+        Task reachedOrFinished = await Task.WhenAny(connectGate.Reached, run.Completion);
+        if (!ReferenceEquals(reachedOrFinished, connectGate.Reached))
+        {
+            throw new InvalidOperationException($"the second run finished ({run.Snapshot.State}) before connecting");
+        }
+
+        RunSnapshot beforeEstimate;
+        try
+        {
+            beforeEstimate = run.Snapshot;
+        }
+        finally
+        {
+            connectGate.Release();
+        }
+
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Running, beforeEstimate.State);
+        Assert.False(beforeEstimate.UsesTickets);
+        Assert.Equal(0, beforeEstimate.OwnerReserveDrops);
+        Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
+        Assert.False(run.Snapshot.UsesTickets);
     }
 }

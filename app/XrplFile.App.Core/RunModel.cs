@@ -15,7 +15,10 @@ public readonly record struct RunView(
     string? Failure,
     string? HistoryNote,
     string StageText,
-    int Percent);
+    int Percent,
+    string? TicketNote,
+    bool TicketsLocked,
+    string? StateNote);
 
 /// <summary>
 /// The run screen (design 4.3). It decides nothing about the run itself — that lives in
@@ -47,10 +50,9 @@ public sealed class RunModel(PublicationRun run)
         string name = snapshot.Name ?? "the file";
 
         return snapshot.UsesTickets
-            ? string.Create(CultureInfo.InvariantCulture,
-                $"\"{name}\" is still publishing. Closing now stops the run; it can be resumed later. The tickets it "
-                + $"reserved stay on this account, each holding {snapshot.OwnerReserveDrops:N0} drops of owner reserve, "
-                + $"until a later publication from this account spends them or the account is closed. Close anyway?")
+            ? $"\"{name}\" is still publishing. Closing now stops the run; it can be resumed later. The tickets it "
+                + $"reserved stay on this account, each holding {XrpAmount.Format(snapshot.OwnerReserveDrops)} of owner reserve, "
+                + $"until a later publication from this account spends them or the account is closed. Close anyway?"
             : $"\"{name}\" is still publishing. Closing now will stop the run; it can be resumed later. Close anyway?";
     }
 
@@ -128,8 +130,103 @@ public sealed class RunModel(PublicationRun run)
             StageText: snapshot.Progress is { } progress
                 ? $"{StageNameOf(progress.Stage)} — {progress.Done:N0} of {progress.Total:N0}"
                 : "Starting",
-            Percent: snapshot.Progress is { } percentProgress ? PercentOf(percentProgress) : 0);
+            Percent: snapshot.Progress is { } percentProgress ? PercentOf(percentProgress) : 0,
+            TicketNote: TicketNoteOf(snapshot),
+            TicketsLocked: TicketsLockedOf(snapshot),
+            StateNote: StateNoteOf(snapshot));
     }
+
+    /// <inheritdoc cref="TicketNoteOf"/>
+    public string? TicketNote => TicketNoteOf(Snapshot);
+
+    /// <inheritdoc cref="TicketsLockedOf"/>
+    public bool TicketsLocked => TicketsLockedOf(Snapshot);
+
+    /// <inheritdoc cref="StateNoteOf"/>
+    public string? StateNote => StateNoteOf(Snapshot);
+
+    /// <summary>
+    /// What the tidy-up after a succeeded publication did with this library's leftover tickets
+    /// (spec 4.6), or <see langword="null"/> when it found none or the run did not succeed. Released
+    /// and already-gone tickets are told together: either way their reserve is free. A tidy-up whose
+    /// counts were lost — it failed, or a cancellation cut it short — does not claim to know how many
+    /// tickets stay, since all-zero counts then say nothing about the account. Tickets that stay are
+    /// named with the only two ways they ever go, as the close confirmation names them.
+    /// </summary>
+    public static string? TicketNoteOf(RunSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        if (FinishedReport(snapshot) is not { } report) return null;
+
+        string reserve = XrpAmount.Format(snapshot.OwnerReserveDrops);
+
+        if (report.TicketReleaseFeeDrops is null)
+        {
+            return "Releasing the leftover tickets on this account did not finish. Any it did not release stay on the "
+                + $"account, each holding {reserve} of owner reserve, until a later publication from this account "
+                + "spends them or the account is closed.";
+        }
+
+        int released = report.TicketsReleased + report.TicketsAlreadyGone;
+        int locked = report.TicketsNotReleased;
+
+        if (locked == 0)
+        {
+            return released == 0
+                ? null
+                : released == 1
+                    ? "1 leftover ticket was released, freeing its owner reserve."
+                    : string.Create(CultureInfo.InvariantCulture,
+                        $"{released:N0} leftover tickets were released, freeing their owner reserve.");
+        }
+
+        string stay = locked == 1
+            ? $"It stays on this account, holding {reserve} of owner reserve, until a later publication from "
+                + "this account spends it or the account is closed."
+            : $"They stay on this account, each holding {reserve} of owner reserve, until a later publication "
+                + "from this account spends them or the account is closed.";
+
+        string lead = released == 0
+            ? string.Create(CultureInfo.InvariantCulture,
+                $"{locked:N0} leftover {(locked == 1 ? "ticket" : "tickets")} could not be released.")
+            : string.Create(CultureInfo.InvariantCulture,
+                $"{released:N0} leftover {(released == 1 ? "ticket was" : "tickets were")} released, but {locked:N0} could not be.");
+
+        return $"{lead} {stay}";
+    }
+
+    /// <summary>
+    /// Whether <see cref="TicketNoteOf"/> says tickets may still be holding a reserve: some were not
+    /// released, or the tidy-up's counts were lost. False when there is no note at all.
+    /// </summary>
+    public static bool TicketsLockedOf(RunSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        return FinishedReport(snapshot) is { } report
+            && (report.TicketReleaseFeeDrops is null || report.TicketsNotReleased > 0);
+    }
+
+    /// <summary>
+    /// What a succeeded run's unsaved state file means, or <see langword="null"/> when it was saved.
+    /// The library keeps the first save that failed, so the file on disk may still name an earlier
+    /// stage and the unfinished-runs list may go on showing the run; resuming it would write the
+    /// block lists and the manifest again.
+    /// </summary>
+    public static string? StateNoteOf(RunSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        return FinishedReport(snapshot)?.StateSaveFailure is null
+            ? null
+            : "This run's progress file could not be updated, so it may still be listed under unfinished runs. The "
+                + "file is published; delete that entry rather than resume it, which would pay again for transactions "
+                + "the file no longer needs.";
+    }
+
+    private static PublicationReport? FinishedReport(RunSnapshot snapshot) =>
+        snapshot.State == PublicationRunState.Succeeded ? snapshot.Report : null;
 
     public static int PercentOf(PublishProgress progress)
     {

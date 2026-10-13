@@ -54,12 +54,21 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
             .. PublicationSession.Unfinished(paths.StateDirectory).Select(unfinished => unfinished.State is { } state
                 ? new UnfinishedRow(
                     unfinished.Path, state.Network, state.Writer, state.KeyReference, state.Type,
-                    state.Name, state.Size, state.Phase, state.Chunk, Unreadable: null)
+                    state.Name, state.Size, RunModel.StageNameOf(state.Phase), ChunksOf(state.Size, state.Chunk), Unreadable: null)
                 : new UnfinishedRow(
                     unfinished.Path, null, null, null, null, null, 0, null, 0,
                     unfinished.Unreadable ?? "This run's state file could not be read.")),
         ];
     }
+
+    /// <summary>
+    /// How many chunks the run's file splits into. The state file records the chunk size, not a
+    /// count, and its per-chunk hashes are written only once the run is done, so the file's own
+    /// chunk count is what an unfinished row can honestly show. Zero for a chunk size that cannot
+    /// split anything.
+    /// </summary>
+    public static int ChunksOf(long size, int chunk) =>
+        chunk <= 0 || size <= 0 ? 0 : (int)((size + chunk - 1) / chunk);
 
     /// <summary>
     /// Asks for the file again and hands the run back to <see cref="PublicationRun"/>.

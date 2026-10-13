@@ -230,6 +230,13 @@ public sealed class PublicationRun(
         PublicationReport? report = null;
         string? failure = null;
 
+        // What the failure sentence may say about money (see PublishErrorMessages.ForRun). Moved to
+        // WhileSubmitting only once a session exists: StartAsync writes the state file before its
+        // first transaction, and ResumeAsync only reads the ledger.
+        RunFailurePoint point = statePath is null ? RunFailurePoint.BeforeSubmitting : RunFailurePoint.BeforeResuming;
+        bool usesTickets = false;
+        long ownerReserveDrops = 0;
+
         try
         {
             paths.EnsureCreated();
@@ -268,14 +275,17 @@ public sealed class PublicationRun(
                     throw new FeeTooLargeForApplicationException();
                 }
 
+                usesTickets = PublishPolicy.UsesTickets(estimate);
+                ownerReserveDrops = estimate.OwnerReserveDrops;
+
                 // Pinned to this run's generation, like every other write after Begin: a newer run's
                 // snapshot must not inherit this one's answer.
                 lock (_gate)
                 {
                     if (_generation == generation)
                     {
-                        _usesTickets = PublishPolicy.UsesTickets(estimate);
-                        _ownerReserveDrops = estimate.OwnerReserveDrops;
+                        _usesTickets = usesTickets;
+                        _ownerReserveDrops = ownerReserveDrops;
                     }
                 }
 
@@ -308,6 +318,8 @@ public sealed class PublicationRun(
                         : await PublicationSession.ResumeAsync(
                             strategy, connection.Source, request.File, statePath, options, cancellationToken)
                             .ConfigureAwait(false);
+
+                    point = RunFailurePoint.WhileSubmitting;
 
                     report = await session
                         .RunAsync(new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false);
@@ -345,7 +357,7 @@ public sealed class PublicationRun(
         }
         catch (XrplFileException ex)
         {
-            failure = PublishErrorMessages.For(ex);
+            failure = PublishErrorMessages.ForRun(ex, point, usesTickets, ownerReserveDrops);
             finalState = PublicationRunState.Failed;
         }
         catch (VaultException ex)

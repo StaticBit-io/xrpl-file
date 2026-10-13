@@ -349,6 +349,71 @@ public sealed class UnfinishedModelTests : VaultHarness
     }
 
     [Fact]
+    public void An_unreadable_row_never_brings_the_ticket_note_whatever_size_it_carries()
+    {
+        Assert.False(UnfinishedModel.ShowsTicketNoteFor([Row(3_145_728, unreadable: "newer format")]));
+    }
+
+    private void WriteState(string fileName, long size, int chunk = 0, string phase = "chunks")
+    {
+        new PublicationState(
+            PublicationState.CurrentVersion, "1", "rWriter", "ref", "application/octet-stream", fileName, size,
+            Chunk: chunk, Root: "AB", StartedInLedger: 1, Phase: phase, ChunkHashes: new Dictionary<int, string>())
+            .Save(Path.Combine(Paths.StateDirectory, fileName));
+    }
+
+    [Theory]
+    [InlineData("chunks", "Writing the file")]
+    [InlineData("read-back", "Reading it back from the ledger")]
+    [InlineData("manifest", "Writing the manifest")]
+    [InlineData("a-newer-stage", "a-newer-stage")]
+    public void A_row_names_its_stage_in_words(string phase, string stage)
+    {
+        WriteState("run.json", 4096, phase: phase);
+
+        UnfinishedModel model = new(Paths, NewRun(), _picker);
+        model.Refresh();
+
+        Assert.Equal(stage, Assert.Single(model.Rows).Stage);
+    }
+
+    [Theory]
+    [InlineData(2_500, 1_000, 3)]
+    [InlineData(2_000, 1_000, 2)]
+    [InlineData(1, 1_000, 1)]
+    [InlineData(4_096, 0, 0)]
+    public void A_row_counts_the_files_chunks_rather_than_showing_the_chunk_size(long size, int chunk, int chunks)
+    {
+        WriteState("run.json", size, chunk);
+
+        UnfinishedModel model = new(Paths, NewRun(), _picker);
+        model.Refresh();
+
+        Assert.Equal(chunks, Assert.Single(model.Rows).Chunks);
+    }
+
+    [Fact]
+    public void The_listed_rows_decide_the_ticket_note()
+    {
+        UnfinishedModel model = new(Paths, NewRun(), _picker);
+
+        model.Refresh();
+        Assert.False(model.ShowsTicketNote);
+
+        WriteState("small.json", 4096);
+        WriteUnreadableState("broken.json");
+        model.Refresh();
+        Assert.False(model.ShowsTicketNote);
+
+        WriteState("ticketed.json", 98_001);
+        model.Refresh();
+        Assert.True(model.ShowsTicketNote);
+
+        model.Delete(Assert.Single(model.Rows, row => row.Size == 98_001));
+        Assert.False(model.ShowsTicketNote);
+    }
+
+    [Fact]
     public void The_ticket_note_reads_as_the_design_says()
     {
         Assert.Equal(

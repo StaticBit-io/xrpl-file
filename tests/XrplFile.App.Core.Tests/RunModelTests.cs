@@ -205,6 +205,9 @@ public sealed class RunModelTests : VaultHarness
         Assert.Equal(model.Link, view.Link);
         Assert.Equal(model.Failure, view.Failure);
         Assert.Equal(model.HistoryNote, view.HistoryNote);
+        Assert.Equal(model.TicketNote, view.TicketNote);
+        Assert.Equal(model.TicketsLocked, view.TicketsLocked);
+        Assert.Equal(model.StateNote, view.StateNote);
         Assert.Equal(model.StageText, view.StageText);
         Assert.Equal(model.Percent, view.Percent);
     }
@@ -265,7 +268,7 @@ public sealed class RunModelTests : VaultHarness
 
         Assert.Equal(
             "\"big.bin\" is still publishing. Closing now stops the run; it can be resumed later. The tickets it "
-            + "reserved stay on this account, each holding 2,000,000 drops of owner reserve, until a later "
+            + "reserved stay on this account, each holding 2 XRP of owner reserve, until a later "
             + "publication from this account spends them or the account is closed. Close anyway?",
             RunModel.CloseConfirmation(snapshot));
     }
@@ -286,5 +289,146 @@ public sealed class RunModelTests : VaultHarness
         RunSnapshot snapshot = new(PublicationRunState.Running, null, null, null, null, null, null);
 
         Assert.StartsWith("\"the file\" is still publishing.", RunModel.CloseConfirmation(snapshot), StringComparison.Ordinal);
+    }
+
+    /// <summary>A report whose tidy-up ran and found nothing, unless the caller says otherwise.</summary>
+    private static PublicationReport Report() =>
+        new(
+            new XrplFileLink("testnet", new string('A', 64)),
+            new Manifest("application/octet-stream", 4096, 1024, "AB", 1, 2, 1, 0, "file.bin"),
+            "rWriter", 6, 72, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, [], [], new string('B', 64))
+        {
+            TicketReleaseFeeDrops = 0,
+            TicketReleaseFeeDropsInDoubt = 0,
+        };
+
+    private static RunSnapshot Finished(PublicationReport report, long ownerReserveDrops = 2_000_000) =>
+        new(PublicationRunState.Succeeded, null, report, null, "big.bin", "1", null)
+        {
+            UsesTickets = true,
+            OwnerReserveDrops = ownerReserveDrops,
+        };
+
+    private static void AssertTicketNote(RunSnapshot snapshot, string? text, bool locked)
+    {
+        Assert.Equal(text, RunModel.TicketNoteOf(snapshot));
+        Assert.Equal(locked, RunModel.TicketsLockedOf(snapshot));
+    }
+
+    [Fact]
+    public void A_tidy_up_that_found_nothing_says_nothing()
+    {
+        AssertTicketNote(Finished(Report()), null, locked: false);
+    }
+
+    [Fact]
+    public void A_run_that_did_not_succeed_says_nothing_about_tickets_or_its_state_file()
+    {
+        foreach (PublicationRunState state in Enum.GetValues<PublicationRunState>().Where(s => s != PublicationRunState.Succeeded))
+        {
+            RunSnapshot snapshot = new(state, null, null, state == PublicationRunState.Failed ? "it broke" : null, "big.bin", "1", null)
+            {
+                UsesTickets = true,
+                OwnerReserveDrops = 2_000_000,
+            };
+
+            AssertTicketNote(snapshot, null, locked: false);
+            Assert.Null(RunModel.StateNoteOf(snapshot));
+        }
+    }
+
+    [Fact]
+    public void Released_and_already_gone_tickets_read_as_released_with_their_reserve_free()
+    {
+        AssertTicketNote(
+            Finished(Report() with { TicketsReleased = 3, TicketsAlreadyGone = 2 }),
+            "5 leftover tickets were released, freeing their owner reserve.",
+            locked: false);
+    }
+
+    [Fact]
+    public void One_released_ticket_reads_in_the_singular()
+    {
+        AssertTicketNote(
+            Finished(Report() with { TicketsAlreadyGone = 1 }),
+            "1 leftover ticket was released, freeing its owner reserve.",
+            locked: false);
+    }
+
+    [Fact]
+    public void Tickets_not_released_say_they_stay_what_each_holds_and_what_frees_them()
+    {
+        AssertTicketNote(
+            Finished(Report() with { TicketsNotReleased = 3 }),
+            "3 leftover tickets could not be released. They stay on this account, each holding 2 XRP of "
+            + "owner reserve, until a later publication from this account spends them or the account is closed.",
+            locked: true);
+    }
+
+    [Fact]
+    public void One_ticket_not_released_reads_in_the_singular()
+    {
+        AssertTicketNote(
+            Finished(Report() with { TicketsNotReleased = 1 }, ownerReserveDrops: 200_000),
+            "1 leftover ticket could not be released. It stays on this account, holding 0.2 XRP of "
+            + "owner reserve, until a later publication from this account spends it or the account is closed.",
+            locked: true);
+    }
+
+    [Fact]
+    public void Some_released_and_some_not_names_both()
+    {
+        AssertTicketNote(
+            Finished(Report() with { TicketsReleased = 4, TicketsAlreadyGone = 1, TicketsNotReleased = 3 }),
+            "5 leftover tickets were released, but 3 could not be. They stay on this account, each holding "
+            + "2 XRP of owner reserve, until a later publication from this account spends them or the "
+            + "account is closed.",
+            locked: true);
+
+        AssertTicketNote(
+            Finished(Report() with { TicketsReleased = 1, TicketsNotReleased = 1 }),
+            "1 leftover ticket was released, but 1 could not be. It stays on this account, holding 2 XRP "
+            + "of owner reserve, until a later publication from this account spends it or the account is closed.",
+            locked: true);
+    }
+
+    private const string TidyUpDidNotFinish =
+        "Releasing the leftover tickets on this account did not finish. Any it did not release stay on the account, "
+        + "each holding 2 XRP of owner reserve, until a later publication from this account spends them "
+        + "or the account is closed.";
+
+    [Fact]
+    public void A_failed_tidy_up_does_not_claim_to_know_how_many_tickets_stay()
+    {
+        AssertTicketNote(
+            Finished(Report() with
+            {
+                TicketReleaseFailure = new TimeoutException("the tidy-up did not stop"),
+                TicketReleaseFeeDrops = null,
+                TicketReleaseFeeDropsInDoubt = null,
+            }),
+            TidyUpDidNotFinish,
+            locked: true);
+    }
+
+    [Fact]
+    public void A_tidy_up_whose_counts_were_lost_without_a_failure_reads_as_unfinished_too()
+    {
+        AssertTicketNote(
+            Finished(Report() with { TicketReleaseFeeDrops = null, TicketReleaseFeeDropsInDoubt = null }),
+            TidyUpDidNotFinish,
+            locked: true);
+    }
+
+    [Fact]
+    public void A_state_file_that_could_not_be_saved_says_to_delete_the_entry_rather_than_resume_it()
+    {
+        Assert.Null(RunModel.StateNoteOf(Finished(Report())));
+
+        Assert.Equal(
+            "This run's progress file could not be updated, so it may still be listed under unfinished runs. The "
+            + "file is published; delete that entry rather than resume it, which would pay again for transactions "
+            + "the file no longer needs.",
+            RunModel.StateNoteOf(Finished(Report() with { StateSaveFailure = new IOException("disk full") })));
     }
 }
