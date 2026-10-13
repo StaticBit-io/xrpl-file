@@ -444,8 +444,11 @@ owner reserve per ticket, both already on the estimate the run was approved agai
 For a ticketed run:
 
 > "big.bin" is still publishing. Closing now stops the run; it can be resumed later. The tickets it
-> reserved stay on this account, each holding 2,000,000 drops of owner reserve, until a later
+> reserved stay on this account, each holding 2 XRP of owner reserve, until a later
 > publication from this account spends them or the account is closed. Close anyway?
+
+The reserve is named in XRP, as a person reads it, not in drops; the amount is the node's owner
+reserve as the estimate reported it (2 XRP on the stand, 0.2 XRP on mainnet).
 
 For a run without tickets the sentence stays as it is today.
 
