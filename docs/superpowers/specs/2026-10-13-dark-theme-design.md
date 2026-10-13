@@ -6,38 +6,43 @@ xrpl-vanity-generator — the sibling application this team already ships — an
 from a wide desktop window down to a phone's width, so that a later mobile build reuses it instead
 of redoing it.
 
-Mockups: the "xrpl-file dark theme" design canvas (nine artboards: four screens at 1280 px, a
-locked vault and a narrow window, three phone screens at 390 px). The canvas is the visual
-reference; this document is the contract.
+Visual reference: the "xrpl-file dark theme" design canvas,
+https://claude.ai/artifact/6R75SmVJGMivc1anMkWwNo, version 10 (2026-10-13). Its artboards map to
+section 5's matrix: Main = Publish/estimate at 1280 px, Run = Publish/running at 1280 px, Read and
+Keys at 1280 px, Unlock = locked vault, Compact = Publish/estimate at 820 px, and three phone
+artboards at 390 px. The canvas shows the look; this document is the contract, and where they
+differ this document wins — notably, the Compact artboard's folded breakdown is not built
+(section 3).
 
 ## 1. Decisions
 
 | # | Decision | Why |
 |---|---|---|
-| T1 | Bootstrap 5.3.3 stays; the theme is a layer on top of it | 21 components use Bootstrap classes 176 times. Bootstrap's own dark mode plus remapped `--bs-*` variables restyles every one of them without touching its markup, and xrpl-vanity is built the same way. Removing Bootstrap would mean rewriting every screen's markup for the same pixels |
-| T2 | The palette, type and radii are xrpl-vanity's, value for value | The two applications are one family; a near-copy reads as a mistake |
-| T3 | Fonts ship inside the application as woff2 files | The application must work offline; a Google Fonts link would fall back silently to system fonts on a machine without network |
+| T1 | Bootstrap 5.3.3 stays as the precompiled file; the theme is a stylesheet on top of it that remaps Bootstrap's root variables AND overrides each component variant the application uses | 21 components use Bootstrap classes 176 times. Bootstrap's compiled CSS gives each variant its own local variables (`.btn-primary` declares `--bs-btn-bg` and friends from Sass), so root variables alone leave stock colours behind. Overriding the variants in place keeps every screen's class names and restyles them all |
+| T2 | The palette, type and radii are xrpl-vanity's, value for value, plus one new token for control boundaries (section 2) | The two applications are one family; a near-copy reads as a mistake. The new token exists because the reference's border colour is too faint to identify an input (WCAG 1.4.11) |
+| T3 | Inter (400, 500, 600) and Cascadia Code (400) ship inside the application as woff2 files, copied with their OFL licence texts from xrpl-vanity's `wwwroot/fonts` | The application must work offline; a web font link would fall back silently to system fonts |
 | T4 | Navigation becomes a side rail on wide windows and a bottom tab bar under 720 px | The rail is xrpl-vanity's; the tab bar is where a phone's thumb is |
 | T5 | History becomes its own navigation entry, out of Publish | It is a list of published links a person comes back to, not a step of publishing |
-| T6 | Layout adapts by CSS breakpoints only; no screen decides its own layout in code | One markup per screen keeps C1's rule (components hold no decisions) and keeps every width testable by resizing a window |
-| T7 | No user-visible text changes in this work | The texts were settled screen by screen in parts C1–C4 and in the leftover-tickets work; a restyle that also rewrites copy cannot be reviewed as either |
+| T6 | Layout adapts by CSS breakpoints only; no component decides its layout in code. Presentational markup changes — wrappers, grouping, moving an element within its own screen, swapping a class — are allowed; a decision, a text or a binding moving out of a model is not | C1's rule is that components hold no decisions, not that their markup is frozen; two columns and a pinned action cannot be made from class names alone |
+| T7 | No existing user-visible text changes. The only new texts are the navigation labels "History" and "More" and the accessible names listed in section 4 | The texts were settled screen by screen in parts C1–C4 and the leftover-tickets work; a restyle that also rewrites copy cannot be reviewed as either |
 | T8 | A mobile build is out of scope | The application targets `net10.0-windows` today. This work makes the layout phone-ready; Android and iOS targets come as their own project |
 
 ## 2. Tokens
 
-Defined once on `:root` in the application's stylesheet, copied from xrpl-vanity's
+Defined once on `:root` in `wwwroot/app.css`, values from xrpl-vanity's
 `wwwroot/scss/common/_var-colors.scss`:
 
 | Token | Value | Use |
 |---|---|---|
 | `--bg` | `#0D0D0D` | window background |
 | `--box-bg` | `#1A1A1A` | cards |
-| `--chips` | `#2D2D2D` | inputs, chips, tiles |
-| `--dark-gray` | `#282828` | borders, dividers |
+| `--chips` | `#2D2D2D` | input fill, chips, tiles |
+| `--dark-gray` | `#282828` | decorative borders and dividers only |
+| `--control-line` | `#6B6B6B` | **new**: the boundary of every input, select, checkbox, switch and outline button |
 | `--secondary-dark` | `#202222` | secondary buttons |
 | `--text` | `#F9F9F9` | primary text |
 | `--text-secondary` | `#A8A8A8` | labels, secondary text |
-| `--mint` | `#64CF95` | primary action, active navigation, success |
+| `--mint` | `#64CF95` | primary action, active navigation, success, focus ring |
 | `--beige` | `#EBAF8E` | figures (counts, amounts) |
 | `--negative` | `#D6776A` | errors, destructive actions |
 | `--yellow` | `#D3E7AB` | warnings |
@@ -46,85 +51,169 @@ Defined once on `:root` in the application's stylesheet, copied from xrpl-vanity
 | `--font-text` | `"Inter", "Segoe UI", system-ui, sans-serif` | body |
 | `--font-mono` | `"Cascadia Code", "Consolas", monospace` | addresses, hashes, links, paths |
 
-`color-scheme: dark` on the root. Body text 14 px; page titles 20 px semibold; card titles 12 px
-upper-case with 0.08 em tracking in `--text-secondary`; figures use tabular numerals in `--beige`.
+`color-scheme: dark` and `data-bs-theme="dark"` on `<html>` in `wwwroot/index.html`. Body text
+14 px; page titles 20 px weight 600; section titles 12 px upper-case, 0.08 em tracking, in
+`--text-secondary`. `@font-face` declarations name the four shipped files; no weight is synthesised.
 
-Bootstrap's variables are remapped to the tokens with `data-bs-theme="dark"` on `<html>`:
-`--bs-body-bg`, `--bs-body-color`, `--bs-secondary-color`, `--bs-border-color`,
-`--bs-tertiary-bg`, `--bs-primary` / `--bs-primary-rgb` (mint), `--bs-danger` (negative),
-`--bs-warning` (yellow), `--bs-success` (mint), `--bs-link-color` (text-secondary, mint on hover),
-`--bs-border-radius` (10 px), `--bs-font-sans-serif` and `--bs-font-monospace`. Buttons, forms,
-tables, alerts and badges pick the theme up from those; anything Bootstrap does not cover is a class
-in the theme layer (section 4).
+**Contrast, measured** (WCAG relative luminance; ≥ 4.5:1 for text, ≥ 3:1 for non-text):
+
+| Foreground | on `--bg` | on `--box-bg` | on `--chips` |
+|---|---|---|---|
+| `--text` | 18.46 | 16.53 | 13.08 |
+| `--text-secondary` | 8.17 | 7.32 | 5.79 |
+| `--mint` | 10.09 | 9.03 | 7.15 |
+| `--beige` | 10.23 | 9.16 | 7.25 |
+| `--negative` | 6.21 | 5.56 | **4.40 — not used for text** |
+| `--yellow` | 14.61 | 13.08 | 10.35 |
+| `--control-line` (non-text) | 3.65 | 3.27 | — |
+
+`#0D0D0D` text on `--mint` is 10.09 and on `--negative` 6.21. Rule: error text never sits on
+`--chips`; an error inside an input, chip or tile is written in `--text` and carries the error
+icon, and validation messages sit below the field on the card.
+
+**Bootstrap root remapping** (each with its `-rgb` twin where Bootstrap has one):
+`--bs-body-bg` (`--bg`), `--bs-body-color` (`--text`), `--bs-secondary-color` and
+`--bs-tertiary-color` (`--text-secondary`), `--bs-secondary-bg` (`--chips`), `--bs-tertiary-bg`
+(`--box-bg`), `--bs-border-color` (`--dark-gray`), `--bs-primary`, `--bs-success` (`--mint`),
+`--bs-danger` (`--negative`), `--bs-warning` (`--yellow`), `--bs-link-color` and
+`--bs-link-color-rgb` (`--text-secondary`), `--bs-link-hover-color` and its `-rgb` (`--mint`),
+`--bs-border-radius` (`--radius-chip`), `--bs-font-sans-serif` (`--font-text`),
+`--bs-font-monospace` (`--font-mono`), `--bs-focus-ring-color` (`--mint` at 100%), and the
+`*-text-emphasis`, `*-bg-subtle` and `*-border-subtle` variables of primary, success, danger,
+warning, info and secondary so that subtle backgrounds follow the palette.
+
+**Component overrides** — every variant the application uses, with default, hover, active, focus
+and disabled states (disabled = 45% opacity, as xrpl-vanity):
+
+| Variant (uses) | Look |
+|---|---|
+| `.btn-primary` (17), `.btn-success` (1) | solid `--mint`, `#0D0D0D` text, weight 600 |
+| `.btn-outline-primary` (15) | transparent, `--mint` text and border; hover fills `rgba(100,207,149,.10)` |
+| `.btn-outline-secondary` (23) | `--secondary-dark` fill, `--text`, `--control-line` border; hover border `--text-secondary` |
+| `.btn-danger` (2) | solid `--negative`, `#0D0D0D` text |
+| `.btn-outline-danger` (6) | transparent, `--negative` text and border |
+| `.btn-outline-warning` (1) | transparent, `--yellow` text and border |
+| `.btn-link` (9) | `--text-secondary`, `--mint` on hover, underline on focus |
+| `.btn` sizes | 44 px minimum height; `.btn-sm` 36 px with a 44 px hit area |
+| `.alert-warning` (14), `-danger` (12), `-success` (8), `-info` (5), `-secondary` (5) | xrpl-vanity banners: yellow, negative, mint tint at 12–14% with the matching text colour; info and secondary on `--chips` with `--text` |
+| `.form-control`, `.form-select` (20) | `--chips` fill, `--control-line` border, `--text`; focus border `--mint` |
+| `.form-check-input`, `.form-switch` | `--control-line` border, checked `--mint` |
+| `.table` (7) | transparent cells, `--dark-gray` row rules, header in section-title style |
+| `.list-group`, `.list-group-item`, `-action` | `--box-bg` items, `--dark-gray` rules, hover `--chips` |
+| `.nav-tabs`, `.nav-link` | `--text-secondary`; active `--mint` with a 2 px `--mint` underline |
+| `.progress`, `.progress-bar` | `--chips` track, `--mint` bar, 8 px, fully rounded |
+| `.badge`, `.text-bg-danger` | pill shape; danger as `--negative` fill with `#0D0D0D` text |
+| `.text-danger` (2) | `--negative`, only on `--bg` or `--box-bg` |
 
 ## 3. Layout
 
 | Width | Navigation | Content |
 |---|---|---|
-| ≥ 1100 px | 72 px rail on the left: mark, six entries (Publish, Read, History, Keys, Accounts, Settings), Lock at the bottom | Two columns where a screen has two groups (estimate: file + key | figures; run: stages | spending; read: manifest | blocks) |
-| 720–1099 px | The same rail | One column; long breakdowns fold into a `<details>` ("How the 51.12 XRP is made up") |
-| < 720 px | Bottom tab bar: Publish, Read, History, Keys, More; More opens Accounts and Settings; Lock moves to the page header | One column, 16 px gutters; the screen's primary action is pinned above the tab bar |
+| ≥ 1100 px | 72 px rail on the left: mark, six entries (Publish, Read, History, Keys, Accounts, Settings), Lock at the bottom | Screens with two groups show two columns (section 5) |
+| 720–1099 px | the same rail | one column; every group shown in full, nothing folded |
+| < 720 px | bottom tab bar: Publish, Read, History, Keys, More; More opens Accounts and Settings; Lock moves to the page header | one column, 16 px gutters; the screen's primary action, where section 5 names one, sits in an action bar above the tab bar |
 
-The rail and the tab bar are both rendered; CSS shows one. Every target is at least 44 × 44 px.
-Wide tables scroll horizontally inside their card, never the page. Dialogs are 420 px centred on
-wide windows and full width under 720 px.
+**Scrolling.** The window never scrolls; the content region does. The shell is a full-height grid
+(rail | content) or column (header | content | action bar | tab bar); the action bar and tab bar
+are rows of that column, not `position: fixed`, so content can never slide under them. Long
+content wraps: addresses, hashes, links and paths use `overflow-wrap: anywhere`; every grid and flex
+child gets `min-width: 0`. Only tables scroll horizontally, inside their own card. Under 720 px the
+tab bar's bottom padding includes `env(safe-area-inset-bottom)`.
 
-## 4. The theme layer
+**Hiding the other navigation.** Both the rail and the tab bar are rendered; the inactive one is
+`display: none`, so it is out of layout, tab order and the accessibility tree. Element ids are
+unique across both. A focused control hidden by a resize loses focus to the content region, which
+is focusable (`tabindex="-1"`).
 
-One stylesheet, `wwwroot/app.css`, replaces the template's: tokens, Bootstrap remapping, then these
-classes, named as in xrpl-vanity where xrpl-vanity has them:
+**Dialogs and cards.** Dialogs are `min(420px, 100% - 32px)` wide, at most `100% - 32px` tall,
+and scroll inside. The vault screens' card is `min(420px, 100% - 32px)` wide and centred.
 
-- **Shell:** `.shell` (rail + content grid), `.rail`, `.nav` / `.nav.active`, `.tabbar`, `.tab`,
-  `.page-head`, `.content`.
-- **Surfaces:** `.card-box` and `.card-title`; `.kv` (label/value list with right-aligned
-  values); `.tile` (a figure in a chip, used in the folded estimate).
-- **Actions:** `.btn-primary-mint`, `.btn-secondary-dark`, `.btn-stop` (secondary that turns
-  negative on hover), `.btn-icon` (icon-only, always with `aria-label`).
-- **Status:** `.pill`, `.pill-active` (mint), `.pill-warn` (yellow); `.banner-yellow`,
-  `.banner-negative`, `.banner-mint`.
-- **Text:** `.num` (tabular figures in beige), `.mono`, `.muted`.
-- **Motion:** `.breathe` on a running state's pill; every transition and animation off under
-  `prefers-reduced-motion: reduce`.
+**Targets.** Project standard (stricter than WCAG 2.2's 24 × 24): every navigation entry, button
+and form control has a hit area of at least 44 × 44 CSS px. Inline links in running text are
+exempt.
 
-Scoped `.razor.css` files are used only where a component needs layout of its own (the shell grid,
-the block grid on Read); everything else uses the shared classes.
+## 4. The theme layer and the shell
 
-## 5. Components
+`wwwroot/app.css` replaces the template's stylesheet: `@font-face`, tokens, Bootstrap remapping,
+component overrides, then the application's own classes. To keep clear of Bootstrap's names
+(`.nav`, `.card-title`), the application's own classes carry an `xf-` prefix:
 
-- **`Shell.razor`** is rewritten: the rail and the tab bar replace the button group; Lock moves into
-  the rail (and the phone header). The failure and loading states use the theme's card.
-- **`ShellModel`** gains `AppTab.History`. Publish stops rendering `<History />`; the History tab
-  does. `Unfinished` stays in Publish — it is part of finishing what was started there.
-- **The More menu** (phone width) is the model's state, not the component's: `ShellModel` gains
-  whether it is open and closes it when a tab is chosen, so the rule "choosing a tab closes More"
-  is tested on Linux.
-- **Every other screen** keeps its markup and gains classes: cards become `.card-box` with a
-  `.card-title`, label/value blocks become `.kv`, primary actions `.btn-primary-mint`, secondary
-  `.btn-secondary-dark`, destructive `.btn-danger`, figures `.num`, addresses and links `.mono`.
-- **Unlock, CreateVault, VaultUnreachable, Damage** sit centred in a 420 px card, as the locked-vault
-  mockup shows.
+- **Shell:** `.xf-shell`, `.xf-rail`, `.xf-rail-item`, `.xf-tabbar`, `.xf-tab`, `.xf-page-head`,
+  `.xf-content`, `.xf-actionbar`, `.xf-more` (the More panel).
+- **Surfaces:** `.xf-card` and `.xf-section-title`; `.xf-kv` (label/value list, values
+  right-aligned); `.xf-columns` (the two-column grid of section 5, one column under 1100 px).
+- **Text:** `.xf-num` (tabular numerals; colour inherited), `.xf-figure` (`.xf-num` in `--beige`
+  for a standalone count or amount), `.xf-mono`, `.xf-muted`.
+- **Status:** `.xf-pill` with `.xf-pill-active` (mint) and `.xf-pill-warn` (yellow).
+- **Motion:** `.xf-breathe` on a running publication's pill; every transition and animation is off
+  under `prefers-reduced-motion: reduce`.
+
+All of it lives in `app.css`; no `.razor.css` file is added, so there is one place a rule can come
+from.
+
+**`Shell.razor`** is rewritten: the rail and the tab bar replace the button group. Lock is a
+button in the rail and, under 720 px, in the page header. Its accessible name is "Lock the vault".
+The failure and loading states use `.xf-card`.
+
+**`ShellModel`** gains:
+
+- `AppTab.History`. Publish stops rendering `<History />`; the History tab does. `Unfinished`
+  stays in Publish — it belongs to finishing what was started there.
+- `MoreOpen` with `ToggleMore()` and `CloseMore()`; `Show(tab)` closes it. When the current tab is
+  Accounts or Settings, the More tab shows as current (`IsMoreCurrent`), so a phone user always
+  sees where they are.
+
+**The More control** is a `<button>` with `aria-expanded` and `aria-controls` pointing at the panel.
+The panel holds two ordinary navigation buttons (Accounts, Settings). Escape and a click outside
+close it, returning focus to the More button. A resize to 720 px or wider closes it.
+Navigation carries `aria-label="Main"`; the current entry carries `aria-current="page"`.
+
+## 5. Screens
+
+| Screen / state | ≥ 1100 px columns | Primary action (pinned under 720 px) |
+|---|---|---|
+| Publish — picker | one | none |
+| Publish — estimate | file + key \| estimate | Publish |
+| Publish — running (Run) | stages \| spent so far | Cancel (`.btn-outline-secondary`, turning `--negative` on hover) |
+| Publish — finished (Run) | one | none |
+| Publish — unfinished runs | one, table in its card | none |
+| Read — link entry | one | Read |
+| Read — reading / done | manifest \| blocks | Save file |
+| History | one, table in its card | none |
+| Keys, Add key, Export, Reveal seed, Delete key | one | none |
+| Accounts, New account, Funding, Close account | one | none |
+| Settings, Change password | one | none |
+| Create vault, Unlock, Vault unreachable, Damage | centred card | the card's own button, not pinned |
+
+Every screen keeps its existing Bootstrap classes; cards and label/value blocks gain `.xf-card` and
+`.xf-kv`, figures `.xf-figure`, addresses and links `.xf-mono`. `.btn-danger` stays for
+irreversible actions (delete a key, close an account); a run's Cancel is not one.
 
 ## 6. Accessibility
 
-- Text contrast at least 4.5:1, 3:1 for text at 24 px and over and for non-text indicators. The
-  token pairs in use (`--text` / `--text-secondary` / `--mint` / `--beige` / `--negative` /
-  `--yellow` on `--bg`, `--box-bg` and `--chips`; `#0D0D0D` on `--mint` and `--negative`) are
-  measured and the ratios recorded in the plan; a pair that fails is not used.
-- Focus is visible on every control: a 2 px `--mint` outline with offset, never removed.
-- Navigation is a `<nav>` with `aria-label`; the current entry carries `aria-current="page"`.
-- Status never relies on colour alone: every pill and banner has words; verified blocks carry a
-  check mark as well as mint.
+- Text contrast and non-text contrast as measured in section 2; a pair outside that table is
+  measured before it is used.
+- Focus is visible on every control: a 2 px `--mint` outline at 2 px offset, never removed, never
+  clipped by an `overflow` container.
+- Status never relies on colour alone: every pill and banner has words; verified blocks on Read
+  carry a check mark as well as mint.
+- Section 4 covers the navigation's semantics and the More control.
 
 ## 7. Testing
 
-- `ShellModel`: the History tab, the More menu opening and closing on tab choice — App.Core tests
-  on Linux.
+- **Linux, App.Core:** the History tab; Publish no longer owning History; More opening, toggling
+  and closing on `Show`, on `CloseMore` and on a tab change; `IsMoreCurrent` for Accounts and
+  Settings.
 - Every App.Core and Core suite stays green; the application builds without warnings.
-- The look is checked in the MauiLab VM at three window widths (1280, 900, 600 px) on the publish,
-  run, read, keys and unlock screens, with screenshots kept with the plan's report.
-- Contrast is checked with the `ui-a11y-gates` skill against the compiled stylesheet.
+- **MauiLab VM**, screenshots in the plan's report folder: every row of section 5's matrix at
+  1280 px; Publish/estimate, Run, Read, Keys, History and Unlock at 900 px and at 600 px; the More
+  panel open at 600 px; keyboard-only pass over the shell (Tab order, focus ring, Escape on More);
+  Windows text size 150% at 1280 px.
+- **Contrast:** the `ui-a11y-gates` skill against the compiled stylesheet, plus a rendered check of
+  hover, disabled and banner states in the VM.
 
 ## 8. What this does not do
 
 It does not add Android or iOS targets, a QR scanner, a light theme or a theme switch. It does not
-change any text, flow or decision a screen makes. It does not touch the browser reader in `web/`.
+change any existing text, flow or decision a screen makes. It does not touch the browser reader in
+`web/`.
