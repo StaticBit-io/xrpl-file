@@ -103,7 +103,7 @@ and disabled states (disabled = 45% opacity, as xrpl-vanity):
 | `.table` (7) | transparent cells, `--dark-gray` row rules, header in section-title style |
 | `.list-group`, `.list-group-item`, `-action` | `--box-bg` items, `--dark-gray` rules, hover `--chips` |
 | `.nav-tabs`, `.nav-link` | `--text-secondary`; active `--mint` with a 2 px `--mint` underline |
-| `.progress`, `.progress-bar` | `--chips` track, `--mint` bar, 20 px (the publishing bar carries its percentage as text, `#0D0D0D` on mint), fully rounded; the native `<progress>` on Read gets `accent-color: var(--mint)` |
+| `.progress`, `.progress-bar` | `--chips` track, `--mint` bar, 20 px (the publishing bar carries its percentage as text, `#0D0D0D` on mint, and is never narrower than that text), fully rounded; the native `<progress>` on Read gets `accent-color: var(--mint)` |
 | `.badge`, `.text-bg-danger` | pill shape; danger as `--negative` fill with `#0D0D0D` text |
 | `.text-danger` (2) | `--negative`, only on `--bg` or `--box-bg` |
 
@@ -129,8 +129,9 @@ tab bar's bottom padding includes `env(safe-area-inset-bottom)`.
 unique across both. A focused control hidden by a resize loses focus to the content region, which
 is focusable (`tabindex="-1"`).
 
-**Dialogs and cards.** Dialogs are `min(420px, 100% - 32px)` wide, at most `100% - 32px` tall,
-and scroll inside. The vault screens' card is `min(420px, 100% - 32px)` wide and centred.
+**Cards.** The vault screens' card is `min(420px, 100% - 32px)` wide and centred. The application
+has no HTML dialogs today (its one confirmation is the native window-close alert); a dialog added
+later is `min(420px, 100% - 32px)` wide, at most `100% - 32px` tall, and scrolls inside.
 
 **Targets.** Project standard (stricter than WCAG 2.2's 24 × 24): every navigation entry, button
 and form control has a hit area of at least 44 × 44 CSS px. Inline links in running text are
@@ -180,7 +181,7 @@ screen's existing last row of buttons, moved into `.xf-actionbar`:
 
 | Screen / state | Pinned under 720 px |
 |---|---|
-| Publish — picker | the Estimate button |
+| Publish — picker | nothing: Unfinished runs follow it on the same scroll, so a pinned bar would ride over them |
 | Publish — estimate | Back and Publish |
 | Publish — running (Run) | Cancel (`.btn-outline-secondary`) |
 | Publish — finished (Run) | Dismiss |
@@ -188,7 +189,8 @@ screen's existing last row of buttons, moved into `.xf-actionbar`:
 | Read — reading | Cancel |
 | Read — finished | Dismiss |
 | Unfinished runs, History, Keys and its sub-screens, Accounts and its sub-screens, Settings, Change password | nothing |
-| Create vault, Unlock, Vault unreachable, Damage | nothing: centred card, its own buttons inside |
+| Create vault, Unlock, Vault unreachable | nothing: centred card, its own buttons inside |
+| Damage | nothing: it is a warning banner at the top of Keys, not a screen of its own |
 
 The mechanical changes on every screen, so that two implementers make the same ones:
 
@@ -210,8 +212,7 @@ not one.
   measured before it is used.
 - Focus is visible on every control: a 2 px `--mint` outline at 2 px offset, never removed, never
   clipped by an `overflow` container.
-- Status never relies on colour alone: every pill and banner has words; verified blocks on Read
-  carry a check mark as well as mint.
+- Status never relies on colour alone: every banner has words.
 - Section 4 covers the navigation's semantics and the More control.
 
 ## 7. Testing
