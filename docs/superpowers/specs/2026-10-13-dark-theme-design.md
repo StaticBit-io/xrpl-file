@@ -11,8 +11,10 @@ https://claude.ai/artifact/6R75SmVJGMivc1anMkWwNo, version 10 (2026-10-13). Its 
 section 5's matrix: Main = Publish/estimate at 1280 px, Run = Publish/running at 1280 px, Read and
 Keys at 1280 px, Unlock = locked vault, Compact = Publish/estimate at 820 px, and three phone
 artboards at 390 px. The canvas shows the look; this document is the contract, and where they
-differ this document wins — notably, the Compact artboard's folded breakdown is not built
-(section 3).
+differ this document wins. The artboards draw richer screens than the application has — a list of
+stages and a "spent so far" card while publishing, a grid of verified blocks while reading, amounts
+in XRP, a two-column estimate, a folded breakdown. None of that is built here: it is new content
+and new text (T7), and the screens keep the content they have today, in one column (section 5).
 
 ## 1. Decisions
 
@@ -109,9 +111,9 @@ and disabled states (disabled = 45% opacity, as xrpl-vanity):
 
 | Width | Navigation | Content |
 |---|---|---|
-| ≥ 1100 px | 72 px rail on the left: mark, six entries (Publish, Read, History, Keys, Accounts, Settings), Lock at the bottom | Screens with two groups show two columns (section 5) |
-| 720–1099 px | the same rail | one column; every group shown in full, nothing folded |
-| < 720 px | bottom tab bar: Publish, Read, History, Keys, More; More opens Accounts and Settings; Lock moves to the page header | one column, 16 px gutters; the screen's primary action, where section 5 names one, sits in an action bar above the tab bar |
+| ≥ 1100 px | 72 px rail on the left: mark, six entries (Publish, Read, History, Keys, Accounts, Settings), Lock at the bottom | one column, at most 920 px wide, left-aligned, 26 px padding |
+| 720–1099 px | the same rail | one column filling the content region, 22 px padding |
+| < 720 px | bottom tab bar: Publish, Read, History, Keys, More; More opens Accounts and Settings; a 56 px header bar holds the mark and Lock | one column, 16 px gutters; the screen's final action row, where section 5 names one, sits in an action bar above the tab bar |
 
 **Scrolling.** The window never scrolls; the content region does. The shell is a full-height grid
 (rail | content) or column (header | content | action bar | tab bar); the action bar and tab bar
@@ -138,10 +140,11 @@ exempt.
 component overrides, then the application's own classes. To keep clear of Bootstrap's names
 (`.nav`, `.card-title`), the application's own classes carry an `xf-` prefix:
 
-- **Shell:** `.xf-shell`, `.xf-rail`, `.xf-rail-item`, `.xf-tabbar`, `.xf-tab`, `.xf-page-head`,
-  `.xf-content`, `.xf-actionbar`, `.xf-more` (the More panel).
-- **Surfaces:** `.xf-card` and `.xf-section-title`; `.xf-kv` (label/value list, values
-  right-aligned); `.xf-columns` (the two-column grid of section 5, one column under 1100 px).
+- **Shell:** `.xf-shell`, `.xf-rail`, `.xf-rail-item`, `.xf-tabbar`, `.xf-tab`, `.xf-topbar`
+  (the header bar under 720 px), `.xf-content`, `.xf-actionbar`, `.xf-more` (the More panel).
+- **Pages:** `.xf-page` (a screen's root), `.xf-title` (its heading).
+- **Surfaces:** `.xf-card` and `.xf-section-title`; `.xf-kv-table` (a table of label/value rows,
+  values right-aligned).
 - **Text:** `.xf-num` (tabular numerals; colour inherited), `.xf-figure` (`.xf-num` in `--beige`
   for a standalone count or amount), `.xf-mono`, `.xf-muted`.
 - **Status:** `.xf-pill` with `.xf-pill-active` (mint) and `.xf-pill-warn` (yellow).
@@ -152,7 +155,7 @@ All of it lives in `app.css`; no `.razor.css` file is added, so there is one pla
 from.
 
 **`Shell.razor`** is rewritten: the rail and the tab bar replace the button group. Lock is a
-button in the rail and, under 720 px, in the page header. Its accessible name is "Lock the vault".
+button in the rail and, under 720 px, in the header bar. Its accessible name is "Lock the vault".
 The failure and loading states use `.xf-card`.
 
 **`ShellModel`** gains:
@@ -170,24 +173,34 @@ Navigation carries `aria-label="Main"`; the current entry carries `aria-current=
 
 ## 5. Screens
 
-| Screen / state | ≥ 1100 px columns | Primary action (pinned under 720 px) |
-|---|---|---|
-| Publish — picker | one | none |
-| Publish — estimate | file + key \| estimate | Publish |
-| Publish — running (Run) | stages \| spent so far | Cancel (`.btn-outline-secondary`, turning `--negative` on hover) |
-| Publish — finished (Run) | one | none |
-| Publish — unfinished runs | one, table in its card | none |
-| Read — link entry | one | Read |
-| Read — reading / done | manifest \| blocks | Save file |
-| History | one, table in its card | none |
-| Keys, Add key, Export, Reveal seed, Delete key | one | none |
-| Accounts, New account, Funding, Close account | one | none |
-| Settings, Change password | one | none |
-| Create vault, Unlock, Vault unreachable, Damage | centred card | the card's own button, not pinned |
+Every screen keeps its content and stays one column. The action row pinned under 720 px is the
+screen's existing last row of buttons, moved into `.xf-actionbar`:
 
-Every screen keeps its existing Bootstrap classes; cards and label/value blocks gain `.xf-card` and
-`.xf-kv`, figures `.xf-figure`, addresses and links `.xf-mono`. `.btn-danger` stays for
-irreversible actions (delete a key, close an account); a run's Cancel is not one.
+| Screen / state | Pinned under 720 px |
+|---|---|
+| Publish — picker | the Estimate button |
+| Publish — estimate | Back and Publish |
+| Publish — running (Run) | Cancel (`.btn-outline-secondary`) |
+| Publish — finished (Run) | Dismiss |
+| Read — link entry | nothing: its buttons sit between the fields they act on |
+| Read — reading | Cancel |
+| Read — finished | Dismiss |
+| Unfinished runs, History, Keys and its sub-screens, Accounts and its sub-screens, Settings, Change password | nothing |
+| Create vault, Unlock, Vault unreachable, Damage | nothing: centred card, its own buttons inside |
+
+The mechanical changes on every screen, so that two implementers make the same ones:
+
+| Today | Becomes |
+|---|---|
+| a screen's root `<div class="container py-3">` (or `py-4`) | `<div class="xf-page">` |
+| its `<h1 class="h3">` | `<h1 class="xf-title">` |
+| each self-contained block — a `table`, a `list-group`, a group of label/value lines, a form's set of fields | wrapped in `<section class="xf-card">` |
+| a `table` of label/value rows (`<th>` + `<td>` per row) | keeps its markup, gains `.xf-kv-table` (labels in `--text-secondary`, values right-aligned with `.xf-num`) |
+| an address, hash, link, path or node URL in `<code>` or plain text | `<code class="xf-mono">` or `<span class="xf-mono">` |
+| the last row of action buttons on a screen the table above names | moved into `<div class="xf-actionbar">` at the end of the screen |
+
+`.btn-danger` stays for irreversible actions (delete a key, close an account); a run's Cancel is
+not one.
 
 ## 6. Accessibility
 
