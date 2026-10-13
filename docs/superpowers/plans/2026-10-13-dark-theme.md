@@ -1248,6 +1248,8 @@ param(
     [int]$Width = 0,
     [int]$Height = 800,
     [string[]]$Eval = @(),
+    [int]$Width2 = 0,
+    [string[]]$Eval2 = @(),
     [string]$Screenshot = ''
 )
 
@@ -1279,6 +1281,14 @@ if ($Width -gt 0) {
     Start-Sleep -Milliseconds 400
 }
 foreach ($expression in $Eval) {
+    $answer = Invoke-Cdp 'Runtime.evaluate' @{ expression = $expression; returnByValue = $true; awaitPromise = $true }
+    $answer.result.result.value | ConvertTo-Json -Depth 10 -Compress
+}
+if ($Width2 -gt 0) {
+    [void](Invoke-Cdp 'Emulation.setDeviceMetricsOverride' @{ width = $Width2; height = $Height; deviceScaleFactor = 0; mobile = $false })
+    Start-Sleep -Milliseconds 400
+}
+foreach ($expression in $Eval2) {
     $answer = Invoke-Cdp 'Runtime.evaluate' @{ expression = $expression; returnByValue = $true; awaitPromise = $true }
     $answer.result.result.value | ConvertTo-Json -Depth 10 -Compress
 }
@@ -1326,19 +1336,13 @@ Expected: `[true,true]` everywhere (Review Focus 1). On Estimate and Run at 600,
 
 - [ ] **Step 5: Review Focus 2 — focus survives the 720 px line**
 
-In one connection: width 1280, focus the current rail item, then width 600, then read the focus:
+In one connection — width 1280, focus the current rail item, cross to 600, read the focus:
 
 ```powershell
-.\vm-cdp.ps1 -Width 1280 -Eval "document.querySelector('.xf-rail-item[aria-current=page]').focus(); document.activeElement.className"
+.\vm-cdp.ps1 -Width 1280 -Eval "document.querySelector('.xf-rail-item[aria-current=page]').focus(); document.activeElement.className" -Width2 600 -Eval2 "new Promise(r => setTimeout(() => r(document.activeElement.id), 300))"
 ```
 
-then, without closing between steps (extend the helper's `-Eval` list if needed, or call `Emulation.setDeviceMetricsOverride` again inside one run):
-
-```powershell
-.\vm-cdp.ps1 -Width 1280 -Eval "document.querySelector('.xf-rail-item[aria-current=page]').focus(); 'focused'", "new Promise(r => setTimeout(r, 50))" ; .\vm-cdp.ps1 -Width 600 -Eval "new Promise(r => setTimeout(() => r(document.activeElement.id), 300))"
-```
-
-Expected: `"xf-content"`. If the second connection starts from the default width and the media change is not seen, put both widths in one run by adding a `-Width2` parameter to the helper that applies a second `setDeviceMetricsOverride` after the first `-Eval` list.
+Expected: first line `"xf-rail-item"`, second `"xf-content"`.
 
 - [ ] **Step 6: Review Focus 4 — no stock Bootstrap blue, in focus states too**
 
