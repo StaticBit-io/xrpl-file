@@ -371,6 +371,9 @@ public sealed class ReadRunTests : IDisposable
 
         Assert.True(run.Snapshot.Saving);
 
+        string? temporary = run.TemporaryPathForTests;
+        Assert.NotNull(temporary);
+
         run.Dispose();
 
         Assert.False(run.Snapshot.Saving);
@@ -388,8 +391,12 @@ public sealed class ReadRunTests : IDisposable
         // of this test. Reset() carries no such guard, so it is the one caller left that can still
         // retry the delete once the save has actually released the file, which by this point (after
         // awaiting `saving` above) it has -- proven here rather than left to the class teardown.
-        string? temporary = run.TemporaryPathForTests;
-        Assert.NotNull(temporary);
+        //
+        // The stranded delete is a Windows behaviour: Windows refuses to delete a file another handle
+        // still holds open. POSIX unlinks it at once, so on Linux Dispose's own delete already
+        // succeeded and there is nothing left for Reset to retry. Either way the file must be gone.
+        if (OperatingSystem.IsWindows()) Assert.Equal(temporary, run.TemporaryPathForTests);
+
         run.Reset();
         Assert.False(File.Exists(temporary));
     }
