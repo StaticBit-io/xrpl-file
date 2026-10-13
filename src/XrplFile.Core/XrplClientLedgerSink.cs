@@ -17,7 +17,8 @@ public sealed class XrplClientLedgerSink : ILedgerSink
     private const string Queued = "terQUEUED";
 
     private readonly IXrplClient? _client;
-    private readonly Func<BaseRequest, CancellationToken, Task<JsonElement>> _request;
+    private readonly Func<BaseRequest, CancellationToken, Task<NodeAnswer>> _request;
+    private long _loadWarnings;
 
     public XrplClientLedgerSink(IXrplClient client)
     {
@@ -32,9 +33,17 @@ public sealed class XrplClientLedgerSink : ILedgerSink
     /// <c>account_info</c> path and is not available on a sink built this way.
     /// </summary>
     internal XrplClientLedgerSink(Func<BaseRequest, CancellationToken, Task<JsonElement>> request)
+        : this(async (sent, token) => new NodeAnswer(await request(sent, token).ConfigureAwait(false), null))
+    {
+    }
+
+    /// <summary>The same seam, for a scripted node that also says what the envelope's <c>warning</c> was.</summary>
+    internal XrplClientLedgerSink(Func<BaseRequest, CancellationToken, Task<NodeAnswer>> request)
     {
         _request = request;
     }
+
+    public long LoadWarnings => Interlocked.Read(ref _loadWarnings);
 
     public async Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken)
     {
@@ -66,12 +75,17 @@ public sealed class XrplClientLedgerSink : ILedgerSink
     /// is resolved by the same lookup of its own hash rather than reported as a refusal. When all
     /// three attempts pass without the node ever answering, the node is unreachable and the caller
     /// is told so.
+    /// A node's error answer comes back as <c>error:&lt;code&gt;</c> whichever shape it arrives in, and a
+    /// connection that dropped is handled as a timeout is (spec 4.8). A refusal that follows an
+    /// unanswered transmission of the same blob says so on
+    /// <see cref="SubmitOutcome.FollowsUnansweredAttempt"/>.
     /// </summary>
     public async Task<SubmitOutcome> SubmitAsync(
         Dictionary<string, object> transaction, ITransactionSigner signer, CancellationToken cancellationToken)
     {
         SignedTransaction signed = await signer.SignAsync(transaction, cancellationToken).ConfigureAwait(false);
         string hash = signed.Hash;
+        bool unanswered = false;
 
         for (int attempt = 1; attempt <= MaxSubmitAttempts; attempt++)
         {
@@ -79,16 +93,23 @@ public sealed class XrplClientLedgerSink : ILedgerSink
 
             try
             {
-                JsonElement answer = await _request(new SubmitRequest { TxBlob = signed.TxBlob }, cancellationToken).ConfigureAwait(false);
+                NodeAnswer answer = await AskAsync(new SubmitRequest { TxBlob = signed.TxBlob }, cancellationToken).ConfigureAwait(false);
 
                 outcome =
-                    answer.TryGetProperty("engine_result", out JsonElement code) ? code.GetString() ?? string.Empty
-                    : answer.TryGetProperty("error", out JsonElement error) ? "error:" + error.GetString()
-                    : answer.GetRawText();
+                    answer.Result.TryGetProperty("engine_result", out JsonElement code) ? code.GetString() ?? string.Empty
+                    : answer.Result.TryGetProperty("error", out JsonElement error) ? "error:" + error.GetString()
+                    : answer.Result.GetRawText();
             }
-            catch (Xrpl.Client.Exceptions.TimeoutException)
+            catch (RippledException e)
             {
-                // The node did not answer in time; it may still have the transaction.
+                // A real node's error answer: the SDK raises status "error" before any JSON reaches
+                // here. The same outcome the embedded shape above gives, so both agree (spec I13).
+                outcome = "error:" + e.Classify().RawError;
+            }
+            catch (Exception e) when (DidNotAnswer(e, cancellationToken))
+            {
+                // The node did not answer; it may still have the transaction (spec I14).
+                unanswered = true;
                 string? landed = await ResultOfAsync(hash, cancellationToken).ConfigureAwait(false);
                 if (landed is not null) return new SubmitOutcome(landed, hash);
 
@@ -106,45 +127,58 @@ public sealed class XrplClientLedgerSink : ILedgerSink
                 if (landed is not null) return new SubmitOutcome(landed, hash);
             }
 
-            return new SubmitOutcome(outcome, hash);
+            return new SubmitOutcome(outcome, hash) { FollowsUnansweredAttempt = unanswered && !TookIt(outcome) };
         }
 
         throw new XrplFileException(XrplFileError.NodeUnreachable,
             $"the node answered neither submit nor tx for transaction {hash} in {MaxSubmitAttempts} attempts");
     }
 
+    /// <summary>The answers that mean the node took the transaction: it may yet apply, and is not a refusal.</summary>
+    private static bool TookIt(string outcome) =>
+        outcome.StartsWith("tes", StringComparison.Ordinal)
+        || outcome.StartsWith("tec", StringComparison.Ordinal)
+        || string.Equals(outcome, Queued, StringComparison.Ordinal);
+
     /// <summary>
-    /// What the node says happened to this transaction, or null when it does not have it — which
-    /// a lookup that times out also means, since a node that did not answer said nothing.
-    /// A validated transaction reports its final result, so a <c>tec</c>/<c>tef</c> code is
-    /// reported as such and never mistaken for acceptance; one still in the open ledger reports
-    /// its provisional result, or merely that the node holds it.
+    /// A request the node did not answer (spec I14): a connection closed, lost or never made, a
+    /// timeout, a response the SDK could not read, or a cancellation the caller's token did not
+    /// cause — the SDK cancels requests in flight when the network drops. A node's own error answer
+    /// is a <see cref="RippledException"/> and is not this.
+    /// </summary>
+    private static bool DidNotAnswer(Exception e, CancellationToken cancellationToken) =>
+        e is XrplException and not RippledException
+        || e is System.TimeoutException
+        || (e is OperationCanceledException && !cancellationToken.IsCancellationRequested);
+
+    /// <summary>
+    /// What the node says happened to this transaction, or null when it does not say — which a lookup
+    /// that times out or loses its connection also means, and so does any error answer to <c>tx</c>
+    /// in either shape: <c>txnNotFound</c> above all, but a busy node's <c>tooBusy</c> says nothing
+    /// about the transaction either (spec 4.8). A validated transaction reports its final result, so
+    /// a <c>tec</c>/<c>tef</c> code is reported as such and never mistaken for acceptance; one still
+    /// in the open ledger reports its provisional result, or merely that the node holds it.
     /// </summary>
     private async Task<string?> ResultOfAsync(string hash, CancellationToken cancellationToken)
     {
-        JsonElement answer;
+        NodeAnswer answer;
 
         try
         {
-            answer = await _request(new TxRequest(hash), cancellationToken).ConfigureAwait(false);
+            answer = await AskAsync(new TxRequest(hash), cancellationToken).ConfigureAwait(false);
         }
-        catch (Xrpl.Client.Exceptions.TimeoutException)
+        catch (RippledException)
         {
             return null;
         }
-        catch (Exception e) when (e is not OperationCanceledException
-            && string.Equals(e.Classify().RawError, XrplErrorCodes.TxnNotFound, StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        if (answer.TryGetProperty("error", out JsonElement error)
-            && string.Equals(error.GetString(), XrplErrorCodes.TxnNotFound, StringComparison.Ordinal))
+        catch (Exception e) when (DidNotAnswer(e, cancellationToken))
         {
             return null;
         }
 
-        return TransactionResult(answer) ?? Queued;
+        if (answer.Result.TryGetProperty("error", out _)) return null;
+
+        return TransactionResult(answer.Result) ?? Queued;
     }
 
     /// <summary>The <c>meta.TransactionResult</c> of a <c>tx</c> answer, in either api_version's shape.</summary>
@@ -162,7 +196,17 @@ public sealed class XrplClientLedgerSink : ILedgerSink
                 : null;
     }
 
-    private async Task<JsonElement> SendAsync(BaseRequest request, CancellationToken cancellationToken)
+    /// <summary>Sends one request and counts the envelope's load warning before the answer is read.</summary>
+    private async Task<NodeAnswer> AskAsync(BaseRequest request, CancellationToken cancellationToken)
+    {
+        NodeAnswer answer = await _request(request, cancellationToken).ConfigureAwait(false);
+
+        if (string.Equals(answer.Warning, "load", StringComparison.Ordinal)) Interlocked.Increment(ref _loadWarnings);
+
+        return answer;
+    }
+
+    private async Task<NodeAnswer> SendAsync(BaseRequest request, CancellationToken cancellationToken)
     {
         Task<XrplResponse<object>> pending = request switch
         {
@@ -173,6 +217,6 @@ public sealed class XrplClientLedgerSink : ILedgerSink
 
         XrplResponse<object> response = await pending.ConfigureAwait(false);
 
-        return response.Raw.ToJsonElement();
+        return new NodeAnswer(response.Raw.ToJsonElement(), response.Warning);
     }
 }

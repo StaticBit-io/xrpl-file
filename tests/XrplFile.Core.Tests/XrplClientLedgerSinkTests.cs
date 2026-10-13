@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Xrpl.Client.Exceptions;
 using Xrpl.Models.Methods;
+using Xrpl.Models.Subscriptions;
 using Xrpl.Wallet;
 using Xunit;
 
@@ -26,6 +28,21 @@ public class XrplClientLedgerSinkTests
         Assert.Equal("tesSUCCESS", outcome.EngineResult);
         Assert.Single(node.Requests);
         Assert.Equal("submit", node.Requests[0].Command);
+    }
+
+    [Fact]
+    public async Task The_sink_counts_the_nodes_load_warnings()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"engine_result":"tesSUCCESS"}""", warning: "load");
+        node.Answer("""{"engine_result":"tesSUCCESS"}""");
+        XrplClientLedgerSink sink = new(node.HandleAsync);
+
+        await sink.SubmitAsync(AccountSet(), Signer, TestContext.Current.CancellationToken);
+        await sink.SubmitAsync(AccountSet(), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, sink.LoadWarnings);
+        Assert.Equal(1, ((ILedgerSink)sink).LoadWarnings);
     }
 
     [Fact]
@@ -181,18 +198,173 @@ public class XrplClientLedgerSinkTests
         Assert.Equal(["submit", "tx"], node.Requests.Select(r => r.Command).ToArray());
     }
 
-    /// <summary>A node whose answers to "submit" and "tx" are scripted, in call order.</summary>
+    private static Dictionary<string, object> AccountSet() => new()
+    {
+        ["TransactionType"] = "AccountSet",
+        ["Account"] = Wallet.ClassicAddress,
+        ["Sequence"] = 1u,
+        ["Fee"] = "12",
+        ["SigningPubKey"] = Wallet.PublicKey,
+    };
+
+    private static RippledException NodeError(string code) => new(code, new ErrorResponse { Error = code });
+
+    [Fact]
+    public async Task A_thrown_error_answer_is_an_outcome_like_an_embedded_one()
+    {
+        ScriptedNode thrown = new();
+        thrown.Throw(NodeError("tooBusy"));
+        ScriptedNode embedded = new();
+        embedded.Answer("""{"error":"tooBusy"}""");
+
+        SubmitOutcome fromThrown = await new XrplClientLedgerSink(thrown.HandleAsync)
+            .SubmitAsync(AccountSet(), Signer, TestContext.Current.CancellationToken);
+        SubmitOutcome fromEmbedded = await new XrplClientLedgerSink(embedded.HandleAsync)
+            .SubmitAsync(AccountSet(), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("error:tooBusy", fromThrown.EngineResult);
+        Assert.Equal("error:tooBusy", fromEmbedded.EngineResult);
+        Assert.False(fromThrown.FollowsUnansweredAttempt);
+    }
+
+    [Fact]
+    public async Task A_closed_socket_is_retried_and_then_unreachable()
+    {
+        ScriptedNode node = new();
+
+        // submit, tx lookup, three times over.
+        for (int i = 0; i < 6; i++) node.Throw(new DisconnectedException("websocket was closed, code: 1008, reason: threshold exceeded"));
+
+        XrplFileException failure = await Assert.ThrowsAsync<XrplFileException>(() =>
+            new XrplClientLedgerSink(node.HandleAsync).SubmitAsync(AccountSet(), Signer, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, failure.Error);
+        Assert.Equal(["submit", "tx", "submit", "tx", "submit", "tx"], node.Commands);
+    }
+
+    [Fact]
+    public async Task A_cancellation_nobody_asked_for_is_a_node_that_did_not_answer()
+    {
+        ScriptedNode node = new();
+        node.Throw(new OperationCanceledException("Connection was intentionally closed."));
+        node.Throw(new NotConnectedException());
+        node.Answer("""{"engine_result":"tesSUCCESS"}""");
+
+        SubmitOutcome outcome = await new XrplClientLedgerSink(node.HandleAsync)
+            .SubmitAsync(AccountSet(), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("tesSUCCESS", outcome.EngineResult);
+
+        // Only a refusal carries the flag: this answer took the transaction.
+        Assert.False(outcome.FollowsUnansweredAttempt);
+    }
+
+    [Fact]
+    public async Task The_callers_own_cancellation_stays_a_cancellation()
+    {
+        // Cancelled inside the node call, after signing: WalletSigner checks the token first, so a
+        // token cancelled before the call would never reach the sink's own handling.
+        using CancellationTokenSource caller = new();
+        ScriptedNode node = new();
+        node.Do(() =>
+        {
+            caller.Cancel();
+            throw new OperationCanceledException(caller.Token);
+        });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new XrplClientLedgerSink(node.HandleAsync).SubmitAsync(AccountSet(), Signer, caller.Token));
+
+        // No lookup and no resubmission: the caller stopped, the node did not fail.
+        Assert.Equal(["submit"], node.Commands);
+    }
+
+    [Fact]
+    public async Task A_signer_that_refuses_is_not_a_node_failure()
+    {
+        ScriptedNode node = new();
+
+        InvalidOperationException refused = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new XrplClientLedgerSink(node.HandleAsync).SubmitAsync(AccountSet(), new RefusingSigner(), TestContext.Current.CancellationToken));
+
+        Assert.Equal("the vault is locked", refused.Message);
+        Assert.Empty(node.Commands);
+    }
+
+    [Fact]
+    public async Task A_refusal_after_an_unanswered_transmission_says_so()
+    {
+        ScriptedNode node = new();
+        node.Throw(new Xrpl.Client.Exceptions.TimeoutException("submit timed out"));
+        node.Answer("""{"error":"txnNotFound"}""");
+        node.Answer("""{"engine_result":"telCAN_NOT_QUEUE"}""");
+
+        SubmitOutcome outcome = await new XrplClientLedgerSink(node.HandleAsync)
+            .SubmitAsync(AccountSet(), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("telCAN_NOT_QUEUE", outcome.EngineResult);
+        Assert.True(outcome.FollowsUnansweredAttempt);
+    }
+
+    [Fact]
+    public async Task A_thrown_error_answer_to_the_lookup_is_not_known_yet()
+    {
+        ScriptedNode node = new();
+        node.Throw(new Xrpl.Client.Exceptions.TimeoutException("submit timed out"));
+        node.Throw(NodeError("tooBusy"));
+        node.Answer("""{"engine_result":"tesSUCCESS"}""");
+
+        SubmitOutcome outcome = await new XrplClientLedgerSink(node.HandleAsync)
+            .SubmitAsync(AccountSet(), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("tesSUCCESS", outcome.EngineResult);
+        Assert.Equal(["submit", "tx", "submit"], node.Commands);
+    }
+
+    [Fact]
+    public async Task An_embedded_error_answer_to_the_lookup_is_not_known_yet_and_not_a_queued_transaction()
+    {
+        ScriptedNode node = new();
+        node.Throw(new Xrpl.Client.Exceptions.TimeoutException("submit timed out"));
+        node.Answer("""{"error":"tooBusy"}""");
+        node.Answer("""{"engine_result":"tesSUCCESS"}""");
+
+        SubmitOutcome outcome = await new XrplClientLedgerSink(node.HandleAsync)
+            .SubmitAsync(AccountSet(), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("tesSUCCESS", outcome.EngineResult);
+        Assert.Equal(["submit", "tx", "submit"], node.Commands);
+    }
+
+    /// <summary>A signer that refuses the way a locked vault does.</summary>
+    private sealed class RefusingSigner : ITransactionSigner
+    {
+        public string Account => Wallet.ClassicAddress;
+
+        public string PublicKey => Wallet.PublicKey;
+
+        public Task<SignedTransaction> SignAsync(IDictionary<string, object> transaction, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("the vault is locked");
+    }
+
+    /// <summary>A node whose answers are scripted, in call order: raw JSON with the envelope's warning, or an exception.</summary>
     private sealed class ScriptedNode
     {
-        private readonly Queue<Func<JsonElement>> _answers = new();
+        private readonly Queue<Func<NodeAnswer>> _answers = new();
 
         public List<(string Command, string? TxBlob)> Requests { get; } = [];
 
-        public void Answer(string json) => _answers.Enqueue(() => JsonDocument.Parse(json).RootElement);
+        public List<string> Commands => [.. Requests.Select(request => request.Command)];
+
+        public void Answer(string json, string? warning = null) =>
+            _answers.Enqueue(() => new NodeAnswer(JsonDocument.Parse(json).RootElement, warning));
 
         public void Throw(Exception exception) => _answers.Enqueue(() => throw exception);
 
-        public Task<JsonElement> HandleAsync(BaseRequest request, CancellationToken cancellationToken)
+        /// <summary>Runs <paramref name="answer"/> when this call is reached — to cancel a token mid-call, say.</summary>
+        public void Do(Func<NodeAnswer> answer) => _answers.Enqueue(answer);
+
+        public Task<NodeAnswer> HandleAsync(BaseRequest request, CancellationToken cancellationToken)
         {
             string? txBlob = request is SubmitRequest submit ? submit.TxBlob : null;
             Requests.Add((request.Command, txBlob));

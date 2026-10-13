@@ -26,6 +26,17 @@ public class SequenceStrategyTests
     }
 
     [Fact]
+    public async Task A_sequence_strategy_mints_nothing()
+    {
+        FakeLedgerSource ledger = new();
+        await using SequenceStrategy strategy = new(new FakeLedgerSink(ledger), Signer);
+
+        await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, strategy.TicketMints);
+    }
+
+    [Fact]
     public async Task A_batch_waits_for_validation_before_the_next_one_starts()
     {
         FakeLedgerSource ledger = new();

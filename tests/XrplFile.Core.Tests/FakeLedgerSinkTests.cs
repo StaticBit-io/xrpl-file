@@ -212,4 +212,107 @@ public class FakeLedgerSinkTests
         Assert.Equal(2, census.Others);
         Assert.Equal(5, ledger.TicketCounts[Wallet.ClassicAddress]);
     }
+
+    private static Dictionary<string, object> SpendOf(uint ticket, uint lastLedger) => new()
+    {
+        ["TransactionType"] = "AccountSet",
+        ["Account"] = Wallet.ClassicAddress,
+        ["Sequence"] = 0u,
+        ["TicketSequence"] = ticket,
+        ["LastLedgerSequence"] = lastLedger,
+        ["Fee"] = "12",
+        ["SigningPubKey"] = Wallet.PublicKey,
+    };
+
+    [Fact]
+    public async Task A_spend_landing_past_its_last_ledger_is_refused_and_leaves_its_ticket()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        uint ticket = sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true)[0];
+
+        SubmitOutcome outcome = await sink.SubmitAsync(SpendOf(ticket, 4000), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("tefMAX_LEDGER", outcome.EngineResult);
+        Assert.Contains(ticket, sink.LiveTickets);
+    }
+
+    [Fact]
+    public async Task A_consumed_ticket_answers_no_ticket_before_max_ledger_as_rippled_checks_them()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        uint ticket = sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true)[0];
+        await sink.SubmitAsync(SpendOf(ticket, 9000), Signer, TestContext.Current.CancellationToken);
+
+        SubmitOutcome outcome = await sink.SubmitAsync(SpendOf(ticket, 4000), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("tefNO_TICKET", outcome.EngineResult);
+    }
+
+    [Fact]
+    public async Task A_queue_refuses_a_spend_whose_last_ledger_is_too_close()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger) { QueueEverything = true };
+        uint ticket = sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true)[0];
+        uint landing = (uint)ledger.CurrentLedger;
+
+        SubmitOutcome outcome = await sink.SubmitAsync(SpendOf(ticket, landing + 1), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("telCAN_NOT_QUEUE", outcome.EngineResult);
+    }
+
+    [Fact]
+    public async Task Scripted_warnings_are_counted_on_the_sink_and_the_source()
+    {
+        FakeLedgerSource ledger = new() { ListingWarnings = 1 };
+        FakeLedgerSink sink = new(ledger);
+        sink.WarnsAt.Add(0);
+        uint ticket = sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true)[0];
+
+        await sink.SubmitAsync(SpendOf(ticket, 9000), Signer, TestContext.Current.CancellationToken);
+        await ledger.LiveTicketsAsync(Wallet.ClassicAddress, TestContext.Current.CancellationToken);
+        await ledger.LiveTicketsAsync(Wallet.ClassicAddress, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, ((ILedgerSink)sink).LoadWarnings);
+        Assert.Equal(1, ((ILedgerSource)ledger).LoadWarnings);
+    }
+
+    [Fact]
+    public async Task The_ledger_clock_moves_the_validated_index_on_each_read()
+    {
+        FakeLedgerSource ledger = new() { CurrentLedger = 100, LedgerAdvancePerRead = 3 };
+
+        long first = await ledger.CurrentLedgerAsync(TestContext.Current.CancellationToken);
+        long second = await ledger.CurrentLedgerAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(103, first);
+        Assert.Equal(106, second);
+    }
+
+    [Fact]
+    public async Task A_spend_whose_last_ledger_the_clock_has_passed_is_refused()
+    {
+        FakeLedgerSource ledger = new() { LedgerAdvancePerRead = 20 };
+        FakeLedgerSink sink = new(ledger);
+        uint ticket = sink.LeaveTickets(Wallet.ClassicAddress, 1, marked: true)[0];
+        await ledger.CurrentLedgerAsync(TestContext.Current.CancellationToken);
+
+        SubmitOutcome outcome = await sink.SubmitAsync(SpendOf(ticket, 5005), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("tefMAX_LEDGER", outcome.EngineResult);
+        Assert.Contains(ticket, sink.LiveTickets);
+    }
+
+    [Fact]
+    public async Task A_ledger_read_can_fail_once_and_recover()
+    {
+        FakeLedgerSource ledger = new() { CurrentLedger = 100, CurrentLedgerFailures = 1 };
+
+        XrplFileException failure = await Assert.ThrowsAsync<XrplFileException>(() => ledger.CurrentLedgerAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, failure.Error);
+        Assert.Equal(100, await ledger.CurrentLedgerAsync(TestContext.Current.CancellationToken));
+    }
 }

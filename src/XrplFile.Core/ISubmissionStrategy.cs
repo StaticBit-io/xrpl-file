@@ -43,6 +43,16 @@ public interface ISubmissionStrategy : IAsyncDisposable
     /// </summary>
     string Account { get; }
 
+    /// <summary>
+    /// How many <c>TicketCreate</c> transactions this instance has submitted, over its lifetime, that
+    /// validated and minted — each claimed a fee (spec 4.9, I18). A mint that validates with a
+    /// <c>tec</c> stops the publication, so it never reaches a report. A strategy that mints nothing answers zero.
+    /// There is no default: a strategy written later has to say what it minted. A session reads it
+    /// before and after its run and reports the difference, so an instance handed to several
+    /// sessions is counted once per session.
+    /// </summary>
+    int TicketMints { get; }
+
     Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken);
 

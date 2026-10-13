@@ -229,13 +229,51 @@ public class XrplClientLedgerSourceTests
     }
 
     [Fact]
-    public async Task A_cancellation_stays_a_cancellation()
+    public async Task The_callers_own_cancellation_stays_a_cancellation()
     {
+        using CancellationTokenSource cancelled = new();
+        await cancelled.CancelAsync();
         ScriptedNode node = new();
-        node.Throw(new OperationCanceledException());
+        node.Throw(new OperationCanceledException(cancelled.Token));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => new XrplClientLedgerSource(node.HandleAsync).EarliestLedgerAsync(TestContext.Current.CancellationToken));
+            () => new XrplClientLedgerSource(node.HandleAsync).EarliestLedgerAsync(cancelled.Token));
+    }
+
+    [Theory]
+    [InlineData("listing")]
+    [InlineData("ledger")]
+    [InlineData("lookup")]
+    public async Task A_cancellation_nobody_asked_for_is_a_node_that_did_not_answer(string read)
+    {
+        ScriptedNode node = new();
+        node.Throw(new OperationCanceledException("Connection was intentionally closed."));
+        XrplClientLedgerSource source = new(node.HandleAsync);
+        CancellationToken token = TestContext.Current.CancellationToken;
+        Func<Task> call = read switch
+        {
+            "listing" => () => source.LiveTicketsAsync("rWriter", token),
+            "ledger" => () => source.CurrentLedgerAsync(token),
+            _ => () => source.TransactionAsync(new string('A', 64), token),
+        };
+
+        XrplFileException failure = await Assert.ThrowsAsync<XrplFileException>(call);
+
+        Assert.Equal(XrplFileError.NodeUnreachable, failure.Error);
+    }
+
+    [Fact]
+    public async Task The_source_counts_the_nodes_load_warnings()
+    {
+        ScriptedNode node = new();
+        node.AnswerWithWarning("""{"ledger_index":7}""", "load");
+        node.AnswerWithWarning("""{"ledger_index":8}""", null);
+        XrplClientLedgerSource source = new(node.HandleWithWarningsAsync);
+
+        await source.CurrentLedgerAsync(TestContext.Current.CancellationToken);
+        await source.CurrentLedgerAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, source.LoadWarnings);
     }
 
     [Fact]
@@ -548,6 +586,17 @@ public class XrplClientLedgerSourceTests
         public void Answer(string json) => _answers.Enqueue(() => JsonDocument.Parse(json).RootElement);
 
         public void Throw(Exception exception) => _answers.Enqueue(() => throw exception);
+
+        private readonly Queue<string?> _warnings = new();
+
+        public void AnswerWithWarning(string json, string? warning)
+        {
+            Answer(json);
+            _warnings.Enqueue(warning);
+        }
+
+        public async Task<NodeAnswer> HandleWithWarningsAsync(Xrpl.Models.Methods.BaseRequest request, CancellationToken cancellationToken) =>
+            new(await HandleAsync(request, cancellationToken), _warnings.Count > 0 ? _warnings.Dequeue() : null);
 
         public Task<JsonElement> HandleAsync(Xrpl.Models.Methods.BaseRequest request, CancellationToken cancellationToken)
         {

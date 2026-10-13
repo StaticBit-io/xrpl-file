@@ -18,6 +18,9 @@ public sealed class SequenceStrategyOptions
     public TimeSpan ValidationTimeout { get; init; } = TimeSpan.FromMinutes(3);
 
     public TimeSpan ValidationPoll { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>The clock the tidy-up measures its validated index's age against (spec 4.6); a test passes its own.</summary>
+    internal TimeProvider Time { get; init; } = TimeProvider.System;
 }
 
 /// <summary>
@@ -44,6 +47,8 @@ public sealed class SequenceStrategy(
     public long FeeDropsPerTransaction => _options.FeeDrops;
 
     public string Account => _signer.Account;
+
+    public int TicketMints => 0;
 
     public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
@@ -74,7 +79,7 @@ public sealed class SequenceStrategy(
     public async Task<TicketRelease> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken) =>
         _source is null
             ? TicketRelease.None
-            : await LeftoverTickets.ReleaseAsync(_sink, _source, _signer, _options.FeeDrops, _options.ValidationPoll, cancellationToken).ConfigureAwait(false);
+            : await LeftoverTickets.ReleaseAsync(_sink, _source, _signer, _options.FeeDrops, _options.ValidationPoll, _options.Time, cancellationToken).ConfigureAwait(false);
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 

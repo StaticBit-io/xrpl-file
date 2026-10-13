@@ -15,7 +15,8 @@ namespace XrplFile;
 /// SDK's typed models, so both api_version shapes parse and a field the models lack is not lost.
 /// Every failure leaves here as an <see cref="XrplFileException"/> or a cancellation: a dropped
 /// connection, a request the node never answered and a node error other than <c>txnNotFound</c>
-/// (for a tx lookup) or <c>actNotFound</c> (for anything asked about an account) are all
+/// (for a tx lookup) or <c>actNotFound</c> (for anything asked about an account), and a
+/// cancellation the caller did not ask for, are all
 /// <see cref="XrplFileError.NodeUnreachable"/>, carrying what the node said. The browser mirror
 /// raises the same error in the same places.
 /// </summary>
@@ -23,7 +24,8 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 {
     private readonly IXrplClient? _client;
     private readonly int _pageSize;
-    private readonly Func<BaseRequest, CancellationToken, Task<JsonElement>> _request;
+    private readonly Func<BaseRequest, CancellationToken, Task<NodeAnswer>> _request;
+    private long _loadWarnings;
 
     public XrplClientLedgerSource(IXrplClient client, int pageSize = 400)
     {
@@ -39,10 +41,18 @@ public sealed class XrplClientLedgerSource : ILedgerSource
     /// <see cref="IXrplClient"/>.
     /// </summary>
     internal XrplClientLedgerSource(Func<BaseRequest, CancellationToken, Task<JsonElement>> request, int pageSize = 400)
+        : this(async (sent, token) => new NodeAnswer(await request(sent, token).ConfigureAwait(false), null), pageSize)
+    {
+    }
+
+    /// <summary>The same seam, for a scripted node that also says what the envelope's <c>warning</c> was.</summary>
+    internal XrplClientLedgerSource(Func<BaseRequest, CancellationToken, Task<NodeAnswer>> request, int pageSize = 400)
     {
         _pageSize = pageSize;
         _request = request;
     }
+
+    public long LoadWarnings => Interlocked.Read(ref _loadWarnings);
 
     public async Task<LedgerTransaction?> TransactionAsync(string hash, CancellationToken cancellationToken)
     {
@@ -340,9 +350,11 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
         try
         {
-            answer = await _request(request, cancellationToken).ConfigureAwait(false);
+            NodeAnswer raw = await _request(request, cancellationToken).ConfigureAwait(false);
+            if (string.Equals(raw.Warning, "load", StringComparison.Ordinal)) Interlocked.Increment(ref _loadWarnings);
+            answer = raw.Result;
         }
-        catch (Exception e) when (IsNodeFailure(e))
+        catch (Exception e) when (IsNodeFailure(e, cancellationToken))
         {
             throw Unreachable(command, e);
         }
@@ -375,13 +387,15 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
         try
         {
-            answer = await _request(request, cancellationToken).ConfigureAwait(false);
+            NodeAnswer raw = await _request(request, cancellationToken).ConfigureAwait(false);
+            if (string.Equals(raw.Warning, "load", StringComparison.Ordinal)) Interlocked.Increment(ref _loadWarnings);
+            answer = raw.Result;
         }
         catch (Exception e) when (e is not OperationCanceledException && IsAbsent(e.Classify().RawError, absentCodes))
         {
             return null;
         }
-        catch (Exception e) when (IsNodeFailure(e))
+        catch (Exception e) when (IsNodeFailure(e, cancellationToken))
         {
             throw Unreachable(command, e);
         }
@@ -410,13 +424,15 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
     /// <summary>
     /// Everything the SDK raises when a request does not come back with an answer this library
-    /// can use: a connection that was never made or was lost, a request that timed out, and the
-    /// node's own error responses (<see cref="RippledException"/>). A cancellation is none of
-    /// these and passes through, as does an <see cref="XrplFileException"/> from further in.
+    /// can use: a connection that was never made or was lost, a request that timed out, the node's
+    /// own error responses (<see cref="RippledException"/>), and a cancellation the caller's token did
+    /// not cause — the SDK cancels requests in flight when the network drops (spec I14). The caller's
+    /// own cancellation passes through, as does an <see cref="XrplFileException"/> from further in.
     /// </summary>
-    private static bool IsNodeFailure(Exception e) =>
-        e is not OperationCanceledException and not XrplFileException
-        && e is XrplException or System.TimeoutException;
+    private static bool IsNodeFailure(Exception e, CancellationToken cancellationToken) =>
+        e is not XrplFileException
+        && (e is XrplException or System.TimeoutException
+            || (e is OperationCanceledException && !cancellationToken.IsCancellationRequested));
 
     private static XrplFileException Unreachable(string command, Exception e) =>
         new(XrplFileError.NodeUnreachable, $"the node did not answer {command}: {e.Message}", inner: e);
@@ -424,7 +440,7 @@ public sealed class XrplClientLedgerSource : ILedgerSource
     private static XrplFileException Answered(string command, JsonElement error) =>
         new(XrplFileError.NodeUnreachable, $"the node answered {error.GetString() ?? error.GetRawText()} to {command}");
 
-    private async Task<JsonElement> SendAsync(BaseRequest request, CancellationToken cancellationToken)
+    private async Task<NodeAnswer> SendAsync(BaseRequest request, CancellationToken cancellationToken)
     {
         Task<XrplResponse<object>> pending = request switch
         {
@@ -440,7 +456,7 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
         XrplResponse<object> response = await pending.ConfigureAwait(false);
 
-        return response.Raw.ToJsonElement();
+        return new NodeAnswer(response.Raw.ToJsonElement(), response.Warning);
     }
 
     private static string? Text(JsonElement json, string name) =>

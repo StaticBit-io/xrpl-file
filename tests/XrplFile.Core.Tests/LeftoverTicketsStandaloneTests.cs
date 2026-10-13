@@ -164,6 +164,8 @@ public class LeftoverTicketsStandaloneTests : IDisposable
             Assert.Contains(await source.LiveTicketsAsync(writer.ClassicAddress, token), ticket => ticket.Sequence == foreign);
             Assert.Equal(0, report.TicketsNotReleased);
             Assert.Null(report.TicketReleaseFailure);
+            Assert.Equal(0, report.TicketReleaseFeeDropsInDoubt);
+            Assert.True(report.TicketReleaseFeeDrops >= report.TicketsReleased * (long)fee);
         }
         finally
         {
@@ -205,6 +207,11 @@ public class LeftoverTicketsStandaloneTests : IDisposable
             Assert.Equal(0, report.TicketsAlreadyGone);
             Assert.Equal(0, report.TicketsNotReleased);
             Assert.Null(report.TicketReleaseFailure);
+            // The node accepted and applied spends carrying a LastLedgerSequence (that they carry it is
+            // pinned by the fake-based tests, spec I16); each released ticket cost exactly one fee, and
+            // nothing is left in doubt (spec I17).
+            Assert.Equal(report.TicketsReleased * (long)fee, report.TicketReleaseFeeDrops);
+            Assert.Equal(0, report.TicketReleaseFeeDropsInDoubt);
 
             TicketCensus after = await LeftoverTickets.FindAsync(source, writer.ClassicAddress, null, token);
             Assert.Empty(after.Ours);

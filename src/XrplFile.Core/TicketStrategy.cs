@@ -28,6 +28,9 @@ public sealed class TicketStrategyOptions
 
     /// <summary>How often one memo may be attempted before the publication is called off.</summary>
     public int MaxAttemptsPerMemo { get; init; } = 3;
+
+    /// <summary>The clock the tidy-up measures its validated index's age against (spec 4.6); a test passes its own.</summary>
+    internal TimeProvider Time { get; init; } = TimeProvider.System;
 }
 
 /// <summary>
@@ -92,6 +95,9 @@ public sealed class TicketStrategy(
     /// <summary>Which mints this instance has already judged ours or somebody else's, so a second look costs no lookups.</summary>
     private readonly Dictionary<string, bool> _creatorVerdicts = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Validated, successful mints over this instance's lifetime (spec I18).</summary>
+    private int _mints;
+
     /// <summary>What one submission did to the ticket it rode.</summary>
     private enum TicketFate
     {
@@ -120,6 +126,8 @@ public sealed class TicketStrategy(
     public long FeeDropsPerTransaction => _options.FeeDrops;
 
     public string Account => _signer.Account;
+
+    public int TicketMints => Volatile.Read(ref _mints);
 
     public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
@@ -232,7 +240,7 @@ public sealed class TicketStrategy(
         // may ride it afterwards.
         lock (_ticketLock) _tickets.Clear();
 
-        return LeftoverTickets.ReleaseAsync(_sink, _source, _signer, _options.FeeDrops, _options.ValidationPoll, cancellationToken);
+        return LeftoverTickets.ReleaseAsync(_sink, _source, _signer, _options.FeeDrops, _options.ValidationPoll, _options.Time, cancellationToken);
     }
 
     public ValueTask DisposeAsync()
@@ -431,6 +439,7 @@ public sealed class TicketStrategy(
 
             // Exactly rippled's arithmetic: a TicketCreate at S with count N mints S+1 through S+N.
             AddTickets(sequence + 1, sequence + (uint)mint);
+            Interlocked.Increment(ref _mints);
 
             // minted.LedgerIndex is only trustworthy once the node calls the mint validated: an
             // unvalidated tx answer can carry no ledger index at all (it reads back as the default,

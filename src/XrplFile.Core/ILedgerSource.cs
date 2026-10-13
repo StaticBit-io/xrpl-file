@@ -81,4 +81,11 @@ public interface ILedgerSource
     /// — an unfunded account is an answer, not a failure to answer.
     /// </summary>
     Task<DestinationState> DestinationAsync(string account, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// How many of the node's answers so far carried <c>"warning": "load"</c> — the client is nearing
+    /// the node's rate limit (spec 4.8). Only grows. Zero for an implementation that does not talk to
+    /// a rate-limited node; a decorator that wraps one should forward it.
+    /// </summary>
+    long LoadWarnings => 0;
 }

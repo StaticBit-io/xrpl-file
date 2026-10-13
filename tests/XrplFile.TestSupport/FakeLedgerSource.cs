@@ -38,6 +38,53 @@ public sealed class FakeLedgerSource : ILedgerSource
 
     private int _transactionLookups;
 
+    private long _loadWarnings;
+
+    /// <summary>How many <c>"warning": "load"</c> answers this fake has given, as a node nearing a client's rate limit gives them.</summary>
+    public long LoadWarnings => Interlocked.Read(ref _loadWarnings);
+
+    /// <summary>How many of the next <see cref="LiveTicketsAsync"/> answers carry <c>"warning": "load"</c>.</summary>
+    public int ListingWarnings
+    {
+        get { lock (_gate) return _listingWarnings; }
+        set { lock (_gate) _listingWarnings = value; }
+    }
+
+    private int _listingWarnings;
+
+    /// <summary>
+    /// How far the validated ledger moves before each <see cref="CurrentLedgerAsync"/> answer — a
+    /// network closing ledgers while the caller works. Zero, the default, keeps the index where the
+    /// transactions put it.
+    /// </summary>
+    public long LedgerAdvancePerRead { get; set; }
+
+    /// <summary>
+    /// How far <see cref="LedgerAdvancePerRead"/> has moved the validated ledger so far;
+    /// <see cref="FakeLedgerSink"/> adds it to the ledger a submission would land in, so a deadline
+    /// the clock has passed is refused as a node refuses it.
+    /// </summary>
+    public long LedgerAdvanced
+    {
+        get { lock (_gate) return _ledgerAdvanced; }
+    }
+
+    private long _ledgerAdvanced;
+
+    /// <summary>
+    /// Moves the validated ledger on by <paramref name="ledgers"/> without anyone reading it — a
+    /// network closing ledgers while a caller waits for an answer. Counts toward
+    /// <see cref="LedgerAdvanced"/>, so <see cref="FakeLedgerSink"/> refuses a deadline it has passed.
+    /// </summary>
+    public void AdvanceLedger(long ledgers)
+    {
+        lock (_gate)
+        {
+            _currentLedger += ledgers;
+            _ledgerAdvanced += ledgers;
+        }
+    }
+
     private long _currentLedger = 1;
 
     public long? EarliestLedger { get; set; } = 1;
@@ -252,6 +299,12 @@ public sealed class FakeLedgerSource : ILedgerSource
         {
             _liveTicketsCalls++;
 
+            if (_listingWarnings > 0)
+            {
+                _listingWarnings--;
+                Interlocked.Increment(ref _loadWarnings);
+            }
+
             if (_liveTicketsFailures > 0 && _liveTicketsCalls >= LiveTicketsFailFromCall)
             {
                 _liveTicketsFailures--;
@@ -288,6 +341,19 @@ public sealed class FakeLedgerSource : ILedgerSource
 
     private int _currentLedgerCalls;
 
+    /// <summary>
+    /// How many of the next <see cref="CurrentLedgerAsync"/> calls fail with
+    /// <see cref="XrplFileError.NodeUnreachable"/> before it recovers — a node that drops one ledger
+    /// answer. Each failing call takes one off this count.
+    /// </summary>
+    public int CurrentLedgerFailures
+    {
+        get { lock (_gate) return _currentLedgerFailures; }
+        set { lock (_gate) _currentLedgerFailures = value; }
+    }
+
+    private int _currentLedgerFailures;
+
     /// <summary>Thrown by <see cref="CurrentLedgerAsync"/> from its <see cref="CurrentLedgerFailsFromCall"/>'th
     /// call onward (1-based, counting every call this fake ever receives). Lets a test make an
     /// earlier caller succeed -- <c>ThrowawayAccount.PreviewDeletionAsync</c>'s own threshold read,
@@ -302,6 +368,16 @@ public sealed class FakeLedgerSource : ILedgerSource
         lock (_gate)
         {
             _currentLedgerCalls++;
+
+            if (_currentLedgerFailures > 0)
+            {
+                _currentLedgerFailures--;
+
+                return Task.FromException<long>(new XrplFileException(XrplFileError.NodeUnreachable, "fake: ledger did not answer"));
+            }
+
+            _currentLedger += LedgerAdvancePerRead;
+            _ledgerAdvanced += LedgerAdvancePerRead;
 
             if (CurrentLedgerFailure is { } failure && _currentLedgerCalls >= CurrentLedgerFailsFromCall)
             {

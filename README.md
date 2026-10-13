@@ -108,7 +108,11 @@ successful publication — on either strategy — spends whatever is still left 
 do nothing, within `SessionOptions.TicketReleaseTimeout` (two minutes by default). The report says
 how many were released (`TicketsReleased`), had already gone (`TicketsAlreadyGone`) or are still
 live (`TicketsNotReleased`), and why the tidy-up failed if it did (`TicketReleaseFailure`); the
-publication itself never fails because of it. Tickets without the mark — minted by anything else,
+publication itself never fails because of it. It also says what the tidy-up cost
+(`TicketReleaseFeeDrops`) and what it may still cost (`TicketReleaseFeeDropsInDoubt`) — a spend
+still queued when time ran out may land until its `LastLedgerSequence`, ten ledgers on. On a loaded
+public node the tidy-up resends a spend the node was too busy to take, and slows down when the node
+warns that the client is nearing its rate limit. Tickets without the mark — minted by anything else,
 or by a version of this library from before the mark — are never touched. A `SequenceStrategy`
 tidies up only when it is given the ledger source: `new SequenceStrategy(sink, signer, options, source)`.
 

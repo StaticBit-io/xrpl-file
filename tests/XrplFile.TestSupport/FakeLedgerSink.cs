@@ -39,6 +39,28 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
     private int _inFlight;
     private int _peakInFlight;
     private int _signatures;
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+    private readonly List<int> _inFlightAtSubmit = [];
+    private readonly List<TimeSpan> _submittedAt = [];
+    private long _loadWarnings;
+
+    /// <summary>Which submissions (by position) are answered with <c>"warning": "load"</c>, as a node nearing a client's rate limit answers.</summary>
+    public HashSet<int> WarnsAt { get; } = [];
+
+    /// <summary>How many submissions were answered with <c>"warning": "load"</c> so far.</summary>
+    public long LoadWarnings => Interlocked.Read(ref _loadWarnings);
+
+    /// <summary>How many submissions were in flight, this one included, when each position was taken.</summary>
+    public IReadOnlyList<int> InFlightAtSubmit
+    {
+        get { lock (_gate) return [.. _inFlightAtSubmit]; }
+    }
+
+    /// <summary>When each position was taken, measured from this fake's construction.</summary>
+    public IReadOnlyList<TimeSpan> SubmittedAt
+    {
+        get { lock (_gate) return [.. _submittedAt]; }
+    }
 
     /// <summary>Which transaction created each ticket this fake has ever minted or been given.</summary>
     private readonly Dictionary<uint, string> _creators = [];
@@ -318,6 +340,8 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
 
             _inFlight++;
             if (_inFlight > _peakInFlight) _peakInFlight = _inFlight;
+            _inFlightAtSubmit.Add(_inFlight);
+            _submittedAt.Add(_clock.Elapsed);
         }
 
         try
@@ -342,6 +366,14 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
         {
             string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"fake:{position}")));
 
+            if (WarnsAt.Contains(position)) Interlocked.Increment(ref _loadWarnings);
+
+            // The ledger this submission would land in, as the stored record below computes it, plus
+            // the validated index the source's clock has run on since: a deadline the network has
+            // passed is refused whatever this fake's own count of ledgers says.
+            uint landing = (uint)(firstLedger + position / 100 + _ledgersClosed + ledger.LedgerAdvanced);
+            uint? lastLedger = transaction.TryGetValue("LastLedgerSequence", out object? last) ? Convert.ToUInt32(last) : null;
+
             // Checked before QueueEverything so a test that scripts a specific position and also
             // sets QueueEverything gets the position it asked for, not silently overridden by the
             // catch-all.
@@ -349,6 +381,13 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
             {
                 Events.Add("submit");
                 return new SubmitOutcome(refusal, hash);
+            }
+
+            // rippled's TxQ will not queue a transaction that cannot stay at least two ledgers.
+            if (QueueEverything && lastLedger is { } queuedUntil && queuedUntil < landing + 2)
+            {
+                Events.Add("submit");
+                return new SubmitOutcome("telCAN_NOT_QUEUE", hash);
             }
 
             if (QueueEverything)
@@ -417,12 +456,16 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
                 // rippled's own split for a ticket it does not hold: one that was consumed, or that
                 // lies below the account's sequence, is gone (tefNO_TICKET, measured on xrpld 3.3.0);
                 // one at or above the sequence has not been created yet (terPRE_TICKET).
-                if (!LiveTickets.Remove(ticket))
+                if (!LiveTickets.Contains(ticket))
                 {
                     return new SubmitOutcome(
                         _consumed.Contains(ticket) || ticket < _nextSequence ? "tefNO_TICKET" : "terPRE_TICKET", hash);
                 }
 
+                // Checked after the ticket, as rippled does: a live ticket and a deadline already past.
+                if (lastLedger is { } until && landing > until) return new SubmitOutcome("tefMAX_LEDGER", hash);
+
+                LiveTickets.Remove(ticket);
                 _consumed.Add(ticket);
                 PublishTickets((string)transaction["Account"]);
             }
@@ -431,6 +474,8 @@ public sealed class FakeLedgerSink(FakeLedgerSource ledger, long firstLedger = 5
                 // Only a transaction that rides the account's sequence moves it. A ticketed one
                 // carries Sequence 0, and taking that literally used to collapse this account's
                 // next sequence to 1 and re-issue ticket numbers a later mint had already spent.
+                if (lastLedger is { } until && landing > until) return new SubmitOutcome("tefMAX_LEDGER", hash);
+
                 _nextSequence = Convert.ToUInt32(transaction["Sequence"]) + 1;
             }
 

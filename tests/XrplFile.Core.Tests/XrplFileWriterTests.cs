@@ -77,6 +77,32 @@ public class XrplFileWriterTests
         Assert.Equal(1, strategy.HeardDuringReport);
     }
 
+    [Fact]
+    public async Task A_network_drop_is_an_unreachable_node_not_a_cancellation()
+    {
+        FakeLedgerSource ledger = new();
+        await using SequenceStrategy strategy = new(new DroppingSink(new FakeLedgerSink(ledger)), Signer);
+        XrplFileWriter writer = new(strategy, ledger);
+
+        XrplFileException failure = await Assert.ThrowsAsync<XrplFileException>(() => writer.PublishAsync(
+            VectorStream.Bytes("drop", 2500), "text/plain", "d.txt", Wallet.ClassicAddress, "testnet",
+            null, null, TestContext.Current.CancellationToken));
+
+        // The SDK cancels requests in flight when the network drops; nobody cancelled this run (spec I14).
+        Assert.Equal(XrplFileError.NodeUnreachable, failure.Error);
+        Assert.IsAssignableFrom<OperationCanceledException>(failure.InnerException);
+    }
+
+    /// <summary>A sink whose sequence read meets a dropped network: the SDK's cancellation, not the caller's.</summary>
+    private sealed class DroppingSink(ILedgerSink inner) : ILedgerSink
+    {
+        public Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken) =>
+            Task.FromException<uint>(new OperationCanceledException("Connection was intentionally closed."));
+
+        public Task<SubmitOutcome> SubmitAsync(Dictionary<string, object> transaction, ITransactionSigner signer, CancellationToken cancellationToken) =>
+            inner.SubmitAsync(transaction, signer, cancellationToken);
+    }
+
     /// <summary>
     /// Wraps a real strategy and, once, reports through the adapter the writer handed down, then
     /// records how many reports the caller had heard by the time that call returned.
@@ -89,6 +115,8 @@ public class XrplFileWriterTests
         public long FeeDropsPerTransaction => inner.FeeDropsPerTransaction;
 
         public string Account => inner.Account;
+
+        public int TicketMints => inner.TicketMints;
 
         public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
             IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)

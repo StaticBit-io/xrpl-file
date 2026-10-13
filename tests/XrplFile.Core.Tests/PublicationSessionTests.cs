@@ -55,10 +55,10 @@ public class PublicationSessionTests : IDisposable
         Assert.Equal(3, report.ChunkHashes.Count);
         Assert.Empty(report.ListHashes);
 
-        // Four memos and the two mints the approved estimate priced — one batching pass for the
-        // chunks and one for the manifest.
-        Assert.Equal(6, report.Transactions);
-        Assert.Equal(6 * NodeFeeDrops, report.FeeDropsEstimated);
+        // Four memos. A sequence strategy mints nothing, and a fresh run counts what its own
+        // strategy minted, not the estimate's two (spec I18).
+        Assert.Equal(4, report.Transactions);
+        Assert.Equal(4 * NodeFeeDrops, report.FeeDropsEstimated);
         Assert.Null(report.StateSaveFailure);
         Assert.True(report.FinishedAt >= report.StartedAt);
     }
@@ -181,7 +181,11 @@ public class PublicationSessionTests : IDisposable
     {
         FakeLedgerSource ledger = Node();
         FakeLedgerSink sink = new(ledger);
-        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
+        await using TicketStrategy inner = new(sink, ledger, Signer, new TicketStrategyOptions
+        {
+            FeeDrops = NodeFeeDrops, SweepPoll = TimeSpan.FromMilliseconds(1), ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
+        LedgerClosingStrategy strategy = new(inner, sink);
 
         PublicationEstimate estimate = await PublicationSession.EstimateAsync(
             ledger, Wallet.ClassicAddress, fileBytes: 2500, Options(), TestContext.Current.CancellationToken);
@@ -192,8 +196,9 @@ public class PublicationSessionTests : IDisposable
 
         PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
 
-        // The estimate the run was approved against counts the mints a ticketed strategy pays for,
-        // not only the memos. A report that counts fewer states less than the account was debited.
+        // A fresh ticketed run with no leftovers mints exactly what the estimate priced — one
+        // batching pass for the chunks and one for the manifest — and the report counts those
+        // mints (spec I18).
         Assert.Equal(2, estimate.Mints);
         Assert.Equal(estimate.Transactions, report.Transactions);
     }
@@ -792,6 +797,8 @@ public class PublicationSessionTests : IDisposable
 
         public string Account => inner.Account;
 
+        public int TicketMints => inner.TicketMints;
+
         public Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
             IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken) =>
             inner.SubmitAllAsync(memos, submitted, cancellationToken);
@@ -816,6 +823,8 @@ public class PublicationSessionTests : IDisposable
         public long FeeDropsPerTransaction => inner.FeeDropsPerTransaction;
 
         public string Account => inner.Account;
+
+        public int TicketMints => inner.TicketMints;
 
         public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
             IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
@@ -900,6 +909,7 @@ public class PublicationSessionTests : IDisposable
 
         Assert.Equal(report.ManifestHash, report.Link.TxHash);
         Assert.Null(report.TicketReleaseFailure);
+        Assert.Null(report.TicketReleaseFeeDrops);
     }
 
     [Fact(Timeout = 10_000)]
@@ -947,6 +957,7 @@ public class PublicationSessionTests : IDisposable
         Assert.Equal(0, report.TicketsAlreadyGone);
         Assert.Equal(0, report.TicketsNotReleased);
         Assert.IsType<TimeoutException>(report.TicketReleaseFailure);
+        Assert.Null(report.TicketReleaseFeeDrops);
     }
 
     [Fact]
@@ -977,6 +988,91 @@ public class PublicationSessionTests : IDisposable
             Wallet.ClassicAddress, "key-1", "testnet", options, cancellationToken);
 
         return await session.RunAsync(null, cancellationToken);
+    }
+
+    [Fact]
+    public async Task A_fresh_run_counts_the_mints_it_made_not_the_estimates()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeaveTickets(Wallet.ClassicAddress, 100, marked: true);
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
+        {
+            FeeDrops = NodeFeeDrops, SweepPoll = TimeSpan.FromMilliseconds(1), ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
+        byte[] file = VectorStream.Bytes("mints", 2500);
+
+        PublicationEstimate estimate = await PublicationSession.EstimateAsync(ledger, Wallet.ClassicAddress, file.Length, Options(), TestContext.Current.CancellationToken);
+        PublicationSession session = await PublicationSession.StartAsync(
+            new LedgerClosingStrategy(strategy, sink), ledger, file, "text/plain", "m.txt",
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
+
+        PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
+
+        long memos = report.ChunkHashes.Count + report.ListHashes.Count + 1;
+        Assert.Equal(memos + strategy.TicketMints, report.Transactions);
+        Assert.True(report.Transactions < memos + estimate.Mints, "the picked-up tickets cost nothing to mint");
+        Assert.Equal(report.Transactions * NodeFeeDrops, report.FeeDropsEstimated);
+    }
+
+    [Fact]
+    public async Task A_reused_strategy_counts_only_this_sessions_mints()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
+        {
+            FeeDrops = NodeFeeDrops, SweepPoll = TimeSpan.FromMilliseconds(1), ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
+        LedgerClosingStrategy closing = new(strategy, sink);
+
+        PublicationSession first = await PublicationSession.StartAsync(
+            closing, ledger, VectorStream.Bytes("one", 2500), "text/plain", "1.txt",
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
+        await first.RunAsync(null, TestContext.Current.CancellationToken);
+        int afterFirst = strategy.TicketMints;
+
+        PublicationSession second = await PublicationSession.StartAsync(
+            closing, ledger, VectorStream.Bytes("two", 2500), "text/plain", "2.txt",
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
+        PublicationReport report = await second.RunAsync(null, TestContext.Current.CancellationToken);
+
+        long memos = report.ChunkHashes.Count + report.ListHashes.Count + 1;
+        Assert.Equal(memos + (strategy.TicketMints - afterFirst), report.Transactions);
+    }
+
+    [Fact]
+    public async Task The_report_prices_the_tidy_ups_charged_and_in_doubt_spends()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using SequenceStrategy inner = new(sink, Signer, StrategyOptions);
+        ScriptedReleaseStrategy strategy = new(inner, _ => Task.FromResult(new TicketRelease(3, 1, 2) { Charged = 4, InDoubt = 2 }));
+
+        PublicationSession session = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("fees", 2500), "text/plain", "f.txt",
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
+        PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(4 * NodeFeeDrops, report.TicketReleaseFeeDrops);
+        Assert.Equal(2 * NodeFeeDrops, report.TicketReleaseFeeDropsInDoubt);
+    }
+
+    [Fact]
+    public async Task A_tidy_up_that_throws_leaves_its_cost_unknown()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using SequenceStrategy inner = new(sink, Signer, StrategyOptions);
+        ScriptedReleaseStrategy strategy = new(inner, _ => throw new InvalidOperationException("the tidy-up broke"));
+
+        PublicationSession session = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("fees", 2500), "text/plain", "f.txt",
+            Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
+        PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
+
+        Assert.Null(report.TicketReleaseFeeDrops);
+        Assert.Null(report.TicketReleaseFeeDropsInDoubt);
     }
 
     [Fact]

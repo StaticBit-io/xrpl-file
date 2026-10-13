@@ -12,9 +12,15 @@ namespace XrplFile.Tests;
 public sealed class ManualTimeProvider : TimeProvider
 {
     private readonly List<ManualTimer> _timers = [];
+
+    /// <summary>Guards <see cref="_now"/>: a test may advance the clock from a fake answering in parallel while the code under test reads it.</summary>
+    private readonly Lock _gate = new();
     private DateTimeOffset _now = DateTimeOffset.UtcNow;
 
-    public override DateTimeOffset GetUtcNow() => _now;
+    public override DateTimeOffset GetUtcNow()
+    {
+        lock (_gate) return _now;
+    }
 
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
     {
@@ -26,14 +32,20 @@ public sealed class ManualTimeProvider : TimeProvider
     /// <summary>Moves the clock forward and fires every still-scheduled timer whose due time has now passed.</summary>
     public void Advance(TimeSpan by)
     {
-        _now += by;
+        DateTimeOffset now;
+
+        lock (_gate)
+        {
+            _now += by;
+            now = _now;
+        }
 
         // A snapshot: a callback firing here may go on (on its own task, never waited on by this
         // call — see VaultAutoLock's remarks) to touch this same provider through a later Touch
         // during some other test, but never through this one call's own iteration.
         foreach (ManualTimer timer in _timers.ToArray())
         {
-            timer.FireIfDue(_now);
+            timer.FireIfDue(now);
         }
     }
 

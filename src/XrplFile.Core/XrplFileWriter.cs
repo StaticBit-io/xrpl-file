@@ -83,6 +83,14 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
         {
             return await PublishCoreAsync(file, type, name, writer, canonical, alreadyLanded, progress, cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException e) when (!cancellationToken.IsCancellationRequested)
+        {
+            // A cancellation nobody asked for: the SDK cancels requests in flight when the network
+            // drops, and a strategy's wait for validation reads sequences through the SDK's typed
+            // path, which nothing below renames. Reporting it as cancelled would tell the person
+            // they stopped a run they did not stop (spec I14, 4.8).
+            throw new XrplFileException(XrplFileError.NodeUnreachable, $"the connection to the node dropped: {e.Message}", inner: e);
+        }
         catch (Exception e) when (IsTransportFailure(e))
         {
             // Only a node that did not answer is unreachable: a connection never made or lost, and

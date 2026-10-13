@@ -46,6 +46,59 @@ public class TicketStrategyTests
     }
 
     [Fact]
+    public async Task A_strategy_counts_the_mints_it_made()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 100);
+
+        await strategy.SubmitAllAsync(Memos(150), null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, strategy.TicketMints);
+    }
+
+    [Fact]
+    public async Task Picked_up_tickets_mean_fewer_mints()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.LeaveTickets(Wallet.ClassicAddress, 100, marked: true);
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 100);
+
+        await strategy.SubmitAllAsync(Memos(150), null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, strategy.TicketMints);
+    }
+
+    [Fact]
+    public async Task A_strategy_counts_its_mints_over_its_lifetime()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 100);
+
+        await strategy.SubmitAllAsync(Memos(150), null, TestContext.Current.CancellationToken);
+        sink.CloseLedger();
+        await strategy.SubmitAllAsync(Memos(150, from: 150), null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(4, strategy.TicketMints);
+    }
+
+    [Fact]
+    public async Task A_mint_that_fails_is_not_counted()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.FailsAs.Add(0);
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 100);
+
+        await Assert.ThrowsAsync<XrplFileException>(
+            () => strategy.SubmitAllAsync(Memos(5), null, TestContext.Current.CancellationToken));
+
+        Assert.Equal(0, strategy.TicketMints);
+    }
+
+    [Fact]
     public async Task A_mint_comes_first_and_the_memos_ride_the_tickets_it_made()
     {
         FakeLedgerSource ledger = new();

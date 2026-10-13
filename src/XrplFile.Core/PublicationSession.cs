@@ -90,10 +90,17 @@ public sealed class PublicationSession
 
     // Captured once at StartAsync, from the same estimate the budget and balance checks used, and
     // reused for the report so its numbers cannot drift against the ones the run was approved
-    // against. The fee is the one the strategy was checked to agree with; the mints are what a
-    // ticketed strategy pays for on top of the memos.
+    // against. The fee is the one the strategy was checked to agree with; the mints are what the
+    // estimate priced a ticketed strategy to pay on top of the memos.
     private readonly long _feeDropsPerTransaction;
+
+    /// <summary>The estimate's mints, used on a resume.</summary>
     private readonly int _mints;
+
+    /// <summary>
+    /// What the strategy had minted when a fresh run was started, or null on a resume (spec I18).
+    /// </summary>
+    private readonly int? _mintsAtStart;
 
     /// <summary>Guards the state and its file: progress arrives from the thread pool.</summary>
     private readonly Lock _stateLock = new();
@@ -113,7 +120,8 @@ public sealed class PublicationSession
 
     private PublicationSession(
         ISubmissionStrategy strategy, ILedgerSource source, ReadOnlyMemory<byte> file,
-        PublicationState state, string statePath, SessionOptions options, long feeDropsPerTransaction, int mints)
+        PublicationState state, string statePath, SessionOptions options, long feeDropsPerTransaction, int mints,
+        int? mintsAtStart)
     {
         _strategy = strategy;
         _source = source;
@@ -122,6 +130,7 @@ public sealed class PublicationSession
         _options = options;
         _feeDropsPerTransaction = feeDropsPerTransaction;
         _mints = mints;
+        _mintsAtStart = mintsAtStart;
         StatePath = statePath;
     }
 
@@ -212,7 +221,8 @@ public sealed class PublicationSession
         state.Save(path);
 
         return new PublicationSession(
-            strategy, source, file, state, path, options, estimate.FeeDropsPerTransaction, estimate.Mints);
+            strategy, source, file, state, path, options, estimate.FeeDropsPerTransaction, estimate.Mints,
+            mintsAtStart: strategy.TicketMints);
     }
 
     /// <summary>
@@ -304,7 +314,8 @@ public sealed class PublicationSession
         PublicationEstimator.Require(estimate, options.BudgetDrops);
 
         PublicationSession session = new(
-            strategy, source, file, state, statePath, options, estimate.FeeDropsPerTransaction, estimate.Mints);
+            strategy, source, file, state, statePath, options, estimate.FeeDropsPerTransaction, estimate.Mints,
+            mintsAtStart: null);
         session._landed = await session.ReconcileAsync(chunks, cancellationToken).ConfigureAwait(false);
 
         return session;
@@ -405,9 +416,13 @@ public sealed class PublicationSession
 
             // After "done" and never before: the manifest is in the ledger, so nothing the tidy-up
             // does — or fails to do — can cost the person their link (spec I8).
-            (TicketRelease release, Exception? releaseFailure) = await ReleaseLeftoverTicketsAsync(cancellationToken).ConfigureAwait(false);
+            (TicketRelease? release, Exception? releaseFailure) = await ReleaseLeftoverTicketsAsync(cancellationToken).ConfigureAwait(false);
+            TicketRelease counts = release ?? TicketRelease.None;
 
-            long transactions = result.ChunkHashes.Count + result.ListHashes.Count + 1 + _mints;
+            // A fresh run's session is its whole publication, so its strategy's own count is the
+            // publication's; a resume's earlier sessions minted too, unrecorded (spec I18).
+            int mints = _mintsAtStart is { } before ? _strategy.TicketMints - before : _mints;
+            long transactions = result.ChunkHashes.Count + result.ListHashes.Count + 1 + mints;
 
             // Priced from the fee the estimate was approved against (see the remarks on
             // SessionOptions), not a fresh node query: the node's open-ledger fee moves with load,
@@ -419,10 +434,12 @@ public sealed class PublicationSession
                 result.ChunkHashes, result.ListHashes, result.ManifestHash)
             {
                 StateSaveFailure = StateSaveFailure,
-                TicketsReleased = release.Released,
-                TicketsAlreadyGone = release.AlreadyGone,
-                TicketsNotReleased = release.NotReleased,
+                TicketsReleased = counts.Released,
+                TicketsAlreadyGone = counts.AlreadyGone,
+                TicketsNotReleased = counts.NotReleased,
                 TicketReleaseFailure = releaseFailure,
+                TicketReleaseFeeDrops = release is null ? null : release.Charged * _feeDropsPerTransaction,
+                TicketReleaseFeeDropsInDoubt = release is null ? null : release.InDoubt * _feeDropsPerTransaction,
             };
         }
         finally
@@ -436,9 +453,9 @@ public sealed class PublicationSession
     /// <summary>
     /// Spends this library's leftover tickets under its own deadline, linked to the publication's
     /// token. A cancellation or the deadline ends it with the counts it reached; an exception is
-    /// caught and returned. Neither fails the publication (spec I8).
+    /// caught and returned. Neither fails the publication (spec I8). Null counts mean they were lost.
     /// </summary>
-    private async Task<(TicketRelease Release, Exception? Failure)> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken)
+    private async Task<(TicketRelease? Release, Exception? Failure)> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken)
     {
         using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         using CancellationTokenSource giveUp = new();
@@ -469,16 +486,16 @@ public sealed class PublicationSession
                     TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
             }
 
-            return (TicketRelease.None, new TimeoutException(
+            return (null, new TimeoutException(
                 $"the tidy-up did not stop within {TicketReleaseGrace} of its {_options.TicketReleaseTimeout} deadline; tickets it had not released stay on the account"));
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
-            return (TicketRelease.None, null);
+            return (null, null);
         }
         catch (Exception failure)
         {
-            return (TicketRelease.None, failure);
+            return (null, failure);
         }
     }
 

@@ -13,21 +13,24 @@ namespace XrplFile;
 /// </summary>
 /// <param name="Transactions">
 /// Publication scope. Everything the publication put on the ledger, not only this session: the
-/// chunk memos, the block-list memos, the manifest, and the <see cref="PublicationEstimate.Mints"/>
-/// a ticketed strategy pays for on top of them. The mints come from the estimate the run was
-/// approved against rather than from the ledger — a strategy that rides the account's sequence
-/// submits none, and for that one this is the estimate's shape rather than the run's. A resumed
-/// session counts the chunks an earlier session paid for here too, because it is the file being
-/// described.
+/// chunk memos, the block-list memos, the manifest, and the ticket mints a ticketed strategy pays
+/// for on top of them. A session started fresh counts the mints its own strategy made during the
+/// session (<see cref="ISubmissionStrategy.TicketMints"/>), so tickets picked up from an earlier run
+/// cost nothing here; a resumed session counts the estimate's <see cref="PublicationEstimate.Mints"/>,
+/// because the earlier sessions' mints are on no record it reads. A resumed session counts the
+/// chunks an earlier session paid for here too, because it is the file being described. The tidy-up
+/// is not in it: see <see cref="TicketReleaseFeeDrops"/>.
 /// </param>
 /// <param name="FeeDropsEstimated">
-/// Publication scope. What the approved estimate implies the whole file cost:
+/// Publication scope. What the approved estimate implies the whole file cost, the tidy-up left out:
 /// <see cref="Transactions"/> at the fee that estimate was priced with, which
 /// <see cref="PublicationSession.StartAsync"/> and <see cref="PublicationSession.ResumeAsync"/>
 /// have already made the strategy agree with. It is not what the ledger debited, and it is not
 /// named as if it were: every retry a strategy makes is a transaction this number cannot see,
 /// nothing here reads a fee back off the ledger, and on a resume it prices an earlier session's
 /// transactions at this session's fee. Reconciling against the account is still the account's job.
+/// What the publication and its tidy-up cost is <c>FeeDropsEstimated + TicketReleaseFeeDrops</c>,
+/// and it may have cost up to <see cref="TicketReleaseFeeDropsInDoubt"/> more.
 /// </param>
 /// <param name="StartedAt">
 /// Session scope: when this session began. A resumed publication's earlier sessions are not in it
@@ -84,4 +87,18 @@ public sealed record PublicationReport(
     /// not cost the report.
     /// </summary>
     public Exception? TicketReleaseFailure { get; init; }
+
+    /// <summary>
+    /// What the tidy-up's spends certainly cost: <see cref="TicketRelease.Charged"/> at the fee the run
+    /// was approved at, which every spend carried (spec 4.9, I17). Null when the tidy-up's counts were
+    /// lost — it failed, did not stop within its grace, or ended in a cancellation instead of returning
+    /// them; the most it could have cost is the worst case the estimate already covered (spec I10).
+    /// </summary>
+    public long? TicketReleaseFeeDrops { get; init; }
+
+    /// <summary>
+    /// What the tidy-up's spends may still cost: <see cref="TicketRelease.InDoubt"/> at the same fee.
+    /// Such a spend may apply until its LastLedgerSequence passes. Null when the counts were lost.
+    /// </summary>
+    public long? TicketReleaseFeeDropsInDoubt { get; init; }
 }
