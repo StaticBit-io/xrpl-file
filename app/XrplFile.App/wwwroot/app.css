@@ -288,6 +288,7 @@ progress { accent-color: var(--mint); }
 .xf-vault > .xf-card { width: min(420px, 100%); box-sizing: border-box; padding: 28px 30px; margin: 0; }
 
 .xf-mono { font-family: var(--font-mono); overflow-wrap: anywhere; }
+.xf-link { word-break: break-all; }
 .xf-num { font-variant-numeric: tabular-nums; }
 .xf-figure { font-variant-numeric: tabular-nums; color: var(--beige); font-weight: 600; }
 .xf-muted { color: var(--text-secondary); }
