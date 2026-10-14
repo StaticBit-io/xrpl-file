@@ -42,28 +42,28 @@ else
         {
             case Mode.Generate:
                 <div class="mb-3">
-                    <label class="form-label">Label</label>
-                    <input class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
+                    <label for="add-generate-label" class="form-label">Label</label>
+                    <input id="add-generate-label" class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Network</label>
-                    <input class="form-control" @bind="_network" @bind:event="oninput" disabled="@_busy" />
+                    <label for="add-generate-network" class="form-label">Network</label>
+                    <input id="add-generate-network" class="form-control" @bind="_network" @bind:event="oninput" disabled="@_busy" />
                 </div>
                 <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoGenerate">Generate</button>
                 break;
 
             case Mode.Import:
                 <div class="mb-3">
-                    <label class="form-label">Label</label>
-                    <input class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
+                    <label for="add-import-label" class="form-label">Label</label>
+                    <input id="add-import-label" class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Network</label>
-                    <input class="form-control" @bind="_network" @bind:event="oninput" disabled="@_busy" />
+                    <label for="add-import-network" class="form-label">Network</label>
+                    <input id="add-import-network" class="form-control" @bind="_network" @bind:event="oninput" disabled="@_busy" />
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Seed</label>
-                    <input type="password" class="form-control" @bind="_seed" @bind:event="oninput" disabled="@_busy" />
+                    <label for="add-import-seed" class="form-label">Seed</label>
+                    <input id="add-import-seed" type="password" class="form-control" @bind="_seed" @bind:event="oninput" disabled="@_busy" />
                 </div>
                 <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoImport">Preview</button>
                 break;
@@ -72,8 +72,8 @@ else
                 @if (Model.ContainerKeys.Count == 0)
                 {
                     <div class="mb-3">
-                        <label class="form-label">Backup password (leave blank if it has none)</label>
-                        <input type="password" class="form-control" @bind="_containerPassword" @bind:event="oninput" disabled="@_busy" />
+                        <label for="add-backup-password" class="form-label">Backup password (leave blank if it has none)</label>
+                        <input id="add-backup-password" type="password" class="form-control" @bind="_containerPassword" @bind:event="oninput" disabled="@_busy" />
                     </div>
                     <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="PickFileAsync">
                         Choose file&hellip;
@@ -115,12 +115,12 @@ else
                         <div class="border rounded p-3 mb-3">
                             <p>Importing <code class="xf-mono">@Model.ContainerKeys[_selectingIndex].Address</code>.</p>
                             <div class="mb-3">
-                                <label class="form-label">Label</label>
-                                <input class="form-control" @bind="_selectLabel" @bind:event="oninput" disabled="@_busy" />
+                                <label for="add-select-label" class="form-label">Label</label>
+                                <input id="add-select-label" class="form-control" @bind="_selectLabel" @bind:event="oninput" disabled="@_busy" />
                             </div>
                             <div class="mb-3">
-                                <label class="form-label">Network</label>
-                                <input class="form-control" @bind="_selectNetwork" @bind:event="oninput" disabled="@_busy" />
+                                <label for="add-select-network" class="form-label">Network</label>
+                                <input id="add-select-network" class="form-control" @bind="_selectNetwork" @bind:event="oninput" disabled="@_busy" />
                             </div>
                             <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoSelect">Preview</button>
                             <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="() => _selectingIndex = -1">
