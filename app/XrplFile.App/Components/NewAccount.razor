@@ -7,7 +7,7 @@
    decision (a label given, a network an xrpl-file link can name); this markup only reads it to
    decide whether the button is live. *@
 
-<h1 class="h3">New account</h1>
+<h1 class="xf-title">New account</h1>
 
 <p>
     This generates a key, not an account &mdash; on the XRP Ledger an account exists once it holds
@@ -19,19 +19,21 @@
     <div class="alert alert-warning">@Model.Message</div>
 }
 
-<div class="mb-3">
-    <label class="form-label">Label</label>
-    <input class="form-control" @bind="Model.Label" @bind:event="oninput" disabled="@_busy" />
-</div>
+<section class="xf-card">
+    <div class="mb-3">
+        <label class="form-label">Label</label>
+        <input class="form-control" @bind="Model.Label" @bind:event="oninput" disabled="@_busy" />
+    </div>
 
-<div class="mb-3">
-    <label class="form-label">Network</label>
-    <input class="form-control" @bind="Model.Network" @bind:event="oninput" disabled="@_busy" />
-</div>
+    <div class="mb-3">
+        <label class="form-label">Network</label>
+        <input class="form-control" @bind="Model.Network" @bind:event="oninput" disabled="@_busy" />
+    </div>
 
-<button type="button" class="btn btn-primary" disabled="@(!Model.CanCreate || _busy)" @onclick="CreateAsync">
-    Generate
-</button>
+    <button type="button" class="btn btn-primary" disabled="@(!Model.CanCreate || _busy)" @onclick="CreateAsync">
+        Generate
+    </button>
+</section>
 <button type="button" class="btn btn-link" @onclick="DoneAsync">Back to accounts</button>
 
 @code {

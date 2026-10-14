@@ -32,25 +32,27 @@ else if (_estimated)
 }
 else
 {
-    <div class="container py-3">
-        <h1 class="h3">Publish a file</h1>
+    <div class="xf-page">
+        <h1 class="xf-title">Publish a file</h1>
 
-        <button type="button" class="btn btn-outline-primary" @onclick="PickAsync">Choose a file&hellip;</button>
+        <section class="xf-card">
+            <button type="button" class="btn btn-outline-primary" @onclick="PickAsync">Choose a file&hellip;</button>
 
-        @if (Model.FileName is not null)
-        {
-            <p class="mt-2">@Model.FileName &mdash; @Model.FileSize.ToString("N0") bytes</p>
-        }
-
-        <ul class="list-group my-3">
-            @foreach (VaultEntryInfo key in Model.Keys)
+            @if (Model.FileName is not null)
             {
-                <li class="list-group-item @(Model.IsSelected(key) ? "active" : "")"
-                    @onclick="() => Model.SelectKey(key.Reference)">
-                    @key.Label &mdash; @key.Address (@key.Network)
-                </li>
+                <p class="mt-2">@Model.FileName &mdash; @Model.FileSize.ToString("N0") bytes</p>
             }
-        </ul>
+
+            <div class="list-group mt-3">
+                @foreach (VaultEntryInfo key in Model.Keys)
+                {
+                    <button type="button" class="list-group-item list-group-item-action @(Model.IsSelected(key) ? "active" : "")"
+                            @onclick="() => Model.SelectKey(key.Reference)">
+                        <span>@key.Label &mdash; <span class="xf-mono">@key.Address</span> (@key.Network)</span>
+                    </button>
+                }
+            </div>
+        </section>
 
         @if (Model.Message is not null)
         {
@@ -68,7 +70,6 @@ else
     </div>
 
     <Unfinished />
-    <History />
 }
 
 @code {

@@ -27,12 +27,12 @@
    balance update lagging by a few seconds costs nothing here, unlike a lock check or a progress
    redraw the other two screens exist for. *@
 
-<div class="container py-3" style="max-width: 900px;">
+<div class="xf-page">
     @switch (_view)
     {
         case SubView.List:
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <h1 class="h3 mb-0">Accounts</h1>
+                <h1 class="xf-title mb-0">Accounts</h1>
                 <button type="button" class="btn btn-primary" @onclick="() => _view = SubView.New">
                     New account
                 </button>
@@ -49,91 +49,93 @@
             }
             else
             {
-                <table class="table align-middle">
-                    <thead>
-                        <tr>
-                            <th>Label</th>
-                            <th>Address</th>
-                            <th>Network</th>
-                            <th>Status</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (AccountRow row in Model.Rows)
-                        {
+                <section class="xf-card">
+                    <table class="table align-middle">
+                        <thead>
                             <tr>
-                                <td>@row.Label</td>
-                                <td><code>@row.Address</code></td>
-                                <td>@row.Network</td>
-                                <td>
-                                    @switch (row.Stage)
-                                    {
-                                        case AccountStage.Unknown:
-                                            <span class="text-muted">Not checked yet</span>
-                                            break;
-
-                                        case AccountStage.KeyOnly:
-                                            <span>a key, no account yet</span>
-                                            break;
-
-                                        case AccountStage.Funded:
-                                            @* Guaranteed non-null on this branch (AccountsModel only reaches Funded
-                                               once a node has actually answered); the null-forgiving operator states
-                                               that invariant rather than GetValueOrDefault() quietly standing in for
-                                               an answer nobody gave, which is exactly the zero design G8 forbids.
-                                               DeletableFromLedger and LedgersRemaining are set alongside BalanceDrops
-                                               by the same AccountsModel.RefreshFromLedgerAsync branch, so they are
-                                               just as guaranteed here -- this is design 4.1's third state, "an
-                                               account that can be closed from ledger N -- with the countdown". *@
-                                            <span>@row.BalanceDrops!.Value.ToString("N0") drops</span>
-                                            <br />
-                                            <span class="text-muted">
-                                                Closable from ledger @row.DeletableFromLedger!.Value.ToString("N0")
-                                                &mdash; about @row.LedgersRemaining!.Value.ToString("N0") ledgers
-                                                remaining (@row.TimeRemainingDescription)
-                                            </span>
-                                            break;
-
-                                        case AccountStage.Closable:
-                                            <span>can be closed now</span>
-                                            break;
-
-                                        case AccountStage.Closed:
-                                            @if (row.Closure is { } closure)
-                                            {
-                                                <span>
-                                                    Closed &mdash; sent @closure.ArrivedDrops.ToString("N0") drops to
-                                                    @closure.Destination
-                                                </span>
-                                            }
-                                            break;
-                                    }
-                                </td>
-                                <td class="text-end">
-                                    @if (row.HasActions)
-                                    {
-                                        <div class="btn-group btn-group-sm">
-                                            <button type="button" class="btn btn-outline-secondary"
-                                                    disabled="@Model.IsChecking(row.Reference)"
-                                                    @onclick="() => CheckAsync(row.Reference)">
-                                                Check
-                                            </button>
-                                            <button type="button" class="btn btn-outline-secondary"
-                                                    @onclick="() => OpenFunding(row.Reference)">
-                                                Fund
-                                            </button>
-                                            <button type="button" class="btn btn-outline-danger"
-                                                    @onclick="() => OpenClose(row.Reference)">
-                                                Close
-                                            </button>
-                                        </div>
-                                    }
-                                </td>
+                                <th>Label</th>
+                                <th>Address</th>
+                                <th>Network</th>
+                                <th>Status</th>
+                                <th></th>
                             </tr>
-                        }
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            @foreach (AccountRow row in Model.Rows)
+                            {
+                                <tr>
+                                    <td>@row.Label</td>
+                                    <td><code class="xf-mono">@row.Address</code></td>
+                                    <td>@row.Network</td>
+                                    <td>
+                                        @switch (row.Stage)
+                                        {
+                                            case AccountStage.Unknown:
+                                                <span class="text-muted">Not checked yet</span>
+                                                break;
+
+                                            case AccountStage.KeyOnly:
+                                                <span>a key, no account yet</span>
+                                                break;
+
+                                            case AccountStage.Funded:
+                                                @* Guaranteed non-null on this branch (AccountsModel only reaches Funded
+                                                   once a node has actually answered); the null-forgiving operator states
+                                                   that invariant rather than GetValueOrDefault() quietly standing in for
+                                                   an answer nobody gave, which is exactly the zero design G8 forbids.
+                                                   DeletableFromLedger and LedgersRemaining are set alongside BalanceDrops
+                                                   by the same AccountsModel.RefreshFromLedgerAsync branch, so they are
+                                                   just as guaranteed here -- this is design 4.1's third state, "an
+                                                   account that can be closed from ledger N -- with the countdown". *@
+                                                <span>@row.BalanceDrops!.Value.ToString("N0") drops</span>
+                                                <br />
+                                                <span class="text-muted">
+                                                    Closable from ledger @row.DeletableFromLedger!.Value.ToString("N0")
+                                                    &mdash; about @row.LedgersRemaining!.Value.ToString("N0") ledgers
+                                                    remaining (@row.TimeRemainingDescription)
+                                                </span>
+                                                break;
+
+                                            case AccountStage.Closable:
+                                                <span>can be closed now</span>
+                                                break;
+
+                                            case AccountStage.Closed:
+                                                @if (row.Closure is { } closure)
+                                                {
+                                                    <span>
+                                                        Closed &mdash; sent @closure.ArrivedDrops.ToString("N0") drops to
+                                                        <span class="xf-mono">@closure.Destination</span>
+                                                    </span>
+                                                }
+                                                break;
+                                        }
+                                    </td>
+                                    <td class="text-end">
+                                        @if (row.HasActions)
+                                        {
+                                            <div class="btn-group btn-group-sm">
+                                                <button type="button" class="btn btn-outline-secondary"
+                                                        disabled="@Model.IsChecking(row.Reference)"
+                                                        @onclick="() => CheckAsync(row.Reference)">
+                                                    Check
+                                                </button>
+                                                <button type="button" class="btn btn-outline-secondary"
+                                                        @onclick="() => OpenFunding(row.Reference)">
+                                                    Fund
+                                                </button>
+                                                <button type="button" class="btn btn-outline-danger"
+                                                        @onclick="() => OpenClose(row.Reference)">
+                                                    Close
+                                                </button>
+                                            </div>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </section>
             }
             break;
 

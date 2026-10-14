@@ -8,37 +8,39 @@
    ever binds to Model.LastCreateMessage. It never reads an exception, and never composes a sentence
    of its own — the same rule Unlock.razor follows for Model.LastMessage. *@
 
-<div class="container py-4" style="max-width: 480px;">
-    <h1>Create your vault</h1>
+<div class="xf-vault">
+    <section class="xf-card">
+        <h1 class="xf-title">Create your vault</h1>
 
-    <p>
-        This is the first time this application has run here, and there is nothing to open yet.
-    </p>
+        <p>
+            This is the first time this application has run here, and there is nothing to open yet.
+        </p>
 
-    <p>
-        <strong>There is no recovery phrase.</strong> The master password you choose below is the
-        only way this vault will ever open. If it is forgotten, every key inside that was not
-        individually exported is gone for good &mdash; there is no support process, no reset link
-        and no backdoor that gets it back.
-    </p>
+        <p>
+            <strong>There is no recovery phrase.</strong> The master password you choose below is the
+            only way this vault will ever open. If it is forgotten, every key inside that was not
+            individually exported is gone for good &mdash; there is no support process, no reset link
+            and no backdoor that gets it back.
+        </p>
 
-    @if (Model.LastCreateMessage is { } message)
-    {
-        <div class="alert alert-danger" role="alert">
-            <strong>@message.Headline</strong>
-            <div>@message.Detail</div>
-        </div>
-    }
+        @if (Model.LastCreateMessage is { } message)
+        {
+            <div class="alert alert-danger" role="alert">
+                <strong>@message.Headline</strong>
+                <div>@message.Detail</div>
+            </div>
+        }
 
-    <form @onsubmit="SubmitAsync" @onsubmit:preventDefault="true">
-        <div class="mb-3">
-            <label for="new-password" class="form-label">Master password</label>
-            <input id="new-password" type="password" class="form-control" autofocus
-                   @bind="_password" @bind:event="oninput" disabled="@_busy" />
-        </div>
+        <form @onsubmit="SubmitAsync" @onsubmit:preventDefault="true">
+            <div class="mb-3">
+                <label for="new-password" class="form-label">Master password</label>
+                <input id="new-password" type="password" class="form-control" autofocus
+                       @bind="_password" @bind:event="oninput" disabled="@_busy" />
+            </div>
 
-        <button type="submit" class="btn btn-primary" disabled="@_busy">Create vault</button>
-    </form>
+            <button type="submit" class="btn btn-primary" disabled="@_busy">Create vault</button>
+        </form>
+    </section>
 </div>
 
 @code {

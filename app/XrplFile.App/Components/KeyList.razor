@@ -8,12 +8,12 @@
    sub-screens (add / export / reveal / a delete confirmation) is on screen right now, which is
    navigation, not a fact about the vault. *@
 
-<div class="container py-3" style="max-width: 760px;">
+<div class="xf-page">
     @switch (_view)
     {
         case SubView.List:
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <h1 class="h3 mb-0">Keys</h1>
+                <h1 class="xf-title mb-0">Keys</h1>
                 <button type="button" class="btn btn-primary" @onclick="() => _view = SubView.AddKey">Add key</button>
             </div>
 
@@ -28,62 +28,64 @@
             }
             else
             {
-                <table class="table align-middle">
-                    <thead>
-                        <tr>
-                            <th>Label</th>
-                            <th>Kind</th>
-                            <th>Network</th>
-                            <th>Address</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (KeyRow row in Model.Rows)
-                        {
+                <section class="xf-card">
+                    <table class="table align-middle">
+                        <thead>
                             <tr>
-                                @if (row.Info is { } info)
-                                {
-                                    <td>
-                                        @info.Label
-                                        @if (row.NeedsExporting)
-                                        {
-                                            <span class="badge text-bg-danger ms-2">Exists only here &mdash; not exported</span>
-                                        }
-                                    </td>
-                                    <td>@info.Kind</td>
-                                    <td>@info.Network</td>
-                                    <td><code>@info.Address</code></td>
-                                    <td class="text-end">
-                                        <div class="btn-group btn-group-sm">
-                                            <button type="button" class="btn btn-outline-secondary"
-                                                    @onclick="() => OpenReveal(row.Reference)">Reveal</button>
-                                            <button type="button" class="btn btn-outline-secondary"
-                                                    disabled="@Model.WritesAreRefused"
-                                                    @onclick="() => OpenExport(row.Reference)">Export</button>
-                                            <button type="button" class="btn btn-outline-danger"
-                                                    disabled="@Model.WritesAreRefused"
-                                                    @onclick="() => PrepareDeleteAsync(row)">Delete</button>
-                                        </div>
-                                    </td>
-                                }
-                                else
-                                {
-                                    <td colspan="5">
-                                        <span class="text-danger">Damaged &mdash; <code>@row.Reference</code></span>
-                                    </td>
-                                }
+                                <th>Label</th>
+                                <th>Kind</th>
+                                <th>Network</th>
+                                <th>Address</th>
+                                <th></th>
                             </tr>
-                        }
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            @foreach (KeyRow row in Model.Rows)
+                            {
+                                <tr>
+                                    @if (row.Info is { } info)
+                                    {
+                                        <td>
+                                            @info.Label
+                                            @if (row.NeedsExporting)
+                                            {
+                                                <span class="badge text-bg-danger ms-2">Exists only here &mdash; not exported</span>
+                                            }
+                                        </td>
+                                        <td>@info.Kind</td>
+                                        <td>@info.Network</td>
+                                        <td><code class="xf-mono">@info.Address</code></td>
+                                        <td class="text-end">
+                                            <div class="btn-group btn-group-sm">
+                                                <button type="button" class="btn btn-outline-secondary"
+                                                        @onclick="() => OpenReveal(row.Reference)">Reveal</button>
+                                                <button type="button" class="btn btn-outline-secondary"
+                                                        disabled="@Model.WritesAreRefused"
+                                                        @onclick="() => OpenExport(row.Reference)">Export</button>
+                                                <button type="button" class="btn btn-outline-danger"
+                                                        disabled="@Model.WritesAreRefused"
+                                                        @onclick="() => PrepareDeleteAsync(row)">Delete</button>
+                                            </div>
+                                        </td>
+                                    }
+                                    else
+                                    {
+                                        <td colspan="5">
+                                            <span class="text-danger">Damaged &mdash; <code class="xf-mono">@row.Reference</code></span>
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </section>
             }
 
             @if (_pendingDeleteRow is { Info: { } pendingInfo })
             {
                 <div class="alert alert-danger">
                     <p>
-                        Delete <code>@pendingInfo.Address</code> (@pendingInfo.Label)?
+                        Delete <code class="xf-mono">@pendingInfo.Address</code> (@pendingInfo.Label)?
                         @if (_deleteWarning is { NeverExported: true })
                         {
                             <strong>

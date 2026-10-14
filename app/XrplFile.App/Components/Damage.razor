@@ -17,7 +17,7 @@
     <ul class="mb-2">
         @foreach (KeyRow row in Model.Rows.Where(row => row.IsDamaged))
         {
-            <li><code>@row.Reference</code></li>
+            <li><code class="xf-mono">@row.Reference</code></li>
         }
     </ul>
 

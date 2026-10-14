@@ -33,17 +33,15 @@
     RunView view = Model.Capture();
 }
 
-<div class="container py-3">
-    <h1 class="h3">Publishing</h1>
+<div class="xf-page">
+    <h1 class="xf-title">Publishing</h1>
 
-    <p>@view.StageText</p>
-    <div class="progress" role="progressbar" aria-valuenow="@view.Percent" aria-valuemin="0" aria-valuemax="100">
-        <div class="progress-bar" style="width: @(view.Percent)%">@view.Percent%</div>
-    </div>
-
-    <button type="button" class="btn btn-outline-secondary mt-3" disabled="@(!view.CanCancel)" @onclick="Cancel">
-        Cancel
-    </button>
+    <section class="xf-card">
+        <p>@view.StageText</p>
+        <div class="progress" role="progressbar" aria-valuenow="@view.Percent" aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-bar" style="width: @(view.Percent)%">@view.Percent%</div>
+        </div>
+    </section>
 
     @if (view.IsFinished)
     {
@@ -51,7 +49,7 @@
         {
             <div class="alert alert-success mt-3">
                 <p class="mb-2">Published.</p>
-                <code class="d-block p-2 bg-body-tertiary text-break user-select-all">@link</code>
+                <code class="d-block p-2 bg-body-tertiary text-break user-select-all xf-mono">@link</code>
                 <button type="button" class="btn btn-outline-secondary mt-2" @onclick="CopyLinkAsync">Copy link</button>
             </div>
         }
@@ -78,9 +76,20 @@
         {
             <div class="alert alert-info mt-3">@stateNote</div>
         }
-
-        <button type="button" class="btn btn-primary mt-3" @onclick="Dismiss">Dismiss</button>
     }
+
+    <div class="xf-actionbar">
+        @if (!view.IsFinished)
+        {
+            <button type="button" class="btn btn-outline-secondary" disabled="@(!view.CanCancel)" @onclick="Cancel">
+                Cancel
+            </button>
+        }
+        @if (view.IsFinished)
+        {
+            <button type="button" class="btn btn-primary" @onclick="Dismiss">Dismiss</button>
+        }
+    </div>
 </div>
 
 @code {

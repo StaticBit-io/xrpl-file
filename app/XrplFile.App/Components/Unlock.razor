@@ -6,33 +6,35 @@
    Model.DeviceUnlockOffered. Whether a message panel or the device-unlock button is present is a
    presentational read of a fact the model already decided, not a decision made here. *@
 
-<div class="container py-4" style="max-width: 480px;">
-    <h1>Unlock your vault</h1>
+<div class="xf-vault">
+    <section class="xf-card">
+        <h1 class="xf-title">Unlock your vault</h1>
 
-    @if (Model.LastMessage is { } message)
-    {
-        <div class="alert @(message.CountsAsAFailedAttempt ? "alert-danger" : "alert-info")" role="alert">
-            <strong>@message.Headline</strong>
-            <div>@message.Detail</div>
-        </div>
-    }
-
-    <form @onsubmit="SubmitAsync" @onsubmit:preventDefault="true">
-        <div class="mb-3">
-            <label for="unlock-password" class="form-label">Master password</label>
-            <input id="unlock-password" type="password" class="form-control" autofocus
-                   @bind="_password" @bind:event="oninput" disabled="@_busy" />
-        </div>
-
-        <button type="submit" class="btn btn-primary" disabled="@_busy">Unlock</button>
-
-        @if (Model.DeviceUnlockOffered)
+        @if (Model.LastMessage is { } message)
         {
-            <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="UnlockWithDeviceAsync">
-                Unlock with this device
-            </button>
+            <div class="alert @(message.CountsAsAFailedAttempt ? "alert-danger" : "alert-info")" role="alert">
+                <strong>@message.Headline</strong>
+                <div>@message.Detail</div>
+            </div>
         }
-    </form>
+
+        <form @onsubmit="SubmitAsync" @onsubmit:preventDefault="true">
+            <div class="mb-3">
+                <label for="unlock-password" class="form-label">Master password</label>
+                <input id="unlock-password" type="password" class="form-control" autofocus
+                       @bind="_password" @bind:event="oninput" disabled="@_busy" />
+            </div>
+
+            <button type="submit" class="btn btn-primary" disabled="@_busy">Unlock</button>
+
+            @if (Model.DeviceUnlockOffered)
+            {
+                <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="UnlockWithDeviceAsync">
+                    Unlock with this device
+                </button>
+            }
+        </form>
+    </section>
 </div>
 
 @code {

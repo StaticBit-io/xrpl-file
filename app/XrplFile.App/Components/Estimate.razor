@@ -8,29 +8,31 @@
    money is spent, so what file and which key -- both already settled in Request, by PublishModel,
    before this component ever existed -- are named here too, not only the cost. *@
 
-<div class="container py-3">
-    <h1 class="h3">Estimate</h1>
+<div class="xf-page">
+    <h1 class="xf-title">Estimate</h1>
 
     <p>
         Publishing <strong>@Request.Name</strong> (@Request.File.Length.ToString("N0") bytes) from
-        <code>@Request.Account</code>.
+        <code class="xf-mono">@Request.Account</code>.
     </p>
 
     @if (Model.Estimate is { } estimate)
     {
-        <table class="table">
-            <tbody>
-                <tr><th>Chunks</th><td>@estimate.Chunks.ToString("N0")</td></tr>
-                <tr><th>Transactions</th><td>@estimate.Transactions.ToString("N0")</td></tr>
-                <tr><th>Fee per transaction</th><td>@estimate.FeeDropsPerTransaction.ToString("N0") drops</td></tr>
-                <tr><th>Total fee</th><td>@estimate.FeeDropsTotal.ToString("N0") drops</td></tr>
-                <tr><th>Required</th><td>@estimate.RequiredDrops.ToString("N0") drops</td></tr>
-                <tr><th>Account balance</th><td>@estimate.BalanceDrops.ToString("N0") drops</td></tr>
-                <tr><th>Spendable</th><td>@estimate.SpendableDrops.ToString("N0") drops</td></tr>
-            </tbody>
-        </table>
+        <section class="xf-card">
+            <table class="table xf-kv-table">
+                <tbody>
+                    <tr><th>Chunks</th><td>@estimate.Chunks.ToString("N0")</td></tr>
+                    <tr><th>Transactions</th><td>@estimate.Transactions.ToString("N0")</td></tr>
+                    <tr><th>Fee per transaction</th><td>@estimate.FeeDropsPerTransaction.ToString("N0") drops</td></tr>
+                    <tr><th>Total fee</th><td>@estimate.FeeDropsTotal.ToString("N0") drops</td></tr>
+                    <tr><th>Required</th><td>@estimate.RequiredDrops.ToString("N0") drops</td></tr>
+                    <tr><th>Account balance</th><td>@estimate.BalanceDrops.ToString("N0") drops</td></tr>
+                    <tr><th>Spendable</th><td>@estimate.SpendableDrops.ToString("N0") drops</td></tr>
+                </tbody>
+            </table>
 
-        <p>Node: <code>@Model.NodeUrl</code> (@Request.Network)</p>
+            <p class="mt-3 mb-0 xf-muted">Node: <code class="xf-mono">@Model.NodeUrl</code> (@Request.Network)</p>
+        </section>
     }
 
     @if (Model.Message is not null)
@@ -38,10 +40,12 @@
         <div class="alert alert-warning">@Model.Message</div>
     }
 
-    <button type="button" class="btn btn-outline-secondary" disabled="@_starting" @onclick="Back">Back</button>
-    <button type="button" class="btn btn-primary" disabled="@(!Model.CanPublish || _starting)" @onclick="PublishAsync">
-        Publish
-    </button>
+    <div class="xf-actionbar">
+        <button type="button" class="btn btn-outline-secondary" disabled="@_starting" @onclick="Back">Back</button>
+        <button type="button" class="btn btn-primary" disabled="@(!Model.CanPublish || _starting)" @onclick="PublishAsync">
+            Publish
+        </button>
+    </div>
 </div>
 
 @code {

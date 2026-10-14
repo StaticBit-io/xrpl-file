@@ -8,8 +8,8 @@
    left to UnfinishedModel.ResumeAsync to refuse, which it already does with its own Message, rather
    than this screen pre-judging the row and disabling the button itself. *@
 
-<div class="container py-3">
-    <h2 class="h5">Unfinished runs</h2>
+<div class="xf-page pt-0">
+    <h2 class="xf-section-title">Unfinished runs</h2>
 
     @if (Model.Rows.Count > 0)
     {
@@ -34,49 +34,51 @@
     }
     else
     {
-        <table class="table align-middle">
-            <thead>
-                <tr>
-                    <th>File</th>
-                    <th>Network</th>
-                    <th>Stage</th>
-                    <th>Chunks</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (UnfinishedRow row in Model.Rows)
-                {
+        <section class="xf-card">
+            <table class="table align-middle">
+                <thead>
                     <tr>
-                        @if (row.Unreadable is { } unreadable)
-                        {
-                            <td colspan="4">
-                                <span class="text-danger">@unreadable</span> (<code>@row.Path</code>)
-                            </td>
-                        }
-                        else
-                        {
-                            <td>@row.Name (@row.Size.ToString("N0") bytes)</td>
-                            <td>@row.Network</td>
-                            <td>@row.Stage</td>
-                            <td>@row.Chunks.ToString("N0")</td>
-                        }
-                        <td class="text-end">
-                            <div class="btn-group btn-group-sm">
-                                <button type="button" class="btn btn-outline-secondary" disabled="@_busy"
-                                        @onclick="() => ResumeAsync(row)">
-                                    Resume
-                                </button>
-                                <button type="button" class="btn btn-outline-danger" disabled="@_busy"
-                                        @onclick="() => Delete(row)">
-                                    Delete
-                                </button>
-                            </div>
-                        </td>
+                        <th>File</th>
+                        <th>Network</th>
+                        <th>Stage</th>
+                        <th>Chunks</th>
+                        <th></th>
                     </tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (UnfinishedRow row in Model.Rows)
+                    {
+                        <tr>
+                            @if (row.Unreadable is { } unreadable)
+                            {
+                                <td colspan="4">
+                                    <span class="text-danger">@unreadable</span> (<code class="xf-mono">@row.Path</code>)
+                                </td>
+                            }
+                            else
+                            {
+                                <td>@row.Name (@row.Size.ToString("N0") bytes)</td>
+                                <td>@row.Network</td>
+                                <td>@row.Stage</td>
+                                <td>@row.Chunks.ToString("N0")</td>
+                            }
+                            <td class="text-end">
+                                <div class="btn-group btn-group-sm">
+                                    <button type="button" class="btn btn-outline-secondary" disabled="@_busy"
+                                            @onclick="() => ResumeAsync(row)">
+                                        Resume
+                                    </button>
+                                    <button type="button" class="btn btn-outline-danger" disabled="@_busy"
+                                            @onclick="() => Delete(row)">
+                                        Delete
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
     }
 </div>
 

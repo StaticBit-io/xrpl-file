@@ -10,7 +10,7 @@
    Model.Shown, after either has happened, actually reaches the screen instead of a stale value
    sitting in markup nothing repainted. *@
 
-<h1 class="h3">Reveal seed</h1>
+<h1 class="xf-title">Reveal seed</h1>
 
 @if (_problem is { } problem)
 {
@@ -24,7 +24,7 @@
             Anyone who sees this can spend from this account. It hides itself automatically after a
             minute, or the instant the vault locks.
         </p>
-        <code class="d-block p-2 bg-body-tertiary user-select-all">@secret</code>
+        <code class="d-block p-2 bg-body-tertiary user-select-all xf-mono">@secret</code>
         <button type="button" class="btn btn-outline-secondary mt-2" @onclick="Hide">Hide now</button>
         <button type="button" class="btn btn-outline-secondary mt-2 ms-2" disabled="@_copying" @onclick="CopyAsync">
             Copy

@@ -19,45 +19,47 @@
    singleton built once at startup (MauiProgram.RegisterVault) that nothing here can repoint while
    it runs. *@
 
-<div class="container py-4" style="max-width: 480px;">
-    <h1>Vault not found here</h1>
+<div class="xf-vault">
+    <section class="xf-card">
+        <h1 class="xf-title">Vault not found here</h1>
 
-    <p>
-        This application was pointed at a vault kept somewhere else, and nothing answered at that
-        location just now. <strong>This is not a fresh install</strong> &mdash; a vault was chosen
-        here before, and it is not offered to create a new one, because that would write a second,
-        different vault at the remembered location and leave the real one wherever it actually is.
-    </p>
+        <p>
+            This application was pointed at a vault kept somewhere else, and nothing answered at that
+            location just now. <strong>This is not a fresh install</strong> &mdash; a vault was chosen
+            here before, and it is not offered to create a new one, because that would write a second,
+            different vault at the remembered location and leave the real one wherever it actually is.
+        </p>
 
-    <p>
-        This usually means the medium holding it is not reachable right now &mdash; a memory stick
-        not plugged in, a synced folder that has not caught up yet. Reconnect it and try again.
-    </p>
+        <p>
+            This usually means the medium holding it is not reachable right now &mdash; a memory stick
+            not plugged in, a synced folder that has not caught up yet. Reconnect it and try again.
+        </p>
 
-    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="RetryAsync">
-        Try again
-    </button>
-    <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="ChooseDifferentAsync">
-        Choose a different vault&hellip;
-    </button>
+        <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="RetryAsync">
+            Try again
+        </button>
+        <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="ChooseDifferentAsync">
+            Choose a different vault&hellip;
+        </button>
 
-    @if (_actionOutcome is { } outcome)
-    {
-        <div class="alert mt-3 @(outcome.Succeeded ? "alert-info" : "alert-danger")">@outcome.Message</div>
-    }
+        @if (_actionOutcome is { } outcome)
+        {
+            <div class="alert mt-3 @(outcome.Succeeded ? "alert-info" : "alert-danger")">@outcome.Message</div>
+        }
 
-    <hr class="my-4" />
+        <hr class="my-4" />
 
-    <h2 class="h5">Start fresh instead</h2>
-    <p>
-        Forgetting this location does not touch the vault file itself &mdash; it only stops this
-        application from looking for it here on its own. If the medium holding it reconnects later,
-        point the application at it again from Settings. After forgetting, restarting opens (or
-        offers to create) the vault at the default location instead.
-    </p>
-    <button type="button" class="btn btn-outline-danger" disabled="@_busy" @onclick="Forget">
-        Forget this location and start fresh
-    </button>
+        <h2 class="xf-section-title mt-4">Start fresh instead</h2>
+        <p>
+            Forgetting this location does not touch the vault file itself &mdash; it only stops this
+            application from looking for it here on its own. If the medium holding it reconnects later,
+            point the application at it again from Settings. After forgetting, restarting opens (or
+            offers to create) the vault at the default location instead.
+        </p>
+        <button type="button" class="btn btn-outline-danger" disabled="@_busy" @onclick="Forget">
+            Forget this location and start fresh
+        </button>
+    </section>
 </div>
 
 @code {

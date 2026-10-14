@@ -20,26 +20,26 @@
    its own top-level container instead of relying on a parent's. Wrapping both branches in the
    same div is what KeyList already does for its own children; this brings Settings in line with
    it rather than leaving ChangePassword to full-bleed edge to edge. *@
-<div class="container py-3" style="max-width: 560px;">
+<div class="xf-page">
     @if (_showChangePassword)
     {
         <ChangePassword OnBack="() => _showChangePassword = false" />
     }
     else
     {
-        <h1 class="h3">Settings</h1>
+        <h1 class="xf-title">Settings</h1>
 
-        <section class="mb-4">
-            <h2 class="h5">Vault location</h2>
+        <section class="xf-card">
+            <h2 class="xf-section-title">Vault location</h2>
             <p>The vault file lives at:</p>
-            <code class="d-block p-2 bg-body-tertiary text-break">@LocationModel.CurrentPath</code>
+            <code class="d-block p-2 bg-body-tertiary text-break xf-mono">@LocationModel.CurrentPath</code>
             <button type="button" class="btn btn-outline-secondary mt-2" @onclick="RevealInFileManager">
                 Show in file manager
             </button>
         </section>
 
-        <section class="mb-4">
-            <h2 class="h5">A different vault</h2>
+        <section class="xf-card">
+            <h2 class="xf-section-title">A different vault</h2>
             <p>
                 Point the application at a vault file kept somewhere else — a copy on a memory
                 stick, a synced folder, a file carried over from another machine. Because the
@@ -63,8 +63,8 @@
             }
         </section>
 
-        <section class="mb-4">
-            <h2 class="h5">Remember on this device</h2>
+        <section class="xf-card">
+            <h2 class="xf-section-title">Remember on this device</h2>
             <p>
                 Tied to the path above: renaming or moving the vault file asks for the master
                 password once, even with this switched on.
@@ -80,8 +80,8 @@
             }
         </section>
 
-        <section class="mb-4">
-            <h2 class="h5">Node URLs</h2>
+        <section class="xf-card">
+            <h2 class="xf-section-title">Node URLs</h2>
             <p>
                 Which rippled node each network publishes to and reads from. Leave a box empty to use
                 the built-in endpoint for that network; a network this application does not already

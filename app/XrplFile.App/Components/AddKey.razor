@@ -18,7 +18,7 @@
 }
 else
 {
-    <h1 class="h3">Add a key</h1>
+    <h1 class="xf-title">Add a key</h1>
 
     <ul class="nav nav-tabs mb-3">
         <li class="nav-item">
@@ -37,115 +37,117 @@ else
         <div class="alert alert-danger">@problem</div>
     }
 
-    @switch (_mode)
-    {
-        case Mode.Generate:
-            <div class="mb-3">
-                <label class="form-label">Label</label>
-                <input class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Network</label>
-                <input class="form-control" @bind="_network" @bind:event="oninput" disabled="@_busy" />
-            </div>
-            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoGenerate">Generate</button>
-            break;
-
-        case Mode.Import:
-            <div class="mb-3">
-                <label class="form-label">Label</label>
-                <input class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Network</label>
-                <input class="form-control" @bind="_network" @bind:event="oninput" disabled="@_busy" />
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Seed</label>
-                <input type="password" class="form-control" @bind="_seed" @bind:event="oninput" disabled="@_busy" />
-            </div>
-            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoImport">Preview</button>
-            break;
-
-        case Mode.Container:
-            @if (Model.ContainerKeys.Count == 0)
-            {
+    <section class="xf-card">
+        @switch (_mode)
+        {
+            case Mode.Generate:
                 <div class="mb-3">
-                    <label class="form-label">Backup password (leave blank if it has none)</label>
-                    <input type="password" class="form-control" @bind="_containerPassword" @bind:event="oninput" disabled="@_busy" />
+                    <label class="form-label">Label</label>
+                    <input class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
                 </div>
-                <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="PickFileAsync">
-                    Choose file&hellip;
-                </button>
-            }
-            else
-            {
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Address</th>
-                            <th>Algorithm</th>
-                            <th>Backup's label</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @for (int index = 0; index < Model.ContainerKeys.Count; index++)
-                        {
-                            ContainerKeyOption key = Model.ContainerKeys[index];
-                            int capturedIndex = index;
-                            <tr>
-                                <td><code>@key.Address</code></td>
-                                <td>@key.Algorithm</td>
-                                <td>@(key.Label ?? "—")</td>
-                                <td>
-                                    <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_busy"
-                                            @onclick="() => BeginSelect(capturedIndex, key)">
-                                        Import&hellip;
-                                    </button>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+                <div class="mb-3">
+                    <label class="form-label">Network</label>
+                    <input class="form-control" @bind="_network" @bind:event="oninput" disabled="@_busy" />
+                </div>
+                <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoGenerate">Generate</button>
+                break;
 
-                @if (_selectingIndex >= 0)
+            case Mode.Import:
+                <div class="mb-3">
+                    <label class="form-label">Label</label>
+                    <input class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Network</label>
+                    <input class="form-control" @bind="_network" @bind:event="oninput" disabled="@_busy" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Seed</label>
+                    <input type="password" class="form-control" @bind="_seed" @bind:event="oninput" disabled="@_busy" />
+                </div>
+                <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoImport">Preview</button>
+                break;
+
+            case Mode.Container:
+                @if (Model.ContainerKeys.Count == 0)
                 {
-                    <div class="border rounded p-3 mb-3">
-                        <p>Importing <code>@Model.ContainerKeys[_selectingIndex].Address</code>.</p>
-                        <div class="mb-3">
-                            <label class="form-label">Label</label>
-                            <input class="form-control" @bind="_selectLabel" @bind:event="oninput" disabled="@_busy" />
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Network</label>
-                            <input class="form-control" @bind="_selectNetwork" @bind:event="oninput" disabled="@_busy" />
-                        </div>
-                        <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoSelect">Preview</button>
-                        <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="() => _selectingIndex = -1">
-                            Cancel
-                        </button>
+                    <div class="mb-3">
+                        <label class="form-label">Backup password (leave blank if it has none)</label>
+                        <input type="password" class="form-control" @bind="_containerPassword" @bind:event="oninput" disabled="@_busy" />
                     </div>
+                    <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="PickFileAsync">
+                        Choose file&hellip;
+                    </button>
                 }
+                else
+                {
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Address</th>
+                                <th>Algorithm</th>
+                                <th>Backup's label</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int index = 0; index < Model.ContainerKeys.Count; index++)
+                            {
+                                ContainerKeyOption key = Model.ContainerKeys[index];
+                                int capturedIndex = index;
+                                <tr>
+                                    <td><code class="xf-mono">@key.Address</code></td>
+                                    <td>@key.Algorithm</td>
+                                    <td>@(key.Label ?? "—")</td>
+                                    <td>
+                                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_busy"
+                                                @onclick="() => BeginSelect(capturedIndex, key)">
+                                            Import&hellip;
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
 
-                <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="DoCloseContainer">
-                    Close this backup
-                </button>
-            }
-            break;
-    }
+                    @if (_selectingIndex >= 0)
+                    {
+                        <div class="border rounded p-3 mb-3">
+                            <p>Importing <code class="xf-mono">@Model.ContainerKeys[_selectingIndex].Address</code>.</p>
+                            <div class="mb-3">
+                                <label class="form-label">Label</label>
+                                <input class="form-control" @bind="_selectLabel" @bind:event="oninput" disabled="@_busy" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Network</label>
+                                <input class="form-control" @bind="_selectNetwork" @bind:event="oninput" disabled="@_busy" />
+                            </div>
+                            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoSelect">Preview</button>
+                            <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="() => _selectingIndex = -1">
+                                Cancel
+                            </button>
+                        </div>
+                    }
 
-    @if (Model.Preview is { } preview)
-    {
-        <div class="alert alert-info mt-3">
-            <p>This will be stored as <code>@preview.Address</code> (@preview.Algorithm).</p>
-            <button type="button" class="btn btn-success" disabled="@_busy" @onclick="StoreAsync">Add to vault</button>
-        </div>
-    }
+                    <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="DoCloseContainer">
+                        Close this backup
+                    </button>
+                }
+                break;
+        }
+
+        @if (Model.Preview is { } preview)
+        {
+            <div class="alert alert-info mt-3">
+                <p>This will be stored as <code class="xf-mono">@preview.Address</code> (@preview.Algorithm).</p>
+                <button type="button" class="btn btn-success" disabled="@_busy" @onclick="StoreAsync">Add to vault</button>
+            </div>
+        }
+    </section>
 
     @if (_stored is { } storedAddress)
     {
-        <div class="alert alert-success mt-3">Added <code>@storedAddress</code> to the vault.</div>
+        <div class="alert alert-success mt-3">Added <code class="xf-mono">@storedAddress</code> to the vault.</div>
     }
 
     <div class="mt-3">

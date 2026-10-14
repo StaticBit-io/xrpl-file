@@ -50,22 +50,22 @@ else if (Model.Closed is { } closed)
     <div class="alert alert-success">
         <p>
             Account closed. <strong>@closed.ArrivedDrops.ToString("N0") drops</strong> was sent to
-            <span class="user-select-all">@closed.Destination</span>.
+            <span class="user-select-all"><span class="xf-mono">@closed.Destination</span></span>.
         </p>
-        <p>Transaction hash: <code class="user-select-all">@closed.TxHash</code></p>
+        <p>Transaction hash: <code class="user-select-all xf-mono">@closed.TxHash</code></p>
     </div>
 
     <button type="button" class="btn btn-link" disabled="@_busy" @onclick="BackAsync">Back to accounts</button>
 }
 else
 {
-    <h1 class="h3">Close account</h1>
+    <h1 class="xf-title">Close account</h1>
 
     @if (Model.AccountAddress is { } accountAddress)
     {
         <div class="alert alert-secondary">
             <strong>Closing:</strong> @Model.AccountLabel &mdash;
-            <span class="user-select-all">@accountAddress</span>
+            <span class="user-select-all"><span class="xf-mono">@accountAddress</span></span>
             @if (Model.Preview is { } holding)
             {
                 <span>(currently holds @holding.BalanceDrops.ToString("N0") drops)</span>
@@ -78,41 +78,43 @@ else
         <strong>The account will cease to exist, and this cannot be undone.</strong>
     </p>
 
-    <div class="mb-3">
-        <label class="form-label">Send the remainder to</label>
+    <section class="xf-card">
+        <div class="mb-3">
+            <label class="form-label">Send the remainder to</label>
 
-        @if (Model.Candidates.Count > 0)
-        {
-            <div class="list-group mb-2">
-                @foreach (VaultEntryInfo candidate in Model.Candidates)
-                {
-                    <button type="button" disabled="@_busy"
-                            class="list-group-item list-group-item-action @(string.Equals(Model.Destination, candidate.Address, StringComparison.Ordinal) ? "active" : "")"
-                            @onclick="() => Model.ChooseDestination(candidate.Address)">
-                        @candidate.Label &mdash; @candidate.Address (@candidate.Network)
-                    </button>
-                }
-            </div>
-        }
+            @if (Model.Candidates.Count > 0)
+            {
+                <div class="list-group mb-2">
+                    @foreach (VaultEntryInfo candidate in Model.Candidates)
+                    {
+                        <button type="button" disabled="@_busy"
+                                class="list-group-item list-group-item-action @(string.Equals(Model.Destination, candidate.Address, StringComparison.Ordinal) ? "active" : "")"
+                                @onclick="() => Model.ChooseDestination(candidate.Address)">
+                            <span>@candidate.Label &mdash; <span class="xf-mono">@candidate.Address</span> (@candidate.Network)</span>
+                        </button>
+                    }
+                </div>
+            }
 
-        <input class="form-control" placeholder="Or type an address" disabled="@_busy"
-               value="@Model.Destination" @oninput="e => Model.ChooseDestination((string)e.Value!)" />
-    </div>
+            <input class="form-control" placeholder="Or type an address" disabled="@_busy"
+                   value="@Model.Destination" @oninput="e => Model.ChooseDestination((string)e.Value!)" />
+        </div>
 
-    <button type="button" class="btn btn-outline-primary" disabled="@(!Model.CanPreflight || _busy)"
-            @onclick="PreflightAsync">
-        Check
-    </button>
+        <button type="button" class="btn btn-outline-primary" disabled="@(!Model.CanPreflight || _busy)"
+                @onclick="PreflightAsync">
+            Check
+        </button>
+    </section>
 
     @if (Model.Preview is { Outcome: DeletionOutcome.Ready } ready)
     {
         <div class="alert alert-info mt-3">
             <p>
                 This will send everything this account holds to
-                <strong class="user-select-all">@Model.Destination</strong>, which currently holds
+                <strong class="user-select-all"><span class="xf-mono">@Model.Destination</span></strong>, which currently holds
                 @Model.DestinationBalanceDrops.ToString("N0") drops.
             </p>
-            <table class="table mb-2">
+            <table class="table mb-2 xf-kv-table">
                 <tbody>
                     <tr><th>Fee</th><td>@ready.FeeDrops.ToString("N0") drops</td></tr>
                     <tr><th>Arriving</th><td>@ready.ArrivingDrops.ToString("N0") drops</td></tr>

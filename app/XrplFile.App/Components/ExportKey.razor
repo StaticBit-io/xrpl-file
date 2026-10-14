@@ -12,7 +12,7 @@
 
 @if (_container is null)
 {
-    <h1 class="h3">Export key</h1>
+    <h1 class="xf-title">Export key</h1>
     <p>
         Exporting writes a portable backup file, protected by its own password &mdash; separate from
         the vault's master password. Anyone who has both the file (or the code below) and this
@@ -24,12 +24,14 @@
         <div class="alert alert-danger">@problem</div>
     }
 
-    <div class="mb-3">
-        <label class="form-label">Backup password</label>
-        <input type="password" class="form-control" @bind="_password" @bind:event="oninput" disabled="@_busy" />
-    </div>
+    <section class="xf-card">
+        <div class="mb-3">
+            <label class="form-label">Backup password</label>
+            <input type="password" class="form-control" @bind="_password" @bind:event="oninput" disabled="@_busy" />
+        </div>
 
-    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="CreateAsync">Create backup</button>
+        <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="CreateAsync">Create backup</button>
+    </section>
     <button type="button" class="btn btn-link" @onclick="BackAsync">Skip for now</button>
 }
 else

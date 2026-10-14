@@ -2,6 +2,7 @@
 @using XrplFile.App
 @inject UnlockModel Model
 @inject ShellModel Tabs
+@inject IJSRuntime JS
 
 @* One window, no router (design section 6). What renders is entirely the model's own Stage --
    this component switches on it but never sets it, and never composes a word of its own.
@@ -18,11 +19,13 @@
 
 @if (_failure is not null)
 {
-    <div class="container py-4">
-        <div class="alert alert-danger" role="alert">
-            <p>This application could not start.</p>
-            <p class="mb-0"><small>@_failure</small></p>
-        </div>
+    <div class="xf-vault">
+        <section class="xf-card">
+            <div class="alert alert-danger mb-0" role="alert">
+                <p>This application could not start.</p>
+                <p class="mb-0"><small>@_failure</small></p>
+            </div>
+        </section>
     </div>
 }
 else if (_ready)
@@ -42,64 +45,91 @@ else if (_ready)
             break;
 
         case UnlockStage.Unlocked:
-            <div class="d-flex justify-content-between align-items-center border-bottom px-3 py-2">
-                <div class="btn-group">
-                    <button type="button"
-                            class="btn btn-outline-primary @(Tabs.Tab == AppTab.Keys ? "active" : "")"
-                            @onclick="() => Tabs.Show(AppTab.Keys)">
-                        Keys
-                    </button>
-                    <button type="button"
-                            class="btn btn-outline-primary @(Tabs.Tab == AppTab.Publish ? "active" : "")"
-                            @onclick="() => Tabs.Show(AppTab.Publish)">
-                        Publish
-                    </button>
-                    <button type="button"
-                            class="btn btn-outline-primary @(Tabs.Tab == AppTab.Settings ? "active" : "")"
-                            @onclick="() => Tabs.Show(AppTab.Settings)">
-                        Settings
-                    </button>
-                    <button type="button"
-                            class="btn btn-outline-primary @(Tabs.Tab == AppTab.Accounts ? "active" : "")"
-                            @onclick="() => Tabs.Show(AppTab.Accounts)">
-                        Accounts
-                    </button>
-                    <button type="button"
-                            class="btn btn-outline-primary @(Tabs.Tab == AppTab.Read ? "active" : "")"
-                            @onclick="() => Tabs.Show(AppTab.Read)">
-                        Read
-                    </button>
-                </div>
-                <button type="button" class="btn btn-outline-secondary" @onclick="LockAsync">Lock</button>
-            </div>
+            <div class="xf-shell">
+                <header class="xf-topbar">
+                    <span class="xf-rail-mark" aria-hidden="true">@Mark</span>
+                    <button type="button" class="xf-icon-button" aria-label="Lock the vault" @onclick="LockAsync">@LockIcon</button>
+                </header>
 
-            @if (Tabs.Tab == AppTab.Keys)
-            {
-                <KeyList />
-            }
-            else if (Tabs.Tab == AppTab.Publish)
-            {
-                <Publish />
-            }
-            else if (Tabs.Tab == AppTab.Settings)
-            {
-                <Settings />
-            }
-            else if (Tabs.Tab == AppTab.Accounts)
-            {
-                <Accounts />
-            }
-            else if (Tabs.Tab == AppTab.Read)
-            {
-                <Read />
-            }
+                <nav class="xf-rail" aria-label="Main">
+                    <span class="xf-rail-mark" aria-hidden="true">@Mark</span>
+                    @foreach (AppTab tab in RailTabs)
+                    {
+                        <button type="button" class="xf-rail-item" aria-current="@(Tabs.Tab == tab ? "page" : null)"
+                                @onclick="() => Tabs.Show(tab)">
+                            @Icon(tab)<span>@tab</span>
+                        </button>
+                    }
+                    <span class="xf-rail-spacer"></span>
+                    <button type="button" class="xf-rail-item" aria-label="Lock the vault" @onclick="LockAsync">
+                        @LockIcon<span aria-hidden="true">Lock</span>
+                    </button>
+                </nav>
+
+                <main id="xf-content" class="xf-content" tabindex="-1" @ref="_content">
+                    @if (Tabs.Tab == AppTab.Keys)
+                    {
+                        <KeyList />
+                    }
+                    else if (Tabs.Tab == AppTab.Publish)
+                    {
+                        <Publish />
+                    }
+                    else if (Tabs.Tab == AppTab.History)
+                    {
+                        <History />
+                    }
+                    else if (Tabs.Tab == AppTab.Settings)
+                    {
+                        <Settings />
+                    }
+                    else if (Tabs.Tab == AppTab.Accounts)
+                    {
+                        <Accounts />
+                    }
+                    else if (Tabs.Tab == AppTab.Read)
+                    {
+                        <Read />
+                    }
+                </main>
+
+                <nav class="xf-tabbar" aria-label="Main">
+                    @foreach (AppTab tab in TabbarTabs)
+                    {
+                        <button type="button" class="xf-tab" aria-current="@(Tabs.Tab == tab ? "page" : null)"
+                                @onclick="() => Tabs.Show(tab)">
+                            @Icon(tab)<span>@tab</span>
+                        </button>
+                    }
+                    <button type="button" class="xf-tab" @ref="_moreButton"
+                            aria-expanded="@(Tabs.MoreOpen ? "true" : "false")" aria-controls="xf-more"
+                            aria-current="@(Tabs.IsMoreCurrent ? "page" : null)" @onclick="ToggleMore">
+                        @MoreIcon<span>More</span>
+                    </button>
+
+                    @if (Tabs.MoreOpen)
+                    {
+                        <div class="xf-more-backdrop" @onclick="CloseMoreAndReturnFocus"></div>
+                        <div id="xf-more" class="xf-more">
+                            <button type="button" class="xf-more-item" @ref="_firstMoreItem"
+                                    aria-current="@(Tabs.Tab == AppTab.Accounts ? "page" : null)"
+                                    @onclick="() => ChooseFromMore(AppTab.Accounts)">Accounts</button>
+                            <button type="button" class="xf-more-item"
+                                    aria-current="@(Tabs.Tab == AppTab.Settings ? "page" : null)"
+                                    @onclick="() => ChooseFromMore(AppTab.Settings)">Settings</button>
+                        </div>
+                    }
+                </nav>
+            </div>
             break;
     }
 }
 else
 {
-    <div class="container py-4">
-        <p>Loading&hellip;</p>
+    <div class="xf-vault">
+        <section class="xf-card">
+            <p class="xf-muted mb-0">Loading&hellip;</p>
+        </section>
     </div>
 }
 
@@ -122,6 +152,101 @@ else
     /// window then shows an empty page for the rest of its life with nothing said anywhere.
     /// </summary>
     private string? _failure;
+
+    private static readonly AppTab[] RailTabs = [AppTab.Publish, AppTab.Read, AppTab.History, AppTab.Keys, AppTab.Accounts, AppTab.Settings];
+    private static readonly AppTab[] TabbarTabs = [AppTab.Publish, AppTab.Read, AppTab.History, AppTab.Keys];
+
+    private ElementReference _moreButton;
+    private ElementReference _firstMoreItem;
+    private ElementReference _content;
+    private bool _focusFirstMoreItem;
+    private bool _focusMoreButton;
+    private bool _focusContent;
+    private bool _watchingWidth;
+    private DotNetObjectReference<Shell>? _self;
+
+    private static readonly RenderFragment Mark =
+        @<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z" stroke="#64CF95" stroke-width="2"/><path d="M14 3v4h4" stroke="#64CF95" stroke-width="2"/><circle cx="12" cy="15" r="2" fill="#EBAF8E"/></svg>;
+
+    private static readonly RenderFragment LockIcon =
+        @<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>;
+
+    private static readonly RenderFragment MoreIcon =
+        @<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>;
+
+    private static RenderFragment Icon(AppTab tab) => tab switch
+    {
+        AppTab.Publish => @<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 20h16"/></svg>,
+        AppTab.Read => @<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>,
+        AppTab.History => @<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>,
+        AppTab.Keys => @<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M17 6l3 3"/></svg>,
+        AppTab.Accounts => @<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><path d="M16 15h2"/></svg>,
+        _ => @<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>,
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_watchingWidth && _ready && Model.Stage == UnlockStage.Unlocked)
+        {
+            _watchingWidth = true;
+            _self = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("xfShell.watchWidth", _self);
+        }
+
+        if (_focusFirstMoreItem)
+        {
+            _focusFirstMoreItem = false;
+            await _firstMoreItem.FocusAsync();
+        }
+
+        if (_focusMoreButton)
+        {
+            _focusMoreButton = false;
+            await _moreButton.FocusAsync();
+        }
+
+        if (_focusContent)
+        {
+            _focusContent = false;
+            await _content.FocusAsync();
+        }
+    }
+
+    /// <summary>
+    /// Choosing Accounts or Settings removes the panel and the button that had focus with it; focus
+    /// goes to the screen that was just opened rather than falling to the page body.
+    /// </summary>
+    private void ChooseFromMore(AppTab tab)
+    {
+        Tabs.Show(tab);
+        _focusContent = true;
+    }
+
+    /// <summary>Called by shell.js when the window widens past the phone layout, where More has no place.</summary>
+    [JSInvokable]
+    public void OnWideLayout() => Tabs.CloseMore();
+
+    private void ToggleMore()
+    {
+        Tabs.ToggleMore();
+        _focusFirstMoreItem = Tabs.MoreOpen;
+    }
+
+    private void CloseMoreAndReturnFocus()
+    {
+        Tabs.CloseMore();
+        _focusMoreButton = true;
+    }
+
+    /// <summary>Called by shell.js on Escape anywhere in the document while the More panel is in the DOM.</summary>
+    [JSInvokable]
+    public void OnEscape()
+    {
+        if (Tabs.MoreOpen)
+        {
+            CloseMoreAndReturnFocus();
+        }
+    }
 
     protected override void OnInitialized() => Tabs.Changed += OnTabChanged;
 
@@ -194,6 +319,7 @@ else
         // Set before the timer is disposed, for the reason RevealSeed.razor's own Dispose explains.
         _disposed = true;
         Tabs.Changed -= OnTabChanged;
+        _self?.Dispose();
         _lockPollTimer?.Dispose();
         _cts.Cancel();
         _cts.Dispose();
