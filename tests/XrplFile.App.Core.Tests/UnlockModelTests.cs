@@ -130,6 +130,54 @@ public class UnlockModelTests : VaultHarness
         Assert.Equal(UnlockStage.Unlocked, model.Stage);
         Assert.False(model.LastMessage!.CountsAsAFailedAttempt);
     }
+
+    [Fact]
+    public async Task Locking_forgets_the_message_of_the_unlock_before_it()
+    {
+        // The unlock screen binds to LastMessage. Kept across a lock, it greeted the person with
+        // "Vault unlocked" before they had typed anything.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        UnlockModel model = new(NewVault());
+        await model.CreateAsync(Password("passphrase"), token);
+        await model.LockAsync();
+        await model.UnlockAsync(Password("passphrase"), token);
+        Assert.NotNull(model.LastMessage);
+
+        await model.LockAsync();
+
+        Assert.Null(model.LastMessage);
+    }
+
+    [Fact]
+    public async Task A_lock_noticed_from_somewhere_else_forgets_the_message_too()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        UnlockModel model = new(vault);
+        await model.CreateAsync(Password("passphrase"), token);
+        await model.LockAsync();
+        await model.UnlockAsync(Password("passphrase"), token);
+        Assert.NotNull(model.LastMessage);
+
+        await vault.LockAsync();
+
+        Assert.True(model.NoticeLock());
+        Assert.Null(model.LastMessage);
+    }
+
+    [Fact]
+    public async Task Noticing_nothing_keeps_the_message_of_a_failed_attempt()
+    {
+        // A poll on a vault that never opened must not wipe "Wrong password" off the screen.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        UnlockModel model = new(NewVault());
+        await model.CreateAsync(Password("right passphrase"), token);
+        await model.LockAsync();
+        await model.UnlockAsync(Password("wrong passphrase"), token);
+
+        Assert.False(model.NoticeLock());
+        Assert.True(model.LastMessage!.CountsAsAFailedAttempt);
+    }
 }
 
 public class UnlockModelDeviceUnlockTests : VaultHarness
