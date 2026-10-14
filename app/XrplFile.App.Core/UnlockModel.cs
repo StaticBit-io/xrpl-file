@@ -226,11 +226,15 @@ public sealed class UnlockModel(IKeyVault vault, bool vaultPathIsDefault = true)
         return result;
     }
 
-    /// <summary>Locks the vault and returns the screen to <see cref="UnlockStage.Locked"/>.</summary>
+    /// <summary>
+    /// Locks the vault and returns the screen to <see cref="UnlockStage.Locked"/>, with no
+    /// <see cref="LastMessage"/>: the attempt it described belongs to the session that just ended.
+    /// </summary>
     public async Task LockAsync()
     {
         await vault.LockAsync().ConfigureAwait(false);
         Stage = UnlockStage.Locked;
+        LastMessage = null;
     }
 
     /// <summary>
@@ -253,13 +257,14 @@ public sealed class UnlockModel(IKeyVault vault, bool vaultPathIsDefault = true)
     /// count as activity. <see cref="RefreshAsync"/> on a locked vault reads the file twice — once
     /// for <see cref="IKeyVault.ExistsAsync"/> and once for <see cref="IKeyVault.HasDeviceWrapAsync"/>
     /// — which is a file read every second, forever, on the unlock screen. This reads one property
-    /// and writes one field. <c>TouchingVault</c> treats a property read as a read and not as use,
+    /// and writes two fields. <c>TouchingVault</c> treats a property read as a read and not as use,
     /// so polling this cannot hold the data key open: an idle vault still locks under a screen that
     /// is watching for it.
     /// </para>
     /// <para>
     /// It only ever moves <see cref="Stage"/> from <see cref="UnlockStage.Unlocked"/> to
-    /// <see cref="UnlockStage.Locked"/>. It never unlocks, never opens a file, and never touches
+    /// <see cref="UnlockStage.Locked"/>, clearing <see cref="LastMessage"/> as
+    /// <see cref="LockAsync"/> does. It never unlocks, never opens a file, and never touches
     /// <see cref="DeviceUnlockOffered"/> — which needs a read of the record, and is therefore left
     /// for the one <see cref="RefreshAsync"/> a caller does after this returns
     /// <see langword="true"/>, rather than being paid for on every tick.
@@ -278,6 +283,7 @@ public sealed class UnlockModel(IKeyVault vault, bool vaultPathIsDefault = true)
         }
 
         Stage = UnlockStage.Locked;
+        LastMessage = null;
         return true;
     }
 

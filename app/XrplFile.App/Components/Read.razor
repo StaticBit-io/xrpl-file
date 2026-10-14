@@ -110,8 +110,8 @@ else
 
         <section class="xf-card">
             <div class="mb-3">
-                <label class="form-label">Link</label>
-                <input class="form-control xf-mono" @bind="Model.Link" @bind:event="oninput" />
+                <label for="read-link" class="form-label">Link</label>
+                <input id="read-link" class="form-control xf-mono" @bind="Model.Link" @bind:event="oninput" />
             </div>
 
             <button type="button" class="btn btn-outline-primary" disabled="@Model.LookingUp" @onclick="LookUpAsync">
