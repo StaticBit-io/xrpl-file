@@ -75,8 +75,24 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         if (!Estimate.BalanceCovers)
         {
             Message =
-                $"This publication needs {Estimate.RequiredDrops:N0} drops and the account can spend "
-                + $"{Estimate.SpendableDrops:N0}. Fund it, or publish a smaller file.";
+                $"This publication needs {XrpAmount.Format(Estimate.RequiredDrops)} and the account can spend "
+                + $"{XrpAmount.Format(Estimate.SpendableDrops)}. {ReserveSentence(Estimate)}"
+                + "Fund it, or publish a smaller file.";
         }
+    }
+
+    /// <summary>
+    /// What part of the requirement is the ticket reserve, which the ledger gives back as tickets are
+    /// used up — so a person reading "needs 51 XRP" learns that most of it is not spent. Empty when
+    /// the estimate holds no ticket reserve, so the sentence never describes money that is not there.
+    /// </summary>
+    private static string ReserveSentence(PublicationEstimate estimate)
+    {
+        if (estimate.PeakReserveDrops <= 0) return string.Empty;
+
+        string share = estimate.PeakReserveDrops * 2 > estimate.RequiredDrops ? "Most" : "Some";
+
+        return $"{share} of it is reserve that comes back as the publication finishes: "
+            + $"{XrpAmount.Format(estimate.PeakReserveDrops)} for tickets. ";
     }
 }

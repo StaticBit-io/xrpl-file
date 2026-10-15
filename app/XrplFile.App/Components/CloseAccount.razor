@@ -49,13 +49,13 @@ else if (Model.Closed is { } closed)
 {
     <div class="alert alert-success">
         <p>
-            Account closed. <strong>@closed.ArrivedDrops.ToString("N0") drops</strong> was sent to
+            Account closed. <strong>@XrpAmount.Format(closed.ArrivedDrops)</strong> was sent to
             <span class="user-select-all"><span class="xf-mono">@closed.Destination</span></span>.
         </p>
         <p>Transaction hash: <code class="user-select-all xf-mono">@closed.TxHash</code></p>
     </div>
 
-    <button type="button" class="btn btn-link" disabled="@_busy" @onclick="BackAsync">Back to accounts</button>
+    <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="BackAsync"><BackIcon /> Back to accounts</button>
 }
 else
 {
@@ -68,7 +68,7 @@ else
             <span class="user-select-all"><span class="xf-mono">@accountAddress</span></span>
             @if (Model.Preview is { } holding)
             {
-                <span> (currently holds @holding.BalanceDrops.ToString("N0") drops)</span>
+                <span> (currently holds @XrpAmount.Format(holding.BalanceDrops))</span>
             }
         </div>
     }
@@ -112,12 +112,12 @@ else
             <p>
                 This will send everything this account holds to
                 <strong class="user-select-all"><span class="xf-mono">@Model.Destination</span></strong>, which currently holds
-                @Model.DestinationBalanceDrops.ToString("N0") drops.
+                @XrpAmount.Format(Model.DestinationBalanceDrops).
             </p>
             <table class="table mb-2 xf-kv-table">
                 <tbody>
-                    <tr><th>Fee</th><td>@ready.FeeDrops.ToString("N0") drops</td></tr>
-                    <tr><th>Arriving</th><td>@ready.ArrivingDrops.ToString("N0") drops</td></tr>
+                    <tr><th>Fee</th><td>@XrpAmount.Format(ready.FeeDrops)</td></tr>
+                    <tr><th>Arriving</th><td>@XrpAmount.Format(ready.ArrivingDrops)</td></tr>
                 </tbody>
             </table>
             <p><strong>The account will cease to exist once this is sent. This cannot be undone.</strong></p>
@@ -147,7 +147,7 @@ else
     }
 
     <div class="mt-3">
-        <button type="button" class="btn btn-link" disabled="@_busy" @onclick="BackAsync">Back to accounts</button>
+        <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="BackAsync"><BackIcon /> Back to accounts</button>
     </div>
 }
 

@@ -59,18 +59,28 @@ else
         <p class="mt-3">
             @if (Model.AccountExists)
             {
-                <span>Balance: @Model.BalanceDrops.ToString("N0") drops</span>
+                <span>Balance: @XrpAmount.Format(Model.BalanceDrops)</span>
             }
             else
             {
                 <span class="text-muted">Not funded yet.</span>
             }
         </p>
+
+        @if (!Model.AccountExists)
+        {
+            <p class="xf-muted small">
+                This screen checks the ledger again every @((int)FundingModel.PollInterval.TotalSeconds) seconds.
+            </p>
+            <button type="button" class="btn btn-outline-secondary" disabled="@(_checking || Model.IsRefreshing)" @onclick="CheckNowAsync">
+                Check now
+            </button>
+        }
     }
 }
 
 <div class="mt-3">
-    <button type="button" class="btn btn-link" @onclick="BackAsync">Back to accounts</button>
+    <button type="button" class="btn btn-outline-secondary" @onclick="BackAsync"><BackIcon /> Back to accounts</button>
 </div>
 
 @code {
@@ -84,6 +94,8 @@ else
     private ElementReference _qrCanvas;
     private bool[][]? _pendingMatrix;
     private bool _copying;
+    private bool _checking;
+    private bool _disposed;
 
     /// <summary>
     /// Whether Model's data is actually resolved for THIS component's own Reference, read live off
@@ -106,6 +118,59 @@ else
         await Model.RefreshAsync(_cts.Token);
 
         _pendingMatrix = Model.QrPayload is { } payload ? QrMatrix.Build(payload) : null;
+
+        // Not awaited: the loop runs for as long as the account is missing, and rendering must not wait
+        // on it. It ends on its own when the account exists or this component is disposed.
+        _ = PollAsync(_cts.Token);
+    }
+
+    private async Task PollAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Model.PollAsync(NotifyChangedAsync, cancellationToken);
+
+            // Whoever else updated the model while the loop waited -- the Check now button -- has
+            // drawn its own answer; this covers the loop ending on an account found some other way.
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                await NotifyChangedAsync();
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private Task NotifyChangedAsync() =>
+        InvokeAsync(() =>
+        {
+            if (!_disposed)
+            {
+                StateHasChanged();
+            }
+        });
+
+    private async Task CheckNowAsync()
+    {
+        if (_checking)
+        {
+            return;
+        }
+
+        _checking = true;
+        StateHasChanged();
+        try
+        {
+            await Model.RefreshAsync(_cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            _checking = false;
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -140,6 +205,7 @@ else
 
     public void Dispose()
     {
+        _disposed = true;
         _cts.Cancel();
         _cts.Dispose();
     }

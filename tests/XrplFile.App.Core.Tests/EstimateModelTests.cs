@@ -42,6 +42,43 @@ public sealed class EstimateModelTests : IDisposable
     }
 
     [Fact]
+    public async Task The_shortfall_is_stated_in_XRP_and_says_how_much_of_it_comes_back()
+    {
+        _connections.Ledger.Balances["rWriter"] = 1_000_000;
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(Request(size: 100_000), TestContext.Current.CancellationToken);
+
+        PublicationEstimate estimate = model.Estimate!;
+        Assert.True(estimate.PeakReserveDrops * 2 > estimate.RequiredDrops);
+        Assert.Equal(
+            $"This publication needs {XrpAmount.Format(estimate.RequiredDrops)} and the account can spend "
+            + $"{XrpAmount.Format(estimate.SpendableDrops)}. Most of it is reserve that comes back as the publication "
+            + $"finishes: {XrpAmount.Format(estimate.PeakReserveDrops)} for tickets. Fund it, or publish a smaller file.",
+            model.Message);
+        Assert.DoesNotContain("drops", model.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_shortfall_that_is_mostly_fees_does_not_claim_the_reserve_is_most_of_it()
+    {
+        // A node quoting a high fee: the worst-case fee outweighs the ticket reserve.
+        _connections.Ledger.Fees = new NetworkFees(500_000, 1_000_000, 200_000);
+        _connections.Ledger.Balances["rWriter"] = 1_000_000;
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(Request(size: 4096), TestContext.Current.CancellationToken);
+
+        PublicationEstimate estimate = model.Estimate!;
+        Assert.True(estimate.PeakReserveDrops > 0);
+        Assert.True(estimate.PeakReserveDrops * 2 <= estimate.RequiredDrops);
+        Assert.DoesNotContain("Most of it", model.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            $"Some of it is reserve that comes back as the publication finishes: {XrpAmount.Format(estimate.PeakReserveDrops)} for tickets.",
+            model.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_node_that_does_not_answer_says_so_in_its_own_words()
     {
         _connections.ConnectThrows = new XrplFileException(XrplFileError.NodeUnreachable, "no answer");

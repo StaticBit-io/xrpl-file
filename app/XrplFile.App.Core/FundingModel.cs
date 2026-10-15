@@ -9,6 +9,16 @@ namespace XrplFile.App.Core;
 /// </summary>
 public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections, IClipboardService clipboard)
 {
+    /// <summary>
+    /// How long <see cref="PollAsync"/> waits between two lookups. Every lookup opens a new WebSocket
+    /// and public nodes rate-limit per address, so this is a floor to stay above, not a default to
+    /// shorten for responsiveness: the "Check now" button is the impatient person's way in.
+    /// </summary>
+    public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(10);
+
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private int _refreshesPending;
+
     public string? Address { get; private set; }
 
     /// <summary>
@@ -36,6 +46,19 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
     /// this property to the reference it asked for, not read <see cref="Address"/> on faith.
     /// </summary>
     public string? CurrentReference { get; private set; }
+
+    /// <summary>
+    /// Whether a lookup is running or queued behind one. The screen disables "Check now" on it, and
+    /// <see cref="RefreshAsync"/> itself never runs two at once either way.
+    /// </summary>
+    public bool IsRefreshing => Volatile.Read(ref _refreshesPending) > 0;
+
+    /// <summary>
+    /// Whether the screen should keep asking the node: a selection that resolved and whose account
+    /// is not on the ledger yet. Once the account exists nothing changes by itself that this screen
+    /// shows, so polling stops there.
+    /// </summary>
+    public bool ShouldPoll => CurrentReference is not null && !AccountExists;
 
     /// <summary>
     /// Resolves <paramref name="reference"/> before touching anything shown, so a failed or empty
@@ -87,6 +110,62 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
     /// explanation the failed select just set.
     /// </summary>
     public async Task RefreshAsync(CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _refreshesPending);
+        try
+        {
+            // One lookup at a time: a poll tick and a "Check now" click landing together would
+            // otherwise open two sockets for one answer. The second waits and then reads the
+            // selection as it is by then, not as it was when it was asked for.
+            await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await RefreshCoreAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _refreshGate.Release();
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _refreshesPending);
+        }
+    }
+
+    /// <summary>
+    /// Asks the node again every <see cref="PollInterval"/> for as long as <see cref="ShouldPoll"/>
+    /// holds, and returns once the account exists, the selection stops resolving, or
+    /// <paramref name="cancellationToken"/> is cancelled. <paramref name="changed"/> runs before and
+    /// after every lookup so a screen can show that one is in flight. <paramref name="delay"/>
+    /// replaces <see cref="Task.Delay(TimeSpan, CancellationToken)"/> in tests.
+    /// </summary>
+    public async Task PollAsync(
+        Func<Task>? changed, CancellationToken cancellationToken, Func<TimeSpan, CancellationToken, Task>? delay = null)
+    {
+        delay ??= Task.Delay;
+
+        try
+        {
+            while (ShouldPoll)
+            {
+                await delay(PollInterval, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // A "Check now" during the wait may have found the account: no lookup is left to make.
+                if (!ShouldPoll) break;
+
+                if (changed is not null) await changed().ConfigureAwait(false);
+                await RefreshAsync(cancellationToken).ConfigureAwait(false);
+                if (changed is not null) await changed().ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task RefreshCoreAsync(CancellationToken cancellationToken)
     {
         if (CurrentReference is null || Address is null || Network is null) return;
 

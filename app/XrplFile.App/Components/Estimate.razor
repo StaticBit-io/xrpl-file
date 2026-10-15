@@ -24,10 +24,31 @@
                     <tr><th>Chunks</th><td>@estimate.Chunks.ToString("N0")</td></tr>
                     <tr><th>Transactions</th><td>@estimate.Transactions.ToString("N0")</td></tr>
                     <tr><th>Fee per transaction</th><td>@estimate.FeeDropsPerTransaction.ToString("N0") drops</td></tr>
-                    <tr><th>Total fee</th><td>@estimate.FeeDropsTotal.ToString("N0") drops</td></tr>
-                    <tr><th>Required</th><td>@estimate.RequiredDrops.ToString("N0") drops</td></tr>
-                    <tr><th>Account balance</th><td>@estimate.BalanceDrops.ToString("N0") drops</td></tr>
-                    <tr><th>Spendable</th><td>@estimate.SpendableDrops.ToString("N0") drops</td></tr>
+                </tbody>
+            </table>
+
+            <h2 class="xf-section-title mt-4">Spent</h2>
+            <table class="table xf-kv-table">
+                <tbody>
+                    <tr><th>Fees</th><td>@XrpAmount.Format(estimate.FeeDropsTotal)</td></tr>
+                    <tr><th>Fees if every transaction is retried</th><td>@XrpAmount.Format(estimate.FeeDropsWorstCase)</td></tr>
+                </tbody>
+            </table>
+
+            <h2 class="xf-section-title mt-4">Held while publishing, returned afterwards</h2>
+            <table class="table xf-kv-table">
+                <tbody>
+                    <tr><th>Ticket reserve</th><td>@XrpAmount.Format(estimate.PeakReserveDrops)</td></tr>
+                    <tr><th>Account reserve</th><td>@XrpAmount.Format(estimate.BaseReserveDrops)</td></tr>
+                </tbody>
+            </table>
+            <p class="xf-muted small mb-0">The account reserve stays on the account until the account is closed.</p>
+
+            <table class="table xf-kv-table mt-4">
+                <tbody>
+                    <tr><th>Required</th><td>@XrpAmount.Format(estimate.RequiredDrops)</td></tr>
+                    <tr><th>Account balance</th><td>@XrpAmount.Format(estimate.BalanceDrops)</td></tr>
+                    <tr><th>Spendable</th><td>@XrpAmount.Format(estimate.SpendableDrops)</td></tr>
                 </tbody>
             </table>
 

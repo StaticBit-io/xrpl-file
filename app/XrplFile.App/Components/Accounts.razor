@@ -1,6 +1,5 @@
 @implements IDisposable
 @inject AccountsModel Model
-@inject FundingModel FundingModel
 
 @* Design 4.1: the throwaway-account list, and the three screens it opens into. Every word on a row
    comes from AccountRow -- label, address, network and, from its own Stage, exactly one of five
@@ -16,16 +15,13 @@
    list slower than useful.
 
    The timer is copied from Shell.razor and Publish.razor -- same Timer / CancellationTokenSource /
-   _disposed shape -- but its job here is heavier than either, not narrower: Shell.razor's own poll
-   reads one boolean the vault already holds in memory, and Publish.razor's only redraws against a
-   snapshot another task already produced, while this one's tick -- while the funding sub-screen is
-   showing -- opens a connection, asks account_info, and closes it again (FundingModel.RefreshAsync).
-   Money may take an hour to arrive (ThrowawayAccount.AwaitFundingAsync's own remarks), and doing a
-   full handshake once a second for that long reads as connection flooding to a public node and is a
-   plausible way to be rate-limited off it while somebody is just waiting for their transfer to land.
-   The interval is five seconds rather than Shell's and Publish's one for exactly that reason -- a
-   balance update lagging by a few seconds costs nothing here, unlike a lock check or a progress
-   redraw the other two screens exist for. *@
+   _disposed shape -- and, like Publish.razor's, only redraws: the countdown on a row ("about 14
+   minutes") is computed from the clock each time it renders. Asking the node again for the funding
+   sub-screen's balance is not done here: Funding.razor polls for itself every ten seconds and redraws
+   itself when the answer lands. This tick used to refresh FundingModel as well, but it redrew only
+   this component, and Funding's parameters never change so Blazor did not re-render it -- a balance
+   that arrived stayed invisible. The interval is five seconds rather than one because a countdown
+   in minutes gains nothing from a faster redraw. *@
 
 <div class="xf-page">
     @switch (_view)
@@ -87,7 +83,7 @@
                                                    by the same AccountsModel.RefreshFromLedgerAsync branch, so they are
                                                    just as guaranteed here -- this is design 4.1's third state, "an
                                                    account that can be closed from ledger N -- with the countdown". *@
-                                                <span>@row.BalanceDrops!.Value.ToString("N0") drops</span>
+                                                <span>@XrpAmount.Format(row.BalanceDrops!.Value)</span>
                                                 <br />
                                                 <span class="text-muted">
                                                     Closable from ledger @row.DeletableFromLedger!.Value.ToString("N0")
@@ -104,7 +100,7 @@
                                                 @if (row.Closure is { } closure)
                                                 {
                                                     <span>
-                                                        Closed &mdash; sent @closure.ArrivedDrops.ToString("N0") drops to
+                                                        Closed &mdash; sent @XrpAmount.Format(closure.ArrivedDrops) to
                                                         <span class="xf-mono">@closure.Destination</span>
                                                     </span>
                                                 }
@@ -162,15 +158,13 @@
         Close,
     }
 
-    /// <summary>How often this screen forces a render, and re-asks the node for the funding
-    /// sub-screen's balance while somebody may be waiting on money to arrive. See the remarks at the
-    /// top of this file for why this differs from Shell.razor's and Publish.razor's own interval.</summary>
+    /// <summary>How often this screen forces a render so the countdown on its rows moves. See the
+    /// remarks at the top of this file for why this differs from Shell.razor's and Publish.razor's own interval.</summary>
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
 
     private readonly CancellationTokenSource _cts = new();
     private Timer? _pollTimer;
     private bool _disposed;
-    private bool _fundingPollInFlight;
     private SubView _view = SubView.List;
     private string? _activeReference;
 
@@ -188,46 +182,8 @@
         // Same disposal discipline as Shell.razor's own poll: Timer.Dispose does not wait for a
         // callback already running on a thread-pool thread, so _disposed is checked inside the
         // delegate the renderer's own dispatcher runs, which orders that check against Dispose().
-        _ = InvokeAsync(async () =>
+        _ = InvokeAsync(() =>
         {
-            if (_disposed)
-            {
-                return;
-            }
-
-            // FundingModel.RefreshAsync opens a ledger connection and can outlast one second
-            // against a slow node; without this guard, a tick that fires while the previous one is
-            // still awaiting would start a second connection racing the first one's writes to the
-            // same fields, and a third would stack on top of that. Only one refresh is ever allowed
-            // in flight -- a tick that finds one already running simply redraws this render's own
-            // state and waits for the next.
-            //
-            // FundingModel.CurrentReference == _activeReference guards a second race: a tick started
-            // while THIS account's funding screen was open can still be in flight after somebody has
-            // since backed out and opened a DIFFERENT account's funding screen. FundingModel itself
-            // now refuses to apply a stale answer once its own CurrentReference has moved on (see its
-            // own remarks), so this check is not what keeps the fields correct -- it is what keeps
-            // this screen from starting a refresh for an account it is not even showing any more.
-            if (_view == SubView.Funding && !_fundingPollInFlight
-                && string.Equals(FundingModel.CurrentReference, _activeReference, StringComparison.Ordinal))
-            {
-                _fundingPollInFlight = true;
-                try
-                {
-                    await FundingModel.RefreshAsync(_cts.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    // Dispose() cancels _cts while this tick may be mid-await -- the ordinary way
-                    // this screen is ever left, on this tab above all, not a fault to surface.
-                    return;
-                }
-                finally
-                {
-                    _fundingPollInFlight = false;
-                }
-            }
-
             if (!_disposed)
             {
                 StateHasChanged();
