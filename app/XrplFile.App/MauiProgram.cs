@@ -219,6 +219,7 @@ public static class MauiProgram
         services.AddSingleton<IConnectionFactory>(
             provider => new XrplConnectionFactory(provider.GetRequiredService<INodeSettingsStore>()));
         services.AddSingleton<NodeSettingsModel>();
+        services.AddSingleton<NetworkChoices>();
 
         // Run state and the publications file are in the application's data directory, never beside
         // the vault: the vault is portable by design (E5) and this is not.

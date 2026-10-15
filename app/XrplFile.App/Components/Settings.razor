@@ -83,17 +83,40 @@
         <section class="xf-card">
             <h2 class="xf-section-title">Node URLs</h2>
             <p>
-                Which rippled node each network publishes to and reads from. Leave a box empty to use
-                the built-in endpoint for that network; a network this application does not already
-                know &mdash; a NetworkID, or a private stand &mdash; needs a URL here before anything
-                can be published to it.
+                Which rippled node each network publishes to and reads from. Pick one of the listed
+                servers, or &ldquo;Built-in&rdquo; to use the endpoint this application ships with for
+                that network; &ldquo;Custom URL&rdquo; takes any <code>ws://</code> or
+                <code>wss://</code> address. A network this application does not already know
+                &mdash; a NetworkID, or a private stand &mdash; needs a URL here before anything can
+                be published to it.
             </p>
             @foreach (NodeSettingRow row in NodeSettings.Rows)
             {
                 <div class="mb-2">
-                    <label class="form-label">@row.Network</label>
-                    <input class="form-control" placeholder="(built-in endpoint)"
-                           value="@NodeEdit(row.Network)" @oninput="e => SetNodeEdit(row.Network, (string)e.Value!)" />
+                    @if (KnownServers.IsKnown(row.Network))
+                    {
+                        string selection = ServerSelection(row.Network);
+                        <label for="node-server-@row.Network" class="form-label">@row.Network</label>
+                        <select id="node-server-@row.Network" class="form-select" value="@selection"
+                                @onchange="e => SetServer(row.Network, (string)e.Value!)">
+                            @foreach (ServerOption option in KnownServers.Options(row.Network))
+                            {
+                                <option value="@option.Value" selected="@(option.Value == selection)">@option.Label</option>
+                            }
+                        </select>
+                        @if (selection == KnownServers.CustomValue)
+                        {
+                            <input id="node-custom-@row.Network" class="form-control mt-2" placeholder="wss://…"
+                                   aria-label="Custom URL for @row.Network"
+                                   value="@NodeEdit(row.Network)" @oninput="e => SetNodeEdit(row.Network, (string)e.Value!)" />
+                        }
+                    }
+                    else
+                    {
+                        <label for="node-url-@row.Network" class="form-label">@row.Network</label>
+                        <input id="node-url-@row.Network" class="form-control" placeholder="wss://…"
+                               value="@NodeEdit(row.Network)" @oninput="e => SetNodeEdit(row.Network, (string)e.Value!)" />
+                    }
                 </div>
             }
             <button type="button" class="btn btn-outline-primary mt-2" @onclick="SaveNodes">
@@ -134,6 +157,7 @@
 @code {
     private readonly CancellationTokenSource _cts = new();
     private readonly Dictionary<string, string> _nodeEdits = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _customRows = new(StringComparer.Ordinal);
     private bool _showChangePassword;
     private bool _deviceUnlockEnabled;
     private bool _busy;
@@ -158,13 +182,43 @@
     private void RestartNodeEdits()
     {
         _nodeEdits.Clear();
+        _customRows.Clear();
         foreach (NodeSettingRow row in NodeSettings.Rows)
         {
             _nodeEdits[row.Network] = row.Url;
+            if (KnownServers.IsKnown(row.Network) && KnownServers.Selection(row.Network, row.Url) == KnownServers.CustomValue)
+            {
+                _customRows.Add(row.Network);
+            }
         }
     }
 
     private string NodeEdit(string network) => _nodeEdits.TryGetValue(network, out string? value) ? value : string.Empty;
+
+    // A row stays on "Custom URL" while its box is open even when the box is empty or holds a listed
+    // server's address, so choosing it does not snap straight back to the entry it was chosen from.
+    private string ServerSelection(string network) =>
+        _customRows.Contains(network) ? KnownServers.CustomValue : KnownServers.Selection(network, NodeEdit(network));
+
+    private void SetServer(string network, string value)
+    {
+        if (value == KnownServers.CustomValue)
+        {
+            if (KnownServers.Selection(network, NodeEdit(network)) != KnownServers.CustomValue)
+            {
+                _nodeEdits[network] = string.Empty;
+            }
+
+            _customRows.Add(network);
+        }
+        else
+        {
+            _customRows.Remove(network);
+            _nodeEdits[network] = value;
+        }
+
+        _nodesSaved = false;
+    }
 
     private void SetNodeEdit(string network, string value)
     {

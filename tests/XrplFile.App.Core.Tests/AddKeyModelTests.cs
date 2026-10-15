@@ -585,4 +585,122 @@ public class AddKeyModelTests : VaultHarness
         Assert.Null(model.Preview);
         Assert.NotNull(model.Problem);
     }
+
+    // The network a key is stored under is what a link names and what Endpoints.For resolves, so a
+    // value that differs only in case or padding must reach the vault in its canonical form, and one
+    // no link can name must not reach it at all -- for each of the three ways in.
+    private async Task<string> StoredNetworkAsync(Func<AddKeyModel, bool> prepare)
+    {
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        AddKeyModel model = new(vault);
+
+        Assert.True(prepare(model));
+        await model.StoreAsync(TestContext.Current.CancellationToken);
+
+        return Assert.Single(await vault.ListAsync(TestContext.Current.CancellationToken)).Network;
+    }
+
+    private static AddKeyModel OpenedContainerModel(KeyVault vault)
+    {
+        byte[] container = BackupContainer.Pack(
+            PayloadOf(EntryFor(XrplWallet.Generate(), "a key")), "p", iterations: 1000);
+        AddKeyModel model = new(vault);
+        model.OpenContainer(container, "p");
+        return model;
+    }
+
+    [Theory]
+    [InlineData("TESTNET", "testnet")]
+    [InlineData(" testnet ", "testnet")]
+    [InlineData("Devnet", "devnet")]
+    [InlineData("1", "1")]
+    public async Task Generate_stores_the_canonical_network(string typed, string expected) =>
+        Assert.Equal(expected, await StoredNetworkAsync(model => model.Generate("mine", typed)));
+
+    [Theory]
+    [InlineData("TESTNET", "testnet")]
+    [InlineData(" testnet ", "testnet")]
+    [InlineData("1", "1")]
+    public async Task Import_stores_the_canonical_network(string typed, string expected) =>
+        Assert.Equal(
+            expected,
+            await StoredNetworkAsync(model => model.Import(new AddKeyDraft("mine", typed, XrplWallet.Generate().Seed, null))));
+
+    [Theory]
+    [InlineData("TESTNET", "testnet")]
+    [InlineData(" testnet ", "testnet")]
+    [InlineData("1", "1")]
+    public async Task SelectContainerKey_stores_the_canonical_network(string typed, string expected)
+    {
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        AddKeyModel model = OpenedContainerModel(vault);
+
+        Assert.True(model.SelectContainerKey(0, "mine", typed));
+        await model.StoreAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected, Assert.Single(await vault.ListAsync(TestContext.Current.CancellationToken)).Network);
+    }
+
+    [Theory]
+    [InlineData("foo")]
+    [InlineData("main net")]
+    [InlineData("-1")]
+    public async Task Generate_refuses_a_network_no_link_can_name_and_stores_nothing(string typed)
+    {
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        AddKeyModel model = new(vault);
+
+        Assert.False(model.Generate("mine", typed));
+
+        Assert.Null(model.Preview);
+        Assert.Contains($"'{typed}'", model.Problem);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => model.StoreAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(await vault.ListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData("foo")]
+    [InlineData("main net")]
+    public async Task Import_refuses_a_network_no_link_can_name_and_stores_nothing(string typed)
+    {
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        AddKeyModel model = new(vault);
+
+        Assert.False(model.Import(new AddKeyDraft("mine", typed, XrplWallet.Generate().Seed, null)));
+
+        Assert.Null(model.Preview);
+        Assert.Contains($"'{typed}'", model.Problem);
+        Assert.Empty(await vault.ListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData("foo")]
+    [InlineData("main net")]
+    public async Task SelectContainerKey_refuses_a_network_no_link_can_name_and_stores_nothing(string typed)
+    {
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
+        AddKeyModel model = OpenedContainerModel(vault);
+
+        Assert.False(model.SelectContainerKey(0, "mine", typed));
+
+        Assert.Null(model.Preview);
+        Assert.Contains($"'{typed}'", model.Problem);
+        Assert.Empty(await vault.ListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public void A_blank_network_still_asks_to_choose_one()
+    {
+        AddKeyModel model = new(NewVault());
+
+        Assert.False(model.Generate("mine", ""));
+
+        Assert.Equal("Choose a network.", model.Problem);
+    }
 }

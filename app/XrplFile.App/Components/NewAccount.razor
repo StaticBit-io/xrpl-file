@@ -1,5 +1,6 @@
 @implements IDisposable
 @inject NewAccountModel Model
+@inject NetworkChoices Choices
 
 @* Design 4.1: generating a throwaway key, not an account -- NewAccountModel's own remarks are
    explicit that nothing is on the ledger until somebody funds the address this produces, and this
@@ -26,8 +27,8 @@
     </div>
 
     <div class="mb-3">
-        <label class="form-label">Network</label>
-        <input class="form-control" @bind="Model.Network" @bind:event="oninput" disabled="@_busy" />
+        <label for="new-account-network" class="form-label">Network</label>
+        <NetworkSelect Id="new-account-network" @bind-Value="Model.Network" Disabled="_busy" />
     </div>
 
     <button type="button" class="btn btn-primary" disabled="@(!Model.CanCreate || _busy)" @onclick="CreateAsync">
@@ -42,6 +43,8 @@
 
     private readonly CancellationTokenSource _cts = new();
     private bool _busy;
+
+    protected override void OnInitialized() => Choices.Refresh();
 
     private async Task CreateAsync()
     {

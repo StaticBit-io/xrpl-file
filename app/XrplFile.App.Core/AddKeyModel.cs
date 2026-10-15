@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 using Xrpl.AddressCodec;
 using Xrpl.Wallet;
 
@@ -125,13 +127,13 @@ public sealed class AddKeyModel(IKeyVault vault)
         Preview = null;
         _pending = null;
 
-        if (!ValidateLabelAndNetwork(label, network))
+        if (!ValidateLabelAndNetwork(label, network, out string? canonicalNetwork))
         {
             return false;
         }
 
         XrplWallet wallet = XrplWallet.Generate();
-        Prepare(VaultEntryKind.Generated, label, network, wallet.ClassicAddress, wallet.Seed, XrplWallet.Ed25519);
+        Prepare(VaultEntryKind.Generated, label, canonicalNetwork, wallet.ClassicAddress, wallet.Seed, XrplWallet.Ed25519);
         return true;
     }
 
@@ -164,7 +166,7 @@ public sealed class AddKeyModel(IKeyVault vault)
         Preview = null;
         _pending = null;
 
-        if (!ValidateLabelAndNetwork(draft.Label, draft.Network))
+        if (!ValidateLabelAndNetwork(draft.Label, draft.Network, out string? canonicalNetwork))
         {
             return false;
         }
@@ -188,7 +190,7 @@ public sealed class AddKeyModel(IKeyVault vault)
             return false;
         }
 
-        Prepare(VaultEntryKind.Imported, draft.Label, draft.Network, wallet.ClassicAddress, draft.Seed, algorithm);
+        Prepare(VaultEntryKind.Imported, draft.Label, canonicalNetwork, wallet.ClassicAddress, draft.Seed, algorithm);
         return true;
     }
 
@@ -274,7 +276,7 @@ public sealed class AddKeyModel(IKeyVault vault)
             return false;
         }
 
-        if (!ValidateLabelAndNetwork(label, network))
+        if (!ValidateLabelAndNetwork(label, network, out string? canonicalNetwork))
         {
             return false;
         }
@@ -294,7 +296,7 @@ public sealed class AddKeyModel(IKeyVault vault)
             return false;
         }
 
-        Prepare(ContainerEntryKind(entry.Kind), label, network, derived.ClassicAddress, entry.KeyValue, algorithm);
+        Prepare(ContainerEntryKind(entry.Kind), label, canonicalNetwork, derived.ClassicAddress, entry.KeyValue, algorithm);
         return true;
     }
 
@@ -403,8 +405,16 @@ public sealed class AddKeyModel(IKeyVault vault)
         Problem = null;
     }
 
-    private bool ValidateLabelAndNetwork(string label, string network)
+    /// <summary>
+    /// Checks the label and the network, and hands back the network in the form it is stored under:
+    /// <see cref="XrplFileLink.TryNormalizeNetwork"/>'s, applied after trimming, so a value that
+    /// differs from a known network only in case or padding is stored as that network and one no link
+    /// can name is refused instead of being filed under a name nothing else will ever match.
+    /// </summary>
+    private bool ValidateLabelAndNetwork(string label, string network, [NotNullWhen(true)] out string? canonicalNetwork)
     {
+        canonicalNetwork = null;
+
         if (string.IsNullOrWhiteSpace(label))
         {
             Problem = "Enter a label.";
@@ -414,6 +424,12 @@ public sealed class AddKeyModel(IKeyVault vault)
         if (string.IsNullOrWhiteSpace(network))
         {
             Problem = "Choose a network.";
+            return false;
+        }
+
+        if (!XrplFileLink.TryNormalizeNetwork(network.Trim(), out canonicalNetwork))
+        {
+            Problem = NetworkChoices.NotANetwork(network);
             return false;
         }
 

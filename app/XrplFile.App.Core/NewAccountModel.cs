@@ -37,9 +37,7 @@ public sealed class NewAccountModel(IKeyVault vault)
 
         if (!XrplFileLink.TryNormalizeNetwork(Network, out string? network))
         {
-            Message =
-                $"'{Network}' is not a network an xrpl-file link can name. Use mainnet, testnet, devnet, "
-                + "or a network ID in digits.";
+            Message = NetworkChoices.NotANetwork(Network);
             return null;
         }
 

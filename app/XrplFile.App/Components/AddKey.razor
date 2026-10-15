@@ -1,6 +1,7 @@
 @implements IDisposable
 @inject AddKeyModel Model
 @inject IFilePickerService FilePicker
+@inject NetworkChoices Choices
 
 @* Design 8: generate a key, import a typed seed, or open a backup container and choose keys out of
    it. Every validation and every derivation lives in AddKeyModel; this component only routes the
@@ -47,7 +48,7 @@ else
                 </div>
                 <div class="mb-3">
                     <label for="add-generate-network" class="form-label">Network</label>
-                    <input id="add-generate-network" class="form-control" @bind="_network" @bind:event="oninput" disabled="@_busy" />
+                    <NetworkSelect Id="add-generate-network" @bind-Value="_network" Disabled="_busy" />
                 </div>
                 <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoGenerate">Generate</button>
                 break;
@@ -59,7 +60,7 @@ else
                 </div>
                 <div class="mb-3">
                     <label for="add-import-network" class="form-label">Network</label>
-                    <input id="add-import-network" class="form-control" @bind="_network" @bind:event="oninput" disabled="@_busy" />
+                    <NetworkSelect Id="add-import-network" @bind-Value="_network" Disabled="_busy" />
                 </div>
                 <div class="mb-3">
                     <label for="add-import-seed" class="form-label">Seed</label>
@@ -120,7 +121,7 @@ else
                             </div>
                             <div class="mb-3">
                                 <label for="add-select-network" class="form-label">Network</label>
-                                <input id="add-select-network" class="form-control" @bind="_selectNetwork" @bind:event="oninput" disabled="@_busy" />
+                                <NetworkSelect Id="add-select-network" @bind-Value="_selectNetwork" Disabled="_busy" />
                             </div>
                             <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoSelect">Preview</button>
                             <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="() => _selectingIndex = -1">
@@ -182,6 +183,8 @@ else
     private string? _stored;
     private bool _busy;
 
+    protected override void OnInitialized() => Choices.Refresh();
+
     private void SwitchMode(Mode mode)
     {
         if (_mode == mode)
@@ -237,7 +240,10 @@ else
     {
         _selectingIndex = index;
         _selectLabel = key.Label ?? string.Empty;
-        _selectNetwork = key.Network ?? string.Empty;
+
+        // The backup's own network is offered only when the list can show it; a Wallet backup carries
+        // none, and a name outside the list is left for the person to choose rather than guessed at.
+        _selectNetwork = Choices.Pick(key.Network) ?? string.Empty;
     }
 
     private void DoSelect()
