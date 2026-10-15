@@ -315,6 +315,12 @@ dotnet build app/XrplFile.App/XrplFile.App.csproj --configuration Release
 dotnet run --project app/XrplFile.App/XrplFile.App.csproj
 ```
 
+On Windows, `run-desktop-app.bat` in the repository root does the same in one step: it checks for
+the SDK and the workload, closes a running instance, publishes a Release build to
+`app\XrplFile.App\bin\publish` and starts it. Double-click it or run it from any directory; no
+administrator rights are needed, because the application is unpackaged. To start the last build
+again without rebuilding, run `app\XrplFile.App\bin\publish\XrplFile.App.exe`.
+
 Windows is the only target this repository builds or tests. `XrplFile.App.Core` carries no
 Windows-specific code — every decision the screens make lives there and is covered by
 `XrplFile.App.Core.Tests` with no operating system in the loop — but the two places the platform is
