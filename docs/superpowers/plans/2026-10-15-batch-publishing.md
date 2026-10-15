@@ -16,12 +16,14 @@
 - No new NuGet packages. `Xrpl` stays at `11.2.0` unless Task 1 Step F2 fires; that bump is a separate commit that runs the whole suite.
 - Tests are xUnit v3. `dotnet test` does not work in this repository. Run tests with `dotnet run --project tests/<Project> -- -class <FullName>`, `-method <FullName>`, `-trait- "Category=Integration"` (unit only) or `-trait "Category=Integration"` (stand only). Add `-showLiveOutput` when a step says to read test output.
 - Integration tests carry `[Trait("Category", "Integration")]` and `[Collection("Standalone")]` and read the node from `XRPL_FILE_NODE_URL`, else `ws://localhost:6006`.
-- The stand is the compose project `xrpl-file-ci`: `docker compose -p xrpl-file-ci -f .ci-config/docker-compose.ci.yml up -d`. Before starting it run `docker ps --format "{{.Names}} {{.Label \"com.docker.compose.project\"}}"`. If `rippled-service` is up under another project, stop and ask; never start, stop or restart another compose project.
+- The stand is the compose project `xrpl-file-ci`: `docker compose -p xrpl-file-ci -f .ci-config/docker-compose.ci.yml up -d`. Before starting it run `docker ps --format '{{.Names}} {{.Label "com.docker.compose.project"}}'` (PowerShell; the same single-quoted form works in Git Bash). If `rippled-service` is up under another project, stop and ask; never start, stop or restart another compose project.
 - Code style: explicit types (no `var`); `async`/`await` with `CancellationToken` passed through; `ConfigureAwait(false)` in library code; English comments only where the surrounding code would comment; Core builds transactions as `Dictionary<string, object>`.
-- Exact values from the spec, verbatim: `InitialWindow` 16, `MaxAhead` 256, `DeadlineLedgers` 20, `SettleLedgers` 2, `ChainCheck` 2 s, `ProgressSweep` 5 s, `SnapshotMaxAge` 10 s, `HistoryLagLimit` 30 s, `FeeWait` 1 min, `MaxAttemptsPerMemo` 3; up to 4 transmissions of one blob, 400 ms × (retry + 1) between them; the window halves after 3 busy answers in a row and grows by 1 after 10 clean sends; batches hold 2–8 inners and a trailing 8 + 1 becomes 7 + 2; fee unit = max(base, ceil(`open_ledger_fee` × 1.5)); ceiling = 2 × the approved unit; a batch pays (inners + 3) × unit, a solo one unit; the estimate refuses `open_ledger_fee` above 200 drops; `tfIndependent` = `0x00080000`, `tfInnerBatchTxn` = `0x40000000`; Amendments singleton index `7DB0788C020F02780A673DC74757F23823FA3014C1866E72CC4CD8B226CD6EF4`; amendment cache 5 min; Batch prior 70 memos/s; rate window 30 s.
+- Exact values from the spec, verbatim: `InitialWindow` 16, `MaxAhead` 256, `DeadlineLedgers` 20, `SettleLedgers` 2, `ChainCheck` 2 s, `ProgressSweep` 5 s, `SnapshotMaxAge` 10 s, `HistoryLagLimit` 30 s, `FeeWait` 1 min, `MaxAttemptsPerMemo` 3; up to 4 transmissions of one blob, 400 ms × (retry + 1) between them; the window halves after 3 busy answers in a row and grows by 1 after 10 clean sends; batches hold 2–8 inners and a trailing 8 + 1 becomes 7 + 2; fee unit = max(base, ceil(`open_ledger_fee` × 1.5)); ceiling = 2 × the approved unit; a batch pays (inners + 3) × unit, a solo one unit; the estimate refuses `open_ledger_fee` above 200 drops; `tfIndependent` = `0x00080000`, `tfInnerBatchTxn` = `0x40000000`; Amendments singleton index `7DB0788C020F02780A673DC74757F23823FA3014C1866E72CC4CD8B226CD6EF4`; amendment cache 5 min; Batch prior 70 memos/s; rate window 30 s. The 400 ms step is `BatchStrategyOptions.TransportRetryStep`; only tests shorten it.
 - State JSON names, verbatim: `Strategy` (`"sequence"`, `"tickets"`, `"batch"`), `SourcePath`, `ManifestHash`, `Payer`, `PayerKeyReference`, `Fence`; version 2 for sequence/ticket runs, 3 for Batch runs.
 - UI and error copy, verbatim from spec 6.1–6.5 (quoted in the tasks that own them).
 - Commits: conventional, English, subject and body; no attribution lines of any kind (no `Co-Authored-By`, no "Generated with").
+- `XrplFile.App.Core` sees only Core's public API (Core's `InternalsVisibleTo` names its two test projects only); App tasks use public members.
+- Save every new or edited file as UTF-8: the plan's literals carry "—", "…" and "·".
 
 ## Review Focus
 
@@ -29,7 +31,12 @@
 2. **The window is closed during a resume's fence wait**: the state file is left byte-for-byte as it was, nothing was read for reconciliation or sent, and a later resume finishes the file — test in Task 16.
 3. **Paid by offers the writer's own account, or misses a payer whose network differs only in case**: the list never contains the selected key or its address, and networks match in canonical form — test in Task 18.
 4. **The run screen when nothing lands for 30 s, or when the fence is already behind the ledger**: it shows "estimating…" rather than an infinite or negative time, and the fence line never shows a negative wait — test in Task 21.
-5. **A one-chunk file on the Batch path**: the chunk pass and the manifest pass are both solo transactions of the writer, the payer pays nothing, and the estimate says so — tests in Task 8 and Task 12.
+5. **A one-chunk file on the Batch path**: the chunk pass and the manifest pass are both solo transactions of the writer, the payer pays nothing, and the estimate says so — tests in Tasks 8, 12 and 14.
+6. **A round larger than `MaxAhead` when the node stops**: the sender is waiting for allowance when the chain check dies; the run still fails with `NodeUnreachable` — test in Task 11.
+7. **An answer lost on a dropped connection**: the same blob is resent before settlement resolves it, and nothing lands twice — test in Task 11.
+8. **History's Forget survives a restart**: start-up recovery never brings back a link the person removed — test in Task 22.
+
+(6–8 were added after the plan review.)
 
 ---
 
@@ -44,7 +51,8 @@
 | `LedgerTransaction.cs` | + `TransactionType`, `Sequence`, `TicketSequence`, `TicketCount`, `Fee`, `ParentBatchID` | 2 |
 | `ILedgerSource.cs`, `XrplClientLedgerSource.cs` | + `SnapshotAsync`, `OpenLedgerFeeAsync`, `IsAmendmentEnabledAsync`; record parsing | 2 |
 | `ILedgerSink.cs`, `XrplClientLedgerSink.cs` | + `SubmitBlobAsync` | 3 |
-| `ClientKeeper.cs` (new, internal) | reconnect the shared client on the next call | 3 |
+| `ClientKeeper.cs` (new) | the one owner of reconnection; builds and retires clients | 3 |
+| `ISubmissionStrategy.cs` | + `SubmittedMemo.LedgerIndex` | 8 |
 | `XrplFileException.cs` | + 4 errors, `AccountRole`, `Role` | 4 |
 | `BatchFees.cs`, `BatchGrouping.cs`, `BatchStrategyOptions.cs`, `BatchBudget.cs`, `IBatchFenceRecorder.cs` (new) | pricing, grouping and assignment, options, budget, fence seam | 6 |
 | `BatchWindow.cs`, `BatchFence.cs`, `BatchCandidate.cs`, `BatchRegistry.cs`, `BatchTrace.cs` (new, internal) | send window; fence tracker; registration under the round lock | 7 |
@@ -60,7 +68,7 @@
 
 **Test support (`tests/XrplFile.TestSupport`)**: `FakeBatchLedgerSink.cs` (new), `FakeLedgerSource.cs` (snapshots, fee, amendments, history hiding, ledger-read event) — Task 5.
 
-**App core (`app/XrplFile.App.Core`)**: `PublishErrorMessages.cs` (4), `IPayerSettingsStore.cs`, `FilePayerSettingsStore.cs`, `BatchAvailability.cs`, `PublishRequest.cs`, `PublishModel.cs`, `PublishPolicy.cs` (18), `EstimateModel.cs` (19), `PublicationRun.cs`, `PublicationRecord.cs` (20), `RunModel.cs` (21), `UnfinishedModel.cs`, `PublicationHistory.cs` (22).
+**App core (`app/XrplFile.App.Core`)**: `XrplConnectionFactory.cs` (3), `PublishErrorMessages.cs` (4), `IPayerSettingsStore.cs`, `FilePayerSettingsStore.cs`, `BatchAvailability.cs`, `PublishRequest.cs`, `PublishModel.cs`, `PublishPolicy.cs` (18), `EstimateModel.cs` (19), `PublicationRun.cs`, `PublicationRecord.cs` (20), `RunModel.cs` (21), `UnfinishedModel.cs`, `PublicationHistory.cs` (22).
 
 **App (`app/XrplFile.App`)**: `MauiProgram.cs` (18, 20, 22), `Components/Publish.razor` (18), `Estimate.razor` (19), `Run.razor` (21), `Unfinished.razor`, `History.razor` (22).
 
@@ -72,7 +80,7 @@
 
 Spec 4.2 steps 1–3 and the signing-time measurement. Nothing after this task is built on a guess about signing.
 
-**What 11.2.0 actually does** (read from `git show v11.2.0:Xrpl/Wallet/XrplWallet.cs` in `E:\GIT\XRPL\XrplCSharp`; the 11.2.0 XML docs omit it): `XrplWallet.Sign(Dictionary)` routes a `Batch` to `SignAsBatchPart` when the wallet's account is among the **inner** transactions' `Account`s and is not the outer's `Account` — not when `BatchSigners` names it. `SignAsBatchPart` is public, appends a `BatchSigner { Account, SigningPubKey, TxnSignature }` to whatever `BatchSigners` the outer already carries, and refuses a duplicate account (`Duplicate BatchSigner account … (temBAD_SIGNER)`). It leaves the outer's `SigningPubKey` as given and writes no `TxnSignature`. So the outer handed to the writer carries **no** `BatchSigners`; the writer's signature creates the entry, and the payer signs the decoded result. The final shape is still the spec's.
+**What 11.2.0 actually does** (read from `git show v11.2.0:Xrpl/Wallet/XrplWallet.cs` in `E:\GIT\XRPL\XrplCSharp`; the 11.2.0 XML docs omit it): `XrplWallet.Sign(Dictionary)` routes a `Batch` to `SignAsBatchPart` when the wallet's account is among the **inner** transactions' `Account`s and is not the outer's `Account` — not when `BatchSigners` names it. `SignAsBatchPart` is public, appends a `BatchSigner { Account, SigningPubKey, TxnSignature }` to whatever `BatchSigners` the outer already carries, and refuses a second signature for an account that already signed (`VerifyBatchSubmitter` throws `UnauthorizedAccessException`; a duplicate `BatchSigner` would reach the node as `temBAD_SIGNER`). It leaves the outer's `SigningPubKey` as given and writes no `TxnSignature`. So the outer handed to the writer carries **no** `BatchSigners`; the writer's signature creates the entry, and the payer signs the decoded result. The final shape is still the spec's.
 
 **Files:**
 - Create: `src/XrplFile.Core/BatchTransactions.cs`
@@ -544,7 +552,7 @@ public class BatchSigningStandaloneTests : IDisposable
 - [ ] **Step 6: Start the stand and run the stand tests**
 
 ```bash
-docker ps --format "{{.Names}} {{.Label \"com.docker.compose.project\"}}"
+docker ps --format '{{.Names}} {{.Label "com.docker.compose.project"}}'
 docker compose -p xrpl-file-ci -f .ci-config/docker-compose.ci.yml up -d
 dotnet run --project tests/XrplFile.Core.Tests -- -class XrplFile.Tests.BatchSigningStandaloneTests -showLiveOutput
 ```
@@ -566,10 +574,11 @@ In `src/XrplFile.Core/ITransactionSigner.cs`, add to `ITransactionSigner`:
     /// Signs <paramref name="outer"/> as one of its BatchSigners (spec 4.2): the returned blob is
     /// the outer with this account's <c>BatchSigner</c> added and no <c>TxnSignature</c>.
     /// </summary>
-    Task<SignedTransaction> SignBatchPartAsync(IDictionary<string, object> outer, CancellationToken cancellationToken);
+    Task<SignedTransaction> SignBatchPartAsync(IDictionary<string, object> outer, CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"{GetType().Name} does not sign batch parts");
 ```
 
-and to `WalletSigner`:
+(A default member, so every other signer — the test doubles, and Task 8's `GatedSigner` — keeps compiling.) Add to `WalletSigner`:
 
 ```csharp
     public Task<SignedTransaction> SignBatchPartAsync(IDictionary<string, object> outer, CancellationToken cancellationToken)
@@ -600,7 +609,7 @@ In `src/XrplFile.Keys/VaultSigner.cs` add:
     }
 ```
 
-Every other `ITransactionSigner` in the tests (`LockingSigner`, `TruncatingSigner`, `RefusingSigner`, `InstantSigner`) gets `public Task<SignedTransaction> SignBatchPartAsync(IDictionary<string, object> outer, CancellationToken cancellationToken) => inner.SignBatchPartAsync(outer, cancellationToken);` (or `=> SignAsync(outer, cancellationToken)` for the ones with no inner). In `BatchTransactions.SignAsync` replace `writer.SignAsync(outer, cancellationToken)` with `writer.SignBatchPartAsync(outer, cancellationToken)`, and in the first stand test replace `writer.SignAsync(outer, token)` with `writer.SignBatchPartAsync(outer, token)`. Build, rerun Step 4 and Step 6.
+Every other signer keeps the default: only a writer's signer is asked for a batch part, and no test double signs as a writer of a batch. In `BatchTransactions.SignAsync` replace `writer.SignAsync(outer, cancellationToken)` with `writer.SignBatchPartAsync(outer, cancellationToken)`, and in the first stand test replace `writer.SignAsync(outer, token)` with `writer.SignBatchPartAsync(outer, token)`. Build, rerun Step 4 and Step 6.
 
 - [ ] **Step F2 (only if Step 6 says so): move `Xrpl` to the current release in its own commit**
 
@@ -1312,14 +1321,14 @@ Spec B24, 7.2 (transport half).
 
 **Files:**
 - Create: `src/XrplFile.Core/ClientKeeper.cs`
-- Modify: `src/XrplFile.Core/ILedgerSink.cs`, `src/XrplFile.Core/XrplClientLedgerSink.cs`, `src/XrplFile.Core/XrplClientLedgerSource.cs` (`SendAsync`)
+- Modify: `src/XrplFile.Core/ILedgerSink.cs`, `src/XrplFile.Core/XrplClientLedgerSink.cs`, `src/XrplFile.Core/XrplClientLedgerSource.cs` (`SendAsync`), `app/XrplFile.App.Core/XrplConnectionFactory.cs`
 - Create: `tests/XrplFile.Core.Tests/DroppingProxy.cs`, `tests/XrplFile.Core.Tests/TransportStandaloneTests.cs`
 - Test: `tests/XrplFile.Core.Tests/XrplClientLedgerSinkTests.cs` (append)
 
 **Interfaces:**
 - Produces:
   - `ILedgerSink.SubmitBlobAsync(string txBlob, CancellationToken cancellationToken)` → `Task<string>`: the `engine_result`, or `error:<code>` for an error answer in either shape; one `submit`, no retry, no `tx` lookup; a transport failure throws `XrplFileException(NodeUnreachable)`. Default implementation throws `NotSupportedException`.
-  - `internal sealed class ClientKeeper` with `static ClientKeeper For(IXrplClient client)` and `Task EnsureConnectedAsync(CancellationToken)`; `internal static readonly TimeSpan ReconnectWait = 10 s`.
+  - `public sealed class ClientKeeper`, the one owner of reconnection (spec B24, Spec question 25). Public: `static XrplClient CreateClient(string url)` — the only way this repository builds a client for publishing, with the SDK's own reconnection set for whichever owner Step 8 keeps — and `static void Retire(IXrplClient client)`, which a connection's owner calls when it closes it, so nothing reconnects it afterwards. Internal: `static ClientKeeper For(IXrplClient client)`, `Task EnsureConnectedAsync(CancellationToken)`.
   - Test helper `internal sealed class DroppingProxy : IAsyncDisposable` with `DroppingProxy(Uri target)`, `Uri Endpoint`, `void DropAll()`.
 
 - [ ] **Step 1: Write the failing unit tests**
@@ -1628,12 +1637,28 @@ public class TransportStandaloneTests
     }
 
     [Fact]
+    public async Task A_client_its_owner_retired_is_refused_rather_than_reconnected()
+    {
+        using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(1));
+        IXrplClient client = ClientKeeper.CreateClient(Endpoint);
+        await client.Connect(timeout.Token);
+        XrplClientLedgerSource source = new(client);
+
+        ClientKeeper.Retire(client);
+        await client.Disconnect();
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => source.CurrentLedgerAsync(timeout.Token));
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+        Assert.False(client.IsConnected());
+    }
+
+    [Fact]
     public async Task A_socket_the_node_dropped_is_reconnected_on_the_next_call()
     {
         using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(2));
         CancellationToken token = timeout.Token;
         await using DroppingProxy proxy = new(new Uri(Endpoint));
-        IXrplClient client = new XrplClient(proxy.Endpoint.ToString());
+        IXrplClient client = ClientKeeper.CreateClient(proxy.Endpoint.ToString());
         await client.Connect(token);
 
         try
@@ -1658,10 +1683,10 @@ public class TransportStandaloneTests
 }
 ```
 
-- [ ] **Step 6: Run the stand tests to see the reconnect fail**
+- [ ] **Step 6: Run the stand tests to see them fail**
 
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class XrplFile.Tests.TransportStandaloneTests`
-Expected: `A_signed_blob…` PASS; `A_socket_the_node_dropped…` FAILS — after the drop the client is not connected and every call fails (`NotConnectedException` or a timeout, surfaced as `NodeUnreachable` twice).
+Expected: build FAILS (`ClientKeeper` does not exist).
 
 - [ ] **Step 7: Write `ClientKeeper` and call it before every client request**
 
@@ -1674,41 +1699,40 @@ using Xrpl.Client;
 namespace XrplFile;
 
 /// <summary>
-/// Gets a dropped client connected again before the next request goes out (spec B24). The sink and
-/// the source of one connection share one client, and so one keeper: two callers that meet the
-/// drop together reconnect once.
+/// The one owner of reconnection (spec B24): a client this repository builds has the SDK's own
+/// reconnection switched off, and the next request after a dropped socket connects it again here.
+/// The sink and the source of one connection share one client, and so one keeper: two callers that
+/// meet the drop together reconnect once. A client its owner retired is refused, never brought back.
 /// </summary>
-internal sealed class ClientKeeper
+public sealed class ClientKeeper
 {
-    /// <summary>How long a lost socket is left to the SDK's own reconnection before this calls Connect itself.</summary>
-    internal static readonly TimeSpan ReconnectWait = TimeSpan.FromSeconds(10);
-
-    private static readonly TimeSpan Poll = TimeSpan.FromMilliseconds(200);
-
     private static readonly ConditionalWeakTable<IXrplClient, ClientKeeper> Keepers = new();
 
     private readonly IXrplClient _client;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private volatile bool _retired;
 
     private ClientKeeper(IXrplClient client) => _client = client;
 
-    public static ClientKeeper For(IXrplClient client) => Keepers.GetValue(client, static owner => new ClientKeeper(owner));
+    /// <summary>A client for <paramref name="url"/> whose reconnection this class owns: the SDK's own is off.</summary>
+    public static XrplClient CreateClient(string url) =>
+        new(url, new XrplClient.ClientOptions { MaxReconnectAttempts = 0, StopAfterMaxAttempts = true });
 
-    public async Task EnsureConnectedAsync(CancellationToken cancellationToken)
+    /// <summary>The client's owner has closed it: from now on every request on it is refused.</summary>
+    public static void Retire(IXrplClient client) => For(client)._retired = true;
+
+    internal static ClientKeeper For(IXrplClient client) => Keepers.GetValue(client, static owner => new ClientKeeper(owner));
+
+    internal async Task EnsureConnectedAsync(CancellationToken cancellationToken)
     {
+        if (_retired) throw Closed();
         if (_client.IsConnected()) return;
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
-            DateTimeOffset until = DateTimeOffset.UtcNow + ReconnectWait;
-
-            while (!_client.IsConnected() && DateTimeOffset.UtcNow < until)
-            {
-                await Task.Delay(Poll, cancellationToken).ConfigureAwait(false);
-            }
-
+            if (_retired) throw Closed();
             if (_client.IsConnected()) return;
 
             try
@@ -1725,6 +1749,8 @@ internal sealed class ClientKeeper
             _gate.Release();
         }
     }
+
+    private static XrplFileException Closed() => new(XrplFileError.NodeUnreachable, "the connection was closed by its owner");
 }
 ```
 
@@ -1736,12 +1762,45 @@ In `XrplClientLedgerSink.SendAsync`, add as the first statement:
 
 and the same line as the first statement of `XrplClientLedgerSink.SequenceAsync` after its `_client is null` check (with `_client` instead of `_client!`). In `XrplClientLedgerSource.SendAsync`, add the same first statement.
 
+In `app/XrplFile.App.Core/XrplConnectionFactory.cs`, build the client with `client = ClientKeeper.CreateClient(url);` instead of `new XrplClient(url)`, and make `Connection.DisposeAsync` call `ClientKeeper.Retire(_client);` before `Disconnect()`, so a late call on a closed connection is refused instead of reopening it.
+
 - [ ] **Step 8: Run the stand tests**
 
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class XrplFile.Tests.TransportStandaloneTests`
-Expected: PASS (2 tests).
+Expected: PASS (3 tests).
 
-If the reconnect test still fails with `NodeUnreachable` naming "did not take a new connection", the 11.2.0 client cannot `Connect` again after its socket died. Then change `XrplConnectionFactory` (`app/XrplFile.App.Core/XrplConnectionFactory.cs`) nowhere yet; instead change the test to build the client with the SDK's own reconnection (`new XrplClient(url, new ConnectionOptions { MaxReconnectAttempts = 10, StopAfterMaxAttempts = true })`, from `Xrpl.Client.Connection`), rerun; when that passes, record in the commit body that reconnection rests on the SDK's options and make the same change in `XrplConnectionFactory.ConnectAsync` in Task 20.
+This decides the owner (Spec question 25): when all three pass, **the keeper owns reconnection and the SDK's is off.**
+
+If `A_socket_the_node_dropped…` fails with `NodeUnreachable` naming "did not take a new connection" — an 11.2.0 client cannot `Connect` again once its socket died — switch to the other owner: **the SDK reconnects, and the keeper only waits.** Replace `CreateClient` and `EnsureConnectedAsync` with the code below, delete `_gate`, change the class summary to say the SDK owns reconnection and this class waits for it, rerun, and name the owner kept in the commit body.
+
+```csharp
+    /// <summary>How long a request waits for the SDK to restore a lost socket before it is a failure.</summary>
+    internal static readonly TimeSpan ReconnectWait = TimeSpan.FromSeconds(10);
+
+    private static readonly TimeSpan Poll = TimeSpan.FromMilliseconds(200);
+
+    /// <summary>A client for <paramref name="url"/> that restores a lost socket itself; this class never calls Connect.</summary>
+    public static XrplClient CreateClient(string url) =>
+        new(url, new XrplClient.ClientOptions { MaxReconnectAttempts = 10, StopAfterMaxAttempts = true });
+
+    internal async Task EnsureConnectedAsync(CancellationToken cancellationToken)
+    {
+        DateTimeOffset until = DateTimeOffset.UtcNow + ReconnectWait;
+
+        while (true)
+        {
+            if (_retired) throw Closed();
+            if (_client.IsConnected()) return;
+
+            if (DateTimeOffset.UtcNow >= until)
+            {
+                throw new XrplFileException(XrplFileError.NodeUnreachable, $"the client did not reconnect within {ReconnectWait}");
+            }
+
+            await Task.Delay(Poll, cancellationToken).ConfigureAwait(false);
+        }
+    }
+```
 
 - [ ] **Step 9: Run every Core unit test and commit**
 
@@ -1749,8 +1808,8 @@ Run: `dotnet run --project tests/XrplFile.Core.Tests -- -trait- "Category=Integr
 Expected: PASS.
 
 ```bash
-git add src/XrplFile.Core/ClientKeeper.cs src/XrplFile.Core/ILedgerSink.cs src/XrplFile.Core/XrplClientLedgerSink.cs src/XrplFile.Core/XrplClientLedgerSource.cs tests/XrplFile.Core.Tests/XrplClientLedgerSinkTests.cs tests/XrplFile.Core.Tests/DroppingProxy.cs tests/XrplFile.Core.Tests/TransportStandaloneTests.cs
-git commit -m "feat(core): submit a signed blob once and reconnect a dropped client"
+git add src/XrplFile.Core/ClientKeeper.cs src/XrplFile.Core/ILedgerSink.cs src/XrplFile.Core/XrplClientLedgerSink.cs src/XrplFile.Core/XrplClientLedgerSource.cs app/XrplFile.App.Core/XrplConnectionFactory.cs tests/XrplFile.Core.Tests/XrplClientLedgerSinkTests.cs tests/XrplFile.Core.Tests/DroppingProxy.cs tests/XrplFile.Core.Tests/TransportStandaloneTests.cs
+git commit -m "feat(core): submit a signed blob once and reconnect a dropped client" -m "Reconnection is owned by <ClientKeeper | the SDK>, as the stand test decided."
 ```
 
 ---
@@ -1769,6 +1828,7 @@ Spec 4.7, 6.5, B22. Added in one place, early, so no later task leaves the exhau
   - `XrplFileError.BatchNotEnabled`, `.PayerInsufficientBalance`, `.AccountInUse`, `.FeeTooHigh`
   - `public enum AccountRole { Writer, Payer }`; `XrplFileException.Role` (`AccountRole?`), set through a new last constructor parameter `AccountRole? role = null`
   - `PublishErrorMessages.FeeTooHighNow` (const string) — the sentence for `FeeTooHigh` before any state exists (Spec question 6)
+  - `PublishErrorMessages.HistoryLaggedWhilePublishing` (const string) — `NodeLacksHistory` raised mid-run by B30
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1822,6 +1882,19 @@ Append inside `PublishErrorMessagesTests`:
 
         Assert.Equal(PublishErrorMessages.FeeTooHighNow, sentence);
         Assert.DoesNotContain("unfinished", sentence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void History_that_lags_a_running_publication_is_not_described_as_a_reader_problem()
+    {
+        XrplFileException thrown = new(XrplFileError.NodeLacksHistory, "account_tx lagged");
+
+        Assert.Equal(
+            PublishErrorMessages.HistoryLaggedWhilePublishing,
+            PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0));
+        Assert.Equal(
+            PublishErrorMessages.For(XrplFileError.NodeLacksHistory),
+            PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
     }
 ```
 
@@ -1895,6 +1968,14 @@ In `app/XrplFile.App.Core/PublishErrorMessages.cs`, add after `FeeTooLargeForApp
     public const string FeeTooHighNow =
         "Network fees are above what this application publishes at right now. Try again when they are back down.";
 
+    /// <summary>
+    /// <see cref="XrplFileError.NodeLacksHistory"/> raised while publishing (spec B30): the node's history
+    /// lagged the run, which is not the reader's "history far enough back" problem.
+    /// </summary>
+    public const string HistoryLaggedWhilePublishing =
+        "The node's history fell behind the publication, so what landed could not be confirmed. The run is listed under "
+        + "unfinished runs; resume it, or choose another node in Settings first.";
+
     private static string AccountInUse(string role) =>
         $"The {role} account sent a transaction of its own during the publication. Is this key in use somewhere else? "
         + "The run is listed under unfinished runs; resume it once nothing else uses the key.";
@@ -1933,6 +2014,8 @@ In `ForRun`, replace its first line `if (exception.Error != XrplFileError.NodeUn
 ```csharp
         if (exception.Error == XrplFileError.FeeTooHigh && point == RunFailurePoint.BeforeSubmitting) return FeeTooHighNow;
 
+        if (exception.Error == XrplFileError.NodeLacksHistory && point == RunFailurePoint.WhileSubmitting) return HistoryLaggedWhilePublishing;
+
         if (exception.Error != XrplFileError.NodeUnreachable) return For(exception);
 ```
 
@@ -1963,8 +2046,8 @@ Spec 7.3 (the fake). The fake is real enough to be worth its own review: it deco
 **Interfaces:**
 - Consumes: `BatchTransactions` (Task 1), `LedgerSnapshot`, `OpenLedgerFee`, `Amendments` (Task 2), `ILedgerSink.SubmitBlobAsync` (Task 3).
 - Produces (namespace `XrplFile.Tests`):
-  - `FakeLedgerSource`: `event Action? LedgerRead` (raised at the start of `SnapshotAsync` and `CurrentLedgerAsync`, outside the fake's lock); `void RecordSequences(long ledger, IReadOnlyDictionary<string, uint> sequences)`; `OpenLedgerFee OpenLedgerFee { get; set; }` (default `(10, 10)`); `Queue<OpenLedgerFee> OpenLedgerFeeScript`; `HashSet<string> EnabledAmendments` (default `{ "BatchV1_1" }`); `Exception? AmendmentFailure`; `int SnapshotFailures`; `int SnapshotReads`; `Func<LedgerTransaction, bool>? HistoryHides`; `int HistoryHideReads`; implementations of the three new `ILedgerSource` members.
-  - `FakeBatchLedgerSink : ILedgerSink` with: ctor `(FakeLedgerSource ledger)`; `bool AutoClose` (default true: every ledger read closes one ledger first); `void SetSequence(string account, uint next)`; `void CloseLedger()`; `int Closes`; `IReadOnlyList<FakeBatchLedgerSink.Transmission> Transmissions`; `int PeakInFlight`; `TimeSpan SubmitDelay`; `Action<Transmission>? Transmitting`; scripts `Dictionary<int, string> AnswerAt`, `HashSet<int> ApplyThenDropAt`, `Dictionary<uint, TimeSpan> DelayOuter`, `HashSet<uint> LoseOuter`, `Dictionary<uint, string> OuterResult`, `Dictionary<string, string> InnerResult`, `HashSet<string> InnerVanishes`; `void Foreign(string account, string kind, uint ticketCount = 0)` with kinds `"AccountSet"`, `"TicketCreate"`, `"TicketedAccountSet"`; `void AddLiveTicket(string account, uint ticket, string creatorHash)`.
+  - `FakeLedgerSource`: `event Action? LedgerRead` (raised at the start of `SnapshotAsync` and `CurrentLedgerAsync`, outside the fake's lock); `void RecordSequences(long ledger, IReadOnlyDictionary<string, uint> sequences)`; `OpenLedgerFee OpenLedgerFee { get; set; }` (default `(10, 10)`); `Queue<OpenLedgerFee> OpenLedgerFeeScript`; `HashSet<string> EnabledAmendments` (default `{ "BatchV1_1" }`); `Exception? AmendmentFailure`; `int SnapshotFailures`; `int SnapshotReads`; `Func<LedgerTransaction, bool>? HistoryHides`; `int HistoryHideReads`; `void SetTicketCount(string account, int count)` (under the fake's lock); implementations of the three new `ILedgerSource` members.
+  - `FakeBatchLedgerSink : ILedgerSink` with: ctor `(FakeLedgerSource ledger)`; `bool AutoClose` (default true: every ledger read closes one ledger first); `void SetSequence(string account, uint next)`; `void CloseLedger()`; `int Closes`; `IReadOnlyList<FakeBatchLedgerSink.Transmission> Transmissions`; `int PeakInFlight`; `TimeSpan SubmitDelay`; `Action<Transmission>? Transmitting`; scripts `Dictionary<(uint Sequence, int Copy), string> AnswerAt`, `HashSet<int> ApplyThenDropAt`, `Dictionary<uint, TimeSpan> DelayOuter`, `HashSet<uint> LoseOuter`, `Dictionary<uint, string> OuterResult`, `Dictionary<string, string> InnerResult`, `HashSet<string> InnerVanishes`; `void Foreign(string account, string kind, uint ticketCount = 0)` with kinds `"AccountSet"`, `"TicketCreate"`, `"TicketedAccountSet"`; `void AddLiveTicket(string account, uint ticket, string creatorHash)`.
   - `public sealed record Transmission(int Ordinal, string Hash, string TransactionType, string Account, uint Sequence, uint LastLedger, int Inners, long OpenLedgerIndex, uint PayerValidatedSequence, string Answer)`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -2194,6 +2277,12 @@ In `tests/XrplFile.TestSupport/FakeLedgerSource.cs`:
         }
     }
 
+    /// <summary>Sets AccountRoot's TicketCount under the lock <see cref="AccountStateAsync"/> reads it under.</summary>
+    public void SetTicketCount(string account, int count)
+    {
+        lock (_gate) TicketCounts[account] = count;
+    }
+
     public Task<LedgerSnapshot> SnapshotAsync(IReadOnlyList<string> accounts, CancellationToken cancellationToken)
     {
         LedgerRead?.Invoke();
@@ -2296,6 +2385,7 @@ public sealed class FakeBatchLedgerSink : ILedgerSink
     private readonly List<Transmission> _transmissions = [];
     private readonly List<(string Account, string Kind, uint Count)> _foreign = [];
     private readonly Dictionary<string, Dictionary<uint, string>> _tickets = new(StringComparer.Ordinal);
+    private readonly Dictionary<uint, int> _copies = [];
     private int _submits;
     private int _inFlight;
     private int _peakInFlight;
@@ -2326,8 +2416,13 @@ public sealed class FakeBatchLedgerSink : ILedgerSink
     /// <summary>Called for each processed submission, before its answer returns.</summary>
     public Action<Transmission>? Transmitting { get; set; }
 
-    /// <summary>Submissions (by arrival ordinal) answered with this and not processed.</summary>
-    public Dictionary<int, string> AnswerAt { get; } = [];
+    /// <summary>
+    /// Submissions answered with this and not processed, keyed by the transaction's sequence and which
+    /// transmission of that sequence it is (1-based, counted over every blob that carries it). Keyed by
+    /// the candidate rather than by arrival order, so a script meant for one round never hits the next
+    /// round's first send.
+    /// </summary>
+    public Dictionary<(uint Sequence, int Copy), string> AnswerAt { get; } = [];
 
     /// <summary>Submissions (by arrival ordinal) processed, then answered with a dropped connection.</summary>
     public HashSet<int> ApplyThenDropAt { get; } = [];
@@ -2417,10 +2512,12 @@ public sealed class FakeBatchLedgerSink : ILedgerSink
         uint lastLedger = (uint)Number(tx["LastLedgerSequence"]);
         int inners = tx["RawTransactions"] is JsonArray raw ? raw.Count : 0;
         int ordinal;
+        int copy;
 
         lock (_gate)
         {
             ordinal = _submits++;
+            copy = _copies[sequence] = _copies.GetValueOrDefault(sequence) + 1;
             _inFlight++;
             if (_inFlight > _peakInFlight) _peakInFlight = _inFlight;
         }
@@ -2440,7 +2537,7 @@ public sealed class FakeBatchLedgerSink : ILedgerSink
 
             lock (_gate)
             {
-                string answer = AnswerAt.TryGetValue(ordinal, out string? scripted)
+                string answer = AnswerAt.TryGetValue((sequence, copy), out string? scripted)
                     ? scripted
                     : Apply(new Pending(hash, tx, type, account, sequence, lastLedger));
 
@@ -2650,7 +2747,7 @@ public sealed class FakeBatchLedgerSink : ILedgerSink
     private void PublishTickets(string account)
     {
         Dictionary<uint, string> live = _tickets.GetValueOrDefault(account) ?? [];
-        _ledger.TicketCounts[account] = live.Count;
+        _ledger.SetTicketCount(account, live.Count);
         _ledger.SetLiveTickets(account, [.. live.OrderBy(pair => pair.Key).Select(pair => new LiveTicket(pair.Key, pair.Value))]);
     }
 
@@ -2693,7 +2790,7 @@ Spec 4.1 (record and constructor shapes), B11, B15 (formula), B26 (budget shape)
 
 **Interfaces:**
 - Produces:
-  - `public sealed record BatchStrategyOptions` with the spec's eleven properties and defaults (Task 11 adds `NodeOutageLimit`).
+  - `public sealed record BatchStrategyOptions` with the spec's eleven properties and defaults, plus `TransportRetryStep` (400 ms, the table's step; Task 11 adds `NodeOutageLimit`).
   - `public sealed record BatchBudget(long FeeUnitDrops, long FeeCeilingDrops, long PayerBudgetDrops, long WriterBudgetDrops)`
   - `public interface IBatchFenceRecorder { Task RecordFenceAsync(long deadline, CancellationToken cancellationToken); }`
   - `public static class BatchFees`: `const long MaxOpenLedgerFeeDrops = 200`; `long Unit(OpenLedgerFee fee)`; `long Ceiling(long approvedUnitDrops)`; `long BatchFee(int inners, long unitDrops)`
@@ -2841,6 +2938,9 @@ public sealed record BatchStrategyOptions
 
     /// <summary>Candidates one memo may be put into in one session (spec B13).</summary>
     public int MaxAttemptsPerMemo { get; init; } = 3;
+
+    /// <summary>The step between transport retries of one blob: step × (retry + 1) (spec submit-answer table). Tests shorten it.</summary>
+    public TimeSpan TransportRetryStep { get; init; } = TimeSpan.FromMilliseconds(400);
 
     public TimeProvider Time { get; init; } = TimeProvider.System;
 }
@@ -2997,7 +3097,7 @@ Spec B10 (window), B7 and B23 (deadline persisted before first transmission), B1
 **Interfaces:**
 - Consumes: `IBatchFenceRecorder`, `LedgerSnapshot`, `SignedTransaction`.
 - Produces (all internal):
-  - `BatchWindow(int initial)`: `int Size`, `int InFlight`, `Task AcquireAsync(CancellationToken)`, `void Release(bool busy)`
+  - `BatchWindow(int initial)`: `int Size`, `int InFlight`, `Task AcquireAsync(CancellationToken)`, `void Release(bool busy)`, `void Return()` (a slot no transmission used: neither busy nor clean)
   - `BatchFence(IBatchFenceRecorder recorder)`: `long Recorded`, `Task CoverAsync(long deadline, CancellationToken)`
   - `BatchCandidate(int ordinal, bool isOuter, string account, uint sequence, uint lastLedger, long feeDrops, IReadOnlyList<int> memos, SignedTransaction signed)`: `const int SoloOrdinal = -1`, properties of the same names (`Ordinal`, `IsOuter`, `Account`, `Sequence`, `LastLedger`, `FeeDrops`, `Memos`, `Signed`), `string Hash`, `bool IsResolved`, `void MarkResolved()`, `bool IsResolvedBy(LedgerSnapshot snapshot)`
   - `BatchRegistry(BatchFence fence, IDictionary<int, int> candidatesPerMemo, BatchTrace trace)`: `bool IsHalted`, `string? HaltReason`, `IReadOnlyList<BatchCandidate> Candidates`, `IReadOnlyList<BatchCandidate> Outers` (by ordinal), `Task<bool> TryRegisterAsync(BatchCandidate, CancellationToken)`, `Task HaltAsync(string reason, CancellationToken)`
@@ -3114,6 +3214,21 @@ public class BatchWindowTests
         }
 
         Assert.Equal(2, window.Size);
+    }
+
+    [Fact]
+    public async Task A_returned_slot_admits_the_next_and_counts_as_no_answer()
+    {
+        BatchWindow window = new(1);
+
+        for (int i = 0; i < 12; i++)
+        {
+            await window.AcquireAsync(TestContext.Current.CancellationToken);
+            window.Return();
+        }
+
+        Assert.Equal(1, window.Size);
+        Assert.Equal(0, window.InFlight);
     }
 
     [Fact]
@@ -3293,11 +3408,26 @@ internal sealed class BatchWindow(int initial)
                 }
             }
 
-            // A cancelled waiter refuses the slot (TrySetResult fails) and is skipped.
-            while (_inFlight < _size && _waiting.TryDequeue(out TaskCompletionSource? next))
-            {
-                if (next.TrySetResult()) _inFlight++;
-            }
+            WakeUnderLock();
+        }
+    }
+
+    /// <summary>Gives back a slot that no transmission used (a batch discarded unsent): neither busy nor clean.</summary>
+    public void Return()
+    {
+        lock (_gate)
+        {
+            _inFlight--;
+            WakeUnderLock();
+        }
+    }
+
+    /// <summary>Called under the gate. A cancelled waiter refuses the slot (TrySetResult fails) and is skipped.</summary>
+    private void WakeUnderLock()
+    {
+        while (_inFlight < _size && _waiting.TryDequeue(out TaskCompletionSource? next))
+        {
+            if (next.TrySetResult()) _inFlight++;
         }
     }
 }
@@ -3522,6 +3652,7 @@ Spec B5–B11, 4.1 "One round" steps 1–7, the submit-answer table, B28. The fi
 
 **Files:**
 - Create: `src/XrplFile.Core/BatchContext.cs`, `src/XrplFile.Core/BatchChain.cs`, `src/XrplFile.Core/BatchRound.cs`, `src/XrplFile.Core/BatchSweep.cs`, `src/XrplFile.Core/BatchStrategy.cs`
+- Modify: `src/XrplFile.Core/ISubmissionStrategy.cs` (`SubmittedMemo.LedgerIndex`, Spec question 23)
 - Test: `tests/XrplFile.Core.Tests/BatchChainTests.cs`, `tests/XrplFile.Core.Tests/BatchStrategyTests.cs`, `tests/XrplFile.Core.Tests/BatchTestNode.cs`, `tests/XrplFile.Core.Tests/GatedSigner.cs`, `tests/XrplFile.Core.Tests/GatedBlobSink.cs`
 
 **Interfaces:**
@@ -3529,7 +3660,8 @@ Spec B5–B11, 4.1 "One round" steps 1–7, the submit-answer table, B28. The fi
 - Produces:
   - `public sealed class BatchStrategy : ISubmissionStrategy` — ctor `(ILedgerSink sink, ILedgerSource source, ITransactionSigner writer, ITransactionSigner payer, BatchBudget budget, IBatchFenceRecorder fence, BatchStrategyOptions? options = null)`; `string Account` (writer), `string Payer`, `long FeeDropsPerTransaction` (= `budget.FeeUnitDrops`), `int TicketMints` (0), `long? PayerFeeDrops`, `TimeSpan SigningTime`; `internal IReadOnlyList<string> Trace`.
   - internal `record BatchContext(ILedgerSink Sink, ILedgerSource Source, ITransactionSigner Writer, ITransactionSigner Payer, BatchBudget Budget, BatchStrategyOptions Options, BatchFence Fence, BatchWindow Window, BatchTrace Trace)`
-  - internal `record RoundResult(IReadOnlyDictionary<int, string> Landed, long PayerFeeDrops, bool PayerFeeKnown)` with `static RoundResult Empty`
+  - `SubmittedMemo` gains `long? LedgerIndex { get; init; }`: the ledger the memo landed in, when the strategy knows it (the writer uses it in Task 15)
+  - internal `record LandedInner(string Hash, long LedgerIndex)`; internal `record RoundResult(IReadOnlyDictionary<int, LandedInner> Landed, long PayerFeeDrops, bool PayerFeeKnown)` with `static RoundResult Empty`
   - internal `static class BatchChain` with `const string Diverged = "diverged"`, `const string Stalled = "stalled"`, `string? Verdict(RoundPlan plan, LedgerSnapshot start, IReadOnlyList<BatchCandidate> outers, LedgerSnapshot snapshot, string writer, string payer)`
   - internal `sealed class BatchRound(BatchContext context, IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> pending, IDictionary<int, int> candidatesPerMemo)` with `Task<RoundResult> RunAsync(CancellationToken)`
   - internal `static class BatchSweep` with `Task<RoundResult> FinalAsync(BatchContext context, IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> pending, IReadOnlyList<BatchCandidate> candidates, LedgerSnapshot start, LedgerSnapshot settled, CancellationToken)`
@@ -3629,6 +3761,10 @@ internal sealed class BatchTestNode
         ProgressSweep = TimeSpan.FromMilliseconds(5),
         HistoryLagLimit = TimeSpan.FromSeconds(2),
         FeeWait = TimeSpan.FromMilliseconds(20),
+
+        // The fake closes a ledger on every read, so its deadlines pass in milliseconds: a 400 ms
+        // retry step would meet a resolved candidate instead of its resend.
+        TransportRetryStep = TimeSpan.FromMilliseconds(1),
     };
 
     public static BatchBudget Budget { get; } = new(15, 30, 10_000_000, 10_000_000);
@@ -3913,9 +4049,9 @@ public class BatchStrategyTests
     {
         BatchTestNode node = new(sink =>
         {
-            sink.AnswerAt[0] = "telCAN_NOT_QUEUE";
-            sink.AnswerAt[1] = "error:tooBusy";
-            sink.AnswerAt[2] = "error:slowDown";
+            sink.AnswerAt[(BatchTestNode.PayerStart, 1)] = "telCAN_NOT_QUEUE";
+            sink.AnswerAt[(BatchTestNode.PayerStart, 2)] = "error:tooBusy";
+            sink.AnswerAt[(BatchTestNode.PayerStart, 3)] = "error:slowDown";
         });
         await using BatchStrategy strategy = node.Strategy();
 
@@ -3928,24 +4064,22 @@ public class BatchStrategyTests
     }
 
     [Fact]
-    public async Task A_fee_refusal_on_every_transmission_leaves_the_batch_to_its_deadline_and_the_next_round()
+    public async Task A_fee_refusal_is_not_resent_and_the_next_round_reads_the_unit_again()
     {
-        BatchTestNode node = new(sink =>
-        {
-            for (int i = 0; i < 4; i++) sink.AnswerAt[i] = "telINSUF_FEE_P";
-        });
+        BatchTestNode node = new(sink => sink.AnswerAt[(BatchTestNode.PayerStart, 1)] = "telINSUF_FEE_P");
         await using BatchStrategy strategy = node.Strategy();
 
         IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(8), null, Token);
 
         Assert.Equal(8, landed.Count);
+        Assert.Single(node.Sink.Transmissions, transmission => transmission.Answer == "telINSUF_FEE_P");
         Assert.Equal(2, strategy.Trace.Count(entry => entry.StartsWith("round:", StringComparison.Ordinal)));
     }
 
     [Fact]
     public async Task A_malformed_answer_fails_the_run_quoting_it()
     {
-        BatchTestNode node = new(sink => sink.AnswerAt[0] = "temBAD_SIGNATURE");
+        BatchTestNode node = new(sink => sink.AnswerAt[(BatchTestNode.PayerStart, 1)] = "temBAD_SIGNATURE");
         await using BatchStrategy strategy = node.Strategy();
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => strategy.SubmitAllAsync(BatchTestNode.Memos(8), null, Token));
@@ -4070,6 +4204,55 @@ public class BatchStrategyTests
         Assert.Equal(node.Payer.Account, strategy.Payer);
         Assert.Equal(0, strategy.TicketMints);
     }
+
+    [Fact]
+    public async Task Every_landed_memo_says_which_ledger_it_is_in()
+    {
+        BatchTestNode node = new();
+        await using BatchStrategy strategy = node.Strategy();
+
+        foreach (SubmittedMemo memo in await strategy.SubmitAllAsync(BatchTestNode.Memos(10), null, Token))
+        {
+            Assert.Equal((await node.Ledger.TransactionAsync(memo.TxHash, Token))!.LedgerIndex, memo.LedgerIndex);
+        }
+    }
+
+    [Fact]
+    public async Task No_batch_is_signed_until_the_window_has_a_slot_for_it()
+    {
+        BatchTestNode node = new();
+        GatedBlobSink gate = new(node.Sink, gateAt: 1);
+        CountingSigner payer = new(node.Payer);
+        await using BatchStrategy strategy = node.Strategy(BatchTestNode.FastOptions with { InitialWindow = 1 }, payer: payer, sink: gate);
+
+        Task<IReadOnlyList<SubmittedMemo>> run = strategy.SubmitAllAsync(BatchTestNode.Memos(40), null, Token);
+        await gate.Reached.WaitAsync(TimeSpan.FromSeconds(20), Token);
+        await Task.Delay(200, Token);
+
+        // The one slot is held by the first batch's transmission: nothing else may be signed meanwhile.
+        Assert.Equal(1, payer.Count);
+
+        gate.Release();
+        Assert.Equal(40, (await run).Count);
+    }
+
+    /// <summary>Counts the signatures it makes.</summary>
+    private sealed class CountingSigner(ITransactionSigner inner) : ITransactionSigner
+    {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public string Account => inner.Account;
+
+        public string PublicKey => inner.PublicKey;
+
+        public Task<SignedTransaction> SignAsync(IDictionary<string, object> transaction, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _count);
+            return inner.SignAsync(transaction, cancellationToken);
+        }
+    }
 }
 ```
 
@@ -4097,10 +4280,13 @@ internal sealed record BatchContext(
     BatchWindow Window,
     BatchTrace Trace);
 
+/// <summary>An inner that landed with tesSUCCESS: its hash and the ledger it is in.</summary>
+internal sealed record LandedInner(string Hash, long LedgerIndex);
+
 /// <summary>What one round found: the memos it landed, by call index, and what the payer paid for the outers that applied (spec B29).</summary>
-internal sealed record RoundResult(IReadOnlyDictionary<int, string> Landed, long PayerFeeDrops, bool PayerFeeKnown)
+internal sealed record RoundResult(IReadOnlyDictionary<int, LandedInner> Landed, long PayerFeeDrops, bool PayerFeeKnown)
 {
-    public static RoundResult Empty { get; } = new(new Dictionary<int, string>(), 0, true);
+    public static RoundResult Empty { get; } = new(new Dictionary<int, LandedInner>(), 0, true);
 }
 ```
 
@@ -4177,7 +4363,7 @@ internal static class BatchSweep
         Dictionary<string, int> byMarker = new(StringComparer.OrdinalIgnoreCase);
         foreach (int index in pending) byMarker[memos[index].MemoTypeHex] = index;
 
-        Dictionary<int, string> landed = [];
+        Dictionary<int, LandedInner> landed = [];
 
         foreach (LedgerTransaction tx in writerRecords)
         {
@@ -4190,7 +4376,7 @@ internal static class BatchSweep
             if (!ours || tx.MemoTypeHex is null || !byMarker.TryGetValue(tx.MemoTypeHex, out int index)) continue;
             if (!string.Equals(tx.MemoDataHex, memos[index].MemoDataHex, StringComparison.OrdinalIgnoreCase)) continue;
 
-            landed.TryAdd(index, tx.Hash);
+            landed.TryAdd(index, new LandedInner(tx.Hash, tx.LedgerIndex));
         }
 
         long fee = 0;
@@ -4242,8 +4428,6 @@ internal sealed class BatchRound(
     /// <summary>Transmissions of one blob, the first included (spec submit-answer table).</summary>
     private const int MaxTransmissions = 4;
 
-    private static readonly TimeSpan RetryStep = TimeSpan.FromMilliseconds(400);
-
     private readonly Lock _latestGate = new();
     private LedgerSnapshot? _latest;
     private DateTimeOffset _latestAt;
@@ -4289,66 +4473,84 @@ internal sealed class BatchRound(
         using CancellationTokenSource checking = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         Task checks = ChainCheckLoopAsync(plan, start, registry, checking.Token);
         ExceptionDispatchInfo? failure = null;
+        LedgerSnapshot? settled = null;
 
         try
         {
-            foreach (PlannedBatch batch in plan.Batches)
+            try
             {
-                if (!await WaitForAllowanceAsync(batch.OuterSequence, registry, cancellationToken).ConfigureAwait(false)) break;
+                foreach (PlannedBatch batch in plan.Batches)
+                {
+                    if (!await WaitForAllowanceAsync(batch.OuterSequence, registry, cancellationToken).ConfigureAwait(false)) break;
 
-                LedgerSnapshot basis = await FreshSnapshotAsync(cancellationToken).ConfigureAwait(false);
-                long fee = BatchFees.BatchFee(batch.Inners.Count, unit);
-                uint lastLedger = checked((uint)(basis.LedgerIndex + Options.DeadlineLedgers));
+                    // A batch is built and signed only once the window has a slot for it (spec 4.1
+                    // step 3, B10); the slot passes to its first transmission.
+                    await context.Window.AcquireAsync(cancellationToken).ConfigureAwait(false);
+                    bool handedOver = false;
 
-                Dictionary<string, object> outer = BatchTransactions.Outer(
-                    Payer, context.Payer.PublicKey, batch.OuterSequence, fee, lastLedger,
-                    [.. batch.Inners.Select(inner => BatchTransactions.Inner(Writer, inner.Sequence, memos[inner.MemoIndex]))]);
+                    try
+                    {
+                        if (registry.IsHalted || Volatile.Read(ref _fatal) is not null) break;
 
-                SignedTransaction signed = await context.Trace.TimeSigningAsync(
-                    () => BatchTransactions.SignAsync(outer, context.Writer, context.Payer, cancellationToken)).ConfigureAwait(false);
+                        LedgerSnapshot basis = await FreshSnapshotAsync(cancellationToken).ConfigureAwait(false);
+                        long fee = BatchFees.BatchFee(batch.Inners.Count, unit);
+                        uint lastLedger = checked((uint)(basis.LedgerIndex + Options.DeadlineLedgers));
 
-                BatchCandidate candidate = new(
-                    batch.Ordinal, isOuter: true, Payer, batch.OuterSequence, lastLedger, fee,
-                    [.. batch.Inners.Select(inner => inner.MemoIndex)], signed);
+                        Dictionary<string, object> outer = BatchTransactions.Outer(
+                            Payer, context.Payer.PublicKey, batch.OuterSequence, fee, lastLedger,
+                            [.. batch.Inners.Select(inner => BatchTransactions.Inner(Writer, inner.Sequence, memos[inner.MemoIndex]))]);
 
-                if (!await registry.TryRegisterAsync(candidate, cancellationToken).ConfigureAwait(false)) break;
+                        SignedTransaction signed = await context.Trace.TimeSigningAsync(
+                            () => BatchTransactions.SignAsync(outer, context.Writer, context.Payer, cancellationToken)).ConfigureAwait(false);
 
-                transmissions.Add(TransmitAsync(candidate, registry, transmitting, transmitting.Token));
+                        BatchCandidate candidate = new(
+                            batch.Ordinal, isOuter: true, Payer, batch.OuterSequence, lastLedger, fee,
+                            [.. batch.Inners.Select(inner => inner.MemoIndex)], signed);
+
+                        if (!await registry.TryRegisterAsync(candidate, cancellationToken).ConfigureAwait(false)) break;
+
+                        transmissions.Add(TransmitAsync(candidate, registry, slotHeld: true, transmitting, transmitting.Token));
+                        handedOver = true;
+                    }
+                    finally
+                    {
+                        if (!handedOver) context.Window.Return();
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                failure = ExceptionDispatchInfo.Capture(e);
+            }
+
+            await checking.CancelAsync().ConfigureAwait(false);
+
+            try
+            {
+                await checks.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (checking.IsCancellationRequested)
+            {
+            }
+
+            // A run that failed here fails unsettled; the fence already covers everything registered (spec B23).
+            if (failure is null && Volatile.Read(ref _fatal) is null)
+            {
+                settled = await SettleAsync(registry.Candidates, cancellationToken).ConfigureAwait(false);
             }
         }
-        catch (Exception e)
+        finally
         {
-            failure = ExceptionDispatchInfo.Capture(e);
-        }
-
-        await checking.CancelAsync().ConfigureAwait(false);
-
-        try
-        {
-            await checks.ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (checking.IsCancellationRequested)
-        {
-        }
-        catch (Exception e)
-        {
-            failure ??= ExceptionDispatchInfo.Capture(e);
-        }
-
-        if (failure is not null || Volatile.Read(ref _fatal) is not null)
-        {
-            // The run fails here, unsettled; the fence already covers everything registered (spec B23).
+            // Whatever ended the round -- settlement, a failure, the caller's cancellation -- no
+            // transmission outlives it.
             await transmitting.CancelAsync().ConfigureAwait(false);
             await DrainAsync(transmissions).ConfigureAwait(false);
-            (failure ?? ExceptionDispatchInfo.Capture(_fatal!)).Throw();
         }
 
-        LedgerSnapshot settled = await SettleAsync(registry.Candidates, cancellationToken).ConfigureAwait(false);
-        await DrainAsync(transmissions).ConfigureAwait(false);
-
+        failure?.Throw();
         if (Volatile.Read(ref _fatal) is { } fatal) ExceptionDispatchInfo.Capture(fatal).Throw();
 
-        return settled;
+        return settled!;
     }
 
     private async Task<LedgerSnapshot> SendSoloAsync(int memoIndex, long unit, BatchRegistry registry, CancellationToken cancellationToken)
@@ -4366,10 +4568,18 @@ internal sealed class BatchRound(
         if (!await registry.TryRegisterAsync(candidate, cancellationToken).ConfigureAwait(false)) return basis;
 
         using CancellationTokenSource transmitting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        Task transmission = TransmitAsync(candidate, registry, transmitting, transmitting.Token);
+        Task transmission = TransmitAsync(candidate, registry, slotHeld: false, transmitting, transmitting.Token);
+        LedgerSnapshot settled;
 
-        LedgerSnapshot settled = await SettleAsync([candidate], cancellationToken).ConfigureAwait(false);
-        await DrainAsync([transmission]).ConfigureAwait(false);
+        try
+        {
+            settled = await SettleAsync([candidate], cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            await transmitting.CancelAsync().ConfigureAwait(false);
+            await DrainAsync([transmission]).ConfigureAwait(false);
+        }
 
         if (Volatile.Read(ref _fatal) is { } fatal) ExceptionDispatchInfo.Capture(fatal).Throw();
 
@@ -4378,19 +4588,29 @@ internal sealed class BatchRound(
 
     /// <summary>
     /// Transmits one registered candidate (spec submit-answer table): busy answers and lost answers
-    /// are transport retries of the same blob, 400 ms × (retry + 1) apart, up to four transmissions
-    /// in all; any other answer leaves it to settlement; a malformed one fails the run.
+    /// are transport retries of the same blob, <see cref="BatchStrategyOptions.TransportRetryStep"/> ×
+    /// (retry + 1) apart, up to four transmissions in all; <c>telINSUF_FEE_P</c> is not resent, since
+    /// the next round reads the unit again; any other answer leaves it to settlement; a malformed one
+    /// fails the run. A halted round sends no first copy of anything: the candidate stays registered
+    /// and counted, its deadline is already in the fence, and settlement waits it out (Spec question 24).
     /// </summary>
     private async Task TransmitAsync(
-        BatchCandidate candidate, BatchRegistry registry, CancellationTokenSource transmitting, CancellationToken cancellationToken)
+        BatchCandidate candidate, BatchRegistry registry, bool slotHeld, CancellationTokenSource transmitting, CancellationToken cancellationToken)
     {
         try
         {
             for (int transmission = 1; transmission <= MaxTransmissions; transmission++)
             {
-                if (candidate.IsResolved) return;
+                bool first = transmission == 1;
 
-                await context.Window.AcquireAsync(cancellationToken).ConfigureAwait(false);
+                if (candidate.IsResolved || (first && registry.IsHalted))
+                {
+                    if (first && slotHeld) context.Window.Return();
+                    if (first && !candidate.IsResolved) context.Trace.Add($"unsent:{candidate.Ordinal}");
+                    return;
+                }
+
+                if (!(first && slotHeld)) await context.Window.AcquireAsync(cancellationToken).ConfigureAwait(false);
                 string? answer = null;
 
                 try
@@ -4415,11 +4635,13 @@ internal sealed class BatchRound(
                         engineResult: answer);
                 }
 
+                if (answer == "telINSUF_FEE_P") return;
+
                 if (answer is not null && !IsBusy(answer)) return;
 
                 if (transmission < MaxTransmissions)
                 {
-                    await Task.Delay(RetryStep * transmission, Options.Time, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(Options.TransportRetryStep * transmission, Options.Time, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -4435,30 +4657,52 @@ internal sealed class BatchRound(
         }
     }
 
-    /// <summary>A <c>tel</c> answer, <c>tooBusy</c> or <c>slowDown</c> (spec B10). <c>telINSUF_FEE_P</c> is one too.</summary>
+    /// <summary>
+    /// A <c>tel</c> answer, <c>tooBusy</c>, <c>slowDown</c> (spec B10), or a node briefly out of step
+    /// with its network -- <c>noNetwork</c>, <c>noCurrent</c>, <c>noClosed</c>, <c>notSynced</c>
+    /// (Spec question 13). <c>amendmentBlocked</c> and any other error are left to settlement.
+    /// </summary>
     private static bool IsBusy(string answer) =>
-        answer.StartsWith("tel", StringComparison.Ordinal) || answer is "error:tooBusy" or "error:slowDown";
+        answer.StartsWith("tel", StringComparison.Ordinal)
+        || answer is "error:tooBusy" or "error:slowDown" or "error:noNetwork" or "error:noCurrent" or "error:noClosed" or "error:notSynced";
 
     /// <summary>A <c>tem</c> answer, or a blob the node could not read at all.</summary>
     private static bool IsMalformed(string answer) =>
         answer.StartsWith("tem", StringComparison.Ordinal) || answer == "error:invalidTransaction";
 
+    /// <summary>
+    /// The chain check of spec B8, every <see cref="BatchStrategyOptions.ChainCheck"/>. A check that
+    /// cannot be made -- the node unreachable past its limit, a ledger that stopped -- is fatal: it
+    /// halts the round, so a sender waiting for allowance is released rather than left waiting.
+    /// </summary>
     private async Task ChainCheckLoopAsync(RoundPlan plan, LedgerSnapshot start, BatchRegistry registry, CancellationToken cancellationToken)
     {
-        while (!registry.IsHalted)
+        try
         {
-            await Task.Delay(Options.ChainCheck, Options.Time, cancellationToken).ConfigureAwait(false);
-
-            LedgerSnapshot snapshot = await SnapshotAsync(cancellationToken).ConfigureAwait(false);
-
-            if (BatchChain.Verdict(plan, start, registry.Outers, snapshot, Writer, Payer) is { } verdict)
+            while (!registry.IsHalted)
             {
-                await registry.HaltAsync(verdict, cancellationToken).ConfigureAwait(false);
-                return;
-            }
+                await Task.Delay(Options.ChainCheck, Options.Time, cancellationToken).ConfigureAwait(false);
 
-            // Raised only by a snapshot that passed the check (spec B10).
-            Interlocked.Exchange(ref _allowance, snapshot.SequenceOf(Payer) + (long)Options.MaxAhead);
+                LedgerSnapshot snapshot = await SnapshotAsync(cancellationToken).ConfigureAwait(false);
+
+                if (BatchChain.Verdict(plan, start, registry.Outers, snapshot, Writer, Payer) is { } verdict)
+                {
+                    await registry.HaltAsync(verdict, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                // Raised only by a snapshot that passed the check (spec B10).
+                Interlocked.Exchange(ref _allowance, snapshot.SequenceOf(Payer) + (long)Options.MaxAhead);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            Interlocked.CompareExchange(ref _fatal, e, null);
+            await registry.HaltAsync("fatal", CancellationToken.None).ConfigureAwait(false);
         }
     }
 
@@ -4558,6 +4802,19 @@ internal sealed class BatchRound(
 }
 ```
 
+In `src/XrplFile.Core/ISubmissionStrategy.cs`, give `SubmittedMemo` a body:
+
+```csharp
+public sealed record SubmittedMemo(int Index, string TxHash)
+{
+    /// <summary>
+    /// The ledger the memo landed in, when the strategy read it off the record it confirmed the memo
+    /// by; null when it did not. The writer then needs no <c>tx</c> lookup per memo (Spec question 23).
+    /// </summary>
+    public long? LedgerIndex { get; init; }
+}
+```
+
 - [ ] **Step 6: Write `BatchStrategy`**
 
 `src/XrplFile.Core/BatchStrategy.cs`:
@@ -4629,7 +4886,7 @@ public sealed class BatchStrategy : ISubmissionStrategy
         ArgumentNullException.ThrowIfNull(memos);
         RequireDistinctMarkers(memos);
 
-        Dictionary<int, string> landed = [];
+        Dictionary<int, LandedInner> landed = [];
         Dictionary<int, int> candidates = [];
         List<int> pending = [.. Enumerable.Range(0, memos.Count)];
 
@@ -4640,7 +4897,7 @@ public sealed class BatchStrategy : ISubmissionStrategy
 
             RoundResult round = await new BatchRound(_context, memos, pending, candidates).RunAsync(cancellationToken).ConfigureAwait(false);
 
-            foreach ((int index, string hash) in round.Landed) landed.TryAdd(index, hash);
+            foreach ((int index, LandedInner inner) in round.Landed) landed.TryAdd(index, inner);
 
             Interlocked.Add(ref _payerFeeDrops, round.PayerFeeDrops);
             if (!round.PayerFeeKnown) _payerFeeUnknown = true;
@@ -4649,7 +4906,8 @@ public sealed class BatchStrategy : ISubmissionStrategy
             pending = [.. pending.Where(index => !landed.ContainsKey(index))];
         }
 
-        return [.. landed.OrderBy(pair => pair.Key).Select(pair => new SubmittedMemo(pair.Key, pair.Value))];
+        return [.. landed.OrderBy(pair => pair.Key)
+            .Select(pair => new SubmittedMemo(pair.Key, pair.Value.Hash) { LedgerIndex = pair.Value.LedgerIndex })];
     }
 
     public Task<TicketRelease> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken) =>
@@ -4699,7 +4957,7 @@ Run three times: `dotnet run --project tests/XrplFile.Core.Tests -- -trait- "Cat
 Expected: PASS every time.
 
 ```bash
-git add src/XrplFile.Core/BatchContext.cs src/XrplFile.Core/BatchChain.cs src/XrplFile.Core/BatchRound.cs src/XrplFile.Core/BatchSweep.cs src/XrplFile.Core/BatchStrategy.cs tests/XrplFile.Core.Tests/BatchChainTests.cs tests/XrplFile.Core.Tests/BatchStrategyTests.cs tests/XrplFile.Core.Tests/BatchTestNode.cs tests/XrplFile.Core.Tests/GatedSigner.cs tests/XrplFile.Core.Tests/GatedBlobSink.cs
+git add src/XrplFile.Core/ISubmissionStrategy.cs src/XrplFile.Core/BatchContext.cs src/XrplFile.Core/BatchChain.cs src/XrplFile.Core/BatchRound.cs src/XrplFile.Core/BatchSweep.cs src/XrplFile.Core/BatchStrategy.cs tests/XrplFile.Core.Tests/BatchChainTests.cs tests/XrplFile.Core.Tests/BatchStrategyTests.cs tests/XrplFile.Core.Tests/BatchTestNode.cs tests/XrplFile.Core.Tests/GatedSigner.cs tests/XrplFile.Core.Tests/GatedBlobSink.cs
 git commit -m "feat(core): BatchStrategy rounds with chain check, settlement and solo memos"
 ```
 
@@ -5039,7 +5297,7 @@ internal static class BatchSweep
         Dictionary<string, int> byMarker = new(StringComparer.OrdinalIgnoreCase);
         foreach (int index in pending) byMarker[memos[index].MemoTypeHex] = index;
 
-        Dictionary<int, string> landed = [];
+        Dictionary<int, LandedInner> landed = [];
 
         foreach (LedgerTransaction tx in writerRecords)
         {
@@ -5052,7 +5310,7 @@ internal static class BatchSweep
             if (!ours || tx.MemoTypeHex is null || !byMarker.TryGetValue(tx.MemoTypeHex, out int index)) continue;
             if (!string.Equals(tx.MemoDataHex, memos[index].MemoDataHex, StringComparison.OrdinalIgnoreCase)) continue;
 
-            landed.TryAdd(index, tx.Hash);
+            landed.TryAdd(index, new LandedInner(tx.Hash, tx.LedgerIndex));
         }
 
         long fee = 0;
@@ -5147,9 +5405,9 @@ public class BatchLimitsTests
     {
         BatchTestNode node = new(sink =>
         {
-            sink.AnswerAt[0] = "telCAN_NOT_QUEUE";
-            sink.AnswerAt[1] = "error:tooBusy";
-            sink.AnswerAt[2] = "telCAN_NOT_QUEUE";
+            sink.AnswerAt[(BatchTestNode.PayerStart, 1)] = "telCAN_NOT_QUEUE";
+            sink.AnswerAt[(BatchTestNode.PayerStart, 2)] = "error:tooBusy";
+            sink.AnswerAt[(BatchTestNode.PayerStart, 3)] = "telCAN_NOT_QUEUE";
         });
         await using BatchStrategy strategy = node.Strategy(BatchTestNode.FastOptions with { MaxAttemptsPerMemo = 1 });
 
@@ -5530,16 +5788,23 @@ public class BatchOutageTests
     {
         BatchTestNode node = new(sink =>
         {
+            // No ledger closes until every lost answer has been resent: otherwise settlement resolves
+            // the three batches by the payer's sequence before their resends go out.
+            sink.AutoClose = false;
             sink.ApplyThenDropAt.Add(0);
             sink.ApplyThenDropAt.Add(1);
             sink.ApplyThenDropAt.Add(2);
         });
-        await using BatchStrategy strategy = node.Strategy(Options);
+        await using BatchStrategy strategy = node.Strategy(Options with { NodeOutageLimit = TimeSpan.FromSeconds(10) });
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
+        Task<IReadOnlyList<SubmittedMemo>> run = strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
+        await BatchTestNode.EventuallyAsync(() => node.Sink.Transmissions.Count(t => t.Answer == "tefPAST_SEQ") >= 3);
+        node.Sink.AutoClose = true;
+
+        IReadOnlyList<SubmittedMemo> landed = await run;
 
         Assert.Equal(24, landed.Count);
-        Assert.Contains(node.Sink.Transmissions, t => t.Answer == "tefPAST_SEQ");
+        Assert.Equal(3, strategy.Trace.Count(entry => entry.EndsWith(":no answer", StringComparison.Ordinal)));
         Assert.All((await node.LandedByMarkerAsync()).Values, copies => Assert.Single(copies));
         Assert.Single(strategy.Trace, entry => entry.StartsWith("round:", StringComparison.Ordinal));
     }
@@ -5578,6 +5843,21 @@ public class BatchOutageTests
 
         Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
         Assert.Contains("stayed at", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_sender_waiting_for_allowance_still_fails_when_the_node_stops()
+    {
+        BatchTestNode node = new();
+        node.Sink.AutoClose = false;
+
+        // Two batches ahead at most: the sender is parked in its allowance wait when the chain check dies.
+        await using BatchStrategy strategy = node.Strategy(Options with { MaxAhead = 2 });
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => strategy.SubmitAllAsync(BatchTestNode.Memos(80), null, Token).WaitAsync(TimeSpan.FromSeconds(20), Token));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
     }
 }
 ```
@@ -6234,7 +6514,7 @@ Spec 4.1 (`IBatchFenceRecorder` is the session), 4.5 (session overloads and refu
 - Consumes: `BatchStrategy`, `BatchBudget`, `IBatchFenceRecorder`, `BatchPublicationEstimate`, `PublicationEstimator.EstimateBatchAsync`/`RequireBatch`, `PublicationState` v3.
 - Produces:
   - `public delegate BatchStrategy BatchStrategyFactory(BatchBudget budget, IBatchFenceRecorder fence);`
-  - `SessionOptions.SourcePath` (`string?`), `SessionOptions.FencePoll` (`TimeSpan`, default 1 s)
+  - `SessionOptions.SourcePath` (`string?`), `SessionOptions.FencePoll` (`TimeSpan`, default 1 s), `SessionOptions.NodeOutageLimit` (`TimeSpan`, default 2 min)
   - `PublicationSession : IBatchFenceRecorder`
   - `static Task<BatchPublicationEstimate> PublicationSession.EstimateAsync(ILedgerSource source, string writer, string payer, long fileBytes, SessionOptions options, CancellationToken cancellationToken)` — refusals 1 (`BatchNotEnabled`) and 2 (`FeeTooHigh`)
   - `static Task<PublicationSession> PublicationSession.StartAsync(BatchStrategyFactory strategyFactory, ILedgerSource source, ReadOnlyMemory<byte> file, string type, string? name, string writer, string keyReference, string payer, string payerKeyReference, string network, SessionOptions options, CancellationToken cancellationToken)`
@@ -6372,7 +6652,9 @@ public class PublicationSessionBatchTests : IDisposable
         List<(long Fence, uint LastLedger)> seen = [];
         node.Sink.Transmitting = transmission =>
         {
-            lock (seen) seen.Add((PublicationState.Load(session.StatePath).Fence ?? 0, transmission.LastLedger));
+            // The session's own view, set only after a save succeeded: opening the file here could make
+            // the next fence save's move fail on Windows, and with it the run (spec B23).
+            lock (seen) seen.Add((session.State.Fence ?? 0, transmission.LastLedger));
         };
 
         await session.RunAsync(null, Token);
@@ -6404,6 +6686,20 @@ public class PublicationSessionBatchTests : IDisposable
             (budget, fence) => new BatchStrategy(node.Sink, node.Ledger, node.Writer, stranger, budget, fence),
             node.Ledger, VectorStream.Bytes("b", 9000), "text/plain", null,
             node.Writer.Account, "key-w", node.Payer.Account, "key-p", "testnet", Options(), Token));
+    }
+
+    [Fact]
+    public async Task A_one_chunk_file_costs_the_payer_nothing_and_the_writer_two_solos()
+    {
+        BatchTestNode node = Funded();
+        PublicationSession session = await StartAsync(node, VectorStream.Bytes("one", 500));
+
+        PublicationReport report = await session.RunAsync(null, Token);
+
+        Assert.Equal(0L, report.PayerFeeDrops);
+        Assert.DoesNotContain(node.Sink.Transmissions, transmission => transmission.TransactionType == "Batch");
+        Assert.Equal(2, node.Sink.Transmissions.Count(t => t.TransactionType == "AccountSet" && t.Account == node.Writer.Account));
+        Assert.Equal(2 * 15L, report.FeeDropsEstimated);
     }
 }
 ```
@@ -6475,6 +6771,9 @@ In `SessionOptions` add:
 
     /// <summary>How often a resume reads the ledger while it waits for the fence to pass (spec B23).</summary>
     public TimeSpan FencePoll { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>How long the fence wait tolerates a node that fails or a ledger that does not advance (Spec question 4).</summary>
+    public TimeSpan NodeOutageLimit { get; init; } = TimeSpan.FromMinutes(2);
 ```
 
 In `PublicationReport` add after `TicketReleaseFeeDropsInDoubt`:
@@ -6490,6 +6789,8 @@ In `PublicationReport` add after `TicketReleaseFeeDropsInDoubt`:
     /// </summary>
     public long? PayerFeeDrops { get; init; }
 ```
+
+and add to the record's `<param name="FeeDropsEstimated">` documentation: "For a Batch run this is the writer's part only — its solo transactions at the approved unit — and <see cref="PayerFeeDrops"/> is what the payer paid; <see cref="Transactions"/> then counts the memos (chunks, lists, manifest), inners and solos alike."
 
 - [ ] **Step 4: The session**
 
@@ -6507,7 +6808,7 @@ In `src/XrplFile.Core/PublicationSession.cs`:
         _strategy ?? throw new InvalidOperationException("this session finished a publication without submitting and has no strategy");
 ```
 
-The private constructor's first parameter becomes `ISubmissionStrategy? strategy`. Replace every `_strategy.` read in `RunAsync` and `ReleaseLeftoverTicketsAsync` with `Strategy.`.
+The private constructor's first parameter becomes `ISubmissionStrategy? strategy`. Replace every read of `_strategy` in `RunAsync` and `ReleaseLeftoverTicketsAsync` with `Strategy` — the member accesses (`_strategy.TicketMints`, `_strategy.ReleaseLeftoverTicketsAsync`) and the field passed whole (`new XrplFileWriter(_strategy, …)`), or the nullable field breaks the build (CS8604 under `TreatWarningsAsErrors`).
 
 3. Add the Batch estimate and start, and the root helper, after the existing `EstimateAsync`:
 
@@ -6691,10 +6992,10 @@ with `ManifestHash = manifestHash ?? _state.ManifestHash,` added to its `with` e
             int mints = _mintsAtStart is { } before ? Strategy.TicketMints - before : _mints;
             long transactions = result.ChunkHashes.Count + result.ListHashes.Count + 1 + mints;
 
-            // A Batch run's figure is its approved estimate, payer and writer, nothing retried; a
-            // one-account run's is its transactions at the approved fee (see the remarks on SessionOptions).
+            // The writer's fees, counted as today (spec 4.6): on the Batch path its solo transactions at
+            // the approved unit, nothing retried; the payer's measured spend is PayerFeeDrops (Spec question 9).
             long feeEstimated = _batchEstimate is { } batch
-                ? batch.PayerFeeDrops + batch.WriterFeeDrops
+                ? batch.WriterFeeDrops
                 : transactions * _feeDropsPerTransaction;
 
             return new PublicationReport(
@@ -6740,7 +7041,7 @@ Spec B27, 5.2 steps 3–4, 7.4's B27 cases (unit half). One manifest builder is 
 **Files:**
 - Create: `src/XrplFile.Core/ManifestPlan.cs`
 - Modify: `src/XrplFile.Core/XrplFileWriter.cs`, `src/XrplFile.Core/PublicationSession.cs` (`ResumeAsync`, `RunAsync`, new `FindManifestAsync`, `RequireResumable`)
-- Test: `tests/XrplFile.Core.Tests/ManifestReconciliationTests.cs`, `tests/XrplFile.Core.Tests/ScriptedStrategy.cs`
+- Test: `tests/XrplFile.Core.Tests/ManifestReconciliationTests.cs`, `tests/XrplFile.Core.Tests/ScriptedStrategy.cs`, `tests/XrplFile.Core.Tests/WriterLedgerTests.cs`
 
 **Interfaces:**
 - Produces:
@@ -6927,10 +7228,77 @@ public class ManifestReconciliationTests : IDisposable
 }
 ```
 
+`tests/XrplFile.Core.Tests/WriterLedgerTests.cs`:
+
+```csharp
+using Xunit;
+
+namespace XrplFile.Tests;
+
+/// <summary>Spec question 23: a strategy that says where each memo landed spares the writer a lookup per memo.</summary>
+public class WriterLedgerTests
+{
+    [Fact]
+    public async Task A_strategy_that_reports_ledgers_spares_the_writer_a_lookup_per_chunk()
+    {
+        BatchTestNode node = new();
+        LookupRecordingSource source = new(node.Ledger);
+        await using BatchStrategy strategy = node.Strategy();
+        XrplFileWriter writer = new(strategy, source, new WriterOptions { ReadBack = false });
+
+        PublishResult result = await writer.PublishAsync(
+            VectorStream.Bytes("ledgers", 20_000), "text/plain", null, node.Writer.Account, "testnet", null, null,
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(source.LookedUp.Intersect(result.ChunkHashes, StringComparer.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Forwards every read and remembers which hashes were looked up one by one.</summary>
+    private sealed class LookupRecordingSource(ILedgerSource inner) : ILedgerSource
+    {
+        private readonly List<string> _lookedUp = [];
+
+        public IReadOnlyList<string> LookedUp
+        {
+            get { lock (_lookedUp) return [.. _lookedUp]; }
+        }
+
+        public Task<LedgerTransaction?> TransactionAsync(string hash, CancellationToken cancellationToken)
+        {
+            lock (_lookedUp) _lookedUp.Add(hash);
+            return inner.TransactionAsync(hash, cancellationToken);
+        }
+
+        public IAsyncEnumerable<LedgerTransaction> AccountTransactionsAsync(string account, long fromLedger, long toLedger, bool forward, CancellationToken cancellationToken) =>
+            inner.AccountTransactionsAsync(account, fromLedger, toLedger, forward, cancellationToken);
+
+        public Task<long?> EarliestLedgerAsync(CancellationToken cancellationToken) => inner.EarliestLedgerAsync(cancellationToken);
+
+        public Task<NetworkFees> FeesAsync(CancellationToken cancellationToken) => inner.FeesAsync(cancellationToken);
+
+        public Task<long> BalanceDropsAsync(string account, CancellationToken cancellationToken) => inner.BalanceDropsAsync(account, cancellationToken);
+
+        public Task<AccountState> AccountStateAsync(string account, CancellationToken cancellationToken) => inner.AccountStateAsync(account, cancellationToken);
+
+        public Task<IReadOnlyList<LiveTicket>> LiveTicketsAsync(string account, CancellationToken cancellationToken) => inner.LiveTicketsAsync(account, cancellationToken);
+
+        public Task<long> CurrentLedgerAsync(CancellationToken cancellationToken) => inner.CurrentLedgerAsync(cancellationToken);
+
+        public Task<DestinationState> DestinationAsync(string account, CancellationToken cancellationToken) => inner.DestinationAsync(account, cancellationToken);
+
+        public Task<LedgerSnapshot> SnapshotAsync(IReadOnlyList<string> accounts, CancellationToken cancellationToken) => inner.SnapshotAsync(accounts, cancellationToken);
+
+        public Task<OpenLedgerFee> OpenLedgerFeeAsync(CancellationToken cancellationToken) => inner.OpenLedgerFeeAsync(cancellationToken);
+
+        public Task<bool> IsAmendmentEnabledAsync(string name, CancellationToken cancellationToken) => inner.IsAmendmentEnabledAsync(name, cancellationToken);
+    }
+}
+```
+
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class XrplFile.Tests.ManifestReconciliationTests`
-Expected: the first two FAIL (`ResumeAsync` throws `InsufficientBalance` in the first; the second sends a second manifest, so `Submitted.Count` grows); the third passes or fails on ordering — it must pass after Step 5.
+Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class XrplFile.Tests.ManifestReconciliationTests -class XrplFile.Tests.WriterLedgerTests`
+Expected: the first two FAIL (`ResumeAsync` throws `InsufficientBalance` in the first; the second sends a second manifest, so `Submitted.Count` grows); the third passes or fails on ordering — it must pass after Step 5; `WriterLedgerTests` FAILS (the writer looks every chunk up).
 
 - [ ] **Step 3: Extract `ManifestPlan` and use it in the writer**
 
@@ -6999,8 +7367,22 @@ In `src/XrplFile.Core/XrplFileWriter.cs`, `PublishCoreAsync`:
 
 4. Replace the manifest submission's memo `new MemoSubmission(MemoLayout.ManifestMarkerHex, MemoLayout.Utf8Hex(manifest.Encode()), MemoLayout.JsonFormatHex)` with `ManifestPlan.Memo(manifest)`.
 
-Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class XrplFile.Tests.XrplFileWriterTests -class XrplFile.Tests.VectorTests`
-Expected: PASS (a pure refactor).
+5. Use the ledger a strategy reports instead of one `tx` lookup per memo (Spec question 23). In the chunk loop replace `chunkLedgers[index] = await LedgerOfAsync(memo.TxHash, cancellationToken).ConfigureAwait(false);` with:
+
+```csharp
+                chunkLedgers[index] = memo.LedgerIndex ?? await LedgerOfAsync(memo.TxHash, cancellationToken).ConfigureAwait(false);
+```
+
+and in the list loop replace `listLedgers[index] = await LedgerOfAsync(memo.TxHash, cancellationToken).ConfigureAwait(false);` with:
+
+```csharp
+                    listLedgers[index] = memo.LedgerIndex ?? await LedgerOfAsync(memo.TxHash, cancellationToken).ConfigureAwait(false);
+```
+
+A strategy reports a ledger only from a validated tesSUCCESS record it matched (B28), which is what the lookup would have checked.
+
+Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class XrplFile.Tests.XrplFileWriterTests -class XrplFile.Tests.VectorTests -class XrplFile.Tests.WriterLedgerTests`
+Expected: PASS (items 1–4 are a pure refactor; item 5 makes `WriterLedgerTests` pass).
 
 - [ ] **Step 4: Look for the manifest, and finish without sending when it is found**
 
@@ -7192,7 +7574,7 @@ Expected: PASS. `A_resumed_ticketed_run_with_no_free_slot_never_starts` still pa
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/XrplFile.Core/ManifestPlan.cs src/XrplFile.Core/XrplFileWriter.cs src/XrplFile.Core/PublicationSession.cs tests/XrplFile.Core.Tests/ManifestReconciliationTests.cs tests/XrplFile.Core.Tests/ScriptedStrategy.cs
+git add src/XrplFile.Core/ManifestPlan.cs src/XrplFile.Core/XrplFileWriter.cs src/XrplFile.Core/PublicationSession.cs tests/XrplFile.Core.Tests/ManifestReconciliationTests.cs tests/XrplFile.Core.Tests/ScriptedStrategy.cs tests/XrplFile.Core.Tests/WriterLedgerTests.cs
 git commit -m "feat(core): a resume finds the manifest a dead run already sent"
 ```
 
@@ -7353,6 +7735,25 @@ public class PublicationSessionBatchResumeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_fence_wait_on_a_node_that_stopped_fails_instead_of_waiting_forever()
+    {
+        BatchTestNode node = Funded();
+        (PublicationSession first, byte[] file) = await InterruptedAsync(node);
+        node.Sink.AutoClose = false;
+        SessionOptions stuck = new()
+        {
+            StateDirectory = _stateDirectory,
+            FencePoll = TimeSpan.FromMilliseconds(1),
+            NodeOutageLimit = TimeSpan.FromMilliseconds(200),
+        };
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            Factory(node, node.Payer), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", stuck, null, Token));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+    }
+
+    [Fact]
     public async Task Closing_during_the_fence_wait_leaves_the_state_as_it_was_and_the_run_resumable()
     {
         BatchTestNode node = Funded();
@@ -7467,20 +7868,39 @@ In `src/XrplFile.Core/PublicationSession.cs` add:
     /// <summary>
     /// Waits until a snapshot is past the fence plus the settle ledgers (spec B23), reporting the wait
     /// as the "fence" stage. A run that never transmitted has a fence of zero and waits for nothing.
+    /// Reads are retried, and a node that stays unreachable, or whose validated ledger stays where it
+    /// is, for <see cref="SessionOptions.NodeOutageLimit"/> fails the resume (Spec question 4).
     /// </summary>
     private static async Task WaitForFenceAsync(
         ILedgerSource source, PublicationState state, SessionOptions options, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
     {
         if (state.Fence is not { } fence || fence <= 0) return;
 
-        long target = fence + new BatchStrategyOptions().SettleLedgers;
+        BatchStrategyOptions reads = new() { ChainCheck = options.FencePoll, NodeOutageLimit = options.NodeOutageLimit };
+        long target = fence + reads.SettleLedgers;
         long? first = null;
+        long highest = 0;
+        DateTimeOffset advancedAt = DateTimeOffset.UtcNow;
 
         while (true)
         {
-            LedgerSnapshot snapshot = await source.SnapshotAsync([state.Writer], cancellationToken).ConfigureAwait(false);
+            LedgerSnapshot snapshot = await BatchReads.RetryAsync(
+                token => source.SnapshotAsync([state.Writer], token), reads, cancellationToken).ConfigureAwait(false);
 
             if (snapshot.LedgerIndex > target) return;
+
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+
+            if (snapshot.LedgerIndex > highest)
+            {
+                highest = snapshot.LedgerIndex;
+                advancedAt = now;
+            }
+            else if (now - advancedAt >= options.NodeOutageLimit)
+            {
+                throw new XrplFileException(XrplFileError.NodeUnreachable,
+                    $"the node's validated ledger has stayed at {snapshot.LedgerIndex} for {options.NodeOutageLimit}, short of the fence at {fence}");
+            }
 
             first ??= snapshot.LedgerIndex;
             progress?.Report(new PublishProgress("fence", snapshot.LedgerIndex - first.Value, target + 1 - first.Value));
@@ -7531,7 +7951,7 @@ Spec B20 (ticket half), 4.4.
 - Test: `tests/XrplFile.Core.Tests/TicketStrategyTests.cs` (append)
 
 **Interfaces:**
-- Produces: `TicketStrategy.SweepAsync` gains an `Action<int>? found` parameter, called after every poll with the number of the batch's memos found successful so far.
+- Produces: `TicketStrategy.SweepAsync` gains an `Action<int>? found` parameter, called after every poll with the number of the batch's memos found successful so far; its `SweepResult.Landed` carries the records themselves, so every `SubmittedMemo` the ticket path returns has its `LedgerIndex` (Spec question 23).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -7562,12 +7982,33 @@ Append inside `TicketStrategyTests`:
         FakeLedgerSink sink = new(ledger);
         sink.FailMarkers.Add(MemoLayout.ChunkMarkerHex(1));
         List<int> reports = [];
-        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        // A short batch timeout: the failing memo would otherwise wait the full five seconds per attempt.
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
+        {
+            TicketsPerBatch = 100,
+            SweepPoll = TimeSpan.FromMilliseconds(1),
+            BatchTimeout = TimeSpan.FromMilliseconds(200),
+            ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
 
         await Assert.ThrowsAsync<XrplFileException>(() => strategy.SubmitAllAsync(
             Memos(3), new SynchronousProgress<int>(reports.Add), TestContext.Current.CancellationToken));
 
         Assert.Equal(2, reports.Max());
+    }
+
+    [Fact]
+    public async Task Every_ticketed_memo_says_which_ledger_it_is_in()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        foreach (SubmittedMemo memo in await strategy.SubmitAllAsync(Memos(5), null, TestContext.Current.CancellationToken))
+        {
+            Assert.Equal((await ledger.TransactionAsync(memo.TxHash, TestContext.Current.CancellationToken))!.LedgerIndex, memo.LedgerIndex);
+        }
     }
 ```
 
@@ -7578,7 +8019,31 @@ Expected: the first new test FAILS (`reports[0]` is 3: one report after the batc
 
 - [ ] **Step 3: Report from every poll**
 
-In `TicketStrategy.SubmitAllAsync`, replace the `SweepAsync` call with:
+1. `SweepResult` carries the records the sweep matched, not only their hashes:
+
+```csharp
+    private sealed record SweepResult(IReadOnlyDictionary<string, LedgerTransaction> Landed, IReadOnlySet<string> Seen)
+    {
+        public static SweepResult Empty { get; } = new(new Dictionary<string, LedgerTransaction>(), new HashSet<string>());
+    }
+```
+
+2. In `SweepAsync`, add the parameter `Action<int>? found` before `CancellationToken cancellationToken`, documented `/// <param name="found">Told after every poll how many of these markers have landed successfully so far (spec B20).</param>`. Rename its local dictionary from `found` to `landedHere` and make it `Dictionary<string, LedgerTransaction> landedHere = new(StringComparer.Ordinal);`; the one `TryAdd` becomes `landedHere.TryAdd(tx.MemoTypeHex, tx);`; the completeness check becomes `if (landedHere.Count == markers.Count) return new SweepResult(landedHere, seen);` and the deadline line `if (DateTimeOffset.UtcNow >= deadline) return new SweepResult(landedHere, seen);`. Immediately after the `await foreach` loop, before those two lines, add:
+
+```csharp
+            found?.Invoke(landedHere.Count);
+```
+
+3. In `SubmitAllAsync`, the landed map holds records: `Dictionary<int, LedgerTransaction> landed = [];`; the copy loop becomes
+
+```csharp
+            foreach ((string marker, LedgerTransaction tx) in swept.Landed)
+            {
+                landed[wanted[marker]] = tx;
+            }
+```
+
+the `SweepAsync` call becomes
 
 ```csharp
             int landedBefore = landed.Count;
@@ -7590,13 +8055,12 @@ In `TicketStrategy.SubmitAllAsync`, replace the `SweepAsync` call with:
                     sweepFrom.Value, batchFrom, found => submitted?.Report(landedBefore + found), cancellationToken).ConfigureAwait(false);
 ```
 
-In `SweepAsync`, add the parameter `Action<int>? found` before `CancellationToken cancellationToken`, document it (`/// <param name="found">Told after every poll how many of these markers have landed successfully so far (spec B20).</param>`), and immediately after the `await foreach` loop add:
+and the final `return` becomes
 
 ```csharp
-            found?.Invoke(found.Count);
+        return [.. landed.OrderBy(pair => pair.Key)
+            .Select(pair => new SubmittedMemo(pair.Key, pair.Value.Hash) { LedgerIndex = pair.Value.LedgerIndex })];
 ```
-
-The local dictionary in `SweepAsync` is also called `found`; rename the dictionary to `landedHere` throughout the method (its declaration, `found.TryAdd`, the two `found.Count == markers.Count`/return lines) so the new line reads `found?.Invoke(landedHere.Count);`.
 
 - [ ] **Step 4: Run the tests**
 
@@ -7607,7 +8071,7 @@ Expected: PASS.
 
 ```bash
 git add src/XrplFile.Core/TicketStrategy.cs tests/XrplFile.Core.Tests/TicketStrategyTests.cs
-git commit -m "feat(core): ticket progress moves with every sweep poll"
+git commit -m "feat(core): ticket progress moves with every sweep poll, and says where each memo landed"
 ```
 
 ---
@@ -8597,7 +9061,8 @@ Spec 6.1 (wiring), 5.1 (History from the state), 5.2 step 7, B16, B18.
 - Produces:
   - `PublicationRun` ctor gains `TimeProvider? time = null, BatchStrategyOptions? batchOptions = null` after `autoLock`.
   - `RunSnapshot` init properties: `bool UsesBatch`, `string? StatePath`, `DateTimeOffset? StartedAt`, `long FileBytes`.
-  - `PublicationRecord` gains `string? Payer = null` as its last parameter.
+  - `PublicationRecord` gains `string? Payer = null` as its last parameter, written only when set.
+  - After History holds a run's link, the run's state file is deleted (Spec question 22).
   - `FakeConnectionFactory.EnableBatch()` → `FakeBatchLedgerSink`; while enabled, connections hand out that sink.
 
 - [ ] **Step 1: Let the fake factory hand out the Batch sink**
@@ -8637,6 +9102,10 @@ public sealed class PublicationRunBatchTests : VaultHarness
         ProgressSweep = TimeSpan.FromMilliseconds(5),
         HistoryLagLimit = TimeSpan.FromSeconds(2),
         FeeWait = TimeSpan.FromMilliseconds(20),
+
+        // The fake closes a ledger on every read, so its deadlines pass in milliseconds: a 400 ms
+        // retry step would meet a resolved candidate instead of its resend.
+        TransportRetryStep = TimeSpan.FromMilliseconds(1),
     };
 
     private readonly string _directory = Directory.CreateTempSubdirectory("xrpl-file-run-batch-").FullName;
@@ -8694,7 +9163,7 @@ public sealed class PublicationRunBatchTests : VaultHarness
         PublicationRecord record = Assert.Single(history.Read());
         Assert.Equal(request.PayerAccount, record.Payer);
         Assert.Equal(snapshot.Report!.Link.ToString(), record.Link);
-        Assert.Equal(PublicationState.Load(snapshot.StatePath!).ManifestHash, snapshot.Report.ManifestHash);
+        Assert.False(File.Exists(snapshot.StatePath), "the finished run's state file outlived its History record");
     }
 
     [Fact]
@@ -8716,7 +9185,7 @@ public sealed class PublicationRunBatchTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
-        Assert.Equal("done", PublicationState.Load(statePath).Phase);
+        Assert.False(File.Exists(statePath));
     }
 
     [Fact]
@@ -8753,7 +9222,7 @@ Expected: build FAILS (`batchOptions`, `UsesBatch`, `PublicationRecord.Payer` do
 
 - [ ] **Step 4: The record and the snapshot**
 
-`app/XrplFile.App.Core/PublicationRecord.cs`: add `string? Payer = null` as the last positional parameter, documented `/// <param name="Payer">The account that paid for a Batch publication, or null.</param>`.
+`app/XrplFile.App.Core/PublicationRecord.cs`: add `using System.Text.Json.Serialization;` and, as the last positional parameter, `[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Payer = null`, documented `/// <param name="Payer">The account that paid for a Batch publication, or null. Omitted from the file when null; an older application ignores it.</param>`.
 
 In `PublicationRun.cs`, add to `RunSnapshot`:
 
@@ -8816,6 +9285,7 @@ In `app/XrplFile.App.Core/PublicationRun.cs`:
         PublicationRunState finalState;
         PublicationReport? report = null;
         PublicationState? finished = null;
+        string? finishedPath = null;
         string? failure = null;
         RunAttempt attempt = new() { Point = statePath is null ? RunFailurePoint.BeforeSubmitting : RunFailurePoint.BeforeResuming };
 
@@ -8832,7 +9302,7 @@ In `app/XrplFile.App.Core/PublicationRun.cs`:
                 PublicationState? recorded = statePath is null ? null : PublicationState.Load(statePath);
                 bool batch = recorded is null ? request.PayerAccount is not null : recorded.Version == PublicationState.BatchVersion;
 
-                (report, finished) = batch
+                (report, finished, finishedPath) = batch
                     ? await RunBatchAsync(request, statePath, connection, attempt, generation, cancellationToken).ConfigureAwait(false)
                     : await RunOneAccountAsync(request, statePath, recorded, connection, attempt, generation, cancellationToken).ConfigureAwait(false);
 
@@ -8867,7 +9337,7 @@ In `app/XrplFile.App.Core/PublicationRun.cs`:
             failure = "The publication's state could not be written to disk, so the run was stopped.";
             finalState = PublicationRunState.Failed;
         }
-        catch (FormatException)
+        catch (Exception ex) when (ex is FormatException or System.Text.Json.JsonException)
         {
             failure = "This run's state file could not be read, so it cannot be resumed.";
             finalState = PublicationRunState.Failed;
@@ -8896,11 +9366,39 @@ In `app/XrplFile.App.Core/PublicationRun.cs`:
                     finished.Payer));
 ```
 
+and, inside the same `try`, after the `if (!appended.Recorded) { … } else if (appended.Note is not null) { … }` block, add:
+
+```csharp
+                // History holds the link now, so the run's state has nothing left to protect, and a
+                // record the person later forgets cannot come back from it (Spec question 22).
+                if (appended.Recorded) DeleteState(finishedPath!);
+```
+
+with, beside `DisposeQuietlyAsync`:
+
+```csharp
+    /// <summary>
+    /// Removes a finished run's state file. One that cannot be removed now is removed at the next
+    /// start-up, which finds its link already listed (<c>PublicationHistory.RecordFinishedRuns</c>, Task 22).
+    /// </summary>
+    private static void DeleteState(string statePath)
+    {
+        try
+        {
+            File.Delete(statePath);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Left for the next start-up.
+        }
+    }
+```
+
 6. Add the two paths and the state-path pin:
 
 ```csharp
     /// <summary>A one-account run: the code this method held before Batch, resuming on the recorded strategy.</summary>
-    private async Task<(PublicationReport Report, PublicationState State)> RunOneAccountAsync(
+    private async Task<(PublicationReport Report, PublicationState State, string StatePath)> RunOneAccountAsync(
         PublishRequest request, string? statePath, PublicationState? recorded, ILedgerConnection connection, RunAttempt attempt,
         int generation, CancellationToken cancellationToken)
     {
@@ -8951,7 +9449,7 @@ In `app/XrplFile.App.Core/PublicationRun.cs`:
             attempt.Point = RunFailurePoint.WhileSubmitting;
 
             PublicationReport report = await session.RunAsync(new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false);
-            return (report, session.State);
+            return (report, session.State, session.StatePath);
         }
         finally
         {
@@ -8964,7 +9462,7 @@ In `app/XrplFile.App.Core/PublicationRun.cs`:
     /// <see cref="PublishPolicy.CreateBatch"/>. A resume passes the payer the request names -- the
     /// recorded one, or the replacement the person chose (spec B18) -- and reports the fence wait.
     /// </summary>
-    private async Task<(PublicationReport Report, PublicationState State)> RunBatchAsync(
+    private async Task<(PublicationReport Report, PublicationState State, string StatePath)> RunBatchAsync(
         PublishRequest request, string? statePath, ILedgerConnection connection, RunAttempt attempt, int generation,
         CancellationToken cancellationToken)
     {
@@ -9015,7 +9513,7 @@ In `app/XrplFile.App.Core/PublicationRun.cs`:
             attempt.Point = RunFailurePoint.WhileSubmitting;
 
             PublicationReport report = await session.RunAsync(new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false);
-            return (report, session.State);
+            return (report, session.State, session.StatePath);
         }
         finally
         {
@@ -9033,7 +9531,7 @@ In `app/XrplFile.App.Core/PublicationRun.cs`:
     }
 ```
 
-(If Task 1 Step F3 fired, create both Batch signers with `cacheWallet: true` and call `writerSigner.ClearCache(); payerSigner.ClearCache();` at the start of the `finally`. If Task 3 Step 8's fallback fired, construct the client in `XrplConnectionFactory.ConnectAsync` with the same `ConnectionOptions` the test used.)
+(If Task 1 Step F3 fired, create both Batch signers with `cacheWallet: true` and call `writerSigner.ClearCache(); payerSigner.ClearCache();` at the start of the `finally`.)
 
 7. `app/XrplFile.App/MauiProgram.cs`: in the `PublicationRun` registration add `provider.GetRequiredService<TimeProvider>()` after `autoLock`.
 
@@ -9131,6 +9629,23 @@ public sealed class RunModelEtaTests : IDisposable
         Assert.Contains("estimating…", text, StringComparison.Ordinal);
         Assert.DoesNotContain("∞", text, StringComparison.Ordinal);
         Assert.DoesNotContain("left", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_pass_whose_memos_have_all_landed_claims_no_seconds_left()
+    {
+        string text = RunModel.StageTextOf(Running("chunks", 7124, 7124, batch: true, TimeSpan.FromSeconds(40)), Now, rate: 300);
+
+        Assert.Equal($"Writing the file — {7124:N0} of {7124:N0} · finishing this pass · 0:40 elapsed", text);
+    }
+
+    [Fact]
+    public async Task Resume_by_path_of_a_run_no_longer_listed_says_so()
+    {
+        UnfinishedModel model = new(new RunPaths(_directory), NewRun(), new FakeFilePicker());
+
+        Assert.False(await model.ResumeByPathAsync(Path.Combine(_directory, "gone.json"), TestContext.Current.CancellationToken));
+        Assert.Equal("This run is no longer listed under unfinished runs, so there is nothing to resume.", model.Message);
     }
 
     [Fact]
@@ -9272,6 +9787,10 @@ In `app/XrplFile.App.Core/RunModel.cs`:
 
         string unit = progress.Stage == "chunks" ? "chunks/s" : "lists/s";
         long remaining = Math.Max(0, progress.Total - progress.Done);
+
+        // Every memo of the pass is in; the pass still settles and the writer still has work, so no
+        // figure of seconds is claimed for it (Spec question 23).
+        if (remaining == 0) return $"{head} · finishing this pass{elapsed}";
         TimeSpan settles = SettlePerPass * PassesAfter(progress.Stage, snapshot.FileBytes);
 
         if (rate is { } measured && measured > 0)
@@ -9330,6 +9849,8 @@ In `app/XrplFile.App.Core/RunModel.cs`:
 ```
 
 3. Replace `StageText` with `public string StageText => Describe(run.Snapshot);`, and in `Capture` replace the `StageText:` argument with `StageText: Describe(snapshot),` and add `CanResume: IsResumable(snapshot), StatePath: snapshot.StatePath` as the last two arguments.
+
+4. In `tests/XrplFile.App.Core.Tests/RunModelTests.cs`, build every `RunModel` with a frozen clock — `new(NewRun(), new ManualTimeProvider())` and likewise for the other constructions — so `AssertViewMatchesProperties` cannot see the elapsed time tick between its two reads.
 
 - [ ] **Step 4: Resume by path**
 
@@ -9417,7 +9938,7 @@ Expected: PASS.
 Run: `dotnet build app/XrplFile.App/XrplFile.App.csproj` — Expected: 0 errors, 0 warnings.
 
 ```bash
-git add app/XrplFile.App.Core/RunModel.cs app/XrplFile.App.Core/UnfinishedModel.cs app/XrplFile.App/Components/Run.razor tests/XrplFile.App.Core.Tests/RunModelEtaTests.cs
+git add app/XrplFile.App.Core/RunModel.cs app/XrplFile.App.Core/UnfinishedModel.cs app/XrplFile.App/Components/Run.razor tests/XrplFile.App.Core.Tests/RunModelEtaTests.cs tests/XrplFile.App.Core.Tests/RunModelTests.cs
 git commit -m "feat(app): time left, the fence wait and Resume on the run screen"
 ```
 
@@ -9435,8 +9956,9 @@ Spec 6.4, 5.1 (History recovery), 5.2 steps 1 and 5, B17, B18.
 - Produces:
   - `UnfinishedRow` init properties: `string? Root`, `string? SourcePath`, `string? Payer`, `string? PayerKeyReference`, `bool IsBatch`, `string? Strategy`, `string? Method`
   - `UnfinishedModel` ctor gains `IKeyVault? vault = null`; `Task RefreshAsync(CancellationToken)`; `UnfinishedRow? NeedsPayer`; `IReadOnlyList<VaultEntryInfo> PayerChoices`; `Task<bool> ResumeWithPayerAsync(UnfinishedRow row, string payerReference, CancellationToken)`; `static string? MethodOf(UnfinishedRow row, IReadOnlyDictionary<string, string> labels)`
-  - `PublicationRecord.Transactions` and `.FeeDropsEstimated` become `long?` (a record recovered from a state file has no report)
-  - `int PublicationHistory.RecordFinishedRuns(string stateDirectory)`
+  - `PublicationRecord` gains `bool? Recovered = null` as its last parameter, written only when set (an older application ignores it); a recovered record carries `0` transactions and `0` fees, its numbers staying non-nullable (Spec question 17)
+  - `int PublicationHistory.RecordFinishedRuns(string stateDirectory)` — records each finished run whose state file still exists, which means its History write never happened, then deletes that state file (Spec question 22)
+  - `UnfinishedModel.ShowsTicketNoteFor` decides by `IsBatch` and the recorded `Strategy` before the size
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -9455,10 +9977,15 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
     private readonly string _directory = Directory.CreateTempSubdirectory("xrpl-file-unfinished-batch-").FullName;
     private readonly FakeFilePicker _picker = new();
 
+    /// <summary>The run a test may have resumed: awaited before the vault and directory go away.</summary>
+    private PublicationRun? _run;
+
     private RunPaths Paths => new(_directory);
 
     public override async ValueTask DisposeAsync()
     {
+        if (_run is not null) await _run.Completion;
+
         await base.DisposeAsync();
         if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
     }
@@ -9487,6 +10014,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
             .Save(statePath);
 
         PublicationRun run = new(new FakeConnectionFactory(), vault, Paths, new PublicationHistory(Paths.HistoryPath));
+        _run = run;
         UnfinishedModel model = new(Paths, run, _picker, vault);
         await model.RefreshAsync(Token);
 
@@ -9511,6 +10039,16 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
         UnfinishedRow row = new("p", "testnet", "rW", "k", "t", "n", size, "Writing the file", 3, null) { Strategy = strategy };
 
         Assert.Equal(expected, UnfinishedModel.MethodOf(row, new Dictionary<string, string>()));
+    }
+
+    [Fact]
+    public void Batch_runs_and_recorded_sequence_runs_never_show_the_ticket_note()
+    {
+        UnfinishedRow big = new("p", "testnet", "rW", "k", "t", "n", 3_145_728, "Writing the file", 3146, null);
+
+        Assert.False(UnfinishedModel.ShowsTicketNoteFor([big with { IsBatch = true }]));
+        Assert.False(UnfinishedModel.ShowsTicketNoteFor([big with { Strategy = PublicationState.SequenceStrategyName }]));
+        Assert.True(UnfinishedModel.ShowsTicketNoteFor([big]));
     }
 
     [Fact]
@@ -9580,24 +10118,72 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
 Append to `tests/XrplFile.App.Core.Tests/PublicationHistoryTests.cs`, inside the class (it has `_directory` and `HistoryPath`):
 
 ```csharp
-    [Fact]
-    public void A_finished_run_missing_from_History_is_recorded_from_its_state_and_only_once()
+    private string StateDirectory => Path.Combine(_directory, "runs");
+
+    private string FinishedState(string name, string manifestHash)
     {
-        string stateDirectory = Path.Combine(_directory, "runs");
-        Directory.CreateDirectory(stateDirectory);
+        Directory.CreateDirectory(StateDirectory);
+        string path = Path.Combine(StateDirectory, name);
         new PublicationState(
             PublicationState.CurrentVersion, "testnet", "rWriter", "key-1", "text/plain", "done.txt", 2500, MemoLayout.ChunkBytes, "AB",
-            42, "done", new Dictionary<int, string>(), Strategy: "sequence", ManifestHash: new string('A', 64))
-            .Save(Path.Combine(stateDirectory, "1-done.json"));
+            42, "done", new Dictionary<int, string>(), Strategy: "sequence", ManifestHash: manifestHash).Save(path);
+        return path;
+    }
+
+    [Fact]
+    public void A_finished_run_missing_from_History_is_recorded_from_its_state_and_its_state_removed()
+    {
+        string statePath = FinishedState("1-done.json", new string('A', 64));
         PublicationHistory history = new(HistoryPath);
 
-        Assert.Equal(1, history.RecordFinishedRuns(stateDirectory));
-        Assert.Equal(0, history.RecordFinishedRuns(stateDirectory));
+        Assert.Equal(1, history.RecordFinishedRuns(StateDirectory));
 
         PublicationRecord record = Assert.Single(history.Read());
         Assert.Equal(new XrplFileLink("testnet", new string('A', 64)).ToString(), record.Link);
         Assert.Equal("done.txt", record.Name);
-        Assert.Null(record.Transactions);
+        Assert.Equal(0, record.Transactions);
+        Assert.True(record.Recovered);
+        Assert.False(File.Exists(statePath));
+    }
+
+    [Fact]
+    public void A_record_the_person_forgot_does_not_come_back_at_start_up()
+    {
+        FinishedState("1-done.json", new string('B', 64));
+        PublicationHistory history = new(HistoryPath);
+        history.RecordFinishedRuns(StateDirectory);
+
+        history.Forget(new XrplFileLink("testnet", new string('B', 64)).ToString());
+
+        Assert.Equal(0, history.RecordFinishedRuns(StateDirectory));
+        Assert.Empty(history.Read());
+    }
+
+    [Fact]
+    public void A_state_whose_link_is_already_listed_is_only_removed()
+    {
+        string link = new XrplFileLink("testnet", new string('C', 64)).ToString();
+        PublicationHistory history = new(HistoryPath);
+        history.Append(new PublicationRecord(link, "done.txt", 2500, "text/plain", "testnet", "rWriter", 4, 40, DateTimeOffset.UtcNow));
+        string statePath = FinishedState("1-done.json", new string('C', 64));
+
+        Assert.Equal(0, history.RecordFinishedRuns(StateDirectory));
+        Assert.Single(history.Read());
+        Assert.False(File.Exists(statePath));
+    }
+
+    [Fact]
+    public void A_recovered_record_is_written_so_an_older_application_still_reads_the_list()
+    {
+        FinishedState("1-done.json", new string('D', 64));
+        new PublicationHistory(HistoryPath).RecordFinishedRuns(StateDirectory);
+
+        using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(HistoryPath));
+        System.Text.Json.JsonElement written = document.RootElement[0];
+
+        Assert.Equal(System.Text.Json.JsonValueKind.Number, written.GetProperty("Transactions").ValueKind);
+        Assert.Equal(System.Text.Json.JsonValueKind.Number, written.GetProperty("FeeDropsEstimated").ValueKind);
+        Assert.False(written.TryGetProperty("Payer", out _));
     }
 ```
 
@@ -9608,15 +10194,18 @@ Expected: build FAILS.
 
 - [ ] **Step 3: The record and History recovery**
 
-`app/XrplFile.App.Core/PublicationRecord.cs`: make `long? Transactions` and `long? FeeDropsEstimated` (document: null for a record recovered from a state file at start-up, which has no report).
+`app/XrplFile.App.Core/PublicationRecord.cs`: add as the last positional parameter `[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Recovered = null`, documented `/// <param name="Recovered">True for a record written at start-up from a finished run's state, which has no report: its transaction and fee figures are 0, not measured. Omitted otherwise; an older application ignores it.</param>`. `Transactions` and `FeeDropsEstimated` stay `long`: an older application reads a null there as a broken file and replaces the whole list.
 
 In `app/XrplFile.App.Core/PublicationHistory.cs` add:
 
 ```csharp
     /// <summary>
-    /// Records every run whose state says "done" and whose manifest is not in the list (spec 5.1), so a
-    /// crash between the run finishing and the list being written loses no link. Called once at start-up.
-    /// Returns how many were recorded.
+    /// Records every finished run whose state file still exists (spec 5.1): the application deletes a
+    /// run's state once History holds its link, so a "done" state still on disk is a run whose History
+    /// write never happened. Its link is recorded unless already listed, and the state file is deleted
+    /// either way -- which is also why a link the person forgot never comes back (Spec question 22).
+    /// Called once at start-up. A state that cannot be read or named as a link is left alone. Returns
+    /// how many records were added.
     /// </summary>
     public int RecordFinishedRuns(string stateDirectory)
     {
@@ -9628,26 +10217,42 @@ In `app/XrplFile.App.Core/PublicationHistory.cs` add:
         foreach (string path in Directory.EnumerateFiles(stateDirectory, "*.json"))
         {
             PublicationState state;
+            string link;
 
             try
             {
                 state = PublicationState.Load(path);
+
+                if (!string.Equals(state.Phase, "done", StringComparison.Ordinal) || state.ManifestHash is not { } manifest) continue;
+
+                link = new XrplFileLink(state.Network, manifest).ToString();
             }
-            catch (Exception e) when (e is FormatException or System.Text.Json.JsonException or IOException or UnauthorizedAccessException)
+            catch (Exception e) when (e is FormatException or System.Text.Json.JsonException or IOException
+                or UnauthorizedAccessException or ArgumentException or XrplFileException)
             {
                 continue;
             }
 
-            if (!string.Equals(state.Phase, "done", StringComparison.Ordinal) || state.ManifestHash is not { } manifest) continue;
+            if (!known.Contains(link))
+            {
+                HistoryAppendResult appended = Append(new PublicationRecord(
+                    link, state.Name ?? Path.GetFileName(path), state.Size, state.Type, state.Network, state.Writer,
+                    0, 0, File.GetLastWriteTimeUtc(path), state.Payer, Recovered: true));
 
-            string link = new XrplFileLink(state.Network, manifest).ToString();
-            if (!known.Add(link)) continue;
+                if (!appended.Recorded) continue;
 
-            HistoryAppendResult appended = Append(new PublicationRecord(
-                link, state.Name ?? Path.GetFileName(path), state.Size, state.Type, state.Network, state.Writer,
-                null, null, File.GetLastWriteTimeUtc(path), state.Payer));
+                known.Add(link);
+                recorded++;
+            }
 
-            if (appended.Recorded) recorded++;
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Tried again at the next start-up, which finds the link already listed.
+            }
         }
 
         return recorded;
@@ -9695,7 +10300,12 @@ In `app/XrplFile.App.Core/UnfinishedModel.cs`:
 }
 ```
 
-2. Change the header to `public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePickerService picker, IKeyVault? vault = null)` and add `using XrplFile.Keys;`.
+2. Change the header to `public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePickerService picker, IKeyVault? vault = null)` and add `using XrplFile.Keys;`. Replace the body of `ShowsTicketNoteFor` (keep its null check) so a Batch row, or a row recorded as a sequence run, never shows the ticket note:
+
+```csharp
+        return rows.Any(row => row.Unreadable is null && !row.IsBatch
+            && (row.Strategy is { } strategy ? strategy == PublicationState.TicketStrategyName : PublishPolicy.UsesTickets(row.Size)));
+```
 
 3. In `Refresh`, build readable rows with the new properties: `with`-style initializer `{ Root = state.Root, SourcePath = state.SourcePath, Payer = state.Payer, PayerKeyReference = state.PayerKeyReference, IsBatch = state.Version == PublicationState.BatchVersion, Strategy = state.Strategy }`, then set `Method` for every readable row with `MethodOf(row, new Dictionary<string, string>())` (addresses stand in for labels until `RefreshAsync` reads the vault). Also set `NeedsPayer = null;` at the start.
 
@@ -10201,7 +10811,7 @@ public class BatchPublicationStandaloneTests : IDisposable
         CancellationToken token = timeout.Token;
         await using LedgerPump pump = new(Endpoint);
         await using DroppingProxy proxy = new(new Uri(Endpoint));
-        IXrplClient client = new XrplClient(proxy.Endpoint.ToString());
+        IXrplClient client = ClientKeeper.CreateClient(proxy.Endpoint.ToString());
         await client.Connect(token);
 
         try
@@ -10655,29 +11265,40 @@ git commit -m "docs(reports): Batch publishing acceptance on testnet"
 Defects or gaps found while planning, each with the ruling this plan follows.
 
 1. **B25 omits `TicketCount`, which B30 needs.** B30 says a `TicketCreate` at s covers the sequences its tickets took; nothing in B25's field list carries the count. *Ruling:* `LedgerTransaction` also gains `TicketCount` (Task 2).
-2. **4.2's outer shape cannot be handed to the writer's signer in Xrpl 11.2.0.** The outer listed in 4.2 already has `BatchSigners [ { BatchSigner: { Account A } } ]`; 11.2.0's `SignAsBatchPart` *appends* a signer and refuses a duplicate account (`temBAD_SIGNER`). Its routing also keys on the inner `Account`s, not on `BatchSigners`. *Ruling:* the outer goes to the writer without `BatchSigners`; the writer's signature adds the entry; the payer signs the decoded result. The final blob has the spec's shape (Task 1).
-3. **The tidy-up "under B7".** B7 asks for `LastLedgerSequence` = I + 20 and a persisted deadline; the tidy-up of spec 2026-10-12 uses I + 10 (I16), and it runs after the state says "done", when nothing reads the fence. *Ruling:* the Batch tidy-up is `LeftoverTickets.ReleaseAsync` unchanged (I6–I8, I16, offset 10), at the approved unit, polling at `ChainCheck`, without writing the fence (Task 9).
-4. **No bound on a node that stops.** Snapshot and history reads that keep failing, or a validated ledger that stops advancing, would leave settlement waiting forever; the spec bounds sends only. *Ruling:* `BatchStrategyOptions.NodeOutageLimit` = 2 min, after which the run fails with `NodeUnreachable` and is resumable (Task 11, Review Focus 1).
+2. **4.2's outer shape cannot be handed to the writer's signer in Xrpl 11.2.0.** The outer listed in 4.2 already has `BatchSigners [ { BatchSigner: { Account A } } ]`; 11.2.0's `SignAsBatchPart` *appends* a signer, and its submitter check refuses an account that already signed (`UnauthorizedAccessException`; at the node a duplicate `BatchSigner` is `temBAD_SIGNER`). Its routing also keys on the inner `Account`s, not on `BatchSigners`. *Ruling:* the outer goes to the writer without `BatchSigners`; the writer's signature adds the entry; the payer signs the decoded result. The final blob has the spec's shape (Task 1).
+3. **The tidy-up "under B7".** B7 asks for `LastLedgerSequence` = I + 20 and a persisted deadline; the tidy-up of spec 2026-10-12 uses I + 10 (I16), and it runs after the state says "done", when nothing reads the fence. *Ruling:* the Batch tidy-up is `LeftoverTickets.ReleaseAsync` unchanged (I6–I8, I16, offset 10), at the approved unit, polling at `ChainCheck`, without writing the fence (Task 9). Residual risk, accepted: a spend still in flight after the two-minute tidy-up deadline can apply during the first round of a Batch publication started at once from the same writer, which then fails with `AccountInUse` (B12) and is resumable. Its window is ten ledgers.
+4. **No bound on a node that stops.** Snapshot and history reads that keep failing, or a validated ledger that stops advancing, would leave settlement waiting forever; the spec bounds sends only. *Ruling:* `BatchStrategyOptions.NodeOutageLimit` = 2 min, after which the run fails with `NodeUnreachable` and is resumable (Task 11, Review Focus 1). A chain check that fails this way is fatal to the round, so a sender parked in its allowance wait is released (Task 8, Review Focus 6). The resume's fence wait has the same bound, through `SessionOptions.NodeOutageLimit` (Task 16).
 5. **`OpenLedgerFeeAsync` must also give the base fee.** B15's unit is "at least the base fee". *Ruling:* it returns `OpenLedgerFee(OpenLedgerFeeDrops, BaseFeeDrops)`, both from the `fee` method (Task 2).
 6. **The `FeeTooHigh` sentence of 6.5 is false at estimate time.** It says the run "is listed under unfinished runs", but the estimate refusal (open-ledger fee above 200) happens before any state exists. *Ruling:* the spec's sentence is kept for a running run; before anything starts the application says "Network fees are above what this application publishes at right now. Try again when they are back down." (`PublishErrorMessages.FeeTooHighNow`, Task 4).
 7. **`AccountInUse`'s sentence names a role that `For(XrplFileError)` cannot know.** *Ruling:* `XrplFileException.Role` (`AccountRole.Writer`/`Payer`) carries it and `For(XrplFileException)` uses "writer" or "payer"; `For(XrplFileError.AccountInUse)` alone says "writer or payer" (Task 4).
 8. **Unfinished-row method for sequence runs.** 6.4 names "Batch, paid by `<label>`" and "Tickets" only, and a sequence run is neither. *Ruling:* such a row says "Sequence" (Task 22).
-9. **The report's `FeeDropsEstimated` on the Batch path, and on a resume that sends nothing.** *Ruling:* for a Batch session it is the approved estimate's `PayerFeeDrops + WriterFeeDrops` (on a resume, the estimate of the missing part); a resume that finds the manifest (B27) reports 0 and sends nothing (Tasks 14, 15).
+9. **The report's `FeeDropsEstimated` on the Batch path, and on a resume that sends nothing.** *Ruling (revised after review):* on the Batch path it is the writer's part counted as today (spec 4.6) — its solo transactions at the approved unit — and the payer's spend is the measured `PayerFeeDrops` (B29), so an estimate and a measurement are never added together; the record's documentation says so. A resume that finds the manifest (B27) reports 0 and sends nothing (Tasks 14, 15). The report's "unknown" payer fee (spec 4.6) is a null on the library object; the application shows no fees on the run screen today, so nothing prints it.
 10. **"Nothing is sent" in B27 and the tidy-up.** *Ruling:* a resume that adopts the manifest also skips the tidy-up; leftover tickets wait for a later publication (spec 2026-10-12 I4).
 11. **The one-account resume order.** 5.2 puts the estimate after reconciliation and the manifest check; the code priced first. *Ruling:* every resume reconciles and looks for the manifest before pricing, so a drained account can still finish a run whose manifest already landed (Task 15).
 12. **Who builds the strategy.** 6.1 says `PublishPolicy.Create` returns a `BatchStrategy` wired with the session's budget and fence, but the session is created after its strategy. *Ruling:* the Batch overloads of `StartAsync`/`ResumeAsync` take a `BatchStrategyFactory(budget, fence)`; the application passes `PublishPolicy.CreateBatch` through it (Tasks 14, 18, 20).
-13. **Submit answers the table does not name.** *Ruling:* `error:invalidTransaction` is treated like `tem*` (the blob is malformed: fail with `SubmitRefused`); any other `error:` code except `tooBusy`/`slowDown` is left to settlement (Task 8).
+13. **Submit answers the table does not name.** *Ruling (revised after review):* `error:invalidTransaction` is treated like `tem*` (the blob is malformed: fail with `SubmitRefused`); `noNetwork`, `noCurrent`, `noClosed` and `notSynced` — a node briefly out of step with its network — are busy, retried within the four transmissions; `amendmentBlocked` and any other code are left to settlement. `telINSUF_FEE_P` counts as busy for the window but is not resent: the same under-priced blob would be refused again, and the next round reads the unit again, as the table says (Task 8).
 14. **A halted round's solo memo.** 4.1 step 7 sends it after settling; after a halt the round has stopped spending. *Ruling:* a halted round sends no solo; the memo goes into the next round (Task 8).
 15. **Payer memory and "Nobody".** *Ruling:* only a real payer is remembered when a run starts; choosing Nobody is not remembered (Task 18).
 16. **What `PublishRequest` carries.** 6.1 adds `PayerReference` and `PayerAccount`. *Ruling:* it also carries `SourcePath` (B17) and the two labels the estimate card and the shortfall sentence need (Task 18).
-17. **History records recovered at start-up have no report.** *Ruling:* `PublicationRecord.Transactions` and `FeeDropsEstimated` become nullable; a recovered record leaves them null (Task 22).
+17. **History records recovered at start-up have no report.** *Ruling (revised after review):* the numbers stay `long` — an older application reads a null there as a broken file and replaces the whole list. A recovered record carries `0` for both and an optional `Recovered: true`, written only when set, which an older application ignores (Task 22).
 18. **The Batch prior before 30 s.** B21 has the Batch path "assume 70 memos/s"; showing "70 chunks/s" would present an assumption as a measurement. *Ruling:* before 30 s the Batch line shows the time left from the prior and no rate (Task 21).
 19. **The fence wait's poll and source.** *Ruling:* it reads `SnapshotAsync([writer])` every `SessionOptions.FencePoll` (1 s), reports the stage `"fence"` with ledgers passed and ledgers to wait, and the screen converts ledgers to seconds at `LedgerTiming.ApproximateLedgerInterval` (Tasks 16, 21).
 20. **"One settle per pass" in B21.** *Ruling:* 3 × `LedgerTiming.ApproximateLedgerInterval` (12 s): the landing ledger and the two settle ledgers (Task 21).
+
+The following were added after the plan review.
+
+21. **When a batch is signed.** The first draft signed and registered batches up to `MaxAhead` ahead of the window, which on a slow node leaves registered batches waiting while their deadlines run. *Ruling:* as spec 4.1 step 3 says — a batch is built and signed only once the window has a slot for it and the budget allows it; the slot passes to its first transmission, and a batch discarded unsent gives it back without counting as an answer (Tasks 7, 8).
+22. **History recovery (spec 5.1) against Forget and Clear.** Nothing deleted a finished run's state file, so recovering every "done" state at start-up would bring back links the person had forgotten or cleared. *Ruling:* once the application has written a run's History record it deletes that run's state file; start-up recovery records only "done" states that still exist — runs whose History write never happened — and deletes them, recording nothing when the link is already listed. No list of forgotten links is kept (Tasks 20, 22).
+23. **The writer's per-memo `tx` lookup.** `XrplFileWriter` asks the node for each memo's ledger one transaction at a time after the strategy returns — about 50 minutes for 7,124 chunks at testnet's 420 ms round trip, while the run screen says seconds are left. *Ruling:* `SubmittedMemo` carries the ledger the memo landed in (`LedgerIndex`); `BatchStrategy` and `TicketStrategy` fill it from the records their sweeps confirmed, the writer skips the lookup when it is present and keeps it as the fallback (`SequenceStrategy`). A pass whose memos have all landed shows "finishing this pass" instead of a time left (Tasks 8, 15, 17, 21).
+24. **Registered batches after a halt.** A halt stops signing, but a batch registered just before it could still be sent for the first time. *Ruling:* a halted round sends no first copy of anything; such a batch stays registered and counted (B13), its deadline is already in the fence, and settlement waits it out. Copies already sent are left alone (Task 8).
+25. **Who reconnects.** `XrplClient` 11.2.0 reconnects on its own by default, and B24 allows only one owner of retries. *Ruling:* exactly one owner. By default `ClientKeeper` owns it: `ClientKeeper.CreateClient` builds every publishing client with the SDK's reconnection off, and the next request after a drop connects again. If the stand shows that a dead 11.2.0 client cannot connect again, the SDK owns it instead and the keeper only waits (Task 3 Step 8 has both branches). A connection its owner closed is retired and refused, never reopened.
+26. **A history that lags a running publication.** B30 raises `NodeLacksHistory`, whose sentence is about reading a file. *Ruling:* while submitting, the application says the node's history fell behind and the run can be resumed (`PublishErrorMessages.HistoryLaggedWhilePublishing`, Task 4).
+27. **B27 and duplicated chunks.** Reconciliation takes the first copy of a chunk in canonical order. A one-account run that sent a chunk twice can have used the other copy's ledger in its manifest; its resume then fails to adopt that manifest and sends a second one. Inherent to B27's "exactly those bytes"; accepted. On the Batch path a memo is in one candidate per round, so it cannot happen there.
 
 ## Self-review
 
 - **Spec coverage.** B1 T1/T8; B2 T1; B3 T18; B4 T18/T20; B5 T8; B6 T2/T8; B7 T7/T8; B8 T8; B9 T8; B10 T7/T8; B11 T6/T8; B12 T9; B13 T7/T8/T10; B14 T2/T14/T18; B15 T6/T10/T14; B16 T13/T14/T18/T20; B17 T14/T15/T22; B18 T16/T22; B19 T21; B20 T10/T17; B21 T21; B22 T4; B23 T7/T14/T16; B24 T3/T8/T11; B25 T2; B26 T10/T12/T16; B27 T14/T15/T23; B28 T8/T9; B29 T9/T14; B30 T9. Spec 4.6 T14; 4.7 T4; 5.1 T13/T20/T22; 5.2 T15/T16/T22; 6.1–6.5 T18–T22 and T4; 7.1 T1; 7.2 T2/T3; 7.3 T5–T12; 7.4 T23 (and T15/T16 in unit form); 7.5 T18–T22; 7.6 T24.
 - **Placeholder scan.** Conditional steps (Task 1 F1–F3, Task 3 Step 8's fallback, Task 23's cache step) carry their full code; every other step has its code or exact command.
 - **Type consistency.** `BatchStrategy` ctor `(sink, source, writer, payer, budget, fence, options)` everywhere; `BatchRound` gains `progress` in Task 10 and `BatchContext` gains `Spending` in Task 10, both with their single construction sites updated there; `PublicationSession.ResumeAsync` Batch overload `(factory, source, file, statePath, payer, payerKeyReference, options, fenceProgress, ct)` in Tasks 16, 20, 23; `RunSnapshot` init properties defined in Task 20 and read in Task 21.
-- **Review Focus.** Each of the five has its test in the owning task (11, 16, 18, 21, 8 and 12).
+- **Review Focus.** Each line has its test in the owning task (11, 16, 18, 21, 8/12/14, 11, 11, 22).
+- **Revised after the plan review.** Transport retries step on `TransportRetryStep` and the fake scripts answers by candidate, so the busy, fee and lost-answer tests can pass (M1); a failed chain check halts the round (M2); the Paid-by test stores its twin under another raw network (M3); finished state files are deleted once History holds the link (M4, Spec question 22); memos carry their ledger (M5, Spec question 23); `_strategy` is replaced as a whole (M6); and every should-fix item of the review is applied in its task, with Spec questions 9, 13 and 17 revised and 21–27 added. Rejected: splitting Task 8 (the round and the strategy are only testable together, and a half would leave an untestable intermediate); a stronger stand check of `SnapshotAsync` (the unit test already pins the request's ledger index); a test of the "could not be read" source-file fallback (an unreadable file cannot be produced the same way on every platform; the moved and changed cases are tested).
