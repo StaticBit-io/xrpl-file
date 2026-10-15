@@ -15,8 +15,10 @@ and asks for the file again.
 **Revised the same day after a review by Codex.** It found that the first draft did not fence
 old transactions off from a resume. The draft also read the two accounts' sequences from different
 ledgers, trusted sequence movement as proof of identity, counted failed inners as progress, and
-gave a worst-case fee that the retry rule did not bound. Decisions B5–B13, B16, B20 and B23–B30 and
-sections 4, 5 and 7 carry the changes.
+gave a worst-case fee that the retry rule did not bound. A second pass found that the manifest
+check ran before the fence and matched on the root alone, that attempts were counted per answer
+rather than per signed candidate, and that history completeness and the per-session limits were
+underspecified. Decisions B5–B13, B16, B20 and B23–B30 and sections 4, 5 and 7 carry the changes.
 
 ## 1. What is known
 
@@ -123,31 +125,31 @@ own investigation, and this design does not depend on it.
 | B3 | The payer is any key in the vault on the writer's network, chosen per publication | The person decided this. A long-lived funded account can pay for many publications while each writer stays a throwaway that needs only its base reserve. The payer appears nowhere in the file format, so it can change between a run and its resume, behind the fence of B23 |
 | B4 | The ticket path stays. A publication uses `BatchStrategy` when a payer is chosen and the network has `BatchV1_1` enabled. With no payer, the existing policy applies: `SequenceStrategy` below 100 memos, `TicketStrategy` from there. A run resumes on the strategy it recorded (B16) | The person decided this. A network without the amendment, such as a private stand on an older build, must still be able to publish |
 | B5 | Batches go out in rounds. A round assigns sequences from one pinned snapshot (B6), sends, settles (B9), then sweeps. The memos still missing go into the next round with fresh sequences | Once a round has settled, nothing it sent can land, so the next round cannot collide with a straggler |
-| B6 | The strategy's view of the chain is a snapshot: one validated ledger index L, read first, then `account_info` of A and of B at `ledger_index` L. Every comparison of the two sequences uses one snapshot | Two separate "validated" reads can straddle a close. A at L and B at L + 1 looks like divergence, and the reverse looks like foreign activity |
+| B6 | The strategy's view of the chain is a snapshot: one validated ledger index L, read first, then `account_info` of A and of B at `ledger_index` L. Every comparison of the two sequences uses one snapshot. A snapshot whose ledger cannot be read at L fails and is taken again; it never falls back to "validated" | Two separate "validated" reads can straddle a close. A at L and B at L + 1 looks like divergence, and the reverse looks like foreign activity |
 | B7 | Every transmission carries `LastLedgerSequence` = I + 20. I is the index of a snapshot no more than 10 s old when the transaction is signed. That applies to batches, solo memos and tidy-up spends. The deadline is registered with the round, and persisted (B23), before the blob is first transmitted | 20 ledgers is about 70 s, which covers two 30-second re-relay periods. A deadline registered before transmission means nothing can be in flight that the round does not know will expire |
 | B8 | A chain check takes a snapshot every 2 s while a round sends. **Stalled**: snapshot L is past the deadline of the first batch whose outer B has not consumed, if that batch has been signed. **Diverged**: A's sequence differs from what the outers B consumed imply. Both halt the round: no new batch is signed, and the round settles | A lost outer holds every later outer until its deadline, at no cost, but waiting for that is pointless. A gap in A's sequence makes every later inner fail while B pays. B's sequence can also move for reasons that are not ours (B12); the check does not try to tell them apart. It only stops spending, and identity is decided at settlement |
-| B9 | A round settles when every registered transmission is resolved: either snapshot L has passed its deadline, or B's sequence (for an outer) or A's (for a solo) has passed its sequence. It then waits `SettleLedgers` = 2 more ledgers before the sweep | A transmission whose sequence is consumed can never apply again, so a round that landed everything settles in a ledger or two instead of waiting out 70 s. One that did not waits only for what is still live |
+| B9 | A round settles when signing has stopped, every worker has either registered its candidate or discarded it unsent, and every registered candidate is resolved: either snapshot L has passed its deadline, or B's sequence (for an outer) or A's (for a solo) has passed its sequence. It then waits `SettleLedgers` = 2 more ledgers before the sweep | A transmission whose sequence is consumed can never apply again, so a round that landed everything settles in a ledger or two instead of waiting out 70 s. One that did not waits only for what is still live. Sequence consumption proves only that a candidate can no longer apply, not that its memo succeeded; the sweep decides that. A tidy-up spend rides a ticket, so it resolves only by its deadline or by its ticket disappearing |
 | B10 | Sends go through a window that starts at 16, halves after 3 busy answers in a row, and grows by 1 after 10 clean sends. The send allowance is never more than 256 batches past B's sequence in the latest snapshot, and it is raised only by a snapshot that passed the chain check. "Busy" is a `tel` answer, a `tooBusy` or `slowDown` error, or a send that got no answer | A public node's limit is the client's own send queue and rate. Raising the allowance only on a checked snapshot limits what one divergence can cost to 256 batches: 256 × 11 × unit, which is 0.042 XRP at a unit of 15 drops |
 | B11 | Memos go 8 to a batch. A trailing group of 1 borrows one memo from the group before it, so 8 + 1 becomes 7 + 2. A round with exactly one memo sends it as a plain `AccountSet` of A at the round's unit, under B7, and only after every batch of the round is resolved | A batch needs 2 to 8 inners. A's own transaction must never share a ledger window with batches in flight (section 1) |
 | B12 | Both accounts must be used by nothing else during a run. At settlement the strategy reads `account_tx` of A and of B over the round's ledgers. A transaction of B that is not one of the round's outers, or a transaction of A that is neither an inner of those outers (its `ParentBatchID`) nor the round's solo memo, fails the run with `AccountInUse`, naming the account | Sequence arithmetic cannot prove identity. A foreign transaction can consume the sequence of one inner while the rest catch A up exactly. A `TicketCreate` on B moves its sequence by more than one. Only transaction identities show what really applied |
-| B13 | Each memo may be sent at most 3 times. An attempt counts when its blob got an accepting answer (`tes`, `ter`) or no answer. A memo that would need a fourth attempt fails the run with `SubmitRefused` | This bounds spending per memo, which a limit on rounds without progress does not. Refused blobs (`tel`, `tef`, `tem`) never applied, cost nothing, and do not count |
+| B13 | Each memo may be put into at most 3 **candidates** per session. A candidate is a distinct signed transaction carrying the memo: a batch or a solo with its own sequence and deadline. A candidate is reserved when it is registered (B7), before its first transmission, and it counts whatever its outcome. Resending the same blob is a **transport retry** of that candidate, up to 4 transmissions, and is not a new candidate. A memo that would need a fourth candidate fails the run with `SubmitRefused` | A candidate is what can charge a fee, however often its bytes are sent; a `tec` outer charges and writes nothing, so it must count. Counting answers instead would either fail a run after a lost connection or let fee-charging failures go uncounted |
 | B14 | `BatchV1_1` is enabled when its id, the SHA-512Half of the name `BatchV1_1`, appears in the `Amendments` field of the ledger's singleton `Amendments` object. That object is read through `ledger_entry` by its fixed index `7DB0788C020F02780A673DC74757F23823FA3014C1866E72CC4CD8B226CD6EF4`. The screen's read is cached per network for 5 minutes. The estimate reads again before every run, and its answer is the one that decides | `feature` is restricted on public nodes, and `ledger_entry` is public. The amendment id is searched for inside the object, not used as the object's index. A cached "off" would otherwise lock the screen for the whole session |
 | B15 | The fee unit of a round is ceil(`open_ledger_fee` × 1.5) from the `fee` method, at least the base fee. It may not exceed the ceiling the estimate approved: ceil(the estimate's `open_ledger_fee` × 1.5) × 2. A round whose unit would exceed the ceiling waits one minute for fees to fall. If they have not, the run fails with `FeeTooHigh`, a new error, and can be resumed later. A batch pays (inners + 3) × unit; a solo pays one unit. The estimate refuses up front when `open_ledger_fee` is above 200 drops | The exact Batch formula, with headroom for escalation. A fixed ceiling makes the approved worst case a true bound (B26). A fee rise past it is an outcome the person is told about, not a silent loop of refused blobs |
-| B16 | Batch runs write state version 3. Ticket and sequence runs keep writing version 2, with one new optional field, `SourcePath`. Version 3 adds `Strategy` (`"batch"`), `Payer`, `PayerKeyReference`, `Fence` and `SourcePath`. The new application reads 2 and 3. A version-2 file without a strategy resumes on the existing policy, as today | An older application refuses version 3 and lists it as unreadable. It cannot resume a Batch run as an ordinary one-account run and erase its payer on save. Ignoring `SourcePath` in version 2 does no harm |
+| B16 | Batch runs write state version 3. Ticket and sequence runs keep writing version 2 with three new optional fields: `Strategy` (`"sequence"` or `"tickets"`), `SourcePath` and `ManifestHash`. Version 3 requires `Strategy` = `"batch"`, `Payer`, `PayerKeyReference` and `Fence`, and allows `SourcePath` and `ManifestHash`. The new application reads 2 and 3 and resumes a run on its recorded strategy; only a version-2 file written before this change, which has no `Strategy`, resumes on the existing policy | An older application refuses version 3 and lists it as unreadable. It cannot resume a Batch run as an ordinary one-account run and erase its payer on save. Ignoring `SourcePath` in version 2 does no harm |
 | B17 | Resume reads the bytes once from `SourcePath`, computes their size and Merkle root, and uses those same bytes for the run. A missing, unreadable or changed file falls back to the picker with the reason. A picked file passes the same check against the state | The person picked the file once. Asking again is what this design answers. Hashing and publishing the same in-memory bytes leaves no window for the file to change in between |
 | B18 | A Batch run resumes as a Batch run. If its payer key has left the vault, the person chooses another payer on the same network, and the choice is written to the state file. That happens only after the fence of B23 has passed | The payer is outside the format (B3). The fence is what makes changing it safe: no outer of the old payer can still apply |
 | B19 | The failed-run screen offers Resume when the run is listed as unfinished, and it takes the same path as the unfinished-runs list | The person was on that screen when it failed. The list already knows how to resume; the screen only lacked the button |
 | B20 | Progress counts memos that a sweep found landed with `tesSUCCESS`, never sequence movement. On the Batch path an incremental sweep reads `account_tx(A)` forward from its last position every 5 s while a round runs. On the ticket path, every poll of `SweepAsync` reports what it has found so far. The count never decreases, because it only ever counts memos found successful | A `tec` inner consumes a sequence and writes nothing, so sequence movement overstates progress. An incremental sweep costs one `account_tx` page every 5 s |
 | B21 | Time left = memos remaining ÷ the rate of confirmed memos over the last 30 s, plus one settle per pass still to come. Before 30 s of data, the Batch path assumes 70 memos/s, the platform's conservative figure, and the ticket path shows "estimating…". The run screen also shows the elapsed time and the rate | A rate measured on this run, on this node, beats any constant. A prior is used only where a measured one exists |
 | B22 | Every new `XrplFileError` value gets its sentence in `PublishErrorMessages`, and the existing exhaustiveness test keeps it that way | The application must never show an error it cannot explain |
-| B23 | **The fence.** A version-3 state file records `Fence`: the highest deadline registered by any transmission of the run. It is written before that transmission is first sent. A run that ends for any reason, whether failure, cancellation, a closed window or a crash, leaves its fence behind. Resume waits until a snapshot is past `Fence` + `SettleLedgers` before it reads anything for reconciliation, changes the payer, or assigns a sequence. The screen shows "Waiting for earlier transactions to expire", with the time left | Without it, an outer of the interrupted run can apply after the resume began. It can consume sequences the resume assigned, or charge an old payer while a new one pays for inners that fail. A persisted fence turns "nothing old can land" from a hope into a check |
+| B23 | **The fence.** A version-3 state file records `Fence`: the highest deadline registered by any transmission of the run. It is written before that transmission is first sent; a save that fails stops the transmission and fails the run, so no blob is ever in flight past the recorded fence. A run that ends for any reason, whether failure, cancellation, a closed window or a crash, leaves its fence behind. Resume waits until a snapshot is past `Fence` + `SettleLedgers` before it reads anything for reconciliation, changes the payer, or assigns a sequence. The screen shows "Waiting for earlier transactions to expire", with the time left | Without it, an outer of the interrupted run can apply after the resume began. It can consume sequences the resume assigned, or charge an old payer while a new one pays for inners that fail. A persisted fence turns "nothing old can land" from a hope into a check |
 | B24 | `ILedgerSink` gains `SubmitBlobAsync(txBlob, ct)`: one transmission of a signed blob, no internal retry, no lookup. A transport failure surfaces as `NodeUnreachable`. The connection under the sink and the source reconnects on the next call after a transport failure. `BatchStrategy` owns every retry and resend | The strategy has to resend the same bytes after a drop (section 1), and only one layer may own retries. Today's `SubmitAsync` re-signs and retries on its own |
 | B25 | `LedgerTransaction` gains `TransactionType`, `Sequence`, `TicketSequence`, `Fee` and `ParentBatchID`. `ILedgerSource` gains `SnapshotAsync(accounts, ct)`, which returns L and each account's sequence at L (B6), `OpenLedgerFeeAsync(ct)` from the `fee` method, and `IsAmendmentEnabledAsync(name, ct)` (B14) | Settlement attributes transactions by identity (B12). The report sums the payer's fees (section 4.6). The fee unit needs `open_ledger_fee` (B15). None of this is readable today |
-| B26 | The estimate's worst case is a true bound under B13 and B15. **Payer**: every memo sent 3 times, in batches of 2, so at most 2.5 units per memo per attempt, at the fee ceiling. **Writer**: every memo sent 3 times as a solo, plus a tidy-up of up to 250 tickets, at the fee ceiling. The strategy also counts committed fees as it signs, and refuses to sign past either account's budget with `BudgetExceeded` | A bound that the algorithm cannot exceed is the one the person approves. Both are pessimistic, but small. For 7 MB at a 10-drop open-ledger fee, the unit is 15 drops and the ceiling 30: about 1.6 XRP for the payer and 0.65 XRP for the writer, against 50 XRP of ticket reserve today. The runtime count is the safety net if an assumption breaks |
-| B27 | Every resume, on every path, first looks for a manifest of this run. That is a `tesSUCCESS` `AccountSet` of the writer after `StartedInLedger`, carrying the manifest marker, whose manifest names the run's Merkle root. When it is found, the run is complete: the state moves to "done" with that hash as the link, and nothing is sent | A run can die between its manifest validating and its state recording "done". Resuming it today pays for a second manifest and gives the person a second link to the same file |
+| B26 | The estimate's worst case is a true bound for one session under B13 and B15; a resume is a new session whose estimate prices the memos still missing and is checked again. **Payer**: every memo sent 3 times, in batches of 2, so at most 2.5 units per memo per attempt, at the fee ceiling. **Writer**: every memo sent 3 times as a solo, plus a tidy-up of up to 250 tickets, at the fee ceiling. The strategy also counts committed fees as it signs, and refuses to sign past either account's budget with `BudgetExceeded` | A bound that the algorithm cannot exceed is the one the person approves. Both are pessimistic, but small. For 7 MB at a 10-drop open-ledger fee, the unit is 15 drops and the ceiling 30: about 1.6 XRP for the payer and 0.65 XRP for the writer, against 50 XRP of ticket reserve today. The runtime count is the safety net if an assumption breaks |
+| B27 | Every resume, on every path, looks for this run's manifest **after** the fence (B23) and after reconciliation. When every chunk and list has landed, it builds the manifest the writer would send from the reconciled hashes and ledgers, and looks for a validated `tesSUCCESS` transaction of the writer after `StartedInLedger` whose manifest memo has exactly those bytes. Only that one counts: its hash goes to `ManifestHash`, the state moves to "done", and nothing is sent. A manifest with the same root but other bytes, such as another publication of the same content, is not adopted | A run can die between its manifest validating and its state recording "done". Resuming it today pays for a second manifest and gives a second link. Checking before the fence would miss a manifest still in flight; matching only the root would adopt a different publication's link |
 | B28 | `tefPAST_SEQ` and `tefALREADY` mean "this sequence is used", not "this blob applied". `terPRE_SEQ` means "not yet", not "held". Only a sweep that finds the memo, matched on marker and data with `tesSUCCESS`, confirms it | The answers are about sequences. Treating them as confirmation would count a chunk that another transaction displaced |
 | B29 | The report's payer fee is the sum of the `Fee` of the outers this session signed that settlement found applied, matched by hash. It covers this session only, and says so | Summing all of B's fees over the session's ledgers would charge this run for anything else B did |
-| B30 | A sweep waits for `account_tx(A)` to catch up with A's sequence in the snapshot. It counts every transaction of A with a sequence below that, of any result, and gives up after 30 s with `NodeLacksHistory` | `account_tx` lags the sequence a little (section 1). Counting records of any result, not only successful memos, means a `tec` inner cannot make the sweep wait forever |
+| B30 | A round's final sweep is complete for an account when its records cover the account's sequence interval for the round: from its sequence in the round's first snapshot up to its sequence in the settling snapshot. A record with a non-zero `Sequence` s covers s, and a `TicketCreate` at s also covers the sequences its tickets took. A record with `Sequence` 0 (a ticket) covers nothing but is still attributed under B12. Records of any result count. Both A and B must be complete. The sweep retries for up to 30 s, then fails with `NodeLacksHistory` | `account_tx` lags the sequence a little (section 1). Counting by sequence interval rather than by number of records survives `TicketCreate` and tickets. Requiring B's history too means a foreign payer transaction cannot slip past B12 while B's index catches up |
 
 ## 4. The library
 
@@ -192,11 +194,12 @@ public sealed class BatchStrategy(
    in order, starting at A₀ plus the inners of every batch before it. A single memo is set aside as
    the round's solo memo.
 3. **Send.** A batch is built and signed (4.2) only when the window (B10) and the budget (B26)
-   allow it. Its deadline is registered and persisted (B7, B23), and only then is it transmitted.
-   The blob is kept until the round settles. The rules for submit answers are in the table below.
-4. **Chain check** every 2 s while sending (B8). Any halt stops new signing at once. A batch already
-   signed and registered is either transmitted or abandoned; either way it counts as sent, because
-   its deadline is registered.
+   allow it. It is then registered under the round's lock: its deadline is persisted (B7, B23),
+   and its memos' candidates are reserved (B13). Only a registered candidate is transmitted, and
+   the blob is kept until the round settles. The rules for submit answers are in the table below.
+4. **Chain check** every 2 s while sending (B8). A halt is set under the same lock, so after it no
+   candidate can register: a worker holding a signed but unregistered blob discards it unsent.
+   Settlement starts only once every worker has returned (B9).
 5. **Progress sweep** every 5 s (B20).
 6. **Settle** (B9).
 7. **Solo memo**, if any: snapshot, sign at the round's unit with a fresh deadline, register,
@@ -204,18 +207,25 @@ public sealed class BatchStrategy(
 8. **Final sweep** of `account_tx(A)` and `account_tx(B)` over the round's ledgers:
    - Record each memo found with `tesSUCCESS` (B28, B30).
    - Apply B12.
-   - Count the attempts of every memo still missing (B13).
+   - Return every memo still missing to the next round. Its candidates were already counted when
+     they were registered (B13).
 
 **Submit answers:**
 
 | Answer | Meaning | Action |
 |---|---|---|
-| `tesSUCCESS`, `terQUEUED`, `terPRE_SEQ` | accepted, or not yet | counts as an attempt (B13); settlement decides |
+| `tesSUCCESS`, `terQUEUED`, `terPRE_SEQ` | accepted, or not yet | settlement decides |
 | `tefPAST_SEQ`, `tefALREADY` | the sequence is used (B28) | settlement decides |
-| other `tef`, `tec`, `tem` on the outer | the outer will not apply as sent | no attempt counted. A `tem` fails the run with `SubmitRefused`, quoting the answer: it is a bug, not a condition. The rest are left to the chain check, which stalls the round at the outer's deadline |
+| `tec` on the outer | applied: B's sequence and the fee are consumed, the inners are not | settlement decides; the chain check sees it as divergence |
+| other `tef` on the outer | will not apply as sent | left to the chain check, which stalls the round at the outer's deadline |
+| `tem*` | malformed | fail the run with `SubmitRefused`, quoting the answer: it is a bug, not a condition |
 | `telINSUF_FEE_P` | the unit is below what the open ledger asks | busy; the next round reads the unit again (B15) |
-| other `tel*`, `tooBusy`, `slowDown`, no answer | busy (B10) | resend the same blob after 400 ms × (attempt + 1), up to 4 transmissions, then leave it to its deadline. "No answer" counts as an attempt |
-| `NodeUnreachable` from `SubmitBlobAsync` | the connection dropped | the next call reconnects (B24); resend every blob of the round that has no answer yet |
+| other `tel*`, `tooBusy`, `slowDown`, no answer | busy (B10) | transport retry of the same blob after 400 ms × (retry + 1), up to 4 transmissions in all, then leave it to its deadline |
+| `NodeUnreachable` from `SubmitBlobAsync` | the connection dropped | the next call reconnects (B24); a transport retry of every registered blob that has no answer yet, within its 4 transmissions |
+
+Every registered candidate counts against its memos' limit (B13), whatever the answer. A
+candidate that never applies has still used a slot, which keeps the bound simple and
+conservative.
 
 **Tidy-up.** `ReleaseLeftoverTicketsAsync` spends this library's leftover tickets on A with plain
 `AccountSet`s of A. It runs only after the last round has settled, under B7. The behaviour and
@@ -333,30 +343,37 @@ fees counted as today. When settlement could not attribute the payer's fees, the
 
 | Field | Version | Value |
 |---|---|---|
-| `SourcePath` | 2 (optional), 3 | the absolute path the file was read from |
-| `Strategy` | 3 | `"batch"` |
-| `Payer`, `PayerKeyReference` | 3 | B's address and vault reference |
-| `Fence` | 3 | the highest registered deadline (B23); 0 before the first transmission |
+| `Strategy` | 2 (optional), 3 (required) | `"sequence"` or `"tickets"` in version 2; `"batch"` in version 3 |
+| `SourcePath` | 2 and 3, optional | the absolute path the file was read from; absent when the caller published bytes it did not read from a file |
+| `ManifestHash` | 2 and 3, optional | the manifest's hash once the run is done (B27) |
+| `Payer`, `PayerKeyReference` | 3, required | B's classic address and vault reference |
+| `Fence` | 3, required | the highest registered deadline (B23); 0 before the first transmission |
 
 - `StartAsync` writes version 3 when it is given a payer, and version 2 otherwise.
-- A version-2 file loads as today. A version-3 file must carry every field above, or it is
-  unreadable.
+- A version-2 file loads as today.
+- A version-3 file is unreadable in any of these cases: its `Strategy` is not `"batch"`, its
+  `Payer` is not a classic address, or it lacks a required field.
+- The application writes History from the state, not from memory. At start-up, a state at "done"
+  whose `ManifestHash` is not in History is recorded there, so a crash between the two writes loses
+  no link.
 - The application of today refuses version 3, which is the point (B16).
 
 ### 5.2 Resume
 
 1. **The file.** Read the bytes from `SourcePath` and check them (B17). The picker opens only when
-   that fails, and its file is checked the same way.
-2. **Done already?** Look for this run's manifest (B27). If it is found, the run is complete.
-3. **The fence.** For a version-3 run, wait until a snapshot is past `Fence` + 2 (B23). The run
+   that fails or there is no path, and its file is checked the same way.
+2. **The fence.** For a version-3 run, wait until a snapshot is past `Fence` + 2 (B23). The run
    screen shows the wait.
-4. **The payer.** If `PayerKeyReference` is no longer in the vault, ask for a payer among the keys
+3. **Reconciliation** is unchanged: a sweep of `account_tx(A)` from `StartedInLedger`. Behind the
+   fence, nothing the interrupted run sent can still apply, so the sweep's answer is final.
+4. **Done already?** Look for this run's manifest (B27). If it is found, the run is complete.
+5. **The payer.** If `PayerKeyReference` is no longer in the vault, ask for a payer among the keys
    on the run's network. Write the new `Payer` and `PayerKeyReference` to the state file before
    running (B18).
-5. **The strategy.** A version-3 run resumes with `BatchStrategy`. A version-2 run resumes with
-   the existing policy.
-6. **Reconciliation** is unchanged: a sweep of `account_tx(A)` from `StartedInLedger`. Behind the
-   fence, nothing the interrupted run sent can still apply, so the sweep's answer is final.
+6. **The estimate.** Price the memos still missing and check both accounts again (B26). The
+   attempt limits and the budget start fresh for the new session.
+7. **The strategy.** The run resumes on its recorded `Strategy`. Only a version-2 file without one
+   resumes on the existing policy.
 
 ## 6. The application
 
@@ -438,7 +455,10 @@ card is today's ticket estimate.
    - a foreign transaction of A, and one of B (including a `TicketCreate`);
    - `account_tx` lagging the snapshot;
    - a fee above the ceiling;
-   - a halt while a signed batch is not yet transmitted.
+   - a halt while a signed batch is not yet registered, and one registered but not yet
+     transmitted;
+   - a fence save that fails: nothing is transmitted;
+   - a `TicketCreate` and a ticketed transaction of A inside the round's interval (B30).
 
    Tests:
    - grouping (never 1; 8 + 1 becomes 7 + 2) and sequence assignment from one snapshot;
@@ -446,7 +466,8 @@ card is today's ticket estimate.
    - the window and the checked allowance;
    - early settlement on consumed sequences, and settlement on deadlines;
    - solo memos after settling;
-   - attempts per memo and the `SubmitRefused` at a fourth;
+   - candidates per memo, transport retries that are not candidates, a `tec` outer that is one,
+     and the `SubmitRefused` at a fourth candidate;
    - the runtime budget;
    - progress from sweeps that never decreases and never counts a `tec`;
    - `AccountInUse` by identity;
@@ -457,7 +478,10 @@ card is today's ticket estimate.
    - a run stopped while batches are in flight, then resumed with a different payer: the resume
      waits for the fence, and no chunk is paid twice by the new payer;
    - a run stopped after its manifest validated: the resume finds the manifest and sends nothing
-     (B27), on the ticket path as well.
+     (B27), on the ticket path as well;
+   - a run stopped while its manifest was in flight: the resume waits for the fence, then finds
+     the manifest;
+   - a second publication of the same bytes by the same writer: its manifest is not adopted.
 5. **App.Core:**
    - "Paid by": its defaults, its memory, its lock when the amendment is off, and its refresh
      after 5 minutes;
@@ -468,7 +492,9 @@ card is today's ticket estimate.
    - the fence wait on the run screen;
    - Resume from the failed-run screen;
    - time left with a fake clock: the prior, the measured rate, and "estimating…" on tickets;
-   - state versions 2 and 3, loaded and refused as 5.1 says;
+   - state versions 2 and 3, loaded and refused as 5.1 says, and a resume on the recorded
+     strategy;
+   - a "done" state missing from History is recorded at start-up;
    - the new error sentences (the exhaustiveness test).
 6. **Acceptance, by hand, in the MauiLab VM against testnet:**
    - the same 7,123,692-byte file, with writer and payer from the vault;
