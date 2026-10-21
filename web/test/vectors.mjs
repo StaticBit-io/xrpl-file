@@ -25,9 +25,27 @@ export const MANIFEST_HASH = labelHash('manifest');
 
 export const LINK = `xrpl-file://testnet/${MANIFEST_HASH}`;
 
+// Generating a vector's bytes dominates these tests (seconds for the 2.5 MB vector), so each
+// vector is generated once per process and every caller gets its own copy to mutate.
+const bytesCache = new Map();
+const ledgerCache = new Map();
+
+/** The vector's bytes, generated once per process; the caller owns the returned copy. */
+export async function vectorFileBytes(seed, size) {
+  const key = `${seed}:${size}`;
+  if (!bytesCache.has(key)) bytesCache.set(key, vectorBytes(seed, size));
+  return (await bytesCache.get(key)).slice();
+}
+
 /** The vector's transactions laid out in the synthetic ledger the vector file describes. */
 export async function vectorLedger(vector) {
-  const bytes = await vectorBytes(vector.seed, vector.size);
+  const key = `${vector.seed}:${vector.size}`;
+  if (!ledgerCache.has(key)) ledgerCache.set(key, buildLedger(vector));
+  return structuredClone(await ledgerCache.get(key));
+}
+
+async function buildLedger(vector) {
+  const bytes = await vectorFileBytes(vector.seed, vector.size);
   const chunks = split(bytes, vector.chunk);
   const ledger = [];
 

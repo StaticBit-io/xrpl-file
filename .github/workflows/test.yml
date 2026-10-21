@@ -35,6 +35,31 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
+    # The stand suite is the longest Linux job, so it runs as two shards, each on its own runner
+    # with its own stand. Shard "a" names its classes (about half the suite by measured time);
+    # shard "b" runs every Integration class shard "a" does not name, so a new stand class can
+    # never fall between the two -- it lands in "b" until someone moves it.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: a
+            classes: >-
+              -class XrplFile.Tests.PublicationSessionStandaloneTests
+              -class XrplFile.Tests.BatchPublicationStandaloneTests
+              -class XrplFile.Tests.BatchSigningStandaloneTests
+              -class XrplFile.Tests.TransportStandaloneTests
+              -class XrplFile.Tests.LiveTicketsStandaloneTests
+              -class XrplFile.Tests.XrplClientLedgerSinkStandaloneTests
+          - shard: b
+            classes: >-
+              -class- XrplFile.Tests.PublicationSessionStandaloneTests
+              -class- XrplFile.Tests.BatchPublicationStandaloneTests
+              -class- XrplFile.Tests.BatchSigningStandaloneTests
+              -class- XrplFile.Tests.TransportStandaloneTests
+              -class- XrplFile.Tests.LiveTicketsStandaloneTests
+              -class- XrplFile.Tests.XrplClientLedgerSinkStandaloneTests
+    name: integration (${{ matrix.shard }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -46,17 +71,38 @@ jobs:
       # docker-compose.local-ports.yml override is only needed on a host that already has
       # another rippled stand parked on those ports.
       - run: docker compose -p xrpl-file-ci -f .ci-config/docker-compose.ci.yml up -d
-      - run: sleep 15
-      - run: dotnet run --project tests/XrplFile.Core.Tests --configuration Release --no-build -- -trait "Category=Integration"
+      - name: wait for the stand to answer
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf -X POST http://localhost:5005 -H 'Content-Type: application/json' \
+                 -d '{"method":"server_info","params":[{}]}' | grep -q '"status" *: *"success"'; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "the stand did not answer server_info within 60 s" >&2
+          exit 1
+      - run: dotnet run --project tests/XrplFile.Core.Tests --configuration Release --no-build -- -trait "Category=Integration" ${{ matrix.classes }}
       - if: always()
         run: docker compose -p xrpl-file-ci -f .ci-config/docker-compose.ci.yml down
 
   windows-app:
     runs-on: windows-latest
+    # Installing the maui-windows workload took 367-456 s of a 10-13 minute job. The SDK is
+    # installed into a directory of its own so that SDK and workload can be cached together;
+    # bump the key's trailing number to force a fresh install.
+    env:
+      DOTNET_INSTALL_DIR: C:\dotnet-maui
     steps:
       - uses: actions/checkout@v4
+      - id: dotnet-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\dotnet-maui
+          key: dotnet-maui-windows-${{ runner.os }}-10.0-1
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-      - run: dotnet workload install maui-windows
+      - if: steps.dotnet-cache.outputs.cache-hit != 'true'
+        run: dotnet workload install maui-windows
       - run: dotnet build app/XrplFile.App/XrplFile.App.csproj --configuration Release
