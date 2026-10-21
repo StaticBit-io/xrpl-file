@@ -2,8 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { XrplFileReader } from '../src/reader.mjs';
 import { parseLink } from '../src/link.mjs';
-import { vectorFile, vectorLedger, FakeSource, LINK, WRITER, labelHash, MANIFEST_HASH } from './vectors.mjs';
-import { vectorBytes } from '../src/vector-stream.mjs';
+import { vectorFile, vectorLedger, vectorFileBytes, FakeSource, LINK, WRITER, labelHash, MANIFEST_HASH } from './vectors.mjs';
 import {
   chunkIndexOf, listIndexOf, isManifest, listMarkerHex, chunkMarkerHex, split, blockHash,
   MANIFEST_MARKER_HEX, JSON_FORMAT_HEX,
@@ -21,7 +20,7 @@ for (const size of [1, 1000, 1001, 1024001, 2500500]) {
   test(`a ${size}-byte vector reads back byte for byte`, async () => {
     const vector = await vectorFile(size);
     const result = await new XrplFileReader(await sourceFor(size)).read(link);
-    assert.deepEqual(result.bytes, await vectorBytes(vector.seed, vector.size));
+    assert.deepEqual(result.bytes, await vectorFileBytes(vector.seed, vector.size));
     assert.equal(result.manifest.root, vector.root);
     assert.equal(result.writer, WRITER);
     assert.equal(result.blocks.length, vector.blocks);
@@ -47,7 +46,7 @@ test('a duplicate index keeps the earlier copy', async () => {
   const real = ledger.find((tx) => chunkIndexOf(tx.memoTypeHex) === 0);
   const duplicate = { ...real, hash: labelHash('retry'), ledgerIndex: 1005, memoDataHex: 'F'.repeat(real.memoDataHex.length) };
   const source = new FakeSource([...ledger, duplicate]);
-  assert.deepEqual((await new XrplFileReader(source).read(link)).bytes, await vectorBytes(vector.seed, vector.size));
+  assert.deepEqual((await new XrplFileReader(source).read(link)).bytes, await vectorFileBytes(vector.seed, vector.size));
 });
 
 test('a wrong copy earlier in canonical order than the real one wins and breaks the hash', async () => {
@@ -85,7 +84,7 @@ test('an oversized chunk is skipped so a later real copy still wins', async () =
   const withOversizedFirstCopy = ledger.map((tx) => (tx === real ? { ...tx, memoDataHex: 'A'.repeat(4000) } : tx));
   // The good copy, later in canonical order, still inside block 0's range (1000..1010).
   const source = new FakeSource([...withOversizedFirstCopy, { ...real, hash: labelHash('good-later'), ledgerIndex: 1005 }]);
-  assert.deepEqual((await new XrplFileReader(source).read(link)).bytes, await vectorBytes(vector.seed, vector.size));
+  assert.deepEqual((await new XrplFileReader(source).read(link)).bytes, await vectorFileBytes(vector.seed, vector.size));
 });
 
 test('an oversized chunk with no other copy is reported as missing', async () => {
@@ -106,7 +105,7 @@ test('a failed, foreign or unmarked transaction is not a chunk', async () => {
     { ...real, hash: labelHash('stranger'), ledgerIndex: 1005, account: 'rSomebodyElse', memoDataHex: '00' },
     { ...real, hash: labelHash('unmarked'), ledgerIndex: 1005, memoTypeHex: null, memoDataHex: '00' },
   ]);
-  assert.deepEqual((await new XrplFileReader(source).read(link)).bytes, await vectorBytes(vector.seed, vector.size));
+  assert.deepEqual((await new XrplFileReader(source).read(link)).bytes, await vectorFileBytes(vector.seed, vector.size));
 });
 
 test('a list that does not match the root is refused before any chunk', async () => {
@@ -149,7 +148,7 @@ test('a duplicate list index keeps the later copy in canonical order', async () 
     memoDataHex: utf8Hex(hexUtf8(real.memoDataHex).replaceAll('A', 'B')),
   };
   const source = new FakeSource([...ledger, wrongButEarlier]);
-  assert.deepEqual((await new XrplFileReader(source).read(link)).bytes, await vectorBytes(vector.seed, vector.size));
+  assert.deepEqual((await new XrplFileReader(source).read(link)).bytes, await vectorFileBytes(vector.seed, vector.size));
 });
 
 test('a wrong copy later in canonical order than the real list memo wins and breaks the root', async () => {
@@ -195,7 +194,7 @@ test('chunks shorter than the manifest implies are a block mismatch, not zero pa
   // root matches, every count agrees. Reading that used to return 5000 bytes of which 2500 were
   // zeros no hash covered -- the only path on which unverified bytes reached a caller. The .NET
   // reader is held to the same rule.
-  const real = await vectorBytes('short', 2500);
+  const real = await vectorFileBytes('short', 2500);
   const chunks = split(real, 500);
   const manifest = {
     type: 'application/octet-stream', size: 5000, chunk: 1000, root: hex(await blockHash(chunks)),
@@ -269,7 +268,7 @@ test("a block is read from its own ledger, not the file's first", async () => {
 
   const block = await reader.block(record, blocks[2]);
 
-  assert.deepEqual(block, (await vectorBytes(vector.seed, vector.size)).subarray(2048 * 1000));
+  assert.deepEqual(block, (await vectorFileBytes(vector.seed, vector.size)).subarray(2048 * 1000));
   // The discriminating check: block() must page from the block's own first ledger, not the
   // file's -- breaking chunks by index alone would prove nothing, since block() filters chunks
   // by index regardless of where the scan starts.
