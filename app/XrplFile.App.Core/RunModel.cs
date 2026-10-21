@@ -38,40 +38,79 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// <summary>One settle per pass still to come: about three ledgers, the landing and the two settle ledgers (spec B21).</summary>
     public static readonly TimeSpan SettlePerPass = LedgerTiming.ApproximateLedgerInterval * 3;
 
+    /// <summary>
+    /// How long a fence wait's ledgers are watched before their measured pace replaces
+    /// <see cref="LedgerTiming.ApproximateLedgerInterval"/>. Shorter than <see cref="RateWindow"/>:
+    /// ledgers close at a steady pace, unlike memos, and the whole wait is only a minute or two.
+    /// </summary>
+    public static readonly TimeSpan FencePaceWindow = TimeSpan.FromSeconds(10);
+
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly Lock _samplesGate = new();
     private readonly List<ProgressSample> _samples = [];
+    private DateTimeOffset? _sampledRun;
+    private string? _sampledStage;
+    private long _stageOpeningDone;
 
-    private readonly record struct ProgressSample(DateTimeOffset At, string Stage, long Done);
+    private readonly record struct ProgressSample(DateTimeOffset At, long Done);
 
     /// <summary>The progress line for this snapshot now, the rate measured from what this model has seen.</summary>
     internal string Describe(RunSnapshot snapshot)
     {
         DateTimeOffset now = _time.GetUtcNow();
-        return StageTextOf(snapshot, now, RateOf(snapshot, now));
+        return StageTextOf(snapshot, now, snapshot.State == PublicationRunState.Running ? RateOf(snapshot, now) : null);
     }
 
     /// <summary>
-    /// Memos per second over the last <see cref="RateWindow"/> of this stage, or null until the stage
-    /// has been watched that long. Samples are taken as the screen renders, once a second.
+    /// Progress per second in the current stage of this run, or null until there is enough of it to
+    /// measure: memos per second over the last <see cref="RateWindow"/>, or during a fence, ledgers per
+    /// second once ledgers have closed over <see cref="FencePaceWindow"/>. Samples are taken as the
+    /// screen renders, once a second.
     /// </summary>
+    /// <remarks>
+    /// Data starts at the stage's first progress, not at the stage's start: a Batch run spends its
+    /// first seconds signing and filling the window with nothing landed, and measuring those as part
+    /// of the rate showed 3 chunks/s and 35 minutes left for a run that finished three minutes later.
+    /// Samples belong to one run, keyed by its start, so a new run in the same stage never inherits the
+    /// last one's. The newest sample at least a window old is always kept, so a screen that comes back
+    /// after a long gap measures across the gap instead of starting over.
+    /// </remarks>
     private double? RateOf(RunSnapshot snapshot, DateTimeOffset now)
     {
         if (snapshot.Progress is not { } progress) return null;
 
         lock (_samplesGate)
         {
-            if (_samples.Count > 0 && !string.Equals(_samples[^1].Stage, progress.Stage, StringComparison.Ordinal)) _samples.Clear();
+            if (_sampledRun != snapshot.StartedAt || !string.Equals(_sampledStage, progress.Stage, StringComparison.Ordinal))
+            {
+                _samples.Clear();
+                _sampledRun = snapshot.StartedAt;
+                _sampledStage = progress.Stage;
+                _stageOpeningDone = progress.Done;
+            }
 
-            _samples.Add(new ProgressSample(now, progress.Stage, progress.Done));
-            _samples.RemoveAll(sample => now - sample.At > RateWindow * 2);
+            if (progress.Done <= _stageOpeningDone) return null;
 
-            if (now - _samples[0].At < RateWindow) return null;
+            _samples.Add(new ProgressSample(now, progress.Done));
 
-            ProgressSample from = _samples.Last(sample => now - sample.At >= RateWindow);
-            double seconds = (now - from.At).TotalSeconds;
+            if (progress.Stage != "fence")
+            {
+                int anchor = _samples.FindLastIndex(sample => now - sample.At >= RateWindow);
+                if (anchor > 0) _samples.RemoveRange(0, anchor);
 
-            return seconds <= 0 ? null : (progress.Done - from.Done) / seconds;
+                ProgressSample start = _samples[0];
+                return now - start.At < RateWindow ? null : (progress.Done - start.Done) / (now - start.At).TotalSeconds;
+            }
+
+            // The pace over the whole wait, which lasts a minute or two, between the first ledger close
+            // and the moment the latest one was seen: the session stops reporting once the fence is
+            // behind it, and measuring up to now would then slow the pace and grow the wait while
+            // nothing is waited for.
+            ProgressSample from = _samples[0];
+            ProgressSample latest = _samples[_samples.FindIndex(sample => sample.Done == progress.Done)];
+            TimeSpan span = latest.At - from.At;
+
+            return span < FencePaceWindow ? null : (latest.Done - from.Done) / span.TotalSeconds;
         }
     }
 
@@ -79,19 +118,31 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// The progress line (spec 6.3): "Writing the file — 1,240 of 7,124 · 52 chunks/s · about 2 min left ·
     /// 0:24 elapsed". Time left is what remains at the measured rate plus one settle per pass still to
     /// come (spec B21); before a rate is measured the Batch path uses its prior and shows no rate, the
-    /// ticket path says "estimating…", and so does any stage whose measured rate is zero. A resume's
-    /// fence wait has its own line.
+    /// ticket path says "estimating…", and so does any stage whose measured rate shows as zero. A
+    /// resume's fence wait has its own line, where <paramref name="rate"/> is ledgers per second. A run
+    /// that has stopped shows how long it took, never a rate or a time left.
     /// </summary>
     public static string StageTextOf(RunSnapshot snapshot, DateTimeOffset now, double? rate)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+
+        if (snapshot.State is PublicationRunState.Succeeded or PublicationRunState.Failed or PublicationRunState.Cancelled)
+        {
+            return StoppedTextOf(snapshot);
+        }
 
         if (snapshot.Progress is not { } progress) return "Starting";
 
         if (progress.Stage == "fence")
         {
             long ledgers = Math.Max(0, progress.Total - progress.Done);
-            return $"Waiting for earlier transactions to expire — about {Duration(LedgerTiming.ApproximateLedgerInterval * ledgers)}";
+
+            // The approximate interval is mainnet's pace; testnet closes faster, so a measured pace wins.
+            TimeSpan wait = rate is { } pace && pace > 0
+                ? TimeSpan.FromSeconds(ledgers / pace)
+                : LedgerTiming.ApproximateLedgerInterval * ledgers;
+
+            return $"{StageNameOf("fence")} — about {Duration(wait)}";
         }
 
         string elapsed = snapshot.StartedAt is { } started ? $" · {Clock(now - started)} elapsed" : string.Empty;
@@ -107,9 +158,9 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
         if (remaining == 0) return $"{head} · finishing this pass{elapsed}";
         TimeSpan settles = SettlePerPass * PassesAfter(progress.Stage, snapshot.FileBytes);
 
-        if (rate is { } measured && measured > 0)
+        if (rate is { } measured && RateText(measured) is { } shown)
         {
-            return $"{head} · {measured:N0} {unit} · about {Duration(TimeSpan.FromSeconds(remaining / measured) + settles)} left{elapsed}";
+            return $"{head} · {shown} {unit} · about {Duration(TimeSpan.FromSeconds(remaining / measured) + settles)} left{elapsed}";
         }
 
         if (rate is null && snapshot.UsesBatch)
@@ -118,6 +169,38 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
         }
 
         return $"{head} · estimating…{elapsed}";
+    }
+
+    /// <summary>
+    /// The line of a run that has stopped: how long it ran, frozen at the moment it stopped, and for a
+    /// run that did not finish, where it stopped. The outcome itself is the alert below the line.
+    /// </summary>
+    private static string StoppedTextOf(RunSnapshot snapshot)
+    {
+        string? took = snapshot is { StartedAt: { } started, FinishedAt: { } finished } ? Clock(finished - started) : null;
+
+        if (snapshot.State == PublicationRunState.Succeeded) return took is null ? "Finished" : $"Finished in {took}";
+
+        string where = snapshot.Progress switch
+        {
+            null => "Stopped while starting",
+            { Stage: "fence" } => $"Stopped while {Lowered(StageNameOf("fence"))}",
+            { } progress => $"Stopped while {Lowered(StageNameOf(progress.Stage))} — {progress.Done:N0} of {progress.Total:N0}",
+        };
+
+        return took is null ? where : $"{where} · {took} elapsed";
+    }
+
+    /// <summary>
+    /// A rate as shown: whole numbers from 10 up, one decimal below that, so the ticket path's 1.3
+    /// chunks/s is not shown as 1 or 0. Null when even one decimal shows zero: that is a stall, not a
+    /// rate, and a time left built from it would run to days.
+    /// </summary>
+    private static string? RateText(double perSecond)
+    {
+        double tenths = Math.Round(perSecond, 1, MidpointRounding.AwayFromZero);
+
+        return tenths >= 10 ? perSecond.ToString("N0") : tenths > 0 ? tenths.ToString("N1") : null;
     }
 
     /// <summary>
@@ -147,11 +230,24 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
         return stage == "chunks" ? (lists ? 2 : 1) : 1;
     }
 
+    /// <summary>
+    /// A rough span in words: seconds under a minute and a half, then the nearest minute, then hours
+    /// and minutes. Rounded, not ceilinged: 64 s used to read "2 min".
+    /// </summary>
     private static string Duration(TimeSpan span)
     {
         double seconds = Math.Max(1, Math.Ceiling(span.TotalSeconds));
-        return seconds < 60 ? $"{seconds:0} s" : $"{Math.Ceiling(seconds / 60):0} min";
+        if (seconds < 90) return $"{seconds:0} s";
+
+        long minutes = (long)Math.Round(seconds / 60, MidpointRounding.AwayFromZero);
+        if (minutes < 60) return $"{minutes} min";
+
+        long rest = minutes % 60;
+        return rest == 0 ? $"{minutes / 60} h" : $"{minutes / 60} h {rest} min";
     }
+
+    private static string Lowered(string text) =>
+        text.Length == 0 ? text : string.Concat(char.ToLowerInvariant(text[0]).ToString(), text.AsSpan(1));
 
     private static string Clock(TimeSpan span)
     {
@@ -378,6 +474,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
         "lists" => "Writing the block list",
         "read-back" => "Reading it back from the ledger",
         "manifest" => "Writing the manifest",
+        "fence" => "Waiting for earlier transactions to expire",
         "done" => "Finished",
 
         // Not an exception: a stage this application does not know about is still a stage the run is

@@ -288,7 +288,8 @@ progress { accent-color: var(--mint); }
 .xf-vault { min-height: 100vh; box-sizing: border-box; display: grid; place-items: center; padding: 16px; }
 .xf-vault > .xf-card { width: min(420px, 100%); box-sizing: border-box; padding: 28px 30px; margin: 0; }
 
-.xf-mono { font-family: var(--font-mono); overflow-wrap: anywhere; }
+/* Addresses, hashes and links are case-sensitive: an upper-casing heading around one must not change it. */
+.xf-mono { font-family: var(--font-mono); overflow-wrap: anywhere; text-transform: none; letter-spacing: normal; }
 .xf-link { word-break: break-all; }
 .xf-num { font-variant-numeric: tabular-nums; }
 .xf-figure { font-variant-numeric: tabular-nums; color: var(--beige); font-weight: 600; }

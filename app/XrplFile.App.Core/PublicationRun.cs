@@ -51,6 +51,12 @@ public sealed record RunSnapshot(
     /// <summary>When this run was started, on the run's clock (spec 6.3: the elapsed time).</summary>
     public DateTimeOffset? StartedAt { get; init; }
 
+    /// <summary>
+    /// When this run stopped, however it stopped, on the same clock as <see cref="StartedAt"/>; null
+    /// while it runs. What freezes the elapsed time on a finished screen.
+    /// </summary>
+    public DateTimeOffset? FinishedAt { get; init; }
+
     /// <summary>The file's size, which says how many passes are still to come (spec B21).</summary>
     public long FileBytes { get; init; }
 }
@@ -76,6 +82,7 @@ public sealed class PublicationRun(
     private bool _usesBatch;
     private string? _statePath;
     private DateTimeOffset? _startedAt;
+    private DateTimeOffset? _finishedAt;
     private long _fileBytes;
 
     private readonly Lock _gate = new();
@@ -137,6 +144,7 @@ public sealed class PublicationRun(
                     UsesBatch = _usesBatch,
                     StatePath = _statePath,
                     StartedAt = _startedAt,
+                    FinishedAt = _finishedAt,
                     FileBytes = _fileBytes,
                 };
             }
@@ -205,6 +213,7 @@ public sealed class PublicationRun(
             _usesBatch = false;
             _statePath = null;
             _startedAt = null;
+            _finishedAt = null;
             _fileBytes = 0;
 
             // Bumped here, not only in Begin: Reset accepts on the same "not Running" state Begin
@@ -249,6 +258,7 @@ public sealed class PublicationRun(
             _usesBatch = request.PayerAccount is not null;
             _statePath = statePath;
             _startedAt = _time.GetUtcNow();
+            _finishedAt = null;
             _fileBytes = request.File.Length;
             _completion = Task.Run(() => RunAsync(request, statePath, cancellation.Token, generation));
         }
@@ -367,6 +377,7 @@ public sealed class PublicationRun(
             {
                 _report = report;
                 _state = PublicationRunState.Succeeded;
+                _finishedAt = _time.GetUtcNow();
                 _cancellation?.Dispose();
                 _cancellation = null;
             }
@@ -447,6 +458,7 @@ public sealed class PublicationRun(
             {
                 _failure = failure;
                 _state = finalState;
+                _finishedAt = _time.GetUtcNow();
                 _cancellation?.Dispose();
                 _cancellation = null;
             }

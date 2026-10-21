@@ -29,8 +29,9 @@ public sealed class RunModelEtaTests : IDisposable
     {
         string text = RunModel.StageTextOf(Running("chunks", 1240, 7124, batch: true, TimeSpan.FromSeconds(24)), Now, rate: 52);
 
-        // 5,884 left at 52/s is 113 s, plus a settle for the list pass and one for the manifest: 137 s.
-        Assert.Equal($"Writing the file — {1240:N0} of {7124:N0} · 52 chunks/s · about 3 min left · 0:24 elapsed", text);
+        // 5,884 left at 52/s is 113 s, plus a settle for the list pass and one for the manifest: 137 s,
+        // to the nearest minute as spec 6.3's own example has it.
+        Assert.Equal($"Writing the file — {1240:N0} of {7124:N0} · 52 chunks/s · about 2 min left · 0:24 elapsed", text);
     }
 
     [Fact]
@@ -38,7 +39,124 @@ public sealed class RunModelEtaTests : IDisposable
     {
         string text = RunModel.StageTextOf(Running("chunks", 120, 7124, batch: true, TimeSpan.FromSeconds(5)), Now, rate: null);
 
-        Assert.Equal($"Writing the file — {120:N0} of {7124:N0} · about 3 min left · 0:05 elapsed", text);
+        // 7,004 left at 70/s is 100 s, plus two settles: 124 s.
+        Assert.Equal($"Writing the file — {120:N0} of {7124:N0} · about 2 min left · 0:05 elapsed", text);
+    }
+
+    [Fact]
+    public void A_rate_under_ten_keeps_a_decimal_and_hours_read_as_hours()
+    {
+        string text = RunModel.StageTextOf(Running("chunks", 530, 7124, batch: false, TimeSpan.FromSeconds(24)), Now, rate: 1.3);
+
+        // 6,594 left at 1.3/s is 5,072 s, plus two settles: 5,097 s, 85 min.
+        Assert.Equal($"Writing the file — {530:N0} of {7124:N0} · {1.3:N1} chunks/s · about 1 h 25 min left · 0:24 elapsed", text);
+    }
+
+    [Fact]
+    public void A_rate_that_shows_as_zero_is_a_stall_not_a_time_left_in_days()
+    {
+        string text = RunModel.StageTextOf(Running("chunks", 120, 7124, batch: true, TimeSpan.FromSeconds(90)), Now, rate: 0.03);
+
+        Assert.Equal($"Writing the file — {120:N0} of {7124:N0} · estimating… · 1:30 elapsed", text);
+    }
+
+    [Fact]
+    public void A_span_just_over_a_minute_is_not_rounded_up_to_two()
+    {
+        // 16 ledgers at the approximate interval is 64 s, which used to read "about 2 min".
+        Assert.Equal(
+            "Waiting for earlier transactions to expire — about 64 s",
+            RunModel.StageTextOf(Running("fence", 0, 16, batch: true, TimeSpan.FromSeconds(3)), Now, rate: null));
+    }
+
+    [Fact]
+    public void A_published_run_shows_how_long_it_took_and_stops_counting()
+    {
+        RunSnapshot published = Running("manifest", 1, 1, batch: true, TimeSpan.FromSeconds(283)) with
+        {
+            State = PublicationRunState.Succeeded,
+            FinishedAt = Now - TimeSpan.FromSeconds(17),
+        };
+
+        Assert.Equal("Finished in 4:26", RunModel.StageTextOf(published, Now, rate: null));
+        Assert.Equal("Finished in 4:26", RunModel.StageTextOf(published, Now + TimeSpan.FromMinutes(5), rate: 40));
+    }
+
+    [Fact]
+    public void A_cancelled_run_shows_where_it_stopped_without_a_rate_or_a_time_left()
+    {
+        RunSnapshot cancelled = Running("chunks", 1240, 7124, batch: true, TimeSpan.FromSeconds(90)) with
+        {
+            State = PublicationRunState.Cancelled,
+            FinishedAt = Now - TimeSpan.FromSeconds(66),
+        };
+
+        Assert.Equal(
+            $"Stopped while writing the file — {1240:N0} of {7124:N0} · 0:24 elapsed",
+            RunModel.StageTextOf(cancelled, Now, rate: 52));
+    }
+
+    [Fact]
+    public void A_run_stopped_during_the_fence_or_before_any_progress_says_so()
+    {
+        RunSnapshot fence = Running("fence", 3, 27, batch: true, TimeSpan.FromSeconds(9)) with
+        {
+            State = PublicationRunState.Cancelled,
+            FinishedAt = Now - TimeSpan.FromSeconds(4),
+        };
+        RunSnapshot early = fence with { State = PublicationRunState.Failed, Progress = null };
+
+        Assert.Equal("Stopped while waiting for earlier transactions to expire · 0:05 elapsed", RunModel.StageTextOf(fence, Now, rate: null));
+        Assert.Equal("Stopped while starting · 0:05 elapsed", RunModel.StageTextOf(early, Now, rate: null));
+    }
+
+    [Fact]
+    public void The_fence_wait_uses_the_ledger_pace_it_measures()
+    {
+        ManualTimeProvider time = new();
+        RunModel model = new(NewRun(), time);
+        DateTimeOffset start = time.GetUtcNow();
+        RunSnapshot Fence(long done) => Running("fence", done, 27, batch: true, TimeSpan.Zero) with { StartedAt = start };
+
+        // 27 ledgers at the approximate interval: the only figure there is before a ledger closes.
+        Assert.Equal("Waiting for earlier transactions to expire — about 2 min", model.Describe(Fence(0)));
+
+        // Testnet: a ledger every 2 s, the first one 2 s in.
+        for (int second = 1; second <= 12; second++)
+        {
+            time.Advance(TimeSpan.FromSeconds(1));
+            model.Describe(Fence(second / 2));
+        }
+
+        // Five ledgers in the ten seconds since the first: 21 left at 0.5 a second is 42 s, not 84 s.
+        Assert.Equal("Waiting for earlier transactions to expire — about 42 s", model.Describe(Fence(6)));
+    }
+
+    /// <summary>
+    /// Seen in the lab: once the fence is behind it the session stops reporting while it prepares
+    /// the resume, and a pace measured up to now grew the wait from 4 s to 29 s over half a minute.
+    /// </summary>
+    [Fact]
+    public void A_fence_wait_does_not_grow_while_no_ledger_is_reported()
+    {
+        ManualTimeProvider time = new();
+        RunModel model = new(NewRun(), time);
+        DateTimeOffset start = time.GetUtcNow();
+        RunSnapshot Fence(long done) => Running("fence", done, 27, batch: true, TimeSpan.Zero) with { StartedAt = start };
+
+        model.Describe(Fence(0));
+        for (int second = 1; second <= 52; second++)
+        {
+            time.Advance(TimeSpan.FromSeconds(1));
+            model.Describe(Fence(Math.Min(second / 2, 26)));
+        }
+
+        // 25 ledgers in 50 s from the first: one left at 0.5 a second.
+        Assert.Equal("Waiting for earlier transactions to expire — about 2 s", model.Describe(Fence(26)));
+
+        time.Advance(TimeSpan.FromSeconds(30));
+
+        Assert.Equal("Waiting for earlier transactions to expire — about 2 s", model.Describe(Fence(26)));
     }
 
     [Fact]
@@ -93,20 +211,91 @@ public sealed class RunModelEtaTests : IDisposable
     }
 
     [Fact]
-    public void The_rate_is_measured_over_the_last_thirty_seconds_on_the_models_clock()
+    public void The_rate_is_measured_over_thirty_seconds_from_the_first_memo_that_landed_on_the_models_clock()
     {
         ManualTimeProvider time = new();
         RunModel model = new(NewRun(), time);
         DateTimeOffset start = time.GetUtcNow();
+        RunSnapshot Chunks(long done) => Running("chunks", done, 7124, batch: true, TimeSpan.Zero) with { StartedAt = start };
 
-        RunSnapshot first = Running("chunks", 0, 7124, batch: true, TimeSpan.Zero) with { StartedAt = start };
-        Assert.DoesNotContain("chunks/s", model.Describe(first), StringComparison.Ordinal);
+        Assert.DoesNotContain("chunks/s", model.Describe(Chunks(0)), StringComparison.Ordinal);
+
+        time.Advance(TimeSpan.FromSeconds(5));
+        Assert.DoesNotContain("chunks/s", model.Describe(Chunks(100)), StringComparison.Ordinal);
 
         time.Advance(TimeSpan.FromSeconds(30));
-        RunSnapshot later = Running("chunks", 1500, 7124, batch: true, TimeSpan.Zero) with { StartedAt = start };
+        string text = model.Describe(Chunks(1600));
 
-        Assert.Contains("50 chunks/s", model.Describe(later), StringComparison.Ordinal);
-        Assert.Contains("0:30 elapsed", model.Describe(later), StringComparison.Ordinal);
+        Assert.Contains("50 chunks/s", text, StringComparison.Ordinal);
+        Assert.Contains("0:35 elapsed", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Report defect 5: at 112 chunks the line read "3 chunks/s · about 35 min left" and the run
+    /// finished 190 s later. The opening seconds, signing and filling the window with nothing landed
+    /// yet, were measured as part of the rate.
+    /// </summary>
+    [Fact]
+    public void A_slow_opening_before_the_first_memo_lands_is_not_measured_as_the_rate()
+    {
+        ManualTimeProvider time = new();
+        RunModel model = new(NewRun(), time);
+        DateTimeOffset start = time.GetUtcNow();
+        RunSnapshot Chunks(long done) => Running("chunks", done, 7124, batch: true, TimeSpan.Zero) with { StartedAt = start };
+
+        for (int second = 0; second < 29; second++)
+        {
+            model.Describe(Chunks(0));
+            time.Advance(TimeSpan.FromSeconds(1));
+        }
+
+        model.Describe(Chunks(56));
+        time.Advance(TimeSpan.FromSeconds(1));
+        string text = model.Describe(Chunks(112));
+
+        // The prior, not 112 chunks over 30 s: 7,012 left at 70/s is 100 s, plus two settles.
+        Assert.Equal($"Writing the file — {112:N0} of {7124:N0} · about 2 min left · 0:30 elapsed", text);
+    }
+
+    [Fact]
+    public void A_new_run_in_the_same_stage_does_not_inherit_the_last_runs_samples()
+    {
+        ManualTimeProvider time = new();
+        RunModel model = new(NewRun(), time);
+        DateTimeOffset first = time.GetUtcNow();
+
+        model.Describe(Running("chunks", 0, 7124, batch: true, TimeSpan.Zero) with { StartedAt = first });
+        time.Advance(TimeSpan.FromSeconds(5));
+        model.Describe(Running("chunks", 100, 7124, batch: true, TimeSpan.Zero) with { StartedAt = first });
+        time.Advance(TimeSpan.FromSeconds(35));
+        Assert.Contains("chunks/s", model.Describe(Running("chunks", 1500, 7124, batch: true, TimeSpan.Zero) with { StartedAt = first }), StringComparison.Ordinal);
+
+        DateTimeOffset second = time.GetUtcNow();
+        time.Advance(TimeSpan.FromSeconds(1));
+        model.Describe(Running("chunks", 1400, 7124, batch: true, TimeSpan.Zero) with { StartedAt = second });
+        time.Advance(TimeSpan.FromSeconds(1));
+        string text = model.Describe(Running("chunks", 1600, 7124, batch: true, TimeSpan.Zero) with { StartedAt = second });
+
+        Assert.DoesNotContain("chunks/s", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_screen_that_comes_back_after_a_minute_away_measures_across_the_gap()
+    {
+        ManualTimeProvider time = new();
+        RunModel model = new(NewRun(), time);
+        DateTimeOffset start = time.GetUtcNow();
+        RunSnapshot Chunks(long done) => Running("chunks", done, 7124, batch: true, TimeSpan.Zero) with { StartedAt = start };
+
+        model.Describe(Chunks(0));
+        time.Advance(TimeSpan.FromSeconds(1));
+        model.Describe(Chunks(50));
+        time.Advance(TimeSpan.FromSeconds(30));
+        Assert.Contains("40 chunks/s", model.Describe(Chunks(1250)), StringComparison.Ordinal);
+
+        time.Advance(TimeSpan.FromSeconds(90));
+
+        Assert.Contains("40 chunks/s", model.Describe(Chunks(4850)), StringComparison.Ordinal);
     }
 
     [Fact]

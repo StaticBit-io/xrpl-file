@@ -109,9 +109,25 @@ public sealed partial class ThemeTokensTests
         return string.Create(CultureInfo.InvariantCulture, $"#{Mix(1):X2}{Mix(3):X2}{Mix(5):X2}");
     }
 
+    /// <summary>
+    /// XRPL addresses are case-sensitive, and the estimate's section titles are upper-cased: an
+    /// address inside one used to read as a different, invalid one.
+    /// </summary>
+    [Fact]
+    public void Monospaced_text_is_never_case_transformed()
+    {
+        Match mono = MonoRule().Match(ReadStylesheet());
+
+        Assert.True(mono.Success, "app.css has no .xf-mono rule");
+        Assert.Contains("text-transform: none", mono.Groups["body"].Value, StringComparison.Ordinal);
+    }
+
+    private static string ReadStylesheet() =>
+        File.ReadAllText(Path.Combine(RepositoryRoot(), "app", "XrplFile.App", "wwwroot", "app.css"));
+
     private static IReadOnlyDictionary<string, string> ReadTokens()
     {
-        string css = File.ReadAllText(Path.Combine(RepositoryRoot(), "app", "XrplFile.App", "wwwroot", "app.css"));
+        string css = ReadStylesheet();
         Match root = RootBlock().Match(css);
         Assert.True(root.Success, "app.css has no :root block");
 
@@ -163,4 +179,7 @@ public sealed partial class ThemeTokensTests
 
     [GeneratedRegex(@"--(?<name>[a-z-]+)\s*:\s*(?<value>#[0-9A-Fa-f]{6})\s*;")]
     private static partial Regex ColourToken();
+
+    [GeneratedRegex(@"(?m)^\.xf-mono\s*\{(?<body>[^}]*)\}")]
+    private static partial Regex MonoRule();
 }

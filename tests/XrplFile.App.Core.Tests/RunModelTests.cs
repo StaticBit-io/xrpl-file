@@ -152,6 +152,46 @@ public sealed class RunModelTests : VaultHarness
     }
 
     /// <summary>
+    /// Report defect 3: under "Cancelled", the elapsed time kept ticking and the rate came back,
+    /// because the line was drawn from the screen's clock as if the run were still going.
+    /// </summary>
+    [Fact]
+    public async Task A_cancelled_runs_line_stops_where_the_run_stopped()
+    {
+        FakeConnectionFactory connections = new();
+        GatedSubmitSink gate = new(connections.Sink, gateAt: 1);
+        GatedConnectionFactory gated = new(connections, gate);
+
+        (PublicationRun run, PublishRequest request) =
+            await ReadyAsync(TestContext.Current.CancellationToken, connections: gated, ledger: connections.Ledger);
+        ManualTimeProvider time = new();
+        RunModel model = new(run, time);
+
+        Assert.True(run.Start(request));
+        Assert.Null(model.Snapshot.FinishedAt);
+
+        await WaitForGateAsync(gate, run);
+        run.Cancel();
+        gate.Release();
+        await run.Completion;
+
+        RunSnapshot stopped = model.Snapshot;
+        Assert.NotNull(stopped.FinishedAt);
+        Assert.True(stopped.FinishedAt >= stopped.StartedAt);
+
+        string line = model.StageText;
+        time.Advance(TimeSpan.FromMinutes(10));
+
+        Assert.Equal(line, model.StageText);
+        Assert.StartsWith("Stopped while", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("/s", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("left", line, StringComparison.Ordinal);
+
+        model.Dismiss();
+        Assert.Null(model.Snapshot.FinishedAt);
+    }
+
+    /// <summary>
     /// <see cref="RunModel.Capture"/> has exactly one caller in the shipped application --
     /// Run.razor -- and every other test in this file exercises the per-property members
     /// (<see cref="RunModel.CanCancel"/>, <see cref="RunModel.StageText"/>, ...) directly, never
