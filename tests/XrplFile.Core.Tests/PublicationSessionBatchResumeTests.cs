@@ -175,6 +175,86 @@ public class PublicationSessionBatchResumeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_resume_waits_for_history_that_lags_the_ledger_and_pays_for_no_landed_chunk_again()
+    {
+        BatchTestNode node = Funded();
+        List<BatchBudget> budgets = [];
+        byte[] file = VectorStream.Bytes("resume", 40_000);
+        BatchPublicationEstimate whole = await PublicationSession.EstimateAsync(node.Ledger, node.Writer.Account, node.Payer.Account, file.Length, Options, Token);
+        (PublicationSession first, _) = await InterruptedAsync(node, afterTransmissions: 3);
+
+        // The node's account_tx has not caught up with the ledgers the fence wait closed: everything
+        // the writer did is missing from the first reads, though its sequence has long moved.
+        node.Ledger.HistoryHides = tx => string.Equals(tx.Account, node.Writer.Account, StringComparison.Ordinal);
+        node.Ledger.HistoryHideReads = 3;
+
+        PublicationSession resumed = await PublicationSession.ResumeAsync(
+            Factory(node, node.Payer, budgets), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options, null, Token);
+
+        Assert.True(Assert.Single(budgets).PayerBudgetDrops < whole.PayerFeeDropsWorstCase);
+
+        PublicationReport report = await resumed.RunAsync(null, Token);
+        Assert.Equal(file, (await new XrplFileReader(node.Ledger).ReadAsync(report.Link, Token)).Bytes);
+        Assert.All((await node.LandedByMarkerAsync()).Where(pair => MemoLayout.ChunkIndexOf(pair.Key) is not null), pair => Assert.Single(pair.Value));
+    }
+
+    [Fact]
+    public async Task A_resume_on_a_node_whose_history_never_catches_up_fails_as_lacking_history_and_stays_resumable()
+    {
+        BatchTestNode node = Funded();
+        (PublicationSession first, byte[] file) = await InterruptedAsync(node, afterTransmissions: 3);
+        node.Ledger.HistoryHides = tx => string.Equals(tx.Account, node.Writer.Account, StringComparison.Ordinal);
+        node.Ledger.HistoryHideReads = int.MaxValue;
+        SessionOptions lagging = new()
+        {
+            StateDirectory = _stateDirectory,
+            FencePoll = TimeSpan.FromMilliseconds(1),
+            HistoryLagLimit = TimeSpan.FromMilliseconds(200),
+        };
+        byte[] before = await File.ReadAllBytesAsync(first.StatePath, Token);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            Factory(node, node.Payer), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", lagging, null, Token));
+
+        Assert.Equal(XrplFileError.NodeLacksHistory, error.Error);
+        Assert.Equal(before, await File.ReadAllBytesAsync(first.StatePath, Token));
+
+        node.Ledger.HistoryHideReads = 0;
+        PublicationSession resumed = await PublicationSession.ResumeAsync(
+            Factory(node, node.Payer), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options, null, Token);
+        PublicationReport report = await resumed.RunAsync(null, Token);
+        Assert.Equal(file, (await new XrplFileReader(node.Ledger).ReadAsync(report.Link, Token)).Bytes);
+        Assert.All((await node.LandedByMarkerAsync()).Where(pair => MemoLayout.ChunkIndexOf(pair.Key) is not null), pair => Assert.Single(pair.Value));
+    }
+
+    [Fact]
+    public async Task A_manifest_the_lagging_history_does_not_show_yet_is_still_found_and_not_sent_twice()
+    {
+        BatchTestNode node = Funded();
+        byte[] file = VectorStream.Bytes("resume", 9_000);
+        PublicationSession first = await PublicationSession.StartAsync(
+            Factory(node, node.Payer), node.Ledger, file, "text/plain", null,
+            node.Writer.Account, "key-w", node.Payer.Account, "key-p", "testnet", Options, Token);
+        PublicationReport original = await first.RunAsync(null, Token);
+
+        // A crash between the manifest validating and "done" being written.
+        PublicationState state = PublicationState.Load(first.StatePath);
+        (state with { Phase = "manifest", ManifestHash = null, ChunkHashes = new Dictionary<int, string>() }).Save(first.StatePath);
+        int transmitted = node.Sink.Transmissions.Count;
+
+        node.Ledger.HistoryHides = tx => MemoLayout.IsManifest(tx.MemoTypeHex);
+        node.Ledger.HistoryHideReads = 2;
+
+        PublicationSession resumed = await PublicationSession.ResumeAsync(
+            Factory(node, node.Payer), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options, null, Token);
+        PublicationReport report = await resumed.RunAsync(null, Token);
+
+        Assert.Equal(original.Link, report.Link);
+        Assert.Equal(transmitted, node.Sink.Transmissions.Count);
+        Assert.Equal(original.ManifestHash, PublicationState.Load(first.StatePath).ManifestHash);
+    }
+
+    [Fact]
     public async Task A_one_account_run_is_not_resumed_as_a_Batch_run()
     {
         BatchTestNode node = Funded();

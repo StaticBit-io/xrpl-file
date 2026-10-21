@@ -50,6 +50,12 @@ public sealed class SessionOptions
 
     /// <summary>How long the fence wait tolerates a node that fails or a ledger that does not advance (Spec question 4).</summary>
     public TimeSpan NodeOutageLimit { get; init; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// How long a resume's reconciliation waits for <c>account_tx</c> to cover the writer's sequence
+    /// up to the snapshot taken after the fence (spec 5.2 step 3, B30). Read again every <see cref="FencePoll"/>.
+    /// </summary>
+    public TimeSpan HistoryLagLimit { get; init; } = TimeSpan.FromSeconds(30);
 }
 
 /// <summary>
@@ -215,7 +221,10 @@ public sealed class PublicationSession : IBatchFenceRecorder
         BatchPublicationEstimate estimate = await EstimateAsync(source, writer, payer, file.Length, options, cancellationToken).ConfigureAwait(false);
         PublicationEstimator.RequireBatch(estimate, options.BudgetDrops);
 
-        long startedIn = await source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+        // The ledger and the writer's sequence in it come from one snapshot (spec B6): together they
+        // are where a resume's history has to start being complete (spec 5.2 step 3).
+        LedgerSnapshot started = await source.SnapshotAsync([writer], cancellationToken).ConfigureAwait(false);
+        long startedIn = started.LedgerIndex;
         IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
 
         PublicationState state = new(
@@ -223,7 +232,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
             file.Length, MemoLayout.ChunkBytes, RootOf(chunks, startedIn), startedIn, Phase: Stages[0],
             ChunkHashes: new Dictionary<int, string>(),
             Strategy: PublicationState.BatchStrategyName, SourcePath: options.SourcePath,
-            Payer: payer, PayerKeyReference: payerKeyReference, Fence: 0);
+            Payer: payer, PayerKeyReference: payerKeyReference, Fence: 0, StartSequence: started.SequenceOf(writer));
 
         string path = NewStatePath(options, startedIn, writer);
         PublicationSession session = new(null, source, file, state, path, options, 0, 0, mintsAtStart: 0);
@@ -471,10 +480,12 @@ public sealed class PublicationSession : IBatchFenceRecorder
         PublicationSession session = new(
             strategy, source, file, state, statePath, options, 0, 0, mintsAtStart: null);
         session.RecordSourcePath(options.SourcePath);
-        session._landed = await session.ReconcileAsync(chunks, cancellationToken).ConfigureAwait(false);
+        long to = await source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<LedgerTransaction> history = await session.HistoryAsync(to, cancellationToken).ConfigureAwait(false);
+        session._landed = session.Reconcile(chunks, history);
 
         // Nothing is sent, so nothing has to be affordable (spec B27).
-        if (await session.FindManifestAsync(chunks, session._landed, cancellationToken).ConfigureAwait(false) is { } done)
+        if (session.FindManifest(chunks, session._landed, history) is { } done)
         {
             session._alreadyPublished = done;
             return session;
@@ -538,9 +549,13 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
         PublicationSession session = new(null, source, file, state, statePath, options, 0, 0, mintsAtStart: 0);
         session.RecordSourcePath(options.SourcePath);
-        session._landed = await session.ReconcileAsync(chunks, cancellationToken).ConfigureAwait(false);
 
-        if (await session.FindManifestAsync(chunks, session._landed, cancellationToken).ConfigureAwait(false) is { } done)
+        // One complete read serves both: a manifest search over a second read could miss what the
+        // reconciliation saw, and send a second manifest (spec B27).
+        IReadOnlyList<LedgerTransaction> history = await session.CompleteHistoryAsync(cancellationToken).ConfigureAwait(false);
+        session._landed = session.Reconcile(chunks, history);
+
+        if (session.FindManifest(chunks, session._landed, history) is { } done)
         {
             session._alreadyPublished = done;
             return session;
@@ -631,11 +646,11 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// <summary>
     /// The manifest this run would send, if the ledger already holds it (spec B27): when every chunk
     /// and list has landed, the manifest is built from the reconciled hashes and ledgers, and a
-    /// validated tesSUCCESS transaction of the writer from <see cref="PublicationState.StartedInLedger"/>
-    /// on carrying exactly those bytes is the one. A manifest with the same root and other bytes is
-    /// another publication's and is not adopted.
+    /// validated tesSUCCESS transaction of the writer in <paramref name="history"/> carrying exactly
+    /// those bytes is the one. A manifest with the same root and other bytes is another publication's
+    /// and is not adopted.
     /// </summary>
-    private async Task<PublishResult?> FindManifestAsync(IReadOnlyList<byte[]> chunks, LandedMemos landed, CancellationToken cancellationToken)
+    private PublishResult? FindManifest(IReadOnlyList<byte[]> chunks, LandedMemos landed, IReadOnlyList<LedgerTransaction> history)
     {
         if (landed.Chunks.Count != chunks.Count) return null;
 
@@ -663,11 +678,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         Manifest manifest = ManifestPlan.Build(state.Type, state.Name, state.Size, entries, firstLedger, lastLedger, listMemos.Count);
         string data = ManifestPlan.Memo(manifest).MemoDataHex;
 
-        long to = await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
-
-        await foreach (LedgerTransaction tx in _source
-            .AccountTransactionsAsync(state.Writer, state.StartedInLedger, to, forward: true, cancellationToken)
-            .ConfigureAwait(false))
+        foreach (LedgerTransaction tx in history)
         {
             if (!tx.Validated || !tx.Succeeded || !string.Equals(tx.Account, state.Writer, StringComparison.Ordinal)) continue;
             if (!MemoLayout.IsManifest(tx.MemoTypeHex) || !string.Equals(tx.MemoDataHex, data, StringComparison.OrdinalIgnoreCase)) continue;
@@ -742,7 +753,8 @@ public sealed class PublicationSession : IBatchFenceRecorder
     }
 
     /// <summary>
-    /// Which of this publication's memos are already in the ledger, read from the ledger itself.
+    /// Which of this publication's memos are already in the ledger, read from the writer's
+    /// <paramref name="history"/> since the run started.
     ///
     /// The sweep starts at the ledger the run started in, which is why that number is in the
     /// state file: without it this would read the account's whole history.
@@ -754,15 +766,12 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// carry per-block ledgers that are not known until the chunks are reconciled; they are
     /// collected raw and checked byte for byte by the writer, which is where they are built.
     /// </summary>
-    private async Task<LandedMemos> ReconcileAsync(IReadOnlyList<byte[]> chunks, CancellationToken cancellationToken)
+    private LandedMemos Reconcile(IReadOnlyList<byte[]> chunks, IReadOnlyList<LedgerTransaction> history)
     {
         Dictionary<int, LandedMemo> landedChunks = [];
         Dictionary<int, LandedMemo> landedLists = [];
-        long to = await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
 
-        await foreach (LedgerTransaction tx in _source
-            .AccountTransactionsAsync(_state.Writer, _state.StartedInLedger, to, forward: true, cancellationToken)
-            .ConfigureAwait(false))
+        foreach (LedgerTransaction tx in history)
         {
             if (!tx.Succeeded || !tx.Validated) continue;
             if (tx.MemoDataHex is not { } data) continue;
@@ -788,6 +797,53 @@ public sealed class PublicationSession : IBatchFenceRecorder
         }
 
         return new LandedMemos(landedChunks, landedLists);
+    }
+
+    /// <summary>The writer's history from <see cref="PublicationState.StartedInLedger"/> to <paramref name="to"/>, in canonical order.</summary>
+    private Task<IReadOnlyList<LedgerTransaction>> HistoryAsync(long to, CancellationToken cancellationToken) =>
+        BatchSweep.HistoryAsync(_source, _state.Writer, _state.StartedInLedger, to, cancellationToken);
+
+    /// <summary>
+    /// The writer's history up to a snapshot taken after the fence, once it is complete (spec 5.2
+    /// step 3): its records cover the writer's sequence from <see cref="PublicationState.StartSequence"/>
+    /// up to the snapshot's, counted as a round's final sweep counts them (spec B30). account_tx lags
+    /// the validated ledger, so a memo that landed near its deadline can still be missing once the
+    /// fence has passed; trusting that answer would pay for the memo again, or send a second manifest.
+    /// The read is taken again every <see cref="SessionOptions.FencePoll"/> for up to
+    /// <see cref="SessionOptions.HistoryLagLimit"/>, then the resume fails with
+    /// <see cref="XrplFileError.NodeLacksHistory"/> having written nothing a later resume depends on.
+    /// </summary>
+    private async Task<IReadOnlyList<LedgerTransaction>> CompleteHistoryAsync(CancellationToken cancellationToken)
+    {
+        string writer = _state.Writer;
+        BatchStrategyOptions reads = new() { ChainCheck = _options.FencePoll, NodeOutageLimit = _options.NodeOutageLimit };
+        LedgerSnapshot snapshot = await BatchReads.RetryAsync(
+            token => _source.SnapshotAsync([writer], token), reads, cancellationToken).ConfigureAwait(false);
+        uint through = snapshot.SequenceOf(writer);
+        DateTimeOffset giveUp = DateTimeOffset.UtcNow + _options.HistoryLagLimit;
+
+        while (true)
+        {
+            IReadOnlyList<LedgerTransaction> history = await BatchReads.RetryAsync(
+                token => HistoryAsync(snapshot.LedgerIndex, token), reads, cancellationToken).ConfigureAwait(false);
+            List<LedgerTransaction> own = [.. history.Where(tx => string.Equals(tx.Account, writer, StringComparison.Ordinal))];
+
+            // A state written before StartSequence was recorded has only its own records to start
+            // from. That still catches a history that lags at its end, which is where it lags.
+            uint from = _state.StartSequence
+                ?? (own.Where(tx => tx.Sequence != 0).Select(tx => (uint?)tx.Sequence).Min() ?? through);
+
+            if (BatchSweep.Covers(own, from, through)) return history;
+
+            if (DateTimeOffset.UtcNow >= giveUp)
+            {
+                throw new XrplFileException(XrplFileError.NodeLacksHistory,
+                    $"account_tx did not cover the writer's sequences from {from} up to {through} by ledger {snapshot.LedgerIndex} "
+                    + $"within {_options.HistoryLagLimit}");
+            }
+
+            await Task.Delay(_options.FencePoll, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>The file's root, computed the way the writer will compute it -- over block hashes alone.</summary>

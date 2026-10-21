@@ -120,7 +120,7 @@ public sealed class PublishErrorMessagesTests
         foreach (XrplFileError error in Enum.GetValues<XrplFileError>().Where(e => e != XrplFileError.NodeUnreachable))
         {
             if (error == XrplFileError.FeeTooHigh && point == RunFailurePoint.BeforeSubmitting) continue;
-            if (error == XrplFileError.NodeLacksHistory && point == RunFailurePoint.WhileSubmitting) continue;
+            if (error == XrplFileError.NodeLacksHistory && point is RunFailurePoint.WhileSubmitting or RunFailurePoint.BeforeResuming) continue;
             if (error is XrplFileError.PayerInsufficientBalance or XrplFileError.BatchNotEnabled && point == RunFailurePoint.BeforeResuming) continue;
 
             XrplFileException thrown = new(error, "failed", block: 7);
@@ -222,6 +222,9 @@ public sealed class PublishErrorMessagesTests
         Assert.Equal(
             PublishErrorMessages.HistoryLaggedWhilePublishing,
             PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0));
+        Assert.Equal(
+            PublishErrorMessages.HistoryLaggedWhilePublishing,
+            PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0));
         Assert.Equal(
             PublishErrorMessages.For(XrplFileError.NodeLacksHistory),
             PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));

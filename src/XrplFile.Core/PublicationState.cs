@@ -37,6 +37,12 @@ namespace XrplFile;
 /// Version 3: the highest deadline any transmission of the run registered, written before that
 /// transmission is first sent (spec B23); 0 before the first one.
 /// </param>
+/// <param name="StartSequence">
+/// Version 3: the writer's next sequence in <see cref="StartedInLedger"/>, read from the same
+/// snapshot. A resume's reconciliation counts the history it reads as complete only when it covers
+/// every sequence from here up to the writer's sequence after the fence (spec 5.2 step 3, B30).
+/// Absent in a state written before it was recorded.
+/// </param>
 public sealed record PublicationState(
     int Version,
     string Network,
@@ -55,7 +61,8 @@ public sealed record PublicationState(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ManifestHash = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Payer = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PayerKeyReference = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Fence = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Fence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] uint? StartSequence = null)
 {
     /// <summary>
     /// Sequence and ticket runs. 2 since <see cref="Root"/> became something a run records at its start rather than at its

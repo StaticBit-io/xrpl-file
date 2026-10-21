@@ -50,8 +50,9 @@ public static class PublishErrorMessages
         "Network fees are above what this application publishes at right now. Try again when they are back down.";
 
     /// <summary>
-    /// <see cref="XrplFileError.NodeLacksHistory"/> raised while publishing (spec B30): the node's history
-    /// lagged the run, which is not the reader's "history far enough back" problem.
+    /// <see cref="XrplFileError.NodeLacksHistory"/> raised while publishing (spec B30), or by a resume
+    /// whose reconciliation waited for it (spec 5.2 step 3): the node's history lagged the run, which is
+    /// not the reader's "history far enough back" problem.
     /// </summary>
     public const string HistoryLaggedWhilePublishing =
         "The node's history fell behind the publication, so what landed could not be confirmed. The run is listed under "
@@ -152,7 +153,10 @@ public static class PublishErrorMessages
 
         if (exception.Error == XrplFileError.FeeTooHigh && point == RunFailurePoint.BeforeSubmitting) return FeeTooHighNow;
 
-        if (exception.Error == XrplFileError.NodeLacksHistory && point == RunFailurePoint.WhileSubmitting) return HistoryLaggedWhilePublishing;
+        if (exception.Error == XrplFileError.NodeLacksHistory && point is RunFailurePoint.WhileSubmitting or RunFailurePoint.BeforeResuming)
+        {
+            return HistoryLaggedWhilePublishing;
+        }
 
         if (point == RunFailurePoint.BeforeResuming)
         {

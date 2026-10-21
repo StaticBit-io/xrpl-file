@@ -86,6 +86,7 @@ public class PublicationSessionBatchTests : IDisposable
         Assert.Equal(node.Payer.Account, state.Payer);
         Assert.Equal("key-p", state.PayerKeyReference);
         Assert.Equal(0, state.Fence);
+        Assert.Equal(BatchTestNode.WriterStart, state.StartSequence);
         Assert.Equal(@"C:\files\s.txt", state.SourcePath);
     }
 

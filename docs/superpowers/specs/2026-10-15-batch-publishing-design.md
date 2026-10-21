@@ -20,6 +20,13 @@ check ran before the fence and matched on the root alone, that attempts were cou
 rather than per signed candidate, and that history completeness and the per-session limits were
 underspecified. Decisions B5–B13, B16, B20 and B23–B30 and sections 4, 5 and 7 carry the changes.
 
+**Amended 2026-10-21 after the final review of the implementation.** A resume trusted `account_tx`
+as complete once the fence had passed. On a node whose history lags the validated ledger by more
+than the settle ledgers, a memo that landed near its deadline was missing from the sweep, and the
+resume paid for it again or sent a second manifest. Reconciliation now waits for complete history
+the way a round's final sweep does (B30); section 5.1 gains `StartSequence` and section 5.2 step 3
+carries the rule.
+
 ## 1. What is known
 
 From the spike, measured on the `xrpl-file-ci` stand (xrpld 3.3.0) and on testnet (xrpld 3.4.1,
@@ -348,6 +355,7 @@ fees counted as today. When settlement could not attribute the payer's fees, the
 | `ManifestHash` | 2 and 3, optional | the manifest's hash once the run is done (B27) |
 | `Payer`, `PayerKeyReference` | 3, required | B's classic address and vault reference |
 | `Fence` | 3, required | the highest registered deadline (B23); 0 before the first transmission |
+| `StartSequence` | 3, optional | the writer's next sequence in `StartedInLedger`, read from the same snapshot (B6); what a resume's coverage check starts from (5.2 step 3) |
 
 - `StartAsync` writes version 3 when it is given a payer, and version 2 otherwise.
 - A version-2 file loads as today.
@@ -364,8 +372,15 @@ fees counted as today. When settlement could not attribute the payer's fees, the
    that fails or there is no path, and its file is checked the same way.
 2. **The fence.** For a version-3 run, wait until a snapshot is past `Fence` + 2 (B23). The run
    screen shows the wait.
-3. **Reconciliation** is unchanged: a sweep of `account_tx(A)` from `StartedInLedger`. Behind the
-   fence, nothing the interrupted run sent can still apply, so the sweep's answer is final.
+3. **Reconciliation.** Take a snapshot of A after the fence and sweep `account_tx(A)` from
+   `StartedInLedger` to the snapshot's ledger. Behind the fence, nothing the interrupted run sent
+   can still apply, so the sweep's answer is final once it is complete. It is complete when A's
+   records cover A's sequence interval from `StartSequence` up to A's sequence in that snapshot,
+   counted as in B30. Until then the sweep is read again, for up to the 30 s of B30, and the
+   resume then fails with `NodeLacksHistory` and stays resumable. The same records serve step 4,
+   so the manifest check cannot miss what the reconciliation saw. A state written before
+   `StartSequence` existed counts from the lowest sequence among A's records, which still catches
+   a history that lags at its end.
 4. **Done already?** Look for this run's manifest (B27). If it is found, the run is complete.
 5. **The payer.** If `PayerKeyReference` is no longer in the vault, ask for a payer among the keys
    on the run's network. Write the new `Payer` and `PayerKeyReference` to the state file before
