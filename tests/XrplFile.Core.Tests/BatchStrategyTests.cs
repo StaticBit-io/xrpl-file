@@ -162,9 +162,12 @@ public class BatchStrategyTests
         Assert.Equal(24, landed.Count);
 
         // B would pay for an outer whose inners can no longer apply. Whether the chain check halted the
-        // round while it sent, or settlement met the divergence after sending ended, it is not sent again.
-        uint first = node.Sink.Transmissions.Where(t => t.Sequence == BatchTestNode.PayerStart + 1).Select(t => t.LastLedger).First();
-        Assert.Equal(4, node.Sink.Transmissions.Count(t => t.Sequence == BatchTestNode.PayerStart + 1 && t.LastLedger == first));
+        // round while it sent, or settlement met the divergence after sending ended, nothing is sent
+        // again in the round that diverged. The next round plans afresh from B's sequence, and its own
+        // outer on that sequence may be refused and sent again like any other.
+        IReadOnlyList<string> trace = strategy.Trace;
+        int second = trace.Select((entry, index) => (entry, index)).Where(pair => pair.entry.StartsWith("round:", StringComparison.Ordinal)).Skip(1).Select(pair => pair.index).First();
+        Assert.DoesNotContain(trace.Take(second), entry => entry.StartsWith("resend:", StringComparison.Ordinal));
     }
 
     [Fact]
