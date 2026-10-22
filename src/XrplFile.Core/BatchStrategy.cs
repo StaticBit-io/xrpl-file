@@ -58,6 +58,13 @@ public sealed class BatchStrategy : ISubmissionStrategy
 
     internal IReadOnlyList<string> Trace => _context.Trace.Events;
 
+    /// <summary>
+    /// What this instance did, in order and with times: rounds, registrations, submit answers, resends,
+    /// halts and settlements. Only ordinals, ledger indexes, fee units and engine results; never key
+    /// material. The application writes it to its trace log when a run ends.
+    /// </summary>
+    public IReadOnlyList<BatchTraceEntry> TraceEntries => _context.Trace.Entries;
+
     internal int WindowSize => _context.Window.Size;
 
     internal int WindowInFlight => _context.Window.InFlight;

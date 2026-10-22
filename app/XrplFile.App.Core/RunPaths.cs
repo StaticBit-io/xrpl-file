@@ -22,12 +22,16 @@ public sealed class RunPaths
 
         StateDirectory = Path.GetFullPath(Path.Combine(root, "runs"));
         HistoryPath = Path.GetFullPath(Path.Combine(root, "publications.json"));
+        TraceLogPath = Path.GetFullPath(Path.Combine(root, "batch-trace.log"));
     }
 
     /// <summary>What <see cref="SessionOptions.StateDirectory"/> is set to.</summary>
     public string StateDirectory { get; }
 
     public string HistoryPath { get; }
+
+    /// <summary>The Batch runs' round traces (<see cref="RunTraceLog"/>), beside the publications list.</summary>
+    public string TraceLogPath { get; }
 
     /// <summary>
     /// Creates the state directory. <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> writes its state

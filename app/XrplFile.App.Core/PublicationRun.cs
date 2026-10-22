@@ -1,3 +1,4 @@
+using System.Globalization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -79,6 +80,7 @@ public sealed class PublicationRun(
     BatchStrategyOptions? batchOptions = null)
 {
     private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly RunTraceLog _traceLog = new(paths.TraceLogPath);
     private bool _usesBatch;
     private string? _statePath;
     private DateTimeOffset? _startedAt;
@@ -273,7 +275,20 @@ public sealed class PublicationRun(
         PublicationState? finished = null;
         string? finishedPath = null;
         string? failure = null;
-        RunAttempt attempt = new() { Point = statePath is null ? RunFailurePoint.BeforeSubmitting : RunFailurePoint.BeforeResuming };
+        Exception? caught = null;
+        RunAttempt attempt = new()
+        {
+            Point = statePath is null ? RunFailurePoint.BeforeSubmitting : RunFailurePoint.BeforeResuming,
+            StatePath = statePath,
+        };
+
+        // An exception filter that never catches: it keeps whatever ended the run for the trace log,
+        // which every catch below would otherwise have to hand over separately.
+        bool Keep(Exception error)
+        {
+            caught = error;
+            return false;
+        }
 
         try
         {
@@ -304,6 +319,11 @@ public sealed class PublicationRun(
             {
                 await DisposeQuietlyAsync(connection).ConfigureAwait(false);
             }
+        }
+        catch (Exception ex) when (Keep(ex))
+        {
+            // Never reached: Keep returns false.
+            throw;
         }
         catch (OperationCanceledException)
         {
@@ -355,6 +375,8 @@ public sealed class PublicationRun(
         // reacts to Succeeded and immediately starts another run can never observe the previous
         // run's connection or strategy still mid-dispose (design F6's "closing stops it" only means
         // something if the stop is visible after it has actually happened).
+        await WriteTraceAsync(request, attempt, finalState, caught).ConfigureAwait(false);
+
         if (finalState == PublicationRunState.Succeeded)
         {
             // Assigned before the history is touched, and specifically before Append is called: a
@@ -473,6 +495,13 @@ public sealed class PublicationRun(
         public bool UsesTickets { get; set; }
 
         public long OwnerReserveDrops { get; set; }
+
+        /// <summary>The Batch strategy the session built, whose trace the run writes to the trace log when it ends.</summary>
+        public BatchStrategy? Batch { get; set; }
+
+        public DateTimeOffset BatchBuiltAt { get; set; }
+
+        public string? StatePath { get; set; }
     }
 
     /// <summary>A one-account run: the code this method held before Batch, resuming on the recorded strategy.</summary>
@@ -540,6 +569,7 @@ public sealed class PublicationRun(
                     .ConfigureAwait(false);
 
             RecordStatePath(generation, session.StatePath);
+            attempt.StatePath = session.StatePath;
             attempt.Point = RunFailurePoint.WhileSubmitting;
 
             PublicationReport report = await session.RunAsync(new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false);
@@ -587,8 +617,13 @@ public sealed class PublicationRun(
                 .CreateAsync(vault, payerReference, cancellationToken, autoLock, cacheWallet: true).ConfigureAwait(false);
             BatchSignerCreated?.Invoke(payerKey);
 
-            BatchStrategy Build(BatchBudget budget, IBatchFenceRecorder fence) =>
+            BatchStrategy Build(BatchBudget budget, IBatchFenceRecorder fence)
+            {
                 built = PublishPolicy.CreateBatch(budget, fence, connection, writer, payerKey, batchOptions);
+                attempt.Batch = built;
+                attempt.BatchBuiltAt = _time.GetUtcNow();
+                return built;
+            }
 
             TimeSpan fencePoll = batchOptions?.ChainCheck ?? TimeSpan.FromSeconds(1);
             PublicationSession session;
@@ -621,6 +656,7 @@ public sealed class PublicationRun(
             }
 
             RecordStatePath(generation, session.StatePath);
+            attempt.StatePath = session.StatePath;
             attempt.Point = RunFailurePoint.WhileSubmitting;
 
             PublicationReport report = await session.RunAsync(new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false);
@@ -640,6 +676,37 @@ public sealed class PublicationRun(
     /// tests, which keep the signers to check that the run dropped their cached wallets.
     /// </summary>
     internal Action<VaultSigner>? BatchSignerCreated { get; set; }
+
+    /// <summary>
+    /// Writes a Batch run's round trace to the trace log when the run ends, however it ended: its state
+    /// file's name, so a report can be matched to a run, every event with its time from the strategy's
+    /// start, and how the run ended. A run that never built a strategy has no trace and writes nothing.
+    /// </summary>
+    private async Task WriteTraceAsync(PublishRequest request, RunAttempt attempt, PublicationRunState finalState, Exception? caught)
+    {
+        if (attempt.Batch is not { } strategy) return;
+
+        string stateFile = attempt.StatePath is null ? "(no state file)" : Path.GetFileName(attempt.StatePath);
+        string ending = finalState == PublicationRunState.Failed
+            ? caught switch
+            {
+                XrplFileException e => $" {e.Error}{(e.EngineResult is null ? string.Empty : " " + e.EngineResult)}",
+                VaultException e => $" {e.Error}",
+                null => string.Empty,
+                _ => $" {caught.GetType().Name}",
+            }
+            : string.Empty;
+
+        List<string> lines =
+        [
+            string.Create(CultureInfo.InvariantCulture,
+                $"{attempt.BatchBuiltAt:O} batch run {stateFile} network={request.Network} writer={request.Account} payer={request.PayerAccount} bytes={request.File.Length}"),
+            .. strategy.TraceEntries.Select(entry => string.Create(CultureInfo.InvariantCulture, $"+{entry.Elapsed.TotalSeconds:F3} {entry.Event}")),
+            string.Create(CultureInfo.InvariantCulture, $"{_time.GetUtcNow():O} end {finalState}{ending}"),
+        ];
+
+        await _traceLog.AppendAsync(lines, CancellationToken.None).ConfigureAwait(false);
+    }
 
     /// <summary>Pins the state file onto this run's snapshot, as every other write after Begin is pinned.</summary>
     private void RecordStatePath(int generation, string statePath)

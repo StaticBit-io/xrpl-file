@@ -78,6 +78,37 @@ public sealed class PublicationRunBatchTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_batch_run_writes_its_round_trace_to_the_log_under_its_state_file_name()
+    {
+        (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync();
+
+        Assert.True(run.Start(request));
+        await run.Completion;
+
+        string log = await File.ReadAllTextAsync(Paths.TraceLogPath, Token);
+        Assert.Contains(Path.GetFileName(run.Snapshot.StatePath!), log, StringComparison.Ordinal);
+        Assert.Contains("round:", log, StringComparison.Ordinal);
+        Assert.Contains("transmit:0:tesSUCCESS", log, StringComparison.Ordinal);
+        Assert.Contains("settled:", log, StringComparison.Ordinal);
+        Assert.Contains("end Succeeded", log, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_cancelled_batch_run_logs_how_it_ended()
+    {
+        (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync(40_000);
+        _connections.BatchSink!.Transmitting = transmission =>
+        {
+            if (transmission.Ordinal == 1) run.Cancel();
+        };
+
+        Assert.True(run.Start(request));
+        await run.Completion;
+
+        Assert.Contains("end Cancelled", await File.ReadAllTextAsync(Paths.TraceLogPath, Token), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_cancelled_batch_run_resumes_from_its_state_with_its_payer()
     {
         (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync(40_000);
