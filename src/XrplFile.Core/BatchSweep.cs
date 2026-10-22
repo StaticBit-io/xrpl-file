@@ -197,6 +197,9 @@ internal static class BatchSweep
     /// <summary>
     /// The writer's records a round's progress sweeps read, in ledger order: complete as account_tx
     /// gave them below <paramref name="ReadFrom"/>, the ledger the next read would have started at.
+    /// That rests on account_tx indexing ledgers in order. A gap that breaks it is caught by B30's
+    /// coverage when the missing record took a sequence, and the sweep then reads the round in full;
+    /// a ticketed one (sequence 0) would go unseen by B12, as it would in a full read made too early.
     /// </summary>
     internal sealed record KnownHistory(IReadOnlyList<LedgerTransaction> Records, long ReadFrom);
 
