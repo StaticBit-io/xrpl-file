@@ -70,6 +70,26 @@ public class BatchWindowTests
     }
 
     [Fact]
+    public async Task Clean_sends_never_widen_it_past_its_ceiling()
+    {
+        BatchWindow window = new(16, maximum: 32);
+
+        for (int i = 0; i < 1000; i++)
+        {
+            await window.AcquireAsync(TestContext.Current.CancellationToken);
+            window.Release(busy: false);
+        }
+
+        Assert.Equal(32, window.Size);
+    }
+
+    [Fact]
+    public void A_start_above_the_ceiling_starts_at_the_ceiling()
+    {
+        Assert.Equal(8, new BatchWindow(16, maximum: 8).Size);
+    }
+
+    [Fact]
     public async Task A_returned_slot_admits_the_next_and_counts_as_no_answer()
     {
         BatchWindow window = new(1);

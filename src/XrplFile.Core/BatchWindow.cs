@@ -2,14 +2,20 @@ namespace XrplFile;
 
 /// <summary>
 /// How many transmissions may be in flight on the connection (spec B10): it starts at the given size,
-/// halves after three busy answers in a row and grows by one after ten clean ones. A public node
-/// closes a client at about a hundred unsent answers; this is what keeps the client well below that.
+/// halves after three busy answers in a row and grows by one after ten clean ones, never past the
+/// maximum. A public node closes a client at about a hundred unsent answers; this is what keeps the
+/// client well below that. Growth alone would not: on testnet a 7 MB run's clean answers widened it
+/// to 105, and 95 were in flight at once.
 /// </summary>
-internal sealed class BatchWindow(int initial)
+internal sealed class BatchWindow(int initial, int maximum = BatchWindow.DefaultMaximum)
 {
+    /// <summary>The spike's ceiling: 32 in flight gave its best testnet rate, far below the node's limit.</summary>
+    public const int DefaultMaximum = 32;
+
     private readonly Lock _gate = new();
     private readonly Queue<TaskCompletionSource> _waiting = new();
-    private int _size = Math.Max(1, initial);
+    private readonly int _maximum = Math.Max(1, maximum);
+    private int _size = Math.Clamp(initial, 1, Math.Max(1, maximum));
     private int _inFlight;
     private int _busyInRow;
     private int _cleanInRow;
@@ -65,7 +71,7 @@ internal sealed class BatchWindow(int initial)
 
                 if (++_cleanInRow >= 10)
                 {
-                    _size++;
+                    _size = Math.Min(_maximum, _size + 1);
                     _cleanInRow = 0;
                 }
             }

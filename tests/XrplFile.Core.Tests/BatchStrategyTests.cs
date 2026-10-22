@@ -90,6 +90,22 @@ public class BatchStrategyTests
     }
 
     [Fact]
+    public async Task A_round_settles_at_the_snapshot_that_resolves_its_last_candidate()
+    {
+        BatchTestNode node = new();
+        await using BatchStrategy strategy = node.Strategy();
+
+        await strategy.SubmitAllAsync(BatchTestNode.Memos(16), null, Token);
+
+        // Once B's validated sequence has passed every outer, nothing the round sent can apply, so
+        // waiting further ledgers buys nothing (spec B9 as amended 2026-10-21). One ledger of slack:
+        // every read of the fake closes one, and a progress sweep may read between the two.
+        long lastLanded = (await node.LandedByMarkerAsync()).Values.SelectMany(copies => copies).Max(tx => tx.LedgerIndex);
+        long settled = long.Parse(strategy.Trace.First(entry => entry.StartsWith("settled:", StringComparison.Ordinal))["settled:".Length..]);
+        Assert.InRange(settled, lastLanded, lastLanded + 1);
+    }
+
+    [Fact]
     public async Task An_outer_that_never_lands_stalls_the_round_and_its_memos_go_in_the_next()
     {
         BatchTestNode node = new(sink => sink.LoseOuter.Add(BatchTestNode.PayerStart));

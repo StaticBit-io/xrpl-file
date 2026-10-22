@@ -584,7 +584,13 @@ public sealed class PublicationSession : IBatchFenceRecorder
     }
 
     /// <summary>
-    /// Waits until a snapshot is past the fence plus the settle ledgers (spec B23), reporting the wait
+    /// The fence keeps the two settle ledgers spec B23 names: a round no longer waits for them (B9 as
+    /// amended 2026-10-21), and a resume, which is rare, keeps its margin.
+    /// </summary>
+    private const int FenceSettleLedgers = 2;
+
+    /// <summary>
+    /// Waits until a snapshot is past the fence plus <see cref="FenceSettleLedgers"/> (spec B23), reporting the wait
     /// as the "fence" stage. A run that never transmitted has a fence of zero and waits for nothing.
     /// Reads are retried, and a node that stays unreachable, or whose validated ledger stays where it
     /// is, for <see cref="SessionOptions.NodeOutageLimit"/> fails the resume (Spec question 4).
@@ -595,7 +601,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         if (state.Fence is not { } fence || fence <= 0) return;
 
         BatchStrategyOptions reads = new() { ChainCheck = options.FencePoll, NodeOutageLimit = options.NodeOutageLimit };
-        long target = fence + reads.SettleLedgers;
+        long target = fence + FenceSettleLedgers;
         long? first = null;
         long highest = 0;
         DateTimeOffset advancedAt = DateTimeOffset.UtcNow;

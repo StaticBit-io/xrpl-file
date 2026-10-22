@@ -6,14 +6,22 @@ public sealed record BatchStrategyOptions
     /// <summary>Transmissions in flight at the start (spec B10).</summary>
     public int InitialWindow { get; init; } = 16;
 
+    /// <summary>The most transmissions the window ever lets be in flight, however clean the answers (spec B10).</summary>
+    public int MaxWindow { get; init; } = BatchWindow.DefaultMaximum;
+
     /// <summary>The most batches sent past the payer's sequence in the latest checked snapshot (spec B10).</summary>
     public int MaxAhead { get; init; } = 256;
 
     /// <summary><c>LastLedgerSequence</c> = the snapshot's index plus this (spec B7).</summary>
     public int DeadlineLedgers { get; init; } = 20;
 
-    /// <summary>Ledgers waited after every candidate is resolved, before the sweep (spec B9).</summary>
-    public int SettleLedgers { get; init; } = 2;
+    /// <summary>
+    /// Ledgers waited after every candidate is resolved, before the sweep (spec B9 as amended
+    /// 2026-10-21). None by default: a candidate is resolved only by a validated snapshot that is past
+    /// its deadline or past its sequence, so it can no longer apply, and the sweep's own wait for
+    /// complete history (B30) covers an account_tx that lags. Two more ledgers cost about 7 s a round.
+    /// </summary>
+    public int SettleLedgers { get; init; }
 
     /// <summary>How often a sending round checks the chain, and how often settlement polls (spec B8).</summary>
     public TimeSpan ChainCheck { get; init; } = TimeSpan.FromSeconds(2);

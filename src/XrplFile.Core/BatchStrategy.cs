@@ -34,7 +34,7 @@ public sealed class BatchStrategy : ISubmissionStrategy
 
         _options = options ?? new BatchStrategyOptions();
         _context = new BatchContext(
-            sink, source, writer, payer, budget, _options, new BatchFence(fence), new BatchWindow(_options.InitialWindow), new BatchTrace(), new BatchSpending(budget));
+            sink, source, writer, payer, budget, _options, new BatchFence(fence), new BatchWindow(_options.InitialWindow, _options.MaxWindow), new BatchTrace(), new BatchSpending(budget));
     }
 
     /// <summary>The estimate's approved unit, which the session checks the estimate against (spec 4.1).</summary>
