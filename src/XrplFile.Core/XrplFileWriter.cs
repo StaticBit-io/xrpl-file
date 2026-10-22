@@ -49,6 +49,10 @@ public sealed record PublishResult(
 /// </summary>
 public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource source, WriterOptions? options = null)
 {
+    private const int ReadBackAttempts = 3;
+
+    private static readonly TimeSpan ReadBackPause = TimeSpan.FromSeconds(1);
+
     private readonly ISubmissionStrategy _strategy = strategy;
     private readonly ILedgerSource _source = source;
     private readonly WriterOptions _options = options ?? new WriterOptions();
@@ -278,12 +282,15 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
         {
             XrplFileReader reader = new(_source, new ReaderOptions { MaxBytes = long.MaxValue });
             ManifestRecord unpublished = new(manifest, writer, lastLedger + 1, string.Empty);
-            IReadOnlyList<BlockEntry> published = await reader.BlockListAsync(unpublished, cancellationToken).ConfigureAwait(false);
+            IReadOnlyList<BlockEntry> published = await ReadBackAsync(
+                () => reader.BlockListAsync(unpublished, cancellationToken), cancellationToken).ConfigureAwait(false);
 
             long at = 0;
             for (int block = 0; block < published.Count; block++)
             {
-                byte[] content = await reader.BlockAsync(unpublished, published[block], cancellationToken).ConfigureAwait(false);
+                BlockEntry entry = published[block];
+                byte[] content = await ReadBackAsync(
+                    () => reader.BlockAsync(unpublished, entry, cancellationToken), cancellationToken).ConfigureAwait(false);
 
                 long remaining = file.Length - at;
                 if (content.Length > remaining)
@@ -330,6 +337,27 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
     private sealed class InlineProgress(Action<int> report) : IProgress<int>
     {
         public void Report(int value) => report(value);
+    }
+
+    /// <summary>
+    /// Takes a read-back read again when the node did not answer it (spec B24): a request left
+    /// unanswered costs its connection, and the next one goes over a new connection. Without this, a
+    /// socket that went silent during the read-back failed a run whose chunks had all landed and been
+    /// paid for. A node that answers none of the attempts still fails the run as unreachable.
+    /// </summary>
+    private static async Task<T> ReadBackAsync<T>(Func<Task<T>> read, CancellationToken cancellationToken)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await read().ConfigureAwait(false);
+            }
+            catch (XrplFileException e) when (e.Error == XrplFileError.NodeUnreachable && attempt < ReadBackAttempts)
+            {
+                await Task.Delay(ReadBackPause, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     private async Task<long> LedgerOfAsync(string hash, CancellationToken cancellationToken)
