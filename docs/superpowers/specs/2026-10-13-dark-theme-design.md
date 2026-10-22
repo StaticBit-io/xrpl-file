@@ -127,8 +127,8 @@ tab bar's bottom padding includes `env(safe-area-inset-bottom)`.
 **Tables on wide windows (amended 2026-10-22).** At 920 px the Keys, Accounts and History tables
 were wider than their card and scrolled sideways even on a 1900 px window. A data table's card now
 grows with the page (the table above), and a table fits its card without a scrollbar wherever its
-columns fit at all: measured in the guest, every table fits from 1,000 px up, and Keys from about
-860 px. From 1100 px an address that is a cell's own content is kept on one line; below that it wraps
+columns fit at all: measured in the guest, every table fits at 900 px and wider; Keys needs about
+an 840 px window. From 1100 px an address that is a cell's own content is kept on one line; below that it wraps
 anywhere again, because kept whole it alone pushed the Keys table out of its card at 900 px. Under
 the width where a table's columns cannot fit, it still scrolls inside its own card and the page never
 scrolls sideways.
