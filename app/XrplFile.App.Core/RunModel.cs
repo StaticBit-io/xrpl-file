@@ -45,12 +45,20 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// </summary>
     public static readonly TimeSpan FencePaceWindow = TimeSpan.FromSeconds(10);
 
+    /// <summary>
+    /// A measured rate under this share of the best one the stage has shown reads as a stall. A Batch
+    /// round waiting on one refused outer keeps a trickle in its window, and on testnet that read "1.1
+    /// chunks/s · about 1 h 35 min left" for 30 s of a run that went on at full speed a minute later.
+    /// </summary>
+    public const double StallShareOfBestRate = 0.1;
+
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly Lock _samplesGate = new();
     private readonly List<ProgressSample> _samples = [];
     private DateTimeOffset? _sampledRun;
     private string? _sampledStage;
     private long _stageOpeningDone;
+    private double _bestRate;
 
     private readonly record struct ProgressSample(DateTimeOffset At, long Done);
 
@@ -73,7 +81,9 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// of the rate showed 3 chunks/s and 35 minutes left for a run that finished three minutes later.
     /// Samples belong to one run, keyed by its start, so a new run in the same stage never inherits the
     /// last one's. The newest sample at least a window old is always kept, so a screen that comes back
-    /// after a long gap measures across the gap instead of starting over.
+    /// after a long gap measures across the gap instead of starting over. A rate under
+    /// <see cref="StallShareOfBestRate"/> of the best this stage has shown is returned as zero, which
+    /// the line shows as a stall rather than as hours left.
     /// </remarks>
     private double? RateOf(RunSnapshot snapshot, DateTimeOffset now)
     {
@@ -87,6 +97,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
                 _sampledRun = snapshot.StartedAt;
                 _sampledStage = progress.Stage;
                 _stageOpeningDone = progress.Done;
+                _bestRate = 0;
             }
 
             if (progress.Done <= _stageOpeningDone) return null;
@@ -99,7 +110,12 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
                 if (anchor > 0) _samples.RemoveRange(0, anchor);
 
                 ProgressSample start = _samples[0];
-                return now - start.At < RateWindow ? null : (progress.Done - start.Done) / (now - start.At).TotalSeconds;
+                if (now - start.At < RateWindow) return null;
+
+                double rate = (progress.Done - start.Done) / (now - start.At).TotalSeconds;
+                _bestRate = Math.Max(_bestRate, rate);
+
+                return rate < _bestRate * StallShareOfBestRate ? 0 : rate;
             }
 
             // The pace over the whole wait, which lasts a minute or two, between the first ledger close

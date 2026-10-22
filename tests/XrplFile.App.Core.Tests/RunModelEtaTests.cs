@@ -296,6 +296,36 @@ public sealed class RunModelEtaTests : IDisposable
         Assert.DoesNotContain("chunks/s", text, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Testnet, 2026-10-22: the chunks stood at 1,064 while a round waited on one refused outer, and for
+    /// 30 s the line read "1.1 chunks/s · about 1 h 35 min left": the trickle of the last window, taken
+    /// for the pace of a run that went on at full speed a minute later.
+    /// </summary>
+    [Fact]
+    public void A_rate_that_falls_below_a_tenth_of_the_best_this_pass_has_shown_reads_as_a_stall()
+    {
+        ManualTimeProvider time = new();
+        RunModel model = new(NewRun(), time);
+        DateTimeOffset start = time.GetUtcNow();
+        RunSnapshot Chunks(long done) => Running("chunks", done, 7124, batch: true, TimeSpan.Zero) with { StartedAt = start };
+        static long Landed(int second) => second switch { < 6 => 0, < 11 => 24, < 22 => 1032, < 36 => 1048, _ => 1064 };
+
+        string text = string.Empty;
+        for (int second = 0; second <= 40; second++)
+        {
+            text = model.Describe(Chunks(Landed(second)));
+            time.Advance(TimeSpan.FromSeconds(1));
+        }
+
+        // At 0:40 the window still reaches back to 24 chunks: 1,040 in 30 s.
+        Assert.Contains("35 chunks/s", text, StringComparison.Ordinal);
+
+        // At 0:41 it starts at 1,032: 32 in 30 s, under a tenth of 35.
+        text = model.Describe(Chunks(Landed(41)));
+
+        Assert.Equal($"Writing the file — {1064:N0} of {7124:N0} · estimating… · 0:41 elapsed", text);
+    }
+
     [Fact]
     public void A_screen_that_comes_back_after_a_minute_away_measures_across_the_gap()
     {
