@@ -107,4 +107,48 @@ public class TransportStandaloneTests
             await client.Disconnect();
         }
     }
+
+    /// <summary>
+    /// A connection that dies without a close -- behind a NAT or a load balancer -- still reads as
+    /// open, so only an unanswered request shows it is gone. The request that meets it fails after
+    /// the SDK's request timeout; the next call must be made over a new connection, not sent into
+    /// the same silence (spec B24).
+    /// </summary>
+    [Fact]
+    public async Task A_socket_that_stopped_answering_is_replaced_on_the_next_call()
+    {
+        using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(3));
+        CancellationToken token = timeout.Token;
+        await using DroppingProxy proxy = new(new Uri(Endpoint));
+        IXrplClient client = ClientKeeper.CreateClient(proxy.Endpoint.ToString());
+        await client.Connect(token);
+
+        try
+        {
+            XrplClientLedgerSource source = new(client);
+            XrplClientLedgerSink sink = new(client);
+            long before = await source.CurrentLedgerAsync(token);
+
+            proxy.SilenceAll();
+            XrplFileException unanswered = await Assert.ThrowsAsync<XrplFileException>(() => source.CurrentLedgerAsync(token));
+            Assert.Equal(XrplFileError.NodeUnreachable, unanswered.Error);
+
+            System.Diagnostics.Stopwatch next = System.Diagnostics.Stopwatch.StartNew();
+            long after = await source.CurrentLedgerAsync(token);
+            Assert.True(after >= before);
+            Assert.True(next.Elapsed < TimeSpan.FromSeconds(10), $"the next call took {next.Elapsed}");
+
+            proxy.SilenceAll();
+            await Assert.ThrowsAsync<XrplFileException>(() => sink.SubmitBlobAsync("00", token));
+
+            next.Restart();
+            Assert.StartsWith("error:", await sink.SubmitBlobAsync("00", token), StringComparison.Ordinal);
+            Assert.True(next.Elapsed < TimeSpan.FromSeconds(10), $"the next submit took {next.Elapsed}");
+        }
+        finally
+        {
+            ClientKeeper.Retire(client);
+            await client.Disconnect();
+        }
+    }
 }

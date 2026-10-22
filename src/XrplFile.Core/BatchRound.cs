@@ -129,7 +129,7 @@ internal sealed class BatchRound(
 
                     // A batch is built and signed only once the window has a slot for it (spec 4.1
                     // step 3, B10); the slot passes to its first transmission.
-                    // A halt does not wake this wait; it ends when a holder's submit does, and a reconnect inside one is bounded by Xrpl 11.2.0 (Connection.Connect: ConnectionAcquisitionTimeout, 5 min).
+                    // A halt does not wake this wait; it ends when a holder's submit does, and a reconnect inside one is bounded by the keeper's client options (ClientKeeper.CreateClient: one 20 s connection attempt, then the 40 s request timeout of Connect's server_info).
                     await context.Window.AcquireAsync(cancellationToken).ConfigureAwait(false);
                     bool handedOver = false;
 

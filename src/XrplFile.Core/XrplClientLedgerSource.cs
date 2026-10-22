@@ -541,9 +541,14 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
     private async Task<NodeAnswer> SendAsync(BaseRequest request, CancellationToken cancellationToken)
     {
-        await ClientKeeper.For(_client!).EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+        XrplResponse<object> response = await ClientKeeper.For(_client!)
+            .SendAsync(() => Send(request, cancellationToken), cancellationToken).ConfigureAwait(false);
 
-        Task<XrplResponse<object>> pending = request switch
+        return new NodeAnswer(response.Raw.ToJsonElement(), response.Warning);
+    }
+
+    private Task<XrplResponse<object>> Send(BaseRequest request, CancellationToken cancellationToken) =>
+        request switch
         {
             TxRequest tx => _client!.GRequest<object, TxRequest>(tx, cancellationToken),
             AccountTransactionsRequest transactions => _client!.GRequest<object, AccountTransactionsRequest>(transactions, cancellationToken),
@@ -556,11 +561,6 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             LedgerEntryRequest entry => _client!.GRequest<object, LedgerEntryRequest>(entry, cancellationToken),
             _ => throw new ArgumentOutOfRangeException(nameof(request), request.Command, "this source sends tx, account_tx, server_info, server_state, account_info, account_objects, ledger, fee and ledger_entry, nothing else"),
         };
-
-        XrplResponse<object> response = await pending.ConfigureAwait(false);
-
-        return new NodeAnswer(response.Raw.ToJsonElement(), response.Warning);
-    }
 
     private static string? Text(JsonElement json, string name) =>
         json.ValueKind == JsonValueKind.Object && json.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String

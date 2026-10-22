@@ -84,6 +84,104 @@ public class ClientKeeperTests
         Assert.Equal(1, fake.Connects);
     }
 
+    [Fact]
+    public async Task A_request_left_unanswered_with_nothing_answered_since_costs_the_connection_on_the_next_call()
+    {
+        FakeClient fake = FakeClient.Create(out IXrplClient client);
+        fake.Connected = true;
+        ClientKeeper keeper = ClientKeeper.For(client);
+
+        await Assert.ThrowsAsync<Xrpl.Client.Exceptions.TimeoutException>(
+            () => keeper.SendAsync<int>(() => throw new Xrpl.Client.Exceptions.TimeoutException("Timeout for request"), TestContext.Current.CancellationToken));
+
+        // The SDK still reads the silent socket as open; only the keeper knows it carried nothing.
+        Assert.True(client.IsConnected());
+        Assert.Equal(7, await keeper.SendAsync(() => Task.FromResult(7), TestContext.Current.CancellationToken));
+        Assert.Equal(1, fake.Disconnects);
+        Assert.Equal(1, fake.Connects);
+    }
+
+    [Fact]
+    public async Task A_request_that_timed_out_while_another_was_answered_keeps_the_connection()
+    {
+        FakeClient fake = FakeClient.Create(out IXrplClient client);
+        fake.Connected = true;
+        ClientKeeper keeper = ClientKeeper.For(client);
+        TaskCompletionSource<int> slow = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task<int> pending = keeper.SendAsync(() => slow.Task, TestContext.Current.CancellationToken);
+        Assert.Equal(1, await keeper.SendAsync(() => Task.FromResult(1), TestContext.Current.CancellationToken));
+        slow.SetException(new Xrpl.Client.Exceptions.TimeoutException("Timeout for request"));
+        await Assert.ThrowsAsync<Xrpl.Client.Exceptions.TimeoutException>(() => pending);
+
+        // A busy node answers one request late, not a dead socket: the connection carried an answer since.
+        Assert.Equal(2, await keeper.SendAsync(() => Task.FromResult(2), TestContext.Current.CancellationToken));
+        Assert.Equal(0, fake.Disconnects);
+        Assert.Equal(0, fake.Connects);
+    }
+
+    [Fact]
+    public async Task A_request_from_a_connection_already_replaced_does_not_cost_the_new_one()
+    {
+        FakeClient fake = FakeClient.Create(out IXrplClient client);
+        fake.Connected = true;
+        ClientKeeper keeper = ClientKeeper.For(client);
+        TaskCompletionSource<int> inFlight = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task<int> early = keeper.SendAsync(() => inFlight.Task, TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<Xrpl.Client.Exceptions.TimeoutException>(
+            () => keeper.SendAsync<int>(() => throw new Xrpl.Client.Exceptions.TimeoutException("Timeout for request"), TestContext.Current.CancellationToken));
+        Assert.Equal(1, await keeper.SendAsync(() => Task.FromResult(1), TestContext.Current.CancellationToken));
+
+        // What the replacement's Disconnect does to a request still in flight on the old socket.
+        inFlight.SetException(new OperationCanceledException("Connection was intentionally closed."));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => early);
+
+        Assert.Equal(2, await keeper.SendAsync(() => Task.FromResult(2), TestContext.Current.CancellationToken));
+        Assert.Equal(1, fake.Disconnects);
+        Assert.Equal(1, fake.Connects);
+    }
+
+    [Fact]
+    public async Task A_request_the_caller_cancelled_keeps_the_connection()
+    {
+        FakeClient fake = FakeClient.Create(out IXrplClient client);
+        fake.Connected = true;
+        ClientKeeper keeper = ClientKeeper.For(client);
+        using CancellationTokenSource cancelled = new();
+        TaskCompletionSource<int> pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Task<int> request = keeper.SendAsync(() => pending.Task, cancelled.Token);
+        await cancelled.CancelAsync();
+        pending.SetCanceled(cancelled.Token);
+        await Assert.ThrowsAsync<TaskCanceledException>(() => request);
+
+        Assert.Equal(3, await keeper.SendAsync(() => Task.FromResult(3), TestContext.Current.CancellationToken));
+        Assert.Equal(0, fake.Disconnects);
+        Assert.Equal(0, fake.Connects);
+    }
+
+    [Fact]
+    public void A_client_built_here_has_no_reconnection_of_the_SDK_s_own_and_no_five_minute_wait()
+    {
+        XrplClient client = ClientKeeper.CreateClient("ws://127.0.0.1:1");
+
+        try
+        {
+            Connection.ConnectionOptions options = client.connection.config;
+            Assert.Equal(0, options.MaxReconnectAttempts);
+            Assert.True(options.StopAfterMaxAttempts);
+            Assert.False(options.UseCustomPing);
+            Assert.False(options.UseCheckHealth);
+            Assert.Equal(RequestFailurePolicy.ImmediateFail, options.RequestPolicy);
+            Assert.Equal(options.ConnectionAttemptTimeout, options.ConnectionAcquisitionTimeout);
+        }
+        finally
+        {
+            client.Dispose();
+        }
+    }
+
     public class FakeClient : DispatchProxy
     {
         private readonly Lock _gate = new();
@@ -131,6 +229,7 @@ public class ClientKeeperTests
                     Interlocked.Increment(ref _connects);
                     TaskCompletionSource? source;
                     lock (_gate) _connectScript.TryDequeue(out source);
+                    if (source is null) Connected = true;
 
                     return source?.Task ?? Task.CompletedTask;
                 case "Disconnect":

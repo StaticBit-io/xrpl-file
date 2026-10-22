@@ -52,14 +52,15 @@ public sealed class XrplClientLedgerSink : ILedgerSink
             throw new InvalidOperationException("a sink built over a request delegate submits and looks up, it does not read sequences");
         }
 
-        await ClientKeeper.For(_client).EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
-
-        AccountInfo info = await _client.AccountInfo(
-            new AccountInfoRequest(account)
-            {
-                LedgerIndex = new LedgerIndex(validated ? LedgerIndexType.Validated : LedgerIndexType.Current),
-            },
-            cancellationToken).Typed().ConfigureAwait(false);
+        IXrplClient client = _client;
+        AccountInfo info = await ClientKeeper.For(client).SendAsync(
+            () => client.AccountInfo(
+                new AccountInfoRequest(account)
+                {
+                    LedgerIndex = new LedgerIndex(validated ? LedgerIndexType.Validated : LedgerIndexType.Current),
+                },
+                cancellationToken).Typed(),
+            cancellationToken).ConfigureAwait(false);
 
         return info.AccountData.Sequence ?? 0;
     }
@@ -234,17 +235,17 @@ public sealed class XrplClientLedgerSink : ILedgerSink
 
     private async Task<NodeAnswer> SendAsync(BaseRequest request, CancellationToken cancellationToken)
     {
-        await ClientKeeper.For(_client!).EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+        XrplResponse<object> response = await ClientKeeper.For(_client!)
+            .SendAsync(() => Send(request, cancellationToken), cancellationToken).ConfigureAwait(false);
 
-        Task<XrplResponse<object>> pending = request switch
+        return new NodeAnswer(response.Raw.ToJsonElement(), response.Warning);
+    }
+
+    private Task<XrplResponse<object>> Send(BaseRequest request, CancellationToken cancellationToken) =>
+        request switch
         {
             SubmitRequest submit => _client!.GRequest<object, SubmitRequest>(submit, cancellationToken),
             TxRequest tx => _client!.GRequest<object, TxRequest>(tx, cancellationToken),
             _ => throw new ArgumentOutOfRangeException(nameof(request), request.Command, "this sink sends submit and tx, nothing else"),
         };
-
-        XrplResponse<object> response = await pending.ConfigureAwait(false);
-
-        return new NodeAnswer(response.Raw.ToJsonElement(), response.Warning);
-    }
 }
