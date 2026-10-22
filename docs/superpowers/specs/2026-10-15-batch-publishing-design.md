@@ -463,7 +463,7 @@ default, because no run used it.
 - The rate and the time left live in `RunModel`, on an injectable `TimeProvider`.
 - During a resume's fence (B23) the line reads "Waiting for earlier transactions to expire — about
   40 s".
-- A failed run that is listed as unfinished shows **Resume** beside Dismiss (B19).
+- A failed run that is listed as unfinished shows **Resume** under its outcome (B19; Dismiss is gone since 2026-10-22, see the dark-theme spec, section 5).
 
 ### 6.4 Unfinished runs and History
 

@@ -193,13 +193,19 @@ screen's existing last row of buttons, moved into `.xf-actionbar`:
 | Publish — picker | nothing: Unfinished runs follow it on the same scroll, so a pinned bar would ride over them |
 | Publish — estimate | Back and Publish |
 | Publish — running (Run) | Cancel (`.btn-outline-secondary`) |
-| Publish — finished (Run) | Dismiss |
+| Publish — finished (Run) | nothing: the outcome sits above the picker, which follows it on the same scroll (amended 2026-10-22) |
 | Read — link entry | nothing: its buttons sit between the fields they act on |
 | Read — reading | Cancel |
-| Read — finished | Dismiss |
+| Read — finished | nothing: the outcome sits above the link entry (amended 2026-10-22) |
 | Unfinished runs, History, Keys and its sub-screens, Accounts and its sub-screens, Settings, Change password | nothing |
 | Create vault, Unlock, Vault unreachable | nothing: centred card, its own buttons inside |
 | Damage | nothing: it is a warning banner at the top of Keys, not a screen of its own |
+
+**Finished runs (amended 2026-10-22).** A finished read or publication no longer replaces its entry
+screen. Its outcome (the result, Save or the link with Copy link, Resume where it applies) is drawn
+above the link entry or the picker, and stays there until the next read or publication replaces it.
+The Dismiss button is gone: the person testing the application did not see it as the way to a new
+start. A running read or publication is still drawn alone, with Cancel.
 
 The mechanical changes on every screen, so that two implementers make the same ones:
 
