@@ -111,19 +111,41 @@ The new tests were written first and failed on the old code:
   without a stall. The old code stalled and then failed with `SubmitRefused`.
 - With the VM run's timeline, the line reads "estimating…" at 0:41. The old code read "1.1 chunks/s".
 
-One guard test was written after the code: a round that diverged does not send an exhausted outer
-again. It is timing-dependent. In most runs the round halts while sending, and `TransmitAsync`
-already refuses a first transmission after a halt. With the settlement guard removed, it failed in 1
-of 10 runs.
+One guard test was written after the code: a round that diverged sends nothing again (`e343f48`).
+Its first form counted transmissions of the refused sequence. It failed about once in fifteen runs
+because a round that diverged before registering that outer leaves the sequence to the next round,
+which may send its own outer on it again, correctly. It now looks only at the round that diverged.
+With the settlement guard removed, it fails in 14 of 15 runs.
 
-Unit: Core 679, App.Core 679. The integration tests on the stand were not run.
+Unit, with the trace log: Core 680, App.Core 684, Keys 251. The application builds in Release with
+0 warnings. This session did not run the integration tests on the stand.
 
 With the fix, the harness published the 7 MB file once more on fresh testnet accounts at
 15:34 UTC. The run took 82.6 s, with 893 × `tesSUCCESS`, no halt and no `resend`, and the bytes read
 back matched. Nothing in it exhausted an outer, so this run shows only that the fix costs nothing on
 a clean run. The resend path itself is shown only on the fake ledger.
 
-## Follow-ups
+## The round trace in the application
 
-- The application writes no round trace. If the stall comes back in the VM, a trace dump there
-  (`BatchStrategy.Trace` to the run's log) would show the submit answers directly.
+`26e37fb` gives a stall that comes back a record. When a Batch run ends, however it ended, the
+application appends its round trace to `batch-trace.log`. The file is in the application data
+directory, beside `publications.json` and `runs\` (on Windows `%APPDATA%\XrplFile\batch-trace.log`).
+
+Each record has:
+
+- A header: the strategy's start time, the state file's name, the network, the writer, the payer and
+  the file size.
+- Every event, with seconds from the strategy's start: `round:`, `register:`, `transmit:<ordinal>:<answer>`,
+  `resend:`, `unsent:`, `discard:`, `halt:`, `settled:`, `fee-wait:`.
+- An `end` line: Succeeded, Cancelled, or Failed with the error code and the engine result.
+
+The log is bounded and safe:
+
+- Each file stays under 1 MiB, and the newest three are kept (`batch-trace.log`, `.1.log`, `.2.log`).
+  A 7 MB run writes about 50 KB.
+- It is written on the run's own task, not the UI thread, and a write that fails is dropped without
+  failing the run.
+- The trace carries only ordinals, ledger indexes, fee units and engine results. As a second guard,
+  a line with a seed-shaped token or hex longer than a transaction hash is withheld. Tests check that
+  a run's trace holds neither the writer's nor the payer's seed nor any long hex, and that such a
+  line is withheld.
