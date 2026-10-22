@@ -489,10 +489,29 @@ internal sealed class BatchRound(
         return await SnapshotAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// A snapshot is never from a ledger below one the run has read (spec B6): such an answer is a node
+    /// that is behind, and it is read again like a failed one, so the outage limit bounds it. Planned
+    /// from, it would assign sequences the previous round already consumed, and its sweep would start
+    /// below that round's own transactions and take them for foreign ones.
+    /// </summary>
     private async Task<LedgerSnapshot> SnapshotAsync(CancellationToken cancellationToken)
     {
-        LedgerSnapshot snapshot = await ReadAsync(
-            token => context.Source.SnapshotAsync([Writer, Payer], token), cancellationToken).ConfigureAwait(false);
+        LedgerSnapshot snapshot = await ReadAsync(async token =>
+        {
+            LedgerSnapshot read = await context.Source.SnapshotAsync([Writer, Payer], token).ConfigureAwait(false);
+            long floor = context.LedgerFloor.Value;
+
+            if (read.LedgerIndex < floor)
+            {
+                throw new XrplFileException(XrplFileError.NodeUnreachable,
+                    $"the node answered with validated ledger {read.LedgerIndex}, behind ledger {floor} this run has already read");
+            }
+
+            return read;
+        }, cancellationToken).ConfigureAwait(false);
+
+        context.LedgerFloor.Raise(snapshot.LedgerIndex);
 
         DateTimeOffset now = Options.Time.GetUtcNow();
         bool stuck = false;

@@ -233,7 +233,7 @@ public class BatchIdentityTests
         BatchTestNode node = new();
         BatchContext context = new(
             node.Sink, node.Ledger, node.Writer, node.Payer, BatchTestNode.Budget, BatchTestNode.FastOptions,
-            new BatchFence(node.Fence), new BatchWindow(1), new BatchTrace(), new BatchSpending(BatchTestNode.Budget));
+            new BatchFence(node.Fence), new BatchWindow(1), new BatchTrace(), new BatchSpending(BatchTestNode.Budget), new BatchLedgerFloor());
         BatchCandidate outer = new(0, isOuter: true, node.Payer.Account, 500, 900, 120, [0], new SignedTransaction("00", "AA"));
         LedgerTransaction validated = new("AA", 5, node.Payer.Account, true, true, "tesSUCCESS", null, null, null) { Fee = 120 };
         LedgerTransaction pendingOne = validated with { Validated = false, Fee = 999 };

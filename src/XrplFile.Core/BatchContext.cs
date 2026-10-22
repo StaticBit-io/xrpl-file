@@ -11,7 +11,8 @@ internal sealed record BatchContext(
     BatchFence Fence,
     BatchWindow Window,
     BatchTrace Trace,
-    BatchSpending Spending);
+    BatchSpending Spending,
+    BatchLedgerFloor LedgerFloor);
 
 /// <summary>An inner that landed with tesSUCCESS: its hash and the ledger it is in.</summary>
 internal sealed record LandedInner(string Hash, long LedgerIndex);
