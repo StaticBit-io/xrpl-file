@@ -116,7 +116,8 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
 
     /// <summary>
     /// The progress line (spec 6.3): "Writing the file — 1,240 of 7,124 · 52 chunks/s · about 2 min left ·
-    /// 0:24 elapsed". Time left is what remains at the measured rate plus one settle per pass still to
+    /// 0:24 elapsed", and "Starting · 0:05 elapsed" until the first report. On the Batch path that
+    /// comes when the pass's first batch is answered, with nothing found landed yet. Time left is what remains at the measured rate plus one settle per pass still to
     /// come (spec B21); before a rate is measured the Batch path uses its prior and shows no rate, the
     /// ticket path says "estimating…", and so does any stage whose measured rate shows as zero. A
     /// resume's fence wait has its own line, where <paramref name="rate"/> is ledgers per second. A run
@@ -131,7 +132,11 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
             return StoppedTextOf(snapshot);
         }
 
-        if (snapshot.Progress is not { } progress) return "Starting";
+        string elapsed = snapshot.StartedAt is { } started ? $" · {Clock(now - started)} elapsed" : string.Empty;
+
+        // Connecting, checking the accounts and signing the first batches report nothing; the clock
+        // shows that a run which says this for ten seconds is still moving.
+        if (snapshot.Progress is not { } progress) return "Starting" + elapsed;
 
         if (progress.Stage == "fence")
         {
@@ -145,7 +150,6 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
             return $"{StageNameOf("fence")} — about {Duration(wait)}";
         }
 
-        string elapsed = snapshot.StartedAt is { } started ? $" · {Clock(now - started)} elapsed" : string.Empty;
         string head = $"{StageNameOf(progress.Stage)} — {progress.Done:N0} of {progress.Total:N0}";
 
         if (progress.Stage is not ("chunks" or "lists")) return head + elapsed;

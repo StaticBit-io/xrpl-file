@@ -35,6 +35,23 @@ public sealed class RunModelEtaTests : IDisposable
     }
 
     [Fact]
+    public void A_run_with_nothing_sent_yet_says_starting_and_how_long_it_has_run()
+    {
+        RunSnapshot snapshot = Running("chunks", 0, 7124, batch: true, TimeSpan.FromSeconds(7)) with { Progress = null };
+
+        Assert.Equal("Starting · 0:07 elapsed", RunModel.StageTextOf(snapshot, Now, rate: null));
+    }
+
+    [Fact]
+    public void A_pass_that_is_sending_with_nothing_landed_yet_names_its_stage()
+    {
+        string text = RunModel.StageTextOf(Running("chunks", 0, 7124, batch: true, TimeSpan.FromSeconds(6)), Now, rate: null);
+
+        // 7,124 left at 70/s is 102 s, plus two settles.
+        Assert.Equal($"Writing the file — 0 of {7124:N0} · about 2 min left · 0:06 elapsed", text);
+    }
+
+    [Fact]
     public void Before_thirty_seconds_the_Batch_path_assumes_seventy_memos_a_second_and_shows_no_rate()
     {
         string text = RunModel.StageTextOf(Running("chunks", 120, 7124, batch: true, TimeSpan.FromSeconds(5)), Now, rate: null);
