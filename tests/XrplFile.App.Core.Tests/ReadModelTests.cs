@@ -137,6 +137,31 @@ public sealed class ReadModelTests : IDisposable
     }
 
     [Fact]
+    public async Task Resetting_empties_the_link_as_well_so_the_entry_screen_starts_clean()
+    {
+        XrplFileLink first = await PublishAsync(_connections, "first.png", "image/png", 4096);
+        XrplFileLink second = await PublishAsync(_connections, "second.png", "image/png", 2048);
+
+        ReadModel model = NewModel();
+        model.Link = first.ToString();
+        await model.LookUpAsync(TestContext.Current.CancellationToken);
+        Assert.True(model.CanRead);
+
+        model.Reset();
+
+        Assert.Equal(string.Empty, model.Link);
+        Assert.Null(model.Manifest);
+        Assert.Null(model.Message);
+        Assert.False(model.CanRead);
+
+        model.Link = second.ToString();
+        await model.LookUpAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("second.png", model.Manifest!.Manifest.Name);
+        Assert.True(model.CanRead);
+    }
+
+    [Fact]
     public async Task Changing_the_link_after_a_successful_lookup_forgets_the_previous_manifest()
     {
         XrplFileLink link = await PublishAsync(_connections, "photo.png", "image/png", 4096);

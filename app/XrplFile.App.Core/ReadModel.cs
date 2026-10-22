@@ -107,6 +107,19 @@ public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore
         lock (_gate) InvalidateLocked();
     }
 
+    /// <summary>
+    /// Back to an empty entry screen: no link and no lookup. What putting a finished read away
+    /// calls, so the next read does not start from the previous one's link and manifest.
+    /// </summary>
+    public void Reset()
+    {
+        lock (_gate)
+        {
+            _link = string.Empty;
+            InvalidateLocked();
+        }
+    }
+
     /// <summary>Clears the published snapshot and bumps <see cref="_generation"/>. Call under <see cref="_gate"/>.</summary>
     private void InvalidateLocked()
     {

@@ -402,6 +402,58 @@ public sealed class ReadRunTests : IDisposable
     }
 
     [Fact]
+    public async Task A_read_put_away_by_reset_lets_the_next_read_start_fresh()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (ReadRun run, XrplFileLink firstLink, ManifestRecord firstManifest) = await ReadyAsync(token, "first.json", 597);
+        (XrplFileLink secondLink, ManifestRecord secondManifest) = await LookUpAsync(token, "second.bin", 3000);
+
+        Assert.True(run.Start(firstLink, firstManifest));
+        await run.Completion;
+        await run.SaveAsync(token);
+        Assert.True(run.Snapshot.Saved);
+
+        run.Reset();
+        Assert.Equal(ReadState.Idle, run.Snapshot.State);
+
+        Assert.True(run.Start(secondLink, secondManifest));
+        await run.Completion;
+
+        ReadSnapshot snapshot = run.Snapshot;
+        Assert.Equal(ReadState.Succeeded, snapshot.State);
+        Assert.Equal("second.bin", snapshot.Name);
+        Assert.Equal(3000, snapshot.BytesDone);
+        Assert.False(snapshot.Saved);
+    }
+
+    [Fact]
+    public async Task A_finished_read_can_be_followed_by_another_without_a_reset()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (ReadRun run, XrplFileLink firstLink, ManifestRecord firstManifest) = await ReadyAsync(token, "first.json", 597);
+        (XrplFileLink secondLink, ManifestRecord secondManifest) = await LookUpAsync(token, "second.bin", 3000);
+
+        Assert.True(run.Start(firstLink, firstManifest));
+        await run.Completion;
+
+        Assert.True(run.Start(secondLink, secondManifest));
+        await run.Completion;
+
+        Assert.Equal("second.bin", run.Snapshot.Name);
+        Assert.Equal(ReadState.Succeeded, run.Snapshot.State);
+    }
+
+    private async Task<(XrplFileLink Link, ManifestRecord Manifest)> LookUpAsync(CancellationToken token, string name, int size)
+    {
+        XrplFileLink link = await PublishAsync(_connections, name, "application/octet-stream", size);
+
+        await using ILedgerConnection connection = await _connections.ConnectAsync(link.Network, token);
+        ManifestRecord manifest = await new XrplFileReader(connection.Source).ManifestAsync(link, token);
+
+        return (link, manifest);
+    }
+
+    [Fact]
     public async Task A_second_read_while_one_is_going_is_refused()
     {
         (ReadRun run, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);

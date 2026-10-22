@@ -122,12 +122,22 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
         _payerChosenByPerson = true;
     }
 
-    /// <summary>A run with this request has started: its payer becomes the network's default (spec 6.1).</summary>
+    /// <summary>
+    /// A run with this request has started: its payer becomes the network's default (spec 6.1), and
+    /// its file is put away, so the picker a finished run is dismissed back to starts the next
+    /// publication empty rather than showing the file just published. The key and the payer stay.
+    /// </summary>
     public void RecordStarted(PublishRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         if (request.PayerReference is { } payer) payers?.Remember(request.Network, payer);
+
+        FilePath = null;
+        FileName = null;
+        FileSize = 0;
+        Message = null;
+        Warning = null;
     }
 
     private static readonly Dictionary<string, string> TypesByExtension = new(StringComparer.OrdinalIgnoreCase)

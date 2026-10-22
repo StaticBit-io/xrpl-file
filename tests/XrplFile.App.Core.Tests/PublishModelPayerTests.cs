@@ -122,6 +122,38 @@ public sealed class PublishModelPayerTests : VaultHarness
     }
 
     [Fact]
+    public async Task Starting_a_run_puts_its_file_away_and_keeps_the_key_and_the_payer()
+    {
+        (PublishModel model, Dictionary<string, string> refs) = await OpenAsync(("writer", "testnet", null), ("payer", "testnet", null));
+        string first = Path.Combine(_files, "first.bin");
+        string second = Path.Combine(_files, "second.bin");
+        File.WriteAllBytes(first, new byte[2000]);
+        File.WriteAllBytes(second, new byte[3000]);
+        _picker.PathToReturn = first;
+        await model.PickFileAsync(Token);
+        model.SelectKey(refs["writer"]);
+        await model.RefreshPayerAsync(Token);
+
+        model.RecordStarted((await model.BuildRequestAsync(Token))!);
+
+        Assert.Null(model.FilePath);
+        Assert.Null(model.FileName);
+        Assert.Equal(0, model.FileSize);
+        Assert.Null(model.Message);
+        Assert.Null(model.Warning);
+        Assert.False(model.CanEstimate);
+        Assert.Equal(refs["writer"], model.SelectedReference);
+        Assert.Equal(refs["payer"], model.SelectedPayerReference);
+
+        _picker.PathToReturn = second;
+        await model.PickFileAsync(Token);
+        PublishRequest next = (await model.BuildRequestAsync(Token))!;
+
+        Assert.Equal("second.bin", next.Name);
+        Assert.Equal(3000, next.File.Length);
+    }
+
+    [Fact]
     public async Task A_request_with_a_payer_names_both_accounts_and_starting_it_remembers_the_payer()
     {
         (PublishModel model, Dictionary<string, string> refs) = await OpenAsync(("writer", "testnet", null), ("payer", "testnet", null));

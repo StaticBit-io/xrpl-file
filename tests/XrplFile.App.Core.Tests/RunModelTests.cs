@@ -300,6 +300,49 @@ public sealed class RunModelTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_dismissed_publication_lets_the_next_one_start_and_finish_with_its_own_link()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (PublicationRun run, PublishRequest request) = await ReadyAsync(token);
+        RunModel model = new(run, new ManualTimeProvider());
+
+        Assert.True(run.Start(request));
+        await run.Completion;
+        string first = model.Link!;
+
+        model.Dismiss();
+
+        Assert.False(model.IsActive);
+        Assert.Null(model.Link);
+
+        Assert.True(run.Start(request with { File = new byte[5000], Name = "second.bin" }));
+        await run.Completion;
+
+        Assert.True(model.IsFinished);
+        Assert.Equal("second.bin", model.Snapshot.Name);
+        Assert.NotNull(model.Link);
+        Assert.NotEqual(first, model.Link);
+    }
+
+    [Fact]
+    public async Task A_finished_publication_can_be_followed_by_another_without_a_dismiss()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (PublicationRun run, PublishRequest request) = await ReadyAsync(token);
+        RunModel model = new(run, new ManualTimeProvider());
+
+        Assert.True(run.Start(request));
+        await run.Completion;
+        string first = model.Link!;
+
+        Assert.True(run.Start(request with { File = new byte[5000], Name = "second.bin" }));
+        await run.Completion;
+
+        Assert.Equal("second.bin", model.Snapshot.Name);
+        Assert.NotEqual(first, model.Link);
+    }
+
+    [Fact]
     public void Closing_over_a_ticketed_run_says_the_tickets_stay_and_what_each_one_holds()
     {
         RunSnapshot snapshot = new(PublicationRunState.Running, null, null, null, "big.bin", "1", null)
