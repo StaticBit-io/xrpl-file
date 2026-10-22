@@ -118,9 +118,9 @@ public sealed class TicketStrategy(
     private sealed record BatchSend(IReadOnlyDictionary<int, uint> Ridden, IReadOnlyCollection<int> Gone);
 
     /// <summary>What a sweep learned about one batch: which markers wrote, and which reached a ledger at all.</summary>
-    private sealed record SweepResult(IReadOnlyDictionary<string, string> Landed, IReadOnlySet<string> Seen)
+    private sealed record SweepResult(IReadOnlyDictionary<string, LedgerTransaction> Landed, IReadOnlySet<string> Seen)
     {
-        public static SweepResult Empty { get; } = new(new Dictionary<string, string>(), new HashSet<string>());
+        public static SweepResult Empty { get; } = new(new Dictionary<string, LedgerTransaction>(), new HashSet<string>());
     }
 
     public long FeeDropsPerTransaction => _options.FeeDrops;
@@ -147,7 +147,7 @@ public sealed class TicketStrategy(
             }
         }
 
-        Dictionary<int, string> landed = [];
+        Dictionary<int, LedgerTransaction> landed = [];
         Dictionary<int, int> attempts = [];
         List<int> pending = [.. Enumerable.Range(0, memos.Count)];
 
@@ -209,15 +209,17 @@ public sealed class TicketStrategy(
                 wanted.Remove(memos[index].MemoTypeHex);
             }
 
+            int landedBefore = landed.Count;
+
             SweepResult swept = wanted.Count == 0
                 ? SweepResult.Empty
                 : await SweepAsync(
                     wanted.ToDictionary(pair => pair.Key, pair => memos[pair.Value].MemoDataHex, StringComparer.Ordinal),
-                    sweepFrom.Value, batchFrom, cancellationToken).ConfigureAwait(false);
+                    sweepFrom.Value, batchFrom, found => submitted?.Report(landedBefore + found), cancellationToken).ConfigureAwait(false);
 
-            foreach ((string marker, string hash) in swept.Landed)
+            foreach ((string marker, LedgerTransaction tx) in swept.Landed)
             {
-                landed[wanted[marker]] = hash;
+                landed[wanted[marker]] = tx;
             }
 
             // Reaching a ledger is what spends a ticket, whether the transaction wrote its memo or
@@ -239,7 +241,8 @@ public sealed class TicketStrategy(
             }
         }
 
-        return [.. landed.OrderBy(pair => pair.Key).Select(pair => new SubmittedMemo(pair.Key, pair.Value))];
+        return [.. landed.OrderBy(pair => pair.Key)
+            .Select(pair => new SubmittedMemo(pair.Key, pair.Value.Hash) { LedgerIndex = pair.Value.LedgerIndex })];
     }
 
     public Task<TicketRelease> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken)
@@ -571,10 +574,11 @@ public sealed class TicketStrategy(
     /// an earlier attempt's tec sits below it and was accounted for when that attempt was swept.
     /// </summary>
     /// <param name="markers">Marker → the data the memo wearing it carries.</param>
+    /// <param name="found">Told after every poll how many of these markers have landed successfully so far (spec B20).</param>
     private async Task<SweepResult> SweepAsync(
-        IReadOnlyDictionary<string, string> markers, long from, long batchFrom, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, string> markers, long from, long batchFrom, Action<int>? found, CancellationToken cancellationToken)
     {
-        Dictionary<string, string> found = new(StringComparer.Ordinal);
+        Dictionary<string, LedgerTransaction> landedHere = new(StringComparer.Ordinal);
         HashSet<string> seen = new(StringComparer.Ordinal);
         DateTimeOffset deadline = DateTimeOffset.UtcNow + _options.BatchTimeout;
 
@@ -605,11 +609,13 @@ public sealed class TicketStrategy(
 
                 // The first copy in canonical order is the one the format's readers will use, so
                 // it is the one whose hash goes in the report.
-                found.TryAdd(tx.MemoTypeHex, tx.Hash);
+                landedHere.TryAdd(tx.MemoTypeHex, tx);
             }
 
-            if (found.Count == markers.Count) return new SweepResult(found, seen);
-            if (DateTimeOffset.UtcNow >= deadline) return new SweepResult(found, seen);
+            found?.Invoke(landedHere.Count);
+
+            if (landedHere.Count == markers.Count) return new SweepResult(landedHere, seen);
+            if (DateTimeOffset.UtcNow >= deadline) return new SweepResult(landedHere, seen);
 
             await Task.Delay(_options.SweepPoll, cancellationToken).ConfigureAwait(false);
         }

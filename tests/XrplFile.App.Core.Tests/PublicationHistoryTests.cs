@@ -34,6 +34,20 @@ public sealed class PublicationHistoryTests : IDisposable
     }
 
     [Fact]
+    public void A_payer_is_written_and_read_back_only_when_the_record_has_one()
+    {
+        PublicationHistory history = new(HistoryPath);
+        history.Append(Record("xrpl-file://testnet/ONE", DateTimeOffset.UnixEpoch));
+        Assert.DoesNotContain("Payer", File.ReadAllText(HistoryPath), StringComparison.OrdinalIgnoreCase);
+
+        history.Append(Record("xrpl-file://testnet/TWO", DateTimeOffset.UnixEpoch.AddDays(1)) with { Payer = "rPayer" });
+
+        PublicationRecord paid = Assert.Single(new PublicationHistory(HistoryPath).Read(), r => r.Link.EndsWith("TWO", StringComparison.Ordinal));
+        Assert.Equal("rPayer", paid.Payer);
+        Assert.Null(Assert.Single(new PublicationHistory(HistoryPath).Read(), r => r.Link.EndsWith("ONE", StringComparison.Ordinal)).Payer);
+    }
+
+    [Fact]
     public void The_newest_record_comes_first()
     {
         PublicationHistory history = new(HistoryPath);
@@ -222,5 +236,73 @@ public sealed class PublicationHistoryTests : IDisposable
 
         Assert.Null(history.Failure);
         Assert.Equal(20, history.Read().Count);
+    }
+
+    private string StateDirectory => Path.Combine(_directory, "runs");
+
+    private string FinishedState(string name, string manifestHash)
+    {
+        Directory.CreateDirectory(StateDirectory);
+        string path = Path.Combine(StateDirectory, name);
+        new PublicationState(
+            PublicationState.CurrentVersion, "testnet", "rWriter", "key-1", "text/plain", "done.txt", 2500, MemoLayout.ChunkBytes, "AB",
+            42, "done", new Dictionary<int, string>(), Strategy: "sequence", ManifestHash: manifestHash).Save(path);
+        return path;
+    }
+
+    [Fact]
+    public void A_finished_run_missing_from_History_is_recorded_from_its_state_and_its_state_removed()
+    {
+        string statePath = FinishedState("1-done.json", new string('A', 64));
+        PublicationHistory history = new(HistoryPath);
+
+        Assert.Equal(1, history.RecordFinishedRuns(StateDirectory));
+
+        PublicationRecord record = Assert.Single(history.Read());
+        Assert.Equal(new XrplFileLink("testnet", new string('A', 64)).ToString(), record.Link);
+        Assert.Equal("done.txt", record.Name);
+        Assert.Equal(0, record.Transactions);
+        Assert.True(record.Recovered);
+        Assert.False(File.Exists(statePath));
+    }
+
+    [Fact]
+    public void A_record_the_person_forgot_does_not_come_back_at_start_up()
+    {
+        FinishedState("1-done.json", new string('B', 64));
+        PublicationHistory history = new(HistoryPath);
+        history.RecordFinishedRuns(StateDirectory);
+
+        history.Forget(new XrplFileLink("testnet", new string('B', 64)).ToString());
+
+        Assert.Equal(0, history.RecordFinishedRuns(StateDirectory));
+        Assert.Empty(history.Read());
+    }
+
+    [Fact]
+    public void A_state_whose_link_is_already_listed_is_only_removed()
+    {
+        string link = new XrplFileLink("testnet", new string('C', 64)).ToString();
+        PublicationHistory history = new(HistoryPath);
+        history.Append(new PublicationRecord(link, "done.txt", 2500, "text/plain", "testnet", "rWriter", 4, 40, DateTimeOffset.UtcNow));
+        string statePath = FinishedState("1-done.json", new string('C', 64));
+
+        Assert.Equal(0, history.RecordFinishedRuns(StateDirectory));
+        Assert.Single(history.Read());
+        Assert.False(File.Exists(statePath));
+    }
+
+    [Fact]
+    public void A_recovered_record_is_written_so_an_older_application_still_reads_the_list()
+    {
+        FinishedState("1-done.json", new string('D', 64));
+        new PublicationHistory(HistoryPath).RecordFinishedRuns(StateDirectory);
+
+        using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(HistoryPath));
+        System.Text.Json.JsonElement written = document.RootElement[0];
+
+        Assert.Equal(System.Text.Json.JsonValueKind.Number, written.GetProperty("Transactions").ValueKind);
+        Assert.Equal(System.Text.Json.JsonValueKind.Number, written.GetProperty("FeeDropsEstimated").ValueKind);
+        Assert.False(written.TryGetProperty("Payer", out _));
     }
 }

@@ -30,7 +30,7 @@ public sealed class RunPaths
     public string HistoryPath { get; }
 
     /// <summary>
-    /// Creates the state directory. <see cref="PublicationSession.StartAsync"/> writes its state
+    /// Creates the state directory. <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> writes its state
     /// file there on the run's first save, and <see cref="PublicationSession.Unfinished"/> treats a
     /// missing directory as "no unfinished runs" — so this is called before a run starts, not
     /// before the list is read.

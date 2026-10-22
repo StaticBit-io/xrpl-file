@@ -42,6 +42,40 @@ public static class PublishErrorMessages
     /// </summary>
     public const string FeeTooLargeForApplication = "The node is quoting a price this application cannot use. Try a different node.";
 
+    /// <summary>
+    /// <see cref="XrplFileError.FeeTooHigh"/> raised before a run exists -- by an estimate, or by a
+    /// fresh start that never wrote a state file -- where "listed under unfinished runs" would be false.
+    /// </summary>
+    public const string FeeTooHighNow =
+        "Network fees are above what this application publishes at right now. Try again when they are back down.";
+
+    /// <summary>
+    /// <see cref="XrplFileError.NodeLacksHistory"/> raised while publishing (spec B30): the node's history
+    /// lagged the run, which is not the reader's "history far enough back" problem.
+    /// </summary>
+    public const string HistoryLaggedWhilePublishing =
+        "The node's history fell behind the publication, so what landed could not be confirmed. The run is listed under "
+        + "unfinished runs; resume it, or choose another node in Settings first.";
+
+    /// <summary>
+    /// <see cref="XrplFileError.PayerInsufficientBalance"/> raised by a resume (spec 5.2 step 5): a Batch
+    /// run cannot be moved to tickets (B18), and the screen offers another payer only when the recorded
+    /// key has left the vault, so "choose another payer" would send the person to a control that is not there.
+    /// </summary>
+    public const string PayerShortBeforeResuming =
+        "The payer does not hold enough XRP to finish this publication. Fund it, then resume.";
+
+    /// <summary>
+    /// <see cref="XrplFileError.BatchNotEnabled"/> raised by a resume: the run is a Batch run and stays one
+    /// (B18), so "Choose Nobody under Paid by" is not a way out of it.
+    /// </summary>
+    public const string BatchNotEnabledBeforeResuming =
+        "This network no longer enables Batch; the run can be resumed once it does.";
+
+    private static string AccountInUse(string role) =>
+        $"The {role} account sent a transaction of its own during the publication. Is this key in use somewhere else? "
+        + "The run is listed under unfinished runs; resume it once nothing else uses the key.";
+
     public static string For(XrplFileError error) => error switch
     {
         XrplFileError.NodeUnreachable =>
@@ -77,6 +111,14 @@ public static class PublishErrorMessages
             "A block read back from the ledger does not match what was written. The manifest was not published, so no link points at it.",
         XrplFileError.ChunkMissing =>
             "A chunk that was written could not be read back from the ledger.",
+        XrplFileError.BatchNotEnabled =>
+            "This network does not enable Batch. Choose Nobody under Paid by to publish with tickets.",
+        XrplFileError.PayerInsufficientBalance =>
+            "The payer does not hold enough XRP for this publication. Fund it, or choose another payer.",
+        XrplFileError.AccountInUse => AccountInUse("writer or payer"),
+        XrplFileError.FeeTooHigh =>
+            "Network fees rose above what this publication was approved for. The run is listed under unfinished runs; "
+            + "resume it when fees are back down.",
         _ => throw new ArgumentOutOfRangeException(nameof(error), error, "no sentence for this error"),
     };
 
@@ -89,7 +131,10 @@ public static class PublishErrorMessages
     {
         ArgumentNullException.ThrowIfNull(exception);
 
-        string sentence = For(exception.Error);
+        string sentence = exception is { Error: XrplFileError.AccountInUse, Role: { } role }
+            ? AccountInUse(role == AccountRole.Writer ? "writer" : "payer")
+            : For(exception.Error);
+
         return exception.Block is int block ? $"{sentence} (block {block})" : sentence;
     }
 
@@ -104,6 +149,16 @@ public static class PublishErrorMessages
     public static string ForRun(XrplFileException exception, RunFailurePoint point, bool usesTickets, long ownerReserveDrops)
     {
         ArgumentNullException.ThrowIfNull(exception);
+
+        if (exception.Error == XrplFileError.FeeTooHigh && point == RunFailurePoint.BeforeSubmitting) return FeeTooHighNow;
+
+        if (exception.Error == XrplFileError.NodeLacksHistory && point == RunFailurePoint.WhileSubmitting) return HistoryLaggedWhilePublishing;
+
+        if (point == RunFailurePoint.BeforeResuming)
+        {
+            if (exception.Error == XrplFileError.PayerInsufficientBalance) return PayerShortBeforeResuming;
+            if (exception.Error == XrplFileError.BatchNotEnabled) return BatchNotEnabledBeforeResuming;
+        }
 
         if (exception.Error != XrplFileError.NodeUnreachable) return For(exception);
 

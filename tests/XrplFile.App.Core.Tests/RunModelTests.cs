@@ -46,7 +46,7 @@ public sealed class RunModelTests : VaultHarness
     [Fact]
     public void A_percentage_is_zero_before_anything_is_reported()
     {
-        RunModel model = new(NewRun());
+        RunModel model = new(NewRun(), new ManualTimeProvider());
 
         Assert.Equal(0, model.Percent);
         Assert.False(model.IsFinished);
@@ -63,7 +63,7 @@ public sealed class RunModelTests : VaultHarness
     [Fact]
     public void An_idle_run_cannot_be_cancelled()
     {
-        RunModel model = new(NewRun());
+        RunModel model = new(NewRun(), new ManualTimeProvider());
 
         Assert.False(model.CanCancel);
     }
@@ -71,7 +71,7 @@ public sealed class RunModelTests : VaultHarness
     [Fact]
     public void An_idle_run_has_no_link_failure_or_history_note()
     {
-        RunModel model = new(NewRun());
+        RunModel model = new(NewRun(), new ManualTimeProvider());
 
         Assert.Null(model.Link);
         Assert.Null(model.Failure);
@@ -81,7 +81,7 @@ public sealed class RunModelTests : VaultHarness
     [Fact]
     public void The_stage_text_says_starting_before_any_progress_is_reported()
     {
-        RunModel model = new(NewRun());
+        RunModel model = new(NewRun(), new ManualTimeProvider());
 
         Assert.Equal("Starting", model.StageText);
     }
@@ -89,7 +89,7 @@ public sealed class RunModelTests : VaultHarness
     [Fact]
     public void An_idle_run_is_not_active_and_was_not_cancelled()
     {
-        RunModel model = new(NewRun());
+        RunModel model = new(NewRun(), new ManualTimeProvider());
 
         Assert.False(model.IsActive);
         Assert.False(model.WasCancelled);
@@ -106,7 +106,7 @@ public sealed class RunModelTests : VaultHarness
     public async Task A_started_run_is_active_immediately()
     {
         (PublicationRun run, PublishRequest request) = await ReadyAsync(TestContext.Current.CancellationToken);
-        RunModel model = new(run);
+        RunModel model = new(run, new ManualTimeProvider());
 
         Assert.True(run.Start(request));
 
@@ -132,7 +132,7 @@ public sealed class RunModelTests : VaultHarness
 
         (PublicationRun run, PublishRequest request) =
             await ReadyAsync(TestContext.Current.CancellationToken, connections: gated, ledger: connections.Ledger);
-        RunModel model = new(run);
+        RunModel model = new(run, new ManualTimeProvider());
 
         Assert.True(run.Start(request));
         Assert.True(model.IsActive);
@@ -167,7 +167,7 @@ public sealed class RunModelTests : VaultHarness
     [Fact]
     public async Task Capture_agrees_with_the_per_property_reads_across_idle_running_and_finished()
     {
-        RunModel idleModel = new(NewRun());
+        RunModel idleModel = new(NewRun(), new ManualTimeProvider());
         AssertViewMatchesProperties(idleModel);
 
         FakeConnectionFactory connections = new();
@@ -176,7 +176,7 @@ public sealed class RunModelTests : VaultHarness
 
         (PublicationRun run, PublishRequest request) =
             await ReadyAsync(TestContext.Current.CancellationToken, connections: gated, ledger: connections.Ledger);
-        RunModel model = new(run);
+        RunModel model = new(run, new ManualTimeProvider());
 
         Assert.True(run.Start(request));
 
@@ -210,6 +210,8 @@ public sealed class RunModelTests : VaultHarness
         Assert.Equal(model.StateNote, view.StateNote);
         Assert.Equal(model.StageText, view.StageText);
         Assert.Equal(model.Percent, view.Percent);
+        Assert.Equal(RunModel.IsResumable(model.Snapshot), view.CanResume);
+        Assert.Equal(model.Snapshot.StatePath, view.StatePath);
     }
 
     /// <summary>

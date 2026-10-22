@@ -186,7 +186,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
             foreach (SubmittedMemo memo in sent)
             {
                 int index = missingIndices[memo.Index];
-                chunkLedgers[index] = await LedgerOfAsync(memo.TxHash, cancellationToken).ConfigureAwait(false);
+                chunkLedgers[index] = memo.LedgerIndex ?? await LedgerOfAsync(memo.TxHash, cancellationToken).ConfigureAwait(false);
             }
         }
         else
@@ -206,24 +206,13 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
         // Block entries: hash over the chunks in memory, first ledger from the ledger itself --
         // the earliest of the block's own chunks, which is where a reader has to start paging to
         // find all of them.
-        List<BlockEntry> entries = new(blocks);
-        for (int block = 0; block < blocks; block++)
-        {
-            int firstChunk = block * FileTree.BlockChunks;
-            List<byte[]> members = [.. chunks.Skip(firstChunk).Take(FileTree.BlockChunks)];
-            long ledger = Enumerable.Range(firstChunk, members.Count).Min(i => chunkLedgers[i]);
-            entries.Add(new BlockEntry(block, Convert.ToHexString(FileTree.BlockHash(members)), ledger));
-        }
-
-        string root = FileTree.RootHex(entries);
+        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(chunks, chunkLedgers);
 
         // Block lists, only when there is more than one block.
         List<string> listHashes = [];
         if (blocks > 1)
         {
-            IReadOnlyList<string> payloads = FileTree.EncodeEntries(entries);
-            IReadOnlyList<MemoSubmission> listMemos =
-                [.. payloads.Select((payload, j) => new MemoSubmission(MemoLayout.ListMarkerHex(j), MemoLayout.Utf8Hex(payload), MemoLayout.JsonFormatHex))];
+            IReadOnlyList<MemoSubmission> listMemos = ManifestPlan.ListMemos(entries);
 
             List<MemoSubmission> missingLists = [];
             List<int> missingListIndices = [];
@@ -267,7 +256,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
                 foreach (SubmittedMemo memo in listsLanded)
                 {
                     int index = missingListIndices[memo.Index];
-                    listLedgers[index] = await LedgerOfAsync(memo.TxHash, cancellationToken).ConfigureAwait(false);
+                    listLedgers[index] = memo.LedgerIndex ?? await LedgerOfAsync(memo.TxHash, cancellationToken).ConfigureAwait(false);
                 }
             }
             else
@@ -282,7 +271,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
             lastLedger = Math.Max(lastLedger, listLedgers.Values.Max());
         }
 
-        Manifest manifest = new(type, file.Length, MemoLayout.ChunkBytes, root, firstLedger, lastLedger, blocks, listHashes.Count, name);
+        Manifest manifest = ManifestPlan.Build(type, name, file.Length, entries, firstLedger, lastLedger, listHashes.Count);
 
         // Read-back through the same reader a stranger would use, before the link exists.
         if (_options.ReadBack)
@@ -315,7 +304,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
         // The manifest, last.
         IReadOnlyList<SubmittedMemo> manifestLanded = await _strategy.SubmitAllAsync(
-            [new MemoSubmission(MemoLayout.ManifestMarkerHex, MemoLayout.Utf8Hex(manifest.Encode()), MemoLayout.JsonFormatHex)],
+            [ManifestPlan.Memo(manifest)],
             null, cancellationToken).ConfigureAwait(false);
         string manifestHash = manifestLanded[0].TxHash;
         progress?.Report(new PublishProgress("manifest", 1, 1));

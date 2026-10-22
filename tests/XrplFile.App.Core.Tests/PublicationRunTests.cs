@@ -605,6 +605,24 @@ public sealed class PublicationRunTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_one_account_resume_is_not_a_Batch_run_even_when_its_request_names_a_payer()
+    {
+        (PublicationRun run, PublishRequest request) = await ReadyAsync(TestContext.Current.CancellationToken);
+        _connections.Sink.Throws[1] = new XrplFileException(XrplFileError.NodeUnreachable, "no answer");
+        run.Start(request);
+        await run.Completion;
+        UnfinishedRun interrupted = Assert.Single(PublicationSession.Unfinished(Paths.StateDirectory));
+        _connections.Sink.Throws.Clear();
+
+        // The recorded strategy decides, not the request: this state file is a one-account run's.
+        run.Resume(interrupted.Path, request with { PayerAccount = XrplWallet.Generate().ClassicAddress, PayerReference = "unused" });
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
+        Assert.False(run.Snapshot.UsesBatch);
+    }
+
+    [Fact]
     public async Task A_failure_after_connecting_still_disposes_the_connection()
     {
         (PublicationRun run, PublishRequest request) = await ReadyAsync(TestContext.Current.CancellationToken);

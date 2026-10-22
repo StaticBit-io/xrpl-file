@@ -47,11 +47,28 @@ else
                 @foreach (VaultEntryInfo key in Model.Keys)
                 {
                     <button type="button" class="list-group-item list-group-item-action @(Model.IsSelected(key) ? "active" : "")"
-                            @onclick="() => Model.SelectKey(key.Reference)">
+                            @onclick="() => SelectKeyAsync(key.Reference)">
                         <span>@key.Label &mdash; <span class="xf-mono">@key.Address</span> (@key.Network)</span>
                     </button>
                 }
             </div>
+
+            @if (Model.SelectedKey is not null)
+            {
+                <label class="form-label mt-3" for="xf-payer">Paid by</label>
+                <select id="xf-payer" class="form-select" disabled="@Model.PayerLocked"
+                        value="@(Model.SelectedPayer?.Reference ?? string.Empty)" @onchange="OnPayerChanged">
+                    @foreach (VaultEntryInfo payer in Model.PayerChoices)
+                    {
+                        <option value="@payer.Reference">@payer.Label &mdash; @payer.Address</option>
+                    }
+                    <option value="">@PublishModel.NobodyLabel</option>
+                </select>
+                @if (Model.PayerNote is { } note)
+                {
+                    <p class="xf-muted small mt-1 mb-0">@note</p>
+                }
+            }
         </section>
 
         @if (Model.Message is not null)
@@ -88,6 +105,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         await Model.RefreshKeysAsync(_cts.Token);
+        await Model.RefreshPayerAsync(_cts.Token);
 
         // Started only once the first refresh has run, matching Shell.razor's own reasoning: a tick
         // can then never race the first render.
@@ -109,6 +127,14 @@ else
             StateHasChanged();
         });
     }
+
+    private async Task SelectKeyAsync(string reference)
+    {
+        Model.SelectKey(reference);
+        await Model.RefreshPayerAsync(_cts.Token);
+    }
+
+    private void OnPayerChanged(ChangeEventArgs change) => Model.SelectPayer(change.Value as string);
 
     private async Task PickAsync()
     {
@@ -138,7 +164,10 @@ else
     /// already been handed off -- so a Dismiss on the run screen that follows finds a fresh start
     /// rather than a stale estimate.
     /// </summary>
-    private void Started() => _estimated = false;
+    private void Started()
+    {
+        _estimated = false;
+    }
 
     public void Dispose()
     {

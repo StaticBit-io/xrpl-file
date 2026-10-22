@@ -135,6 +135,65 @@ public sealed class PublicationHistory : IPublicationHistory
         }
     }
 
+    /// <summary>
+    /// Records every finished run whose state file still exists (spec 5.1): the application deletes a
+    /// run's state once History holds its link, so a "done" state still on disk is a run whose History
+    /// write never happened. Its link is recorded unless already listed, and the state file is deleted
+    /// either way -- which is also why a link the person forgot never comes back (Spec question 22).
+    /// Called once at start-up. A state that cannot be read or named as a link is left alone. Returns
+    /// how many records were added.
+    /// </summary>
+    public int RecordFinishedRuns(string stateDirectory)
+    {
+        if (!Directory.Exists(stateDirectory)) return 0;
+
+        HashSet<string> known = new(Read().Select(record => record.Link), StringComparer.Ordinal);
+        int recorded = 0;
+
+        foreach (string path in Directory.EnumerateFiles(stateDirectory, "*.json"))
+        {
+            PublicationState state;
+            string link;
+
+            try
+            {
+                state = PublicationState.Load(path);
+
+                if (!string.Equals(state.Phase, "done", StringComparison.Ordinal) || state.ManifestHash is not { } manifest) continue;
+
+                link = new XrplFileLink(state.Network, manifest).ToString();
+            }
+            catch (Exception e) when (e is FormatException or JsonException or IOException
+                or UnauthorizedAccessException or ArgumentException or XrplFileException)
+            {
+                continue;
+            }
+
+            if (!known.Contains(link))
+            {
+                HistoryAppendResult appended = Append(new PublicationRecord(
+                    link, state.Name ?? Path.GetFileName(path), state.Size, state.Type, state.Network, state.Writer,
+                    0, 0, File.GetLastWriteTimeUtc(path), state.Payer, Recovered: true));
+
+                if (!appended.Recorded) continue;
+
+                known.Add(link);
+                recorded++;
+            }
+
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Tried again at the next start-up, which finds the link already listed.
+            }
+        }
+
+        return recorded;
+    }
+
     public void Forget(string link)
     {
         ArgumentException.ThrowIfNullOrEmpty(link);

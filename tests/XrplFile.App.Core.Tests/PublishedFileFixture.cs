@@ -11,7 +11,7 @@ namespace XrplFile.App.Core.Tests;
 /// its link, so a read test has something true to read. Built from what
 /// <c>tests/XrplFile.Core.Tests/PublicationSessionTests.cs</c> already does: a
 /// <see cref="SequenceStrategy"/> over the fake sink, a signer, and
-/// <see cref="PublicationSession.StartAsync"/> + <see cref="PublicationSession.RunAsync"/>.
+/// <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> + <see cref="PublicationSession.RunAsync"/>.
 ///
 /// Kept in its own file rather than inlined in a test class: Task 4's differential test needs the
 /// identical fixture, and two copies of a publishing helper would drift the way this project has
@@ -21,7 +21,7 @@ public static class PublishedFileFixture
 {
     /// <summary>What every <see cref="FakeConnectionFactory"/>'s <c>Ledger</c> charges by default
     /// (<c>new NetworkFees(10, ...)</c>). The strategy is priced from it, as a caller must, or
-    /// <see cref="PublicationSession.StartAsync"/> refuses the run with <c>FeeMismatch</c>.</summary>
+    /// <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> refuses the run with <c>FeeMismatch</c>.</summary>
     private const int NodeFeeDrops = 10;
 
     private static readonly SequenceStrategyOptions StrategyOptions = new() { FeeDrops = NodeFeeDrops };

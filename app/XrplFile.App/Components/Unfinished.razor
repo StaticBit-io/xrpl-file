@@ -28,6 +28,24 @@
         <div class="alert alert-warning">@Model.Message</div>
     }
 
+    @if (Model.NeedsPayer is { } waiting)
+    {
+        <section class="xf-card">
+            <label class="form-label" for="xf-new-payer">Paid by</label>
+            <select id="xf-new-payer" class="form-select" @bind="_payerChoice">
+                <option value="">Choose a key&hellip;</option>
+                @foreach (VaultEntryInfo key in Model.PayerChoices)
+                {
+                    <option value="@key.Reference">@key.Label &mdash; @key.Address</option>
+                }
+            </select>
+            <button type="button" class="btn btn-primary mt-2" disabled="@(_busy || string.IsNullOrEmpty(_payerChoice))"
+                    @onclick="() => ResumeWithPayerAsync(waiting)">
+                Resume with this payer
+            </button>
+        </section>
+    }
+
     @if (Model.Rows.Count == 0)
     {
         <p>No unfinished runs.</p>
@@ -40,6 +58,7 @@
                     <tr>
                         <th>File</th>
                         <th>Network</th>
+                        <th>Method</th>
                         <th>Stage</th>
                         <th>Chunks</th>
                         <th></th>
@@ -51,7 +70,7 @@
                         <tr>
                             @if (row.Unreadable is { } unreadable)
                             {
-                                <td colspan="4">
+                                <td colspan="5">
                                     <span class="text-danger">@unreadable</span> (<code class="xf-mono">@row.Path</code>)
                                 </td>
                             }
@@ -59,6 +78,7 @@
                             {
                                 <td>@row.Name (@row.Size.ToString("N0") bytes)</td>
                                 <td>@row.Network</td>
+                                <td>@row.Method</td>
                                 <td>@row.Stage</td>
                                 <td>@row.Chunks.ToString("N0")</td>
                             }
@@ -85,8 +105,9 @@
 @code {
     private readonly CancellationTokenSource _cts = new();
     private bool _busy;
+    private string? _payerChoice;
 
-    protected override void OnInitialized() => Model.Refresh();
+    protected override async Task OnInitializedAsync() => await Model.RefreshAsync(_cts.Token);
 
     private async Task ResumeAsync(UnfinishedRow row)
     {
@@ -100,6 +121,24 @@
         try
         {
             await Model.ResumeAsync(row, _cts.Token);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ResumeWithPayerAsync(UnfinishedRow row)
+    {
+        if (_busy || string.IsNullOrEmpty(_payerChoice))
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Model.ResumeWithPayerAsync(row, _payerChoice, _cts.Token);
         }
         finally
         {

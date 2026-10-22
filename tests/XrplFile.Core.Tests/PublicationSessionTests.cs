@@ -64,6 +64,39 @@ public class PublicationSessionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_run_records_its_strategy_and_where_its_bytes_came_from()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions { FeeDrops = NodeFeeDrops });
+
+        PublicationSession session = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
+            new SessionOptions { StateDirectory = _stateDirectory, TicketsPerBatch = 100, SourcePath = @"D:\in\s.txt" },
+            TestContext.Current.CancellationToken);
+
+        PublicationState state = PublicationState.Load(session.StatePath);
+        Assert.Equal(PublicationState.CurrentVersion, state.Version);
+        Assert.Equal(PublicationState.TicketStrategyName, state.Strategy);
+        Assert.Equal(@"D:\in\s.txt", state.SourcePath);
+    }
+
+    [Fact]
+    public async Task A_finished_run_records_its_manifest_hash()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
+
+        PublicationSession session = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
+            Options(), TestContext.Current.CancellationToken);
+        PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(report.ManifestHash, PublicationState.Load(session.StatePath).ManifestHash);
+    }
+
+    [Fact]
     public async Task A_run_that_costs_more_than_the_budget_never_starts()
     {
         FakeLedgerSource ledger = Node();
@@ -315,7 +348,7 @@ public class PublicationSessionTests : IDisposable
         Assert.Equal(
             [
                 "Version", "Network", "Writer", "KeyReference", "Type", "Name",
-                "Size", "Chunk", "Root", "StartedInLedger", "Phase", "ChunkHashes",
+                "Size", "Chunk", "Root", "StartedInLedger", "Phase", "ChunkHashes", "Strategy",
             ],
             properties);
     }

@@ -92,6 +92,53 @@ public class VaultSignerTests : VaultTestHarness
     }
 
     [Fact]
+    public async Task A_caching_signer_stops_signing_once_the_vault_locks()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (KeyVault vault, string reference, XrplWallet wallet) = await VaultHoldingAKeyAsync(token);
+
+        VaultSigner signer = new(vault, reference, wallet.ClassicAddress, wallet.PublicKey, cacheWallet: true);
+        SignedTransaction first = await signer.SignAsync(Transaction(wallet, 7u), token);
+        SignedTransaction second = await signer.SignAsync(Transaction(wallet, 7u), token);
+
+        Assert.Equal(first.TxBlob, second.TxBlob);
+
+        await vault.LockAsync();
+
+        VaultException refused = await Assert.ThrowsAsync<VaultException>(
+            () => signer.SignAsync(Transaction(wallet, 8u), token));
+
+        Assert.Equal(VaultError.Locked, refused.Error);
+    }
+
+    [Fact]
+    public async Task Clearing_a_caching_signers_wallet_makes_the_next_signature_read_the_vault_again()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (KeyVault vault, string reference, XrplWallet wallet) = await VaultHoldingAKeyAsync(token);
+
+        // A second entry, so the vault is not merely empty (see the test for a missing entry).
+        await vault.StoreAsync(
+            new NewVaultEntry(VaultEntryKind.Generated, "other", "standalone", "rOther", XrplWallet.Generate().Seed),
+            token);
+
+        VaultSigner signer = new(vault, reference, wallet.ClassicAddress, wallet.PublicKey, cacheWallet: true);
+        await signer.SignAsync(Transaction(wallet, 7u), token);
+
+        await vault.DeleteAsync(reference, token);
+
+        // The cached wallet still signs: only ClearCache bounds its lifetime.
+        await signer.SignAsync(Transaction(wallet, 8u), token);
+
+        signer.ClearCache();
+
+        VaultException refused = await Assert.ThrowsAsync<VaultException>(
+            () => signer.SignAsync(Transaction(wallet, 9u), token));
+
+        Assert.Equal(VaultError.NoSuchEntry, refused.Error);
+    }
+
+    [Fact]
     public async Task Signing_for_an_entry_that_is_gone_is_refused_as_no_such_entry()
     {
         CancellationToken token = TestContext.Current.CancellationToken;

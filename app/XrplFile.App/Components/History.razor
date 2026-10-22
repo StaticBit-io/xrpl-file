@@ -59,7 +59,13 @@
                     @foreach (PublicationRecord record in Model.Records)
                     {
                         <tr>
-                            <td>@record.Name</td>
+                            <td>
+                                @record.Name
+                                @if (record.Payer is { } payer)
+                                {
+                                    <div class="xf-muted small">Paid by <span class="xf-mono">@payer</span></div>
+                                }
+                            </td>
                             <td>@record.Network</td>
                             <td><code class="xf-mono xf-link">@record.Link</code></td>
                             <td class="text-end">

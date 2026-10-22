@@ -32,6 +32,31 @@ public enum XrplFileError
     /// strategy handed to it signs as an account other than the run's writer.
     /// </summary>
     ResumeMismatch,
+
+    /// <summary>A Batch run on a network whose ledger does not enable <c>BatchV1_1</c> (spec 4.7).</summary>
+    BatchNotEnabled,
+
+    /// <summary>The payer's spendable balance is below its part of a Batch run (spec 4.7).</summary>
+    PayerInsufficientBalance,
+
+    /// <summary>
+    /// A transaction of the writer or the payer that the run did not send applied during a round
+    /// (spec B12). <see cref="XrplFileException.Role"/> says which account.
+    /// </summary>
+    AccountInUse,
+
+    /// <summary>
+    /// The open-ledger fee is above 200 drops at estimate time, or above the approved ceiling for a
+    /// minute during a run (spec B15).
+    /// </summary>
+    FeeTooHigh,
+}
+
+/// <summary>Which of a Batch run's two accounts an error is about.</summary>
+public enum AccountRole
+{
+    Writer,
+    Payer,
 }
 
 public sealed class XrplFileException : Exception
@@ -49,12 +74,17 @@ public sealed class XrplFileException : Exception
     /// </summary>
     public string? EngineResult { get; }
 
+    /// <summary>For <see cref="XrplFileError.AccountInUse"/>: the account that was in use; otherwise null.</summary>
+    public AccountRole? Role { get; }
+
     public XrplFileException(
-        XrplFileError error, string message, int? block = null, Exception? inner = null, string? engineResult = null)
+        XrplFileError error, string message, int? block = null, Exception? inner = null, string? engineResult = null,
+        AccountRole? role = null)
         : base(message, inner)
     {
         Error = error;
         Block = block;
         EngineResult = engineResult;
+        Role = role;
     }
 }

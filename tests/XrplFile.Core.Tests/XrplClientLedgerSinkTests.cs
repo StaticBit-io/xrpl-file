@@ -307,6 +307,51 @@ public class XrplClientLedgerSinkTests
     }
 
     [Fact]
+    public async Task A_reconnect_the_keeper_gave_up_on_is_no_answer_and_the_submit_is_retried()
+    {
+        ScriptedNode node = new();
+        node.Throw(KeeperGaveUp());
+        node.Throw(KeeperGaveUp());
+        node.Answer("""{"engine_result":"tesSUCCESS"}""");
+
+        SubmitOutcome outcome = await new XrplClientLedgerSink(node.HandleAsync)
+            .SubmitAsync(AccountSet(), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("tesSUCCESS", outcome.EngineResult);
+        Assert.Equal(["submit", "tx", "submit"], node.Commands);
+    }
+
+    [Fact]
+    public async Task A_refusal_after_a_reconnect_the_keeper_gave_up_on_follows_an_unanswered_attempt()
+    {
+        ScriptedNode node = new();
+        node.Throw(KeeperGaveUp());
+        node.Throw(KeeperGaveUp());
+        node.Answer("""{"engine_result":"telCAN_NOT_QUEUE"}""");
+
+        SubmitOutcome outcome = await new XrplClientLedgerSink(node.HandleAsync)
+            .SubmitAsync(AccountSet(), Signer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("telCAN_NOT_QUEUE", outcome.EngineResult);
+        Assert.True(outcome.FollowsUnansweredAttempt);
+    }
+
+    [Fact]
+    public async Task Three_attempts_the_keeper_could_not_connect_report_the_node_as_unreachable()
+    {
+        ScriptedNode node = new();
+        for (int i = 0; i < 6; i++) node.Throw(KeeperGaveUp());
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => Submit(node));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+        Assert.Equal(6, node.Requests.Count);
+    }
+
+    private static XrplFileException KeeperGaveUp() =>
+        new(XrplFileError.NodeUnreachable, "the node did not take a new connection: connection refused");
+
+    [Fact]
     public async Task A_thrown_error_answer_to_the_lookup_is_not_known_yet()
     {
         ScriptedNode node = new();
@@ -345,6 +390,56 @@ public class XrplClientLedgerSinkTests
 
         public Task<SignedTransaction> SignAsync(IDictionary<string, object> transaction, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("the vault is locked");
+    }
+
+    [Fact]
+    public async Task A_blob_is_transmitted_once_and_its_answer_returned_as_it_came()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"engine_result":"terPRE_SEQ"}""");
+        XrplClientLedgerSink sink = new(node.HandleAsync);
+
+        string answer = await sink.SubmitBlobAsync("ABCDEF", TestContext.Current.CancellationToken);
+
+        Assert.Equal("terPRE_SEQ", answer);
+        Assert.Equal(("submit", "ABCDEF"), Assert.Single(node.Requests));
+    }
+
+    [Fact]
+    public async Task A_used_sequence_is_reported_without_looking_the_hash_up()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"engine_result":"tefPAST_SEQ"}""");
+        XrplClientLedgerSink sink = new(node.HandleAsync);
+
+        Assert.Equal("tefPAST_SEQ", await sink.SubmitBlobAsync("ABCDEF", TestContext.Current.CancellationToken));
+        Assert.Equal(["submit"], node.Commands);
+    }
+
+    [Fact]
+    public async Task A_busy_node_answers_with_its_error_code_in_either_shape()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"error":"tooBusy"}""");
+        node.Throw(new RippledException("slowDown", new ErrorResponse { Error = "slowDown" }));
+        XrplClientLedgerSink sink = new(node.HandleAsync);
+
+        Assert.Equal("error:tooBusy", await sink.SubmitBlobAsync("AA", TestContext.Current.CancellationToken));
+        Assert.Equal("error:slowDown", await sink.SubmitBlobAsync("AA", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task A_transmission_the_node_never_answers_is_NodeUnreachable_and_is_not_retried()
+    {
+        ScriptedNode node = new();
+        node.Throw(new Xrpl.Client.Exceptions.TimeoutException("submit timed out"));
+        XrplClientLedgerSink sink = new(node.HandleAsync);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => sink.SubmitBlobAsync("AA", TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+        Assert.Equal(["submit"], node.Commands);
     }
 
     /// <summary>A node whose answers are scripted, in call order: raw JSON with the envelope's warning, or an exception.</summary>

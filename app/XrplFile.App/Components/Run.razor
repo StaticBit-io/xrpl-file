@@ -1,5 +1,6 @@
 @implements IDisposable
 @inject RunModel Model
+@inject UnfinishedModel Unfinished
 @inject IClipboardService Clipboard
 
 @* Design 4.3: the run in progress, and its outcome. CanCancel, IsFinished, WasCancelled, Link,
@@ -62,6 +63,17 @@
             <div class="alert alert-secondary mt-3">Cancelled. Nothing further was submitted.</div>
         }
 
+        @if (_resumeMessage is { } resumeMessage)
+        {
+            <div class="alert alert-warning mt-3">
+                @resumeMessage
+                @if (Unfinished.NeedsPayer is not null)
+                {
+                    <button type="button" class="btn btn-link p-0 ms-1 align-baseline" @onclick="Dismiss">Go to Unfinished runs</button>
+                }
+            </div>
+        }
+
         @if (view.HistoryNote is { } note)
         {
             <div class="alert alert-info mt-3">@note</div>
@@ -87,6 +99,10 @@
         }
         @if (view.IsFinished)
         {
+            @if (view.CanResume)
+            {
+                <button type="button" class="btn btn-outline-primary" disabled="@_resuming" @onclick="() => ResumeAsync(view.StatePath!)">Resume</button>
+            }
             <button type="button" class="btn btn-primary" @onclick="Dismiss">Dismiss</button>
         }
     </div>
@@ -98,6 +114,25 @@
     private readonly CancellationTokenSource _cts = new();
     private Timer? _pollTimer;
     private bool _disposed;
+    private bool _resuming;
+    private string? _resumeMessage;
+
+    private async Task ResumeAsync(string statePath)
+    {
+        if (_resuming) return;
+
+        _resuming = true;
+        _resumeMessage = null;
+
+        try
+        {
+            if (!await Unfinished.ResumeByPathAsync(statePath, _cts.Token)) _resumeMessage = Unfinished.Message;
+        }
+        finally
+        {
+            _resuming = false;
+        }
+    }
 
     /// <summary>
     /// Fired once <see cref="RunModel.Dismiss"/> has actually been called, so a parent that only

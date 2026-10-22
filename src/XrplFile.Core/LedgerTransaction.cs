@@ -17,4 +17,23 @@ public sealed record LedgerTransaction(
     string? Result,
     string? MemoTypeHex,
     string? MemoDataHex,
-    string? MemoFormatHex);
+    string? MemoFormatHex)
+{
+    /// <summary>The transaction's type as the node names it, or null when the record does not say.</summary>
+    public string? TransactionType { get; init; }
+
+    /// <summary>The sequence it consumed; zero for a transaction that rode a ticket (spec B30).</summary>
+    public uint Sequence { get; init; }
+
+    /// <summary>The ticket it rode, or null.</summary>
+    public uint? TicketSequence { get; init; }
+
+    /// <summary>How many tickets a <c>TicketCreate</c> asked for, or null for anything else.</summary>
+    public uint? TicketCount { get; init; }
+
+    /// <summary>The fee it carried, in drops: "0" for a Batch inner. Null when the record does not say.</summary>
+    public long? Fee { get; init; }
+
+    /// <summary>The outer Batch an inner belongs to, upper case; null for anything that is not an inner (spec B12).</summary>
+    public string? ParentBatchID { get; init; }
+}

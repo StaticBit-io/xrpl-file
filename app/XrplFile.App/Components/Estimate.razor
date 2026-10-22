@@ -1,6 +1,7 @@
 @implements IDisposable
 @inject EstimateModel Model
 @inject PublicationRun Run
+@inject PublishModel Picker
 
 @* Design 4.2: what a publication will cost, before it is agreed to. Every figure below is
    EstimateModel.Estimate's own; this component decides only whether to show the alert CanPublish and
@@ -16,7 +17,47 @@
         <code class="xf-mono">@Request.Account</code>.
     </p>
 
-    @if (Model.Estimate is { } estimate)
+    @if (Model.BatchEstimate is { } batch)
+    {
+        <section class="xf-card">
+            <table class="table xf-kv-table">
+                <tbody>
+                    <tr><th>Chunks</th><td>@batch.Chunks.ToString("N0")</td></tr>
+                    <tr><th>Batches</th><td>@batch.Batches.ToString("N0")</td></tr>
+                    <tr><th>Solo transactions</th><td>@batch.SoloTransactions.ToString("N0")</td></tr>
+                    <tr><th>Fee unit</th><td>@batch.FeeUnitDrops.ToString("N0") drops</td></tr>
+                </tbody>
+            </table>
+
+            <h2 class="xf-section-title mt-4">Payer &mdash; @(Request.PayerLabel) <code class="xf-mono">@Request.PayerAccount</code></h2>
+            <table class="table xf-kv-table">
+                <tbody>
+                    <tr><th>Fees</th><td>@XrpAmount.Format(batch.PayerFeeDrops)</td></tr>
+                    <tr><th>Fees in the worst case</th><td>@XrpAmount.Format(batch.PayerFeeDropsWorstCase)</td></tr>
+                    <tr><th>Account reserve</th><td>@XrpAmount.Format(batch.BaseReserveDrops)</td></tr>
+                    <tr><th>Required</th><td>@XrpAmount.Format(batch.PayerRequiredDrops)</td></tr>
+                    <tr><th>Balance</th><td>@XrpAmount.Format(batch.PayerBalanceDrops)</td></tr>
+                    <tr><th>Spendable</th><td>@XrpAmount.Format(batch.PayerSpendableDrops)</td></tr>
+                </tbody>
+            </table>
+
+            <h2 class="xf-section-title mt-4">Writer &mdash; @(Request.WriterLabel) <code class="xf-mono">@Request.Account</code></h2>
+            <table class="table xf-kv-table">
+                <tbody>
+                    <tr><th>Fees</th><td>@XrpAmount.Format(batch.WriterFeeDrops)</td></tr>
+                    <tr><th>Fees in the worst case</th><td>@XrpAmount.Format(batch.WriterFeeDropsWorstCase)</td></tr>
+                    <tr><th>Account reserve</th><td>@XrpAmount.Format(batch.BaseReserveDrops)</td></tr>
+                    <tr><th>Required</th><td>@XrpAmount.Format(batch.WriterRequiredDrops)</td></tr>
+                    <tr><th>Balance</th><td>@XrpAmount.Format(batch.WriterBalanceDrops)</td></tr>
+                    <tr><th>Spendable</th><td>@XrpAmount.Format(batch.WriterSpendableDrops)</td></tr>
+                </tbody>
+            </table>
+
+            <p class="mt-3 mb-0">@Model.MethodLine</p>
+            <p class="mt-3 mb-0 xf-muted">Node: <code class="xf-mono">@Model.NodeUrl</code> (@Request.Network)</p>
+        </section>
+    }
+    else if (Model.Estimate is { } estimate)
     {
         <section class="xf-card">
             <table class="table xf-kv-table">
@@ -101,7 +142,7 @@
             // Publish.razor already rules out: that screen only ever shows this one when
             // RunModel.IsActive is false. Nothing further is done with the result -- Publish.razor's
             // own poll notices IsActive flip and swaps to <Run /> within one second either way.
-            Run.Start(Request);
+            if (Run.Start(Request)) Picker.RecordStarted(Request);
             await OnStarted.InvokeAsync();
         }
         finally

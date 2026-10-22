@@ -6,7 +6,7 @@ namespace XrplFile.App.Core;
 /// The first publish screen (design 4.1): which file, which key, and every reason those two are not
 /// yet enough to ask a node anything.
 /// </summary>
-public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INodeSettingsStore nodes)
+public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INodeSettingsStore nodes, BatchAvailability? batch = null, IPayerSettingsStore? payers = null)
 {
     /// <summary>
     /// Read from <see cref="ReaderOptions.MaxBytes"/>'s own default rather than copied as a literal
@@ -26,6 +26,109 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
     /// cost stops it long before its size does.
     /// </summary>
     public const long MaxFileBytes = 64L * 1024 * 1024;
+
+    /// <summary>The last entry of "Paid by" (spec 6.1).</summary>
+    public const string NobodyLabel = "Nobody — publish with tickets";
+
+    /// <summary>The muted note under "Nobody" (spec 6.1).</summary>
+    public const string NobodyNote = "Slower, and holds up to 50 XRP of reserve while publishing.";
+
+    /// <summary>Under "Paid by" when the network's ledger does not enable Batch (spec 6.1).</summary>
+    public const string BatchUnavailableNote = "This network does not support Batch, so publishing uses tickets.";
+
+    /// <summary>The writer the current payer was chosen for.</summary>
+    private string? _payerChosenFor;
+
+    /// <summary>Whether the person chose the current payer; a default is worked out again on every refresh.</summary>
+    private bool _payerChosenByPerson;
+
+    /// <summary>The chosen payer's reference, or null for Nobody.</summary>
+    public string? SelectedPayerReference { get; private set; }
+
+    /// <summary>The cached amendment read for the writer's network (spec B14): null when it could not be read.</summary>
+    public bool? BatchEnabled { get; private set; }
+
+    /// <summary>Fixed on Nobody: the network does not enable Batch.</summary>
+    public bool PayerLocked => BatchEnabled == false;
+
+    /// <summary>
+    /// Every other key on the writer's network, compared in canonical form, never the writer's own
+    /// account under another reference (spec 6.1, B3). Oldest key first: the vault lists by random
+    /// reference, so "the first other key" needs an order of its own to mean the same thing twice.
+    /// </summary>
+    public IReadOnlyList<VaultEntryInfo> PayerChoices =>
+        SelectedKey is { } writer && XrplFileLink.TryNormalizeNetwork(writer.Network, out string? network)
+            ? [.. Keys
+                .Where(key =>
+                    !string.Equals(key.Reference, writer.Reference, StringComparison.Ordinal)
+                    && !string.Equals(key.Address, writer.Address, StringComparison.Ordinal)
+                    && XrplFileLink.TryNormalizeNetwork(key.Network, out string? other)
+                    && string.Equals(other, network, StringComparison.Ordinal))
+                .OrderBy(key => key.CreatedAt)
+                .ThenBy(key => key.Label, StringComparer.Ordinal)
+                .ThenBy(key => key.Reference, StringComparer.Ordinal)]
+            : [];
+
+    /// <summary>The payer the run will use, or null for Nobody (a locked drop-down is always Nobody).</summary>
+    public VaultEntryInfo? SelectedPayer =>
+        PayerLocked || SelectedPayerReference is null
+            ? null
+            : PayerChoices.FirstOrDefault(key => string.Equals(key.Reference, SelectedPayerReference, StringComparison.Ordinal));
+
+    /// <summary>The muted line under "Paid by", or null.</summary>
+    public string? PayerNote => PayerLocked ? BatchUnavailableNote : SelectedPayer is null ? NobodyNote : null;
+
+    /// <summary>
+    /// Reads the amendment for the writer's network (cached, spec B14) and picks the default payer
+    /// for the selected writer: the payer used last on that network, else the first other key
+    /// there, else Nobody (spec 6.1). A payer the person chose for this writer stands.
+    /// </summary>
+    public async Task RefreshPayerAsync(CancellationToken cancellationToken)
+    {
+        if (SelectedKey is not { } writer || !XrplFileLink.TryNormalizeNetwork(writer.Network, out string? network))
+        {
+            SelectedPayerReference = null;
+            BatchEnabled = null;
+            _payerChosenFor = null;
+            _payerChosenByPerson = false;
+            return;
+        }
+
+        BatchEnabled = batch is null ? null : await batch.IsEnabledAsync(network, cancellationToken).ConfigureAwait(false);
+
+        if (_payerChosenByPerson
+            && string.Equals(_payerChosenFor, writer.Reference, StringComparison.Ordinal)
+            && (SelectedPayerReference is null || PayerChoices.Any(key => string.Equals(key.Reference, SelectedPayerReference, StringComparison.Ordinal))))
+        {
+            return;
+        }
+
+        IReadOnlyList<VaultEntryInfo> choices = PayerChoices;
+        string? last = payers?.LastPayer(network);
+
+        SelectedPayerReference =
+            last is not null && choices.Any(key => string.Equals(key.Reference, last, StringComparison.Ordinal)) ? last
+            : choices.Count > 0 ? choices[0].Reference
+            : null;
+        _payerChosenFor = writer.Reference;
+        _payerChosenByPerson = false;
+    }
+
+    /// <summary>The person's choice in "Paid by"; null or empty is Nobody.</summary>
+    public void SelectPayer(string? reference)
+    {
+        SelectedPayerReference = string.IsNullOrEmpty(reference) ? null : reference;
+        _payerChosenFor = SelectedReference;
+        _payerChosenByPerson = true;
+    }
+
+    /// <summary>A run with this request has started: its payer becomes the network's default (spec 6.1).</summary>
+    public void RecordStarted(PublishRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.PayerReference is { } payer) payers?.Remember(request.Network, payer);
+    }
 
     private static readonly Dictionary<string, string> TypesByExtension = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -243,6 +346,12 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
                 Message = "That key is no longer in the vault.";
                 return null;
             }
+
+            if (SelectedPayer is { } chosen && !listed.Any(key => string.Equals(key.Reference, chosen.Reference, StringComparison.Ordinal)))
+            {
+                Message = "The key chosen to pay is no longer in the vault.";
+                return null;
+            }
         }
         catch (VaultException ex)
         {
@@ -255,13 +364,22 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
         // rather than being refused deep inside the run for a mismatch of its own making.
         XrplFileLink.TryNormalizeNetwork(SelectedKey.Network, out string? canonicalNetwork);
 
+        VaultEntryInfo? payer = SelectedPayer;
+
         return new PublishRequest(
             bytes,
             TypeOf(FileName!),
             FileName!,
             SelectedKey.Reference,
             SelectedKey.Address,
-            canonicalNetwork!);
+            canonicalNetwork!,
+            payer?.Reference,
+            payer?.Address,
+            FilePath)
+        {
+            WriterLabel = SelectedKey.Label,
+            PayerLabel = payer?.Label,
+        };
     }
 
     private static string TypeOf(string fileName) =>

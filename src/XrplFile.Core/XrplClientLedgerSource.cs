@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Xrpl.Client;
@@ -283,6 +284,87 @@ public sealed class XrplClientLedgerSource : ILedgerSource
         throw new XrplFileException(XrplFileError.NodeUnreachable, "the node answered ledger without an index");
     }
 
+    public async Task<LedgerSnapshot> SnapshotAsync(IReadOnlyList<string> accounts, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(accounts);
+
+        long ledger = await CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+
+        if (ledger is <= 0 or > uint.MaxValue)
+        {
+            throw new XrplFileException(XrplFileError.NodeUnreachable, $"the node answered ledger index {ledger}, which no ledger has");
+        }
+
+        Dictionary<string, uint> sequences = new(StringComparer.Ordinal);
+
+        foreach (string account in accounts)
+        {
+            // Pinned to the index just read (spec B6). An error other than actNotFound -- lgrNotFound
+            // above all -- leaves here as NodeUnreachable, and the caller takes the snapshot again.
+            JsonElement? answer = await AskOrAbsentAsync(
+                new AccountInfoRequest(account) { LedgerIndex = new LedgerIndex((uint)ledger) },
+                "account_info", XrplErrorCodes.ActNotFound, cancellationToken).ConfigureAwait(false);
+
+            sequences[account] =
+                answer is { } found && found.TryGetProperty("account_data", out JsonElement data) && UInt(data, "Sequence") is { } sequence
+                    ? sequence
+                    : 0;
+        }
+
+        return new LedgerSnapshot(ledger, sequences);
+    }
+
+    public async Task<OpenLedgerFee> OpenLedgerFeeAsync(CancellationToken cancellationToken)
+    {
+        JsonElement answer = await AskAsync(new FeeRequest(), "fee", cancellationToken).ConfigureAwait(false);
+
+        if (!answer.TryGetProperty("drops", out JsonElement drops)
+            || Drops(drops, "open_ledger_fee") is not { } open
+            || Drops(drops, "base_fee") is not { } baseFee)
+        {
+            throw new XrplFileException(XrplFileError.NodeUnreachable, "the node answered fee without its open-ledger and base fees");
+        }
+
+        return new OpenLedgerFee(open, baseFee);
+    }
+
+    public async Task<bool> IsAmendmentEnabledAsync(string name, CancellationToken cancellationToken)
+    {
+        string id = Amendments.IdOf(name);
+
+        // entryNotFound is an answer: a ledger with no Amendments object has none enabled (spec 4.3).
+        JsonElement? answer = await AskOrAbsentAsync(
+            new LedgerEntryRequest
+            {
+                Index = Amendments.SingletonIndex,
+                LedgerIndex = new LedgerIndex(LedgerIndexType.Validated),
+            },
+            "ledger_entry", "entryNotFound", cancellationToken).ConfigureAwait(false);
+
+        if (answer is not { } found
+            || !found.TryGetProperty("node", out JsonElement node)
+            || !node.TryGetProperty("Amendments", out JsonElement list)
+            || list.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (JsonElement entry in list.EnumerateArray())
+        {
+            if (entry.ValueKind == JsonValueKind.String && string.Equals(entry.GetString(), id, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>A drops amount, sent as a string by rippled and as a number by some proxies.</summary>
+    private static long? Drops(JsonElement json, string name) =>
+        Text(json, name) is { } text && long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out long parsed) ? parsed
+        : Number(json, name);
+
+    private static uint? UInt(JsonElement json, string name) =>
+        Number(json, name) is { } value and >= 0 and <= uint.MaxValue ? (uint)value : null;
+
     public static IReadOnlyList<LedgerTransaction> ParseTransactions(JsonElement answer)
     {
         if (!answer.TryGetProperty("transactions", out JsonElement list) || list.ValueKind != JsonValueKind.Array) return [];
@@ -313,8 +395,13 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             memoFormat = Text(memo, "MemoFormat");
         }
 
-        string? outcome = record.TryGetProperty("meta", out JsonElement meta) ? Text(meta, "TransactionResult") : null;
+        JsonElement meta = record.TryGetProperty("meta", out JsonElement found) ? found : default;
+        string? outcome = Text(meta, "TransactionResult");
         bool validated = record.TryGetProperty("validated", out JsonElement flag) && flag.ValueKind == JsonValueKind.True;
+
+        // An inner carries ParentBatchID in its metadata (measured on the stand); the transaction is
+        // read as a fallback for a node that puts it there instead.
+        string? parentBatch = Text(meta, "ParentBatchID") ?? Text(tx, "ParentBatchID");
 
         return new LedgerTransaction(
             Hash: (Text(record, "hash") ?? Text(tx, "hash") ?? string.Empty).ToUpperInvariant(),
@@ -325,7 +412,15 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             Result: outcome,
             MemoTypeHex: memoType,
             MemoDataHex: memoData,
-            MemoFormatHex: memoFormat);
+            MemoFormatHex: memoFormat)
+        {
+            TransactionType = Text(tx, "TransactionType"),
+            Sequence = UInt(tx, "Sequence") ?? 0,
+            TicketSequence = UInt(tx, "TicketSequence"),
+            TicketCount = UInt(tx, "TicketCount"),
+            Fee = Drops(tx, "Fee"),
+            ParentBatchID = parentBatch?.ToUpperInvariant(),
+        };
     }
 
     /// <summary>
@@ -446,6 +541,8 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
     private async Task<NodeAnswer> SendAsync(BaseRequest request, CancellationToken cancellationToken)
     {
+        await ClientKeeper.For(_client!).EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+
         Task<XrplResponse<object>> pending = request switch
         {
             TxRequest tx => _client!.GRequest<object, TxRequest>(tx, cancellationToken),
@@ -455,7 +552,9 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             AccountInfoRequest accountInfo => _client!.GRequest<object, AccountInfoRequest>(accountInfo, cancellationToken),
             AccountObjectsRequest objects => _client!.GRequest<object, AccountObjectsRequest>(objects, cancellationToken),
             LedgerRequest ledger => _client!.GRequest<object, LedgerRequest>(ledger, cancellationToken),
-            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Command, "this source sends tx, account_tx, server_info, server_state, account_info, account_objects and ledger, nothing else"),
+            FeeRequest fee => _client!.GRequest<object, FeeRequest>(fee, cancellationToken),
+            LedgerEntryRequest entry => _client!.GRequest<object, LedgerEntryRequest>(entry, cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Command, "this source sends tx, account_tx, server_info, server_state, account_info, account_objects, ledger, fee and ledger_entry, nothing else"),
         };
 
         XrplResponse<object> response = await pending.ConfigureAwait(false);

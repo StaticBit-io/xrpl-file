@@ -71,7 +71,8 @@ public static class ReadErrorMessages
             "The node did not answer. Check the node URL in Settings and try again.",
         XrplFileError.InsufficientBalance or XrplFileError.BudgetExceeded or XrplFileError.FeeMismatch
             or XrplFileError.SubmitRefused or XrplFileError.ValidationTimeout or XrplFileError.ResumeMismatch
-            or XrplFileError.SessionAlreadyRun =>
+            or XrplFileError.SessionAlreadyRun or XrplFileError.BatchNotEnabled or XrplFileError.PayerInsufficientBalance
+            or XrplFileError.AccountInUse or XrplFileError.FeeTooHigh =>
             "Something went wrong that reading a file cannot cause. This is a defect in this application, not something you did.",
         _ => throw new ArgumentOutOfRangeException(nameof(error), error, "no sentence for this error"),
     };

@@ -7,22 +7,22 @@ namespace XrplFile;
 /// The fee an estimate is priced at and the fee a strategy charges are two different numbers, and
 /// nothing this class says about money is true unless they are the same one.
 /// <see cref="SequenceStrategyOptions.FeeDrops"/> and <see cref="TicketStrategyOptions.FeeDrops"/>
-/// both default to a hardcoded 12 drops, while <see cref="PublicationSession.EstimateAsync"/> and
-/// <see cref="PublicationSession.StartAsync"/> price a run from the node's current open-ledger fee
+/// both default to a hardcoded 12 drops, while <see cref="PublicationSession.EstimateAsync(ILedgerSource, string, long, SessionOptions, CancellationToken)"/> and
+/// <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> price a run from the node's current open-ledger fee
 /// — <see cref="PublicationEstimate.FeeDropsPerTransaction"/>.
 ///
 /// A session is handed its <see cref="ISubmissionStrategy"/> already built, so it cannot reach in
 /// and change what that strategy charges. What it can do is refuse to start, and it does:
-/// <see cref="PublicationSession.StartAsync"/> compares
+/// <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> compares
 /// <see cref="ISubmissionStrategy.FeeDropsPerTransaction"/> against the estimate it just built and
 /// throws <see cref="XrplFileError.FeeMismatch"/> before a drop is spent, rather than approving a
 /// run priced differently from the one that would actually be submitted.
 ///
 /// So the order on the caller's side is: ask for the estimate — either
-/// <see cref="PublicationSession.EstimateAsync"/> or <see cref="PublicationEstimator.EstimateAsync"/>
+/// <see cref="PublicationSession.EstimateAsync(ILedgerSource, string, long, SessionOptions, CancellationToken)"/> or <see cref="PublicationEstimator.EstimateAsync"/>
 /// — read its <see cref="PublicationEstimate.FeeDropsPerTransaction"/>, build the strategy with
 /// that same value in its own <c>FeeDrops</c> option, then call
-/// <see cref="PublicationSession.StartAsync"/>.
+/// <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/>.
 /// </remarks>
 public sealed class SessionOptions
 {
@@ -41,6 +41,15 @@ public sealed class SessionOptions
     /// is left as it is (spec I8). Linked to the publication's own cancellation.
     /// </summary>
     public TimeSpan TicketReleaseTimeout { get; init; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>The absolute path the bytes were read from, recorded so a resume need not ask for them (spec B17).</summary>
+    public string? SourcePath { get; init; }
+
+    /// <summary>How often a resume reads the ledger while it waits for the fence to pass (spec B23).</summary>
+    public TimeSpan FencePoll { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>How long the fence wait tolerates a node that fails or a ledger that does not advance (Spec question 4).</summary>
+    public TimeSpan NodeOutageLimit { get; init; } = TimeSpan.FromMinutes(2);
 }
 
 /// <summary>
@@ -65,9 +74,9 @@ public sealed record UnfinishedRun(string Path, PublicationState? State, string?
 /// afterwards. That is this class, and it is the one an application holds.
 ///
 /// One session is one run. <see cref="RunAsync"/> may be called once; the checks that make a run
-/// safe to pay for happen in <see cref="StartAsync"/> and are not repeated.
+/// safe to pay for happen in <see cref="StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> and are not repeated.
 /// </summary>
-public sealed class PublicationSession
+public sealed class PublicationSession : IBatchFenceRecorder
 {
     /// <summary>
     /// The stages a run passes through, in order. The rank is what keeps the recorded phase moving
@@ -82,7 +91,7 @@ public sealed class PublicationSession
     /// </summary>
     private static readonly TimeSpan TicketReleaseGrace = TimeSpan.FromSeconds(5);
 
-    private readonly ISubmissionStrategy _strategy;
+    private ISubmissionStrategy? _strategy;
     private readonly ILedgerSource _source;
     private readonly ReadOnlyMemory<byte> _file;
     private readonly SessionOptions _options;
@@ -92,10 +101,20 @@ public sealed class PublicationSession
     // reused for the report so its numbers cannot drift against the ones the run was approved
     // against. The fee is the one the strategy was checked to agree with; the mints are what the
     // estimate priced a ticketed strategy to pay on top of the memos.
-    private readonly long _feeDropsPerTransaction;
+    private long _feeDropsPerTransaction;
 
     /// <summary>The estimate's mints, used on a resume.</summary>
-    private readonly int _mints;
+    private int _mints;
+
+    /// <summary>The finished publication a resume found in the ledger (spec B27), or null.</summary>
+    private PublishResult? _alreadyPublished;
+
+    /// <summary>The Batch estimate the run was approved against, or null for a one-account run.</summary>
+    private BatchPublicationEstimate? _batchEstimate;
+
+    /// <summary>The strategy; a session resumed onto a publication that already finished has none (spec B27).</summary>
+    private ISubmissionStrategy Strategy =>
+        _strategy ?? throw new InvalidOperationException("this session finished a publication without submitting and has no strategy");
 
     /// <summary>
     /// What the strategy had minted when a fresh run was started, or null on a resume (spec I18).
@@ -112,14 +131,14 @@ public sealed class PublicationSession
     private int _run;
 
     /// <summary>
-    /// What <see cref="ResumeAsync"/> found already in the ledger: chunks and block lists, each by
-    /// its own index. Null for a run that started fresh through <see cref="StartAsync"/> -- there
+    /// What <see cref="ResumeAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, SessionOptions, CancellationToken)"/> found already in the ledger: chunks and block lists, each by
+    /// its own index. Null for a run that started fresh through <see cref="StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> -- there
     /// is nothing to reconcile against on a first run.
     /// </summary>
     private LandedMemos? _landed;
 
     private PublicationSession(
-        ISubmissionStrategy strategy, ILedgerSource source, ReadOnlyMemory<byte> file,
+        ISubmissionStrategy? strategy, ILedgerSource source, ReadOnlyMemory<byte> file,
         PublicationState state, string statePath, SessionOptions options, long feeDropsPerTransaction, int mints,
         int? mintsAtStart)
     {
@@ -153,6 +172,182 @@ public sealed class PublicationSession
         PublicationEstimator.EstimateAsync(source, account, fileBytes, options.TicketsPerBatch, cancellationToken);
 
     /// <summary>
+    /// What a Batch run would cost each account (spec 4.5), refusing first a network that does not
+    /// enable <c>BatchV1_1</c>, then an open-ledger fee above 200 drops. The amendment is read again
+    /// here, before every run: this read decides, not a cached one (spec B14).
+    /// </summary>
+    public static async Task<BatchPublicationEstimate> EstimateAsync(
+        ILedgerSource source, string writer, string payer, long fileBytes, SessionOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(options);
+
+        await RequireBatchEnabledAsync(source, cancellationToken).ConfigureAwait(false);
+
+        BatchPublicationEstimate estimate = await PublicationEstimator
+            .EstimateBatchAsync(source, writer, payer, fileBytes, cancellationToken).ConfigureAwait(false);
+
+        RequireFeeWithinLimit(estimate);
+
+        return estimate;
+    }
+
+    /// <summary>
+    /// Starts a Batch run (spec 4.5): estimates, refuses in the spec's order, builds the strategy
+    /// through <paramref name="strategyFactory"/> with this session as its fence recorder, and writes
+    /// a version-3 state file -- all before a single transaction is submitted.
+    /// </summary>
+    public static async Task<PublicationSession> StartAsync(
+        BatchStrategyFactory strategyFactory, ILedgerSource source, ReadOnlyMemory<byte> file, string type, string? name,
+        string writer, string keyReference, string payer, string payerKeyReference, string network, SessionOptions options,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(strategyFactory);
+        ArgumentNullException.ThrowIfNull(options);
+        RequireNameableAccount(writer);
+        ArgumentException.ThrowIfNullOrWhiteSpace(payerKeyReference);
+
+        if (string.Equals(payer, writer, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("a Batch run's payer is another account than its writer (spec B1)", nameof(payer));
+        }
+
+        BatchPublicationEstimate estimate = await EstimateAsync(source, writer, payer, file.Length, options, cancellationToken).ConfigureAwait(false);
+        PublicationEstimator.RequireBatch(estimate, options.BudgetDrops);
+
+        long startedIn = await source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
+
+        PublicationState state = new(
+            PublicationState.BatchVersion, network, writer, keyReference, type, name,
+            file.Length, MemoLayout.ChunkBytes, RootOf(chunks, startedIn), startedIn, Phase: Stages[0],
+            ChunkHashes: new Dictionary<int, string>(),
+            Strategy: PublicationState.BatchStrategyName, SourcePath: options.SourcePath,
+            Payer: payer, PayerKeyReference: payerKeyReference, Fence: 0);
+
+        string path = NewStatePath(options, startedIn, writer);
+        PublicationSession session = new(null, source, file, state, path, options, 0, 0, mintsAtStart: 0);
+
+        await session.AttachBatchAsync(strategyFactory, estimate, resuming: false).ConfigureAwait(false);
+        state.Save(path);
+
+        return session;
+    }
+
+    /// <summary>The root a file will publish under: over block hashes alone, as the writer computes it.</summary>
+    public static string RootOf(ReadOnlyMemory<byte> file) => RootOf(FileTree.Split(file, MemoLayout.ChunkBytes), 0);
+
+    /// <summary>
+    /// A BatchStrategy needs the session's own fence recorder and a version-3 state; the one-account
+    /// overloads give it neither, so it can only come through the factory overloads (spec B16, Spec question 12).
+    /// </summary>
+    private static void RequireNotBatch(ISubmissionStrategy strategy)
+    {
+        ArgumentNullException.ThrowIfNull(strategy);
+
+        if (strategy is BatchStrategy)
+        {
+            throw new ArgumentException(
+                "a BatchStrategy is built by the session, with the session as its fence; start it with a BatchStrategyFactory",
+                nameof(strategy));
+        }
+    }
+
+    private static async Task RequireBatchEnabledAsync(ILedgerSource source, CancellationToken cancellationToken)
+    {
+        if (!await source.IsAmendmentEnabledAsync(Amendments.Batch, cancellationToken).ConfigureAwait(false))
+        {
+            throw new XrplFileException(XrplFileError.BatchNotEnabled,
+                $"this network's validated ledger does not enable {Amendments.Batch}");
+        }
+    }
+
+    private static void RequireFeeWithinLimit(BatchPublicationEstimate estimate)
+    {
+        if (estimate.OpenLedgerFeeDrops > BatchFees.MaxOpenLedgerFeeDrops)
+        {
+            throw new XrplFileException(XrplFileError.FeeTooHigh,
+                $"the open-ledger fee is {estimate.OpenLedgerFeeDrops} drops, above the {BatchFees.MaxOpenLedgerFeeDrops} a run starts at");
+        }
+    }
+
+    /// <summary>
+    /// Builds the run's strategy with this session as its fence recorder, and holds it to the state:
+    /// the same writer, the same payer, and the estimate's unit (spec 4.1).
+    /// </summary>
+    private async Task AttachBatchAsync(BatchStrategyFactory strategyFactory, BatchPublicationEstimate estimate, bool resuming)
+    {
+        BatchBudget budget = new(
+            estimate.FeeUnitDrops, estimate.FeeCeilingDrops, estimate.PayerFeeDropsWorstCase, estimate.WriterFeeDropsWorstCase);
+
+        BatchStrategy strategy = strategyFactory(budget, this);
+
+        Exception? refusal = null;
+
+        if (!string.Equals(strategy.Account, _state.Writer, StringComparison.Ordinal)
+            || !string.Equals(strategy.Payer, _state.Payer, StringComparison.Ordinal))
+        {
+            string message = $"the run is recorded for writer {_state.Writer} and payer {_state.Payer}, and the strategy signs as "
+                + $"{strategy.Account} and {strategy.Payer}";
+
+            refusal = resuming
+                ? new XrplFileException(XrplFileError.ResumeMismatch, message)
+                : new ArgumentException(message, nameof(strategyFactory));
+        }
+        else if (strategy.FeeDropsPerTransaction != estimate.FeeUnitDrops)
+        {
+            refusal = new XrplFileException(XrplFileError.FeeMismatch,
+                $"the estimate approved a unit of {estimate.FeeUnitDrops} drops and the strategy charges {strategy.FeeDropsPerTransaction}");
+        }
+
+        if (refusal is not null)
+        {
+            // The factory built it, so nobody else will release what its signers hold.
+            await strategy.DisposeAsync().ConfigureAwait(false);
+            throw refusal;
+        }
+
+        _strategy = strategy;
+        _batchEstimate = estimate;
+        _feeDropsPerTransaction = estimate.FeeUnitDrops;
+    }
+
+    /// <summary>
+    /// Persists the fence (spec B23) before the transmission it covers is first sent. A save that
+    /// fails throws, which stops that transmission and fails the run.
+    /// </summary>
+    Task IBatchFenceRecorder.RecordFenceAsync(long deadline, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_stateLock)
+        {
+            if (_state.Fence is { } recorded && recorded >= deadline) return Task.CompletedTask;
+
+            PublicationState next = _state with { Fence = deadline };
+            next.Save(StatePath);
+            _state = next;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>One run, one file: a ledger-and-writer name with a random suffix (see StartAsync's remarks).</summary>
+    private static string NewStatePath(SessionOptions options, long startedIn, string writer)
+    {
+        string suffix = Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
+        return Path.Combine(options.StateDirectory, $"{startedIn}-{writer}-{suffix}.json");
+    }
+
+    /// <summary>The name a version-2 state records for the strategies this library ships; null for anything else.</summary>
+    private static string? StrategyName(ISubmissionStrategy strategy) => strategy switch
+    {
+        TicketStrategy => PublicationState.TicketStrategyName,
+        SequenceStrategy => PublicationState.SequenceStrategyName,
+        _ => null,
+    };
+
+    /// <summary>
     /// Estimates, refuses what cannot be afforded or what the strategy would price differently,
     /// and writes the state file — all before a single transaction is submitted. A run that is
     /// going to fail on money fails here, where it has cost nothing.
@@ -161,6 +356,8 @@ public sealed class PublicationSession
         ISubmissionStrategy strategy, ILedgerSource source, ReadOnlyMemory<byte> file, string type, string? name,
         string writer, string keyReference, string network, SessionOptions options, CancellationToken cancellationToken)
     {
+        RequireNotBatch(strategy);
+
         // The writer becomes part of a file name below, so it is checked before anything at all
         // happens. An XRPL account is base58 and cannot hold a separator or a dot-dot; something
         // that can is not an account, and must not get to choose where the state file lands.
@@ -209,15 +406,15 @@ public sealed class PublicationSession
         PublicationState state = new(
             PublicationState.CurrentVersion, network, writer, keyReference, type, name,
             file.Length, MemoLayout.ChunkBytes, root, startedIn, Phase: Stages[0],
-            ChunkHashes: new Dictionary<int, string>());
+            ChunkHashes: new Dictionary<int, string>(),
+            Strategy: StrategyName(strategy), SourcePath: options.SourcePath);
 
         // One run, one file, and no two runs share one. Two publications from one account inside
         // one ledger — four seconds, ordinary in a batch loop — would otherwise agree on a name,
         // and the second would overwrite the only record of money the first had already spent.
         // The root is now known up front, but a hex root is an unfriendly file name and offers no
         // ordering, so the run is still told apart by a random suffix rather than by its identity.
-        string suffix = Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
-        string path = Path.Combine(options.StateDirectory, $"{startedIn}-{writer}-{suffix}.json");
+        string path = NewStatePath(options, startedIn, writer);
         state.Save(path);
 
         return new PublicationSession(
@@ -233,17 +430,23 @@ public sealed class PublicationSession
     /// there is what counts. The file's own map of hashes carries the report through the
     /// interruption; it does not decide what still needs sending.
     ///
-    /// A resumed run still spends money, so it is checked exactly as a fresh one is: a fresh
-    /// estimate is priced against the strategy's fee, and the caller's budget and the account's
-    /// balance are checked against it, before the sweep below even runs. That estimate is for the
-    /// <em>whole file</em>, not for the part still missing — the chunks already in the ledger are
-    /// priced again, and their tickets with them. A budget sized for the original run therefore
-    /// carries the resume as well; one sized for the remainder refuses it.
+    /// The ledger is reconciled first, and a manifest the dead run already sent is looked for
+    /// before anything is priced (spec B27, 5.2): when it is found nothing is sent, so nothing has
+    /// to be affordable and a drained account still finishes the run.
+    ///
+    /// A resumed run that does have something left to send still spends money, so it is checked
+    /// exactly as a fresh one is: a fresh estimate is priced against the strategy's fee, and the
+    /// caller's budget and the account's balance are checked against it, before anything is sent.
+    /// That estimate is for the <em>whole file</em>, not for the part still missing — the chunks
+    /// already in the ledger are priced again, and their tickets with them. A budget sized for the
+    /// original run therefore carries the resume as well; one sized for the remainder refuses it.
     /// </summary>
     public static async Task<PublicationSession> ResumeAsync(
         ISubmissionStrategy strategy, ILedgerSource source, ReadOnlyMemory<byte> file,
         string statePath, SessionOptions options, CancellationToken cancellationToken)
     {
+        RequireNotBatch(strategy);
+
         PublicationState state = PublicationState.Load(statePath);
 
         // Before anything else, because everything else is about this account: the sweep reads the
@@ -256,6 +459,230 @@ public sealed class PublicationSession
                 + "a publication cannot change accounts half-way");
         }
 
+        // A Batch run resumes with its payer, on its own overload (spec B16).
+        if (state.Version == PublicationState.BatchVersion)
+        {
+            throw new XrplFileException(XrplFileError.ResumeMismatch,
+                $"{statePath} records a Batch run, which resumes with its payer rather than on one account");
+        }
+
+        IReadOnlyList<byte[]> chunks = RequireResumable(state, statePath, file);
+
+        PublicationSession session = new(
+            strategy, source, file, state, statePath, options, 0, 0, mintsAtStart: null);
+        session.RecordSourcePath(options.SourcePath);
+        session._landed = await session.ReconcileAsync(chunks, cancellationToken).ConfigureAwait(false);
+
+        // Nothing is sent, so nothing has to be affordable (spec B27).
+        if (await session.FindManifestAsync(chunks, session._landed, cancellationToken).ConfigureAwait(false) is { } done)
+        {
+            session._alreadyPublished = done;
+            return session;
+        }
+
+        PublicationEstimate estimate = await PublicationEstimator
+            .EstimateAsync(source, state.Writer, file.Length, options.TicketsPerBatch, cancellationToken).ConfigureAwait(false);
+
+        // Same rule StartAsync holds: the estimate this run is approved against and the strategy
+        // that would submit it must price a transaction the same way, or the checks below describe
+        // a run nobody is going to submit.
+        if (strategy.FeeDropsPerTransaction != estimate.FeeDropsPerTransaction)
+        {
+            throw new XrplFileException(XrplFileError.FeeMismatch,
+                $"the estimate prices every transaction at {estimate.FeeDropsPerTransaction} drops and the strategy "
+                + $"charges {strategy.FeeDropsPerTransaction}; build the strategy from the estimate's fee, or the "
+                + "budget and balance checks describe a run nobody is going to submit");
+        }
+
+        if (strategy is TicketStrategy) PublicationEstimator.RequireTicketSlot(estimate);
+        PublicationEstimator.Require(estimate, options.BudgetDrops);
+
+        session._feeDropsPerTransaction = estimate.FeeDropsPerTransaction;
+        session._mints = estimate.Mints;
+
+        return session;
+    }
+
+    /// <summary>
+    /// Picks a Batch run back up (spec 5.2): checks the file, waits until a snapshot is past the
+    /// recorded fence plus the settle ledgers, reconciles, looks for a manifest already sent, writes
+    /// a new payer to the state if one is given, prices what is still missing as a new session, and
+    /// only then builds the strategy. Nothing the interrupted run sent can apply once the fence has
+    /// passed, so the ledger's answer read after it is final.
+    /// </summary>
+    public static async Task<PublicationSession> ResumeAsync(
+        BatchStrategyFactory strategyFactory, ILedgerSource source, ReadOnlyMemory<byte> file, string statePath,
+        string payer, string payerKeyReference, SessionOptions options, IProgress<PublishProgress>? fenceProgress,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(strategyFactory);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentException.ThrowIfNullOrWhiteSpace(payerKeyReference);
+
+        PublicationState state = PublicationState.Load(statePath);
+
+        if (state.Version != PublicationState.BatchVersion)
+        {
+            throw new XrplFileException(XrplFileError.ResumeMismatch,
+                $"{statePath} records a one-account run, which resumes on the strategy it recorded rather than as a Batch run");
+        }
+
+        if (string.Equals(payer, state.Writer, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("a Batch run's payer is another account than its writer (spec B1)", nameof(payer));
+        }
+
+        IReadOnlyList<byte[]> chunks = RequireResumable(state, statePath, file);
+
+        await WaitForFenceAsync(source, state, options, fenceProgress, cancellationToken).ConfigureAwait(false);
+
+        PublicationSession session = new(null, source, file, state, statePath, options, 0, 0, mintsAtStart: 0);
+        session.RecordSourcePath(options.SourcePath);
+        session._landed = await session.ReconcileAsync(chunks, cancellationToken).ConfigureAwait(false);
+
+        if (await session.FindManifestAsync(chunks, session._landed, cancellationToken).ConfigureAwait(false) is { } done)
+        {
+            session._alreadyPublished = done;
+            return session;
+        }
+
+        // Behind the fence no outer of the old payer can still apply, which is what makes changing it safe (spec B18).
+        session.ChangePayer(payer, payerKeyReference);
+
+        await RequireBatchEnabledAsync(source, cancellationToken).ConfigureAwait(false);
+
+        int blocks = FileTree.BlockCount(chunks.Count);
+        int lists = blocks > 1 ? PublicationEstimator.BlockListMemoCount(blocks) : 0;
+        long missingChunks = chunks.Count - session._landed.Chunks.Count;
+
+        // Lists are priced in full: their bytes depend on ledgers only the writer knows by now, and
+        // there are few of them.
+        BatchPublicationEstimate estimate = await PublicationEstimator
+            .EstimateBatchAsync(source, state.Writer, payer, missingChunks, blocks, lists, cancellationToken).ConfigureAwait(false);
+
+        RequireFeeWithinLimit(estimate);
+        PublicationEstimator.RequireBatch(estimate, options.BudgetDrops);
+
+        await session.AttachBatchAsync(strategyFactory, estimate, resuming: true).ConfigureAwait(false);
+
+        return session;
+    }
+
+    /// <summary>
+    /// Waits until a snapshot is past the fence plus the settle ledgers (spec B23), reporting the wait
+    /// as the "fence" stage. A run that never transmitted has a fence of zero and waits for nothing.
+    /// Reads are retried, and a node that stays unreachable, or whose validated ledger stays where it
+    /// is, for <see cref="SessionOptions.NodeOutageLimit"/> fails the resume (Spec question 4).
+    /// </summary>
+    private static async Task WaitForFenceAsync(
+        ILedgerSource source, PublicationState state, SessionOptions options, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
+    {
+        if (state.Fence is not { } fence || fence <= 0) return;
+
+        BatchStrategyOptions reads = new() { ChainCheck = options.FencePoll, NodeOutageLimit = options.NodeOutageLimit };
+        long target = fence + reads.SettleLedgers;
+        long? first = null;
+        long highest = 0;
+        DateTimeOffset advancedAt = DateTimeOffset.UtcNow;
+
+        while (true)
+        {
+            LedgerSnapshot snapshot = await BatchReads.RetryAsync(
+                token => source.SnapshotAsync([state.Writer], token), reads, cancellationToken).ConfigureAwait(false);
+
+            if (snapshot.LedgerIndex > target) return;
+
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+
+            if (snapshot.LedgerIndex > highest)
+            {
+                highest = snapshot.LedgerIndex;
+                advancedAt = now;
+            }
+            else if (now - advancedAt >= options.NodeOutageLimit)
+            {
+                throw new XrplFileException(XrplFileError.NodeUnreachable,
+                    $"the node's validated ledger has stayed at {snapshot.LedgerIndex} for {options.NodeOutageLimit}, short of the fence at {fence}");
+            }
+
+            first ??= snapshot.LedgerIndex;
+            progress?.Report(new PublishProgress("fence", snapshot.LedgerIndex - first.Value, target + 1 - first.Value));
+
+            await Task.Delay(options.FencePoll, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Writes the payer a resume runs with to the state before anything is sent (spec 5.2 step 5).</summary>
+    private void ChangePayer(string payer, string payerKeyReference)
+    {
+        lock (_stateLock)
+        {
+            if (string.Equals(_state.Payer, payer, StringComparison.Ordinal)
+                && string.Equals(_state.PayerKeyReference, payerKeyReference, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _state = _state with { Payer = payer, PayerKeyReference = payerKeyReference };
+            _state.Save(StatePath);
+        }
+    }
+
+    /// <summary>
+    /// The manifest this run would send, if the ledger already holds it (spec B27): when every chunk
+    /// and list has landed, the manifest is built from the reconciled hashes and ledgers, and a
+    /// validated tesSUCCESS transaction of the writer from <see cref="PublicationState.StartedInLedger"/>
+    /// on carrying exactly those bytes is the one. A manifest with the same root and other bytes is
+    /// another publication's and is not adopted.
+    /// </summary>
+    private async Task<PublishResult?> FindManifestAsync(IReadOnlyList<byte[]> chunks, LandedMemos landed, CancellationToken cancellationToken)
+    {
+        if (landed.Chunks.Count != chunks.Count) return null;
+
+        Dictionary<int, long> chunkLedgers = landed.Chunks.ToDictionary(pair => pair.Key, pair => pair.Value.LedgerIndex);
+        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(chunks, chunkLedgers);
+        IReadOnlyList<MemoSubmission> listMemos = ManifestPlan.ListMemos(entries);
+        List<string> listHashes = [];
+        List<long> listLedgers = [];
+
+        for (int j = 0; j < listMemos.Count; j++)
+        {
+            if (!landed.Lists.TryGetValue(j, out LandedMemo? list)
+                || !string.Equals(list.MemoDataHex, listMemos[j].MemoDataHex, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            listHashes.Add(list.TxHash);
+            listLedgers.Add(list.LedgerIndex);
+        }
+
+        long firstLedger = chunkLedgers.Values.Min();
+        long lastLedger = listLedgers.Count == 0 ? chunkLedgers.Values.Max() : Math.Max(chunkLedgers.Values.Max(), listLedgers.Max());
+        PublicationState state = State;
+        Manifest manifest = ManifestPlan.Build(state.Type, state.Name, state.Size, entries, firstLedger, lastLedger, listMemos.Count);
+        string data = ManifestPlan.Memo(manifest).MemoDataHex;
+
+        long to = await _source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+
+        await foreach (LedgerTransaction tx in _source
+            .AccountTransactionsAsync(state.Writer, state.StartedInLedger, to, forward: true, cancellationToken)
+            .ConfigureAwait(false))
+        {
+            if (!tx.Validated || !tx.Succeeded || !string.Equals(tx.Account, state.Writer, StringComparison.Ordinal)) continue;
+            if (!MemoLayout.IsManifest(tx.MemoTypeHex) || !string.Equals(tx.MemoDataHex, data, StringComparison.OrdinalIgnoreCase)) continue;
+
+            List<string> chunkHashes = [.. Enumerable.Range(0, chunks.Count).Select(i => landed.Chunks[i].TxHash)];
+
+            return new PublishResult(new XrplFileLink(state.Network, tx.Hash), manifest, state.Writer, chunkHashes, listHashes, tx.Hash);
+        }
+
+        return null;
+    }
+
+    /// <summary>The checks every resume makes before it reads the ledger; returns the file's chunks.</summary>
+    private static IReadOnlyList<byte[]> RequireResumable(PublicationState state, string statePath, ReadOnlyMemory<byte> file)
+    {
         if (string.Equals(state.Phase, "done", StringComparison.Ordinal))
         {
             throw new XrplFileException(XrplFileError.ResumeMismatch,
@@ -282,7 +709,6 @@ public sealed class PublicationSession
         // is refused rather than resumed without it, because skipping the check is exactly how a
         // resume publishes the wrong bytes under a started run's name.
         IReadOnlyList<byte[]> chunks = FileTree.Split(file, state.Chunk);
-        string root = RootOf(chunks, state.StartedInLedger);
 
         if (state.Root is not { } recorded)
         {
@@ -290,35 +716,29 @@ public sealed class PublicationSession
                 $"{statePath} records no root, so there is nothing to check this file against");
         }
 
+        string root = RootOf(chunks, state.StartedInLedger);
+
         if (!string.Equals(recorded, root, StringComparison.Ordinal))
         {
             throw new XrplFileException(XrplFileError.ResumeMismatch,
                 $"{statePath} was started for a file rooted at {recorded} and this one roots at {root}");
         }
 
-        PublicationEstimate estimate = await PublicationEstimator
-            .EstimateAsync(source, state.Writer, file.Length, options.TicketsPerBatch, cancellationToken).ConfigureAwait(false);
+        return chunks;
+    }
 
-        // Same rule StartAsync holds: the estimate this run is approved against and the strategy
-        // that would submit it must price a transaction the same way, or the checks below describe
-        // a run nobody is going to submit.
-        if (strategy.FeeDropsPerTransaction != estimate.FeeDropsPerTransaction)
+    /// <summary>A picked file at a new place is where the next resume reads from (spec B17).</summary>
+    private void RecordSourcePath(string? sourcePath)
+    {
+        if (sourcePath is null) return;
+
+        lock (_stateLock)
         {
-            throw new XrplFileException(XrplFileError.FeeMismatch,
-                $"the estimate prices every transaction at {estimate.FeeDropsPerTransaction} drops and the strategy "
-                + $"charges {strategy.FeeDropsPerTransaction}; build the strategy from the estimate's fee, or the "
-                + "budget and balance checks describe a run nobody is going to submit");
+            if (string.Equals(_state.SourcePath, sourcePath, StringComparison.Ordinal)) return;
+
+            _state = _state with { SourcePath = sourcePath };
+            _state.Save(StatePath);
         }
-
-        if (strategy is TicketStrategy) PublicationEstimator.RequireTicketSlot(estimate);
-        PublicationEstimator.Require(estimate, options.BudgetDrops);
-
-        PublicationSession session = new(
-            strategy, source, file, state, statePath, options, estimate.FeeDropsPerTransaction, estimate.Mints,
-            mintsAtStart: null);
-        session._landed = await session.ReconcileAsync(chunks, cancellationToken).ConfigureAwait(false);
-
-        return session;
     }
 
     /// <summary>
@@ -404,15 +824,31 @@ public sealed class PublicationSession
 
         try
         {
+            if (_alreadyPublished is { } done)
+            {
+                // The dead run's manifest is in the ledger: record "done" and send nothing, the
+                // tidy-up included (spec B27). The fees were spent by the sessions before this one.
+                Advance("done", done.Manifest.Root, done.ChunkHashes, done.ManifestHash);
+
+                return new PublicationReport(
+                    done.Link, done.Manifest, done.Writer,
+                    done.ChunkHashes.Count + done.ListHashes.Count + 1, 0,
+                    _startedAt, DateTimeOffset.UtcNow, done.ChunkHashes, done.ListHashes, done.ManifestHash)
+                {
+                    StateSaveFailure = StateSaveFailure,
+                    Payer = State.Payer,
+                };
+            }
+
             PublicationState started = State;
 
-            XrplFileWriter writer = new(_strategy, _source, new WriterOptions { ReadBack = _options.ReadBack });
+            XrplFileWriter writer = new(Strategy, _source, new WriterOptions { ReadBack = _options.ReadBack });
 
             PublishResult result = await writer.PublishAsync(
                 _file, started.Type, started.Name, started.Writer, started.Network, _landed,
                 new PhaseRecordingProgress(this, progress), cancellationToken).ConfigureAwait(false);
 
-            Advance("done", result.Manifest.Root, result.ChunkHashes);
+            Advance("done", result.Manifest.Root, result.ChunkHashes, result.ManifestHash);
 
             // After "done" and never before: the manifest is in the ledger, so nothing the tidy-up
             // does — or fails to do — can cost the person their link (spec I8).
@@ -421,15 +857,21 @@ public sealed class PublicationSession
 
             // A fresh run's session is its whole publication, so its strategy's own count is the
             // publication's; a resume's earlier sessions minted too, unrecorded (spec I18).
-            int mints = _mintsAtStart is { } before ? _strategy.TicketMints - before : _mints;
+            int mints = _mintsAtStart is { } before ? Strategy.TicketMints - before : _mints;
             long transactions = result.ChunkHashes.Count + result.ListHashes.Count + 1 + mints;
+
+            // The writer's fees, counted as today (spec 4.6): on the Batch path its solo transactions at
+            // the approved unit, nothing retried; the payer's measured spend is PayerFeeDrops (Spec question 9).
+            long feeEstimated = _batchEstimate is { } batch
+                ? batch.WriterFeeDrops
+                : transactions * _feeDropsPerTransaction;
 
             // Priced from the fee the estimate was approved against (see the remarks on
             // SessionOptions), not a fresh node query: the node's open-ledger fee moves with load,
             // and a second query here would report a cost the run was never checked against.
             return new PublicationReport(
                 result.Link, result.Manifest, result.Writer,
-                transactions, transactions * _feeDropsPerTransaction,
+                transactions, feeEstimated,
                 _startedAt, DateTimeOffset.UtcNow,
                 result.ChunkHashes, result.ListHashes, result.ManifestHash)
             {
@@ -440,6 +882,8 @@ public sealed class PublicationSession
                 TicketReleaseFailure = releaseFailure,
                 TicketReleaseFeeDrops = release is null ? null : release.Charged * _feeDropsPerTransaction,
                 TicketReleaseFeeDropsInDoubt = release is null ? null : release.InDoubt * _feeDropsPerTransaction,
+                Payer = started.Payer,
+                PayerFeeDrops = (Strategy as BatchStrategy)?.PayerFeeDrops,
             };
         }
         finally
@@ -469,7 +913,7 @@ public sealed class PublicationSession
             // rather than thrown after the manifest has landed (spec I8).
             deadline.CancelAfter(_options.TicketReleaseTimeout);
 
-            release = _strategy.ReleaseLeftoverTicketsAsync(deadline.Token);
+            release = Strategy.ReleaseLeftoverTicketsAsync(deadline.Token);
 
             // The deadline is the strategy's cue to stop and report what it settled; the wait is
             // only abandoned once the grace after it has run out too, so a strategy that honours the
@@ -552,7 +996,7 @@ public sealed class PublicationSession
     /// <see cref="PublishProgress"/> carries a count and a stage, not a transaction hash. The
     /// stage is what a person interrupted half-way actually needs, and it is what this records.
     /// </summary>
-    private void Advance(string phase, string? root, IReadOnlyList<string>? chunkHashes)
+    private void Advance(string phase, string? root, IReadOnlyList<string>? chunkHashes, string? manifestHash = null)
     {
         lock (_stateLock)
         {
@@ -562,6 +1006,7 @@ public sealed class PublicationSession
             {
                 Phase = phase,
                 Root = root ?? _state.Root,
+                ManifestHash = manifestHash ?? _state.ManifestHash,
                 ChunkHashes = chunkHashes is null
                     ? _state.ChunkHashes
                     : chunkHashes.Select((hash, index) => (hash, index)).ToDictionary(pair => pair.index, pair => pair.hash),

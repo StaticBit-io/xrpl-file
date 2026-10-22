@@ -198,7 +198,7 @@ public sealed class UnfinishedModelTests : VaultHarness
     /// Starts <paramref name="run"/> and cancels it only once it is actually inside its first
     /// submission -- see <c>PublicationRunTests.A_cancelled_run_reports_cancelled_and_leaves_a_state_file</c>'s
     /// own remarks on why cancelling the instant <see cref="PublicationRun.Start"/> returns races
-    /// <see cref="PublicationSession.StartAsync"/> itself and can drop the state file entirely.
+    /// <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> itself and can drop the state file entirely.
     /// Leaves <paramref name="run"/> <see cref="PublicationRunState.Cancelled"/> with a readable
     /// state file on disk -- the fixture both resume tests below build on.
     /// </summary>
@@ -278,7 +278,7 @@ public sealed class UnfinishedModelTests : VaultHarness
     /// cover: this application is never actually reached through the same, still-in-memory
     /// <see cref="PublicationRun"/> that started the interrupted publication -- a real resume follows
     /// a process restart, and nothing survives that except what
-    /// <see cref="PublicationSession.StartAsync"/> persisted to <see cref="RunPaths.StateDirectory"/>.
+    /// <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> persisted to <see cref="RunPaths.StateDirectory"/>.
     /// <see cref="PublicationRun.Start"/> and <see cref="PublicationRun.Resume"/> both reset every one
     /// of a run's instance fields on every call, so there is nothing left in the first run's
     /// <see cref="PublicationRun"/> for a second instance to need or conflict with -- but that is

@@ -221,6 +221,13 @@ public static class MauiProgram
         services.AddSingleton<NodeSettingsModel>();
         services.AddSingleton<NetworkChoices>();
 
+        // "Paid by" (spec 6.1): the payer remembered per network, beside node-urls.json, and the
+        // network's Batch amendment, cached for five minutes. PublishModel takes both as optional
+        // constructor parameters, which the container fills from these registrations.
+        services.AddSingleton<IPayerSettingsStore>(new FilePayerSettingsStore());
+        services.AddSingleton(provider => new BatchAvailability(
+            provider.GetRequiredService<IConnectionFactory>(), provider.GetRequiredService<TimeProvider>()));
+
         // Run state and the publications file are in the application's data directory, never beside
         // the vault: the vault is portable by design (E5) and this is not.
         services.AddSingleton(new RunPaths());
@@ -230,7 +237,16 @@ public static class MauiProgram
         // only writer. Registered once, as the concrete type, so PublicationRun (as
         // IPublicationHistory) and HistoryModel (which needs Read/Forget/Clear, not on that
         // interface) resolve to the same object.
-        services.AddSingleton(provider => new PublicationHistory(provider.GetRequiredService<RunPaths>().HistoryPath));
+        services.AddSingleton(provider =>
+        {
+            RunPaths runPaths = provider.GetRequiredService<RunPaths>();
+            PublicationHistory history = new(runPaths.HistoryPath);
+
+            // A run that finished and crashed before its link was listed (spec 5.1).
+            history.RecordFinishedRuns(runPaths.StateDirectory);
+
+            return history;
+        });
         services.AddSingleton<IPublicationHistory>(provider => provider.GetRequiredService<PublicationHistory>());
 
         // A singleton because a publication outlives the screen that started it (design F5). It is
@@ -241,7 +257,8 @@ public static class MauiProgram
             provider.GetRequiredService<IKeyVault>(),
             provider.GetRequiredService<RunPaths>(),
             provider.GetRequiredService<IPublicationHistory>(),
-            autoLock));
+            autoLock,
+            provider.GetRequiredService<TimeProvider>()));
 
         services.AddSingleton<PublishModel>();
         services.AddSingleton<EstimateModel>();

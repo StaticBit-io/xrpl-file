@@ -64,7 +64,7 @@ public static class PublishPolicy
     /// </summary>
     /// <remarks>
     /// The fee comes from the estimate rather than from either options type's own default because
-    /// <see cref="PublicationSession.StartAsync"/> re-estimates and refuses a strategy priced
+    /// <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> re-estimates and refuses a strategy priced
     /// differently with <see cref="XrplFileError.FeeMismatch"/>.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
@@ -87,12 +87,48 @@ public static class PublishPolicy
 
         int fee = (int)estimate.FeeDropsPerTransaction;
 
-        return UsesTickets(estimate)
-            ? new TicketStrategy(
-                connection.Sink,
-                connection.Source,
-                signer,
-                new TicketStrategyOptions { FeeDrops = fee, TicketsPerBatch = TicketsPerBatch })
-            : new SequenceStrategy(connection.Sink, signer, new SequenceStrategyOptions { FeeDrops = fee }, connection.Source);
+        return UsesTickets(estimate) ? Tickets(connection, signer, fee) : Sequence(connection, signer, fee);
     }
+
+    /// <summary>
+    /// The Batch strategy for a run with a payer (spec 6.1, B4): built by the session, which hands in
+    /// the budget from its estimate and itself as the fence recorder.
+    /// </summary>
+    public static BatchStrategy CreateBatch(
+        BatchBudget budget, IBatchFenceRecorder fence, ILedgerConnection connection, ITransactionSigner writer, ITransactionSigner payer,
+        BatchStrategyOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        return new BatchStrategy(connection.Sink, connection.Source, writer, payer, budget, fence, options);
+    }
+
+    /// <summary>
+    /// The one-account strategy a run resumes on (spec B16): the one it recorded, whatever its size;
+    /// a run recorded before strategies were, on the existing policy.
+    /// </summary>
+    public static ISubmissionStrategy CreateFor(
+        string? recordedStrategy, PublicationEstimate estimate, ILedgerConnection connection, ITransactionSigner signer)
+    {
+        ArgumentNullException.ThrowIfNull(estimate);
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(signer);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(estimate.FeeDropsPerTransaction, int.MaxValue);
+
+        int fee = (int)estimate.FeeDropsPerTransaction;
+
+        return recordedStrategy switch
+        {
+            null => Create(estimate, connection, signer),
+            PublicationState.TicketStrategyName => Tickets(connection, signer, fee),
+            PublicationState.SequenceStrategyName => Sequence(connection, signer, fee),
+            _ => throw new ArgumentOutOfRangeException(nameof(recordedStrategy), recordedStrategy, "not a one-account strategy"),
+        };
+    }
+
+    private static TicketStrategy Tickets(ILedgerConnection connection, ITransactionSigner signer, int fee) =>
+        new(connection.Sink, connection.Source, signer, new TicketStrategyOptions { FeeDrops = fee, TicketsPerBatch = TicketsPerBatch });
+
+    private static SequenceStrategy Sequence(ILedgerConnection connection, ITransactionSigner signer, int fee) =>
+        new(connection.Sink, signer, new SequenceStrategyOptions { FeeDrops = fee }, connection.Source);
 }

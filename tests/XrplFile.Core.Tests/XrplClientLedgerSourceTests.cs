@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Xrpl.Models.Methods;
 using Xunit;
 
 namespace XrplFile.Tests;
@@ -587,6 +588,154 @@ public class XrplClientLedgerSourceTests
             """).RootElement;
 
         Assert.Equal([new LiveTicket(uint.MaxValue, "CC")], XrplClientLedgerSource.ParseTickets(answer));
+    }
+
+    [Fact]
+    public void A_batch_inner_is_read_with_its_type_sequence_fee_and_parent_batch()
+    {
+        JsonElement record = JsonDocument.Parse("""
+            {"hash":"inner1","ledger_index":10,"validated":true,
+             "meta":{"TransactionResult":"tesSUCCESS","ParentBatchID":"abcdef"},
+             "tx_json":{"Account":"rWriter","TransactionType":"AccountSet","Sequence":41,"Fee":"0"}}
+            """).RootElement;
+
+        LedgerTransaction tx = XrplClientLedgerSource.ParseRecord(record);
+
+        Assert.Equal("AccountSet", tx.TransactionType);
+        Assert.Equal(41u, tx.Sequence);
+        Assert.Equal(0L, tx.Fee);
+        Assert.Equal("ABCDEF", tx.ParentBatchID);
+        Assert.Null(tx.TicketSequence);
+    }
+
+    [Fact]
+    public void A_ticket_create_and_a_ticketed_transaction_are_read_with_their_ticket_fields()
+    {
+        LedgerTransaction create = XrplClientLedgerSource.ParseRecord(JsonDocument.Parse("""
+            {"hash":"c","ledger_index":3,"validated":true,"meta":{"TransactionResult":"tesSUCCESS"},
+             "tx_json":{"Account":"r","TransactionType":"TicketCreate","Sequence":7,"TicketCount":3,"Fee":"12"}}
+            """).RootElement);
+        LedgerTransaction ticketed = XrplClientLedgerSource.ParseRecord(JsonDocument.Parse("""
+            {"hash":"t","ledger_index":4,"validated":true,"meta":{"TransactionResult":"tesSUCCESS"},
+             "tx_json":{"Account":"r","TransactionType":"AccountSet","Sequence":0,"TicketSequence":9,"Fee":"12"}}
+            """).RootElement);
+
+        Assert.Equal(3u, create.TicketCount);
+        Assert.Equal(7u, create.Sequence);
+        Assert.Equal(12L, create.Fee);
+        Assert.Equal(0u, ticketed.Sequence);
+        Assert.Equal(9u, ticketed.TicketSequence);
+        Assert.Null(ticketed.ParentBatchID);
+    }
+
+    [Fact]
+    public async Task A_snapshot_reads_every_account_at_the_one_validated_ledger_it_read_first()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"ledger_index":700}""");
+        node.Answer("""{"account_data":{"Sequence":11}}""");
+        node.Answer("""{"account_data":{"Sequence":22}}""");
+        XrplClientLedgerSource source = new(node.HandleAsync);
+
+        LedgerSnapshot snapshot = await source.SnapshotAsync(["rA", "rB"], TestContext.Current.CancellationToken);
+
+        Assert.Equal(700, snapshot.LedgerIndex);
+        Assert.Equal(11u, snapshot.SequenceOf("rA"));
+        Assert.Equal(22u, snapshot.SequenceOf("rB"));
+        Assert.Equal(["ledger", "account_info", "account_info"], node.Commands);
+        Assert.All(node.Requests.OfType<AccountInfoRequest>(), request => Assert.Equal((uint?)700, request.LedgerIndex.Index));
+    }
+
+    [Fact]
+    public async Task An_unfunded_account_in_a_snapshot_has_sequence_zero()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"ledger_index":5}""");
+        node.Answer("""{"error":"actNotFound"}""");
+        XrplClientLedgerSource source = new(node.HandleAsync);
+
+        LedgerSnapshot snapshot = await source.SnapshotAsync(["rNobody"], TestContext.Current.CancellationToken);
+
+        Assert.Equal(0u, snapshot.SequenceOf("rNobody"));
+    }
+
+    [Fact]
+    public async Task A_snapshot_whose_ledger_cannot_be_read_fails_rather_than_reading_validated()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"ledger_index":5}""");
+        node.Answer("""{"error":"lgrNotFound"}""");
+        XrplClientLedgerSource source = new(node.HandleAsync);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => source.SnapshotAsync(["rA"], TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+        Assert.Equal(2, node.Commands.Count);
+    }
+
+    [Fact]
+    public async Task The_open_ledger_fee_and_the_base_fee_come_from_the_fee_method()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"drops":{"base_fee":"10","median_fee":"5000","minimum_fee":"10","open_ledger_fee":"12"}}""");
+        XrplClientLedgerSource source = new(node.HandleAsync);
+
+        OpenLedgerFee fee = await source.OpenLedgerFeeAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new OpenLedgerFee(12, 10), fee);
+        Assert.Equal(["fee"], node.Commands);
+    }
+
+    [Fact]
+    public async Task A_fee_answer_without_drops_is_a_node_failure()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"current_ledger_size":"3"}""");
+        XrplClientLedgerSource source = new(node.HandleAsync);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => source.OpenLedgerFeeAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+    }
+
+    [Theory]
+    [InlineData("BatchV1_1", true)]
+    [InlineData("NoSuchAmendmentAnywhere", false)]
+    public async Task An_amendment_is_enabled_when_its_id_is_in_the_amendments_object(string name, bool expected)
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"node":{"Amendments":["42426C4D4F1009EE67080A9B7965B44656D7714D104A72F9B4369F97ABF044EE","9f287aed3cdb50a7bd1acec24296a30c9b5230ccd136219317ac790e3b884377"],"LedgerEntryType":"Amendments"}}""");
+        XrplClientLedgerSource source = new(node.HandleAsync);
+
+        Assert.Equal(expected, await source.IsAmendmentEnabledAsync(name, TestContext.Current.CancellationToken));
+
+        LedgerEntryRequest request = Assert.IsType<LedgerEntryRequest>(Assert.Single(node.Requests));
+        Assert.Equal(Amendments.SingletonIndex, request.Index);
+    }
+
+    [Fact]
+    public async Task No_amendments_object_means_nothing_is_enabled()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"error":"entryNotFound"}""");
+        XrplClientLedgerSource source = new(node.HandleAsync);
+
+        Assert.False(await source.IsAmendmentEnabledAsync(Amendments.Batch, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Any_other_failure_to_read_the_amendments_is_a_node_failure()
+    {
+        ScriptedNode node = new();
+        node.Answer("""{"error":"noNetwork"}""");
+        XrplClientLedgerSource source = new(node.HandleAsync);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => source.IsAmendmentEnabledAsync(Amendments.Batch, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
     }
 
     /// <summary>A node whose answers are scripted, in call order.</summary>

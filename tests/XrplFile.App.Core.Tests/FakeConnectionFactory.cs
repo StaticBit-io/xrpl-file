@@ -20,7 +20,16 @@ public sealed class FakeConnectionFactory : IConnectionFactory
     /// <summary>When set, <see cref="ConnectAsync"/> returns a failed task with it.</summary>
     public Exception? ConnectThrows { get; set; }
 
+    /// <summary>The Batch node, once <see cref="EnableBatch"/> created it; connections then hand it out as their sink.</summary>
+    public FakeBatchLedgerSink? BatchSink { get; private set; }
+
     public FakeConnectionFactory() => Sink = new FakeLedgerSink(Ledger);
+
+    /// <summary>
+    /// Switches every later connection to a <see cref="FakeBatchLedgerSink"/> over the same ledger.
+    /// Not the default: that sink closes a ledger on every read, which the one-account tests do not expect.
+    /// </summary>
+    public FakeBatchLedgerSink EnableBatch() => BatchSink ??= new FakeBatchLedgerSink(Ledger);
 
     public Task<ILedgerConnection> ConnectAsync(string network, CancellationToken cancellationToken)
     {
@@ -34,7 +43,7 @@ public sealed class FakeConnectionFactory : IConnectionFactory
     {
         public ILedgerSource Source => owner.Ledger;
 
-        public ILedgerSink Sink => owner.Sink;
+        public ILedgerSink Sink => (ILedgerSink?)owner.BatchSink ?? owner.Sink;
 
         public string Url => "fake://node";
 

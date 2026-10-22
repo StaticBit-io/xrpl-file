@@ -1,0 +1,84 @@
+using Xunit;
+
+namespace XrplFile.Tests;
+
+public class BatchPublicationEstimateTests
+{
+    private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    private static FakeLedgerSource Node(long writerBalance = 100_000_000, long payerBalance = 100_000_000)
+    {
+        FakeLedgerSource source = new() { Fees = new NetworkFees(10, 1_000_000, 200_000), OpenLedgerFee = new OpenLedgerFee(10, 10) };
+        source.Balances["rWriter"] = writerBalance;
+        source.Balances["rPayer"] = payerBalance;
+        return source;
+    }
+
+    [Fact]
+    public async Task The_seven_megabyte_file_of_the_testnet_run_is_priced_as_the_spec_says()
+    {
+        BatchPublicationEstimate estimate = await PublicationEstimator.EstimateBatchAsync(Node(), "rWriter", "rPayer", 7_123_692, Token);
+
+        Assert.Equal(7124, estimate.Chunks);
+        Assert.Equal(7, estimate.Blocks);
+        Assert.Equal(1, estimate.Lists);
+        Assert.Equal(7126, estimate.Memos);
+        Assert.Equal(891, estimate.Batches);
+        Assert.Equal(2, estimate.SoloTransactions);
+        Assert.Equal(15, estimate.FeeUnitDrops);
+        Assert.Equal(30, estimate.FeeCeilingDrops);
+        Assert.Equal((7124 + 3 * 891) * 15L, estimate.PayerFeeDrops);
+        Assert.Equal(2 * 15L, estimate.WriterFeeDrops);
+        Assert.Equal(53_445 * 30L, estimate.PayerFeeDropsWorstCase);
+        Assert.Equal((7126 * 3 + 250) * 30L, estimate.WriterFeeDropsWorstCase);
+        Assert.Equal(1_000_000 + 53_445 * 30L, estimate.PayerRequiredDrops);
+    }
+
+    [Fact]
+    public async Task A_one_chunk_file_is_two_solo_transactions_and_costs_the_payer_nothing()
+    {
+        BatchPublicationEstimate estimate = await PublicationEstimator.EstimateBatchAsync(Node(), "rWriter", "rPayer", 500, Token);
+
+        Assert.Equal(0, estimate.Batches);
+        Assert.Equal(2, estimate.SoloTransactions);
+        Assert.Equal(0, estimate.PayerFeeDrops);
+        Assert.Equal(30, estimate.WriterFeeDrops);
+    }
+
+    [Fact]
+    public async Task Nine_chunks_are_two_batches_and_the_manifest_a_solo()
+    {
+        BatchPublicationEstimate estimate = await PublicationEstimator.EstimateBatchAsync(Node(), "rWriter", "rPayer", 9_000, Token);
+
+        Assert.Equal(2, estimate.Batches);
+        Assert.Equal(1, estimate.SoloTransactions);
+        Assert.Equal((9 + 3 * 2) * 15L, estimate.PayerFeeDrops);
+    }
+
+    [Fact]
+    public async Task Owned_objects_lock_reserve_out_of_each_accounts_spendable_balance()
+    {
+        FakeLedgerSource node = Node(writerBalance: 2_000_000, payerBalance: 3_000_000);
+        node.OwnerCounts["rPayer"] = 5;
+
+        BatchPublicationEstimate estimate = await PublicationEstimator.EstimateBatchAsync(node, "rWriter", "rPayer", 10_000, Token);
+
+        Assert.Equal(2_000_000, estimate.WriterSpendableDrops);
+        Assert.Equal(3_000_000 - 5 * 200_000, estimate.PayerSpendableDrops);
+        Assert.True(estimate.WriterCovers);
+        Assert.True(estimate.PayerCovers);
+    }
+
+    [Fact]
+    public void Refusals_come_writer_first_then_payer_then_budget()
+    {
+        BatchPublicationEstimate broke = new(10, 1, 0, 11, 2, 1, 10, 15, 30, 300, 15, 3000, 1000, 1_000_000, 200_000, 0, 0, 0, 0);
+        BatchPublicationEstimate payerBroke = broke with { WriterBalanceDrops = 10_000_000 };
+        BatchPublicationEstimate rich = payerBroke with { PayerBalanceDrops = 10_000_000 };
+
+        Assert.Equal(XrplFileError.InsufficientBalance, Assert.Throws<XrplFileException>(() => PublicationEstimator.RequireBatch(broke, 1)).Error);
+        Assert.Equal(XrplFileError.PayerInsufficientBalance, Assert.Throws<XrplFileException>(() => PublicationEstimator.RequireBatch(payerBroke, 1)).Error);
+        Assert.Equal(XrplFileError.BudgetExceeded, Assert.Throws<XrplFileException>(() => PublicationEstimator.RequireBatch(rich, 1)).Error);
+        PublicationEstimator.RequireBatch(rich, null);
+    }
+}

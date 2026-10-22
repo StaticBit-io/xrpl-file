@@ -119,11 +119,111 @@ public sealed class PublishErrorMessagesTests
     {
         foreach (XrplFileError error in Enum.GetValues<XrplFileError>().Where(e => e != XrplFileError.NodeUnreachable))
         {
+            if (error == XrplFileError.FeeTooHigh && point == RunFailurePoint.BeforeSubmitting) continue;
+            if (error == XrplFileError.NodeLacksHistory && point == RunFailurePoint.WhileSubmitting) continue;
+            if (error is XrplFileError.PayerInsufficientBalance or XrplFileError.BatchNotEnabled && point == RunFailurePoint.BeforeResuming) continue;
+
             XrplFileException thrown = new(error, "failed", block: 7);
 
             Assert.Equal(
                 PublishErrorMessages.For(thrown),
                 PublishErrorMessages.ForRun(thrown, point, usesTickets: true, ownerReserveDrops: 200_000));
         }
+    }
+
+    [Fact]
+    public void A_resume_refused_for_a_short_payer_does_not_offer_a_payer_chooser_the_screen_may_not_have()
+    {
+        XrplFileException thrown = new(XrplFileError.PayerInsufficientBalance, "payer holds too little");
+
+        string sentence = PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0);
+
+        Assert.Equal("The payer does not hold enough XRP to finish this publication. Fund it, then resume.", sentence);
+        Assert.DoesNotContain("another payer", sentence, StringComparison.Ordinal);
+        Assert.Equal(
+            PublishErrorMessages.For(XrplFileError.PayerInsufficientBalance),
+            PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
+        Assert.Equal(
+            PublishErrorMessages.For(XrplFileError.PayerInsufficientBalance),
+            PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0));
+    }
+
+    [Fact]
+    public void A_resume_refused_because_Batch_is_off_does_not_offer_tickets_a_Batch_run_cannot_use()
+    {
+        XrplFileException thrown = new(XrplFileError.BatchNotEnabled, "Batch is not enabled");
+
+        string sentence = PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0);
+
+        Assert.Equal("This network no longer enables Batch; the run can be resumed once it does.", sentence);
+        Assert.DoesNotContain("Nobody", sentence, StringComparison.Ordinal);
+        Assert.Equal(
+            PublishErrorMessages.For(XrplFileError.BatchNotEnabled),
+            PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
+        Assert.Equal(
+            PublishErrorMessages.For(XrplFileError.BatchNotEnabled),
+            PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0));
+    }
+
+    [Fact]
+    public void Batch_not_enabled_sends_the_person_to_Nobody()
+    {
+        Assert.Equal(
+            "This network does not enable Batch. Choose Nobody under Paid by to publish with tickets.",
+            PublishErrorMessages.For(XrplFileError.BatchNotEnabled));
+    }
+
+    [Fact]
+    public void A_short_payer_is_told_apart_from_a_short_writer()
+    {
+        Assert.Equal(
+            "The payer does not hold enough XRP for this publication. Fund it, or choose another payer.",
+            PublishErrorMessages.For(XrplFileError.PayerInsufficientBalance));
+    }
+
+    [Theory]
+    [InlineData(AccountRole.Writer, "writer")]
+    [InlineData(AccountRole.Payer, "payer")]
+    public void An_account_in_use_names_its_role(AccountRole role, string word)
+    {
+        XrplFileException thrown = new(XrplFileError.AccountInUse, "rX sent a payment", role: role);
+
+        Assert.Equal(
+            $"The {word} account sent a transaction of its own during the publication. Is this key in use somewhere else? "
+                + "The run is listed under unfinished runs; resume it once nothing else uses the key.",
+            PublishErrorMessages.For(thrown));
+    }
+
+    [Fact]
+    public void Fees_that_rose_mid_run_say_the_run_can_be_resumed()
+    {
+        Assert.Equal(
+            "Network fees rose above what this publication was approved for. The run is listed under unfinished runs; "
+                + "resume it when fees are back down.",
+            PublishErrorMessages.For(XrplFileError.FeeTooHigh));
+    }
+
+    [Fact]
+    public void Fees_too_high_before_anything_started_do_not_mention_an_unfinished_run()
+    {
+        XrplFileException thrown = new(XrplFileError.FeeTooHigh, "open ledger fee 250");
+
+        string sentence = PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0);
+
+        Assert.Equal(PublishErrorMessages.FeeTooHighNow, sentence);
+        Assert.DoesNotContain("unfinished", sentence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void History_that_lags_a_running_publication_is_not_described_as_a_reader_problem()
+    {
+        XrplFileException thrown = new(XrplFileError.NodeLacksHistory, "account_tx lagged");
+
+        Assert.Equal(
+            PublishErrorMessages.HistoryLaggedWhilePublishing,
+            PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0));
+        Assert.Equal(
+            PublishErrorMessages.For(XrplFileError.NodeLacksHistory),
+            PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
     }
 }

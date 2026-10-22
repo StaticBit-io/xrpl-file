@@ -99,7 +99,7 @@ public static class PublicationEstimator
 
         long chunks = FileTree.ChunkCount(fileBytes, MemoLayout.ChunkBytes);
         int blocks = FileTree.BlockCount(chunks);
-        int lists = blocks > 1 ? BlockListMemos(blocks) : 0;
+        int lists = blocks > 1 ? BlockListMemoCount(blocks) : 0;
 
         long memos = chunks + lists + 1;
         int batch = Math.Min(ticketsPerBatch, TicketStrategy.MaxTicketsPerMint);
@@ -147,6 +147,100 @@ public static class PublicationEstimator
     }
 
     /// <summary>
+    /// Prices the memos of a file of <paramref name="fileBytes"/> bytes for a Batch run: the writer
+    /// signs the inners, the payer pays the outers (spec 4.5).
+    /// </summary>
+    public static Task<BatchPublicationEstimate> EstimateBatchAsync(
+        ILedgerSource source, string writer, string payer, long fileBytes, CancellationToken cancellationToken)
+    {
+        if (fileBytes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(fileBytes), fileBytes, "an empty file has no chunks and no root");
+        }
+
+        long chunks = FileTree.ChunkCount(fileBytes, MemoLayout.ChunkBytes);
+        int blocks = FileTree.BlockCount(chunks);
+        int lists = blocks > 1 ? BlockListMemoCount(blocks) : 0;
+
+        return EstimateBatchAsync(source, writer, payer, chunks, blocks, lists, cancellationToken);
+    }
+
+    /// <summary>
+    /// Prices <paramref name="chunks"/> chunk memos, <paramref name="lists"/> list memos and the
+    /// manifest, over the three passes the writer makes, each grouped by spec B11 (spec 4.5).
+    /// </summary>
+    internal static async Task<BatchPublicationEstimate> EstimateBatchAsync(
+        ILedgerSource source, string writer, string payer, long chunks, int blocks, int lists, CancellationToken cancellationToken)
+    {
+        int batches = 0;
+        int solos = 0;
+        long batchedMemos = 0;
+
+        foreach (long pass in new[] { chunks, lists, 1L })
+        {
+            if (pass == 0) continue;
+
+            if (pass == 1)
+            {
+                solos++;
+                continue;
+            }
+
+            batches += BatchGrouping.Sizes(checked((int)pass)).Count;
+            batchedMemos += pass;
+        }
+
+        long memos = chunks + lists + 1;
+
+        OpenLedgerFee open = await source.OpenLedgerFeeAsync(cancellationToken).ConfigureAwait(false);
+        long unit = BatchFees.Unit(open);
+        long ceiling = BatchFees.Ceiling(unit);
+
+        NetworkFees fees = await source.FeesAsync(cancellationToken).ConfigureAwait(false);
+        AccountState writerState = await source.AccountStateAsync(writer, cancellationToken).ConfigureAwait(false);
+        AccountState payerState = await source.AccountStateAsync(payer, cancellationToken).ConfigureAwait(false);
+
+        long payerFee = (batchedMemos + 3L * batches) * unit;
+        long writerFee = solos * unit;
+
+        // ceil(memos × 3 × 2.5) = ceil(memos × 7.5) = (15 × memos + 1) / 2 for a whole number of memos.
+        long payerWorst = (memos * 15 + 1) / 2 * ceiling;
+        long writerWorst = (memos * 3 + TicketStrategy.MaxLiveTickets) * ceiling;
+
+        return new BatchPublicationEstimate(
+            chunks, blocks, lists, memos, batches, solos,
+            open.OpenLedgerFeeDrops, unit, ceiling,
+            payerFee, writerFee, payerWorst, writerWorst,
+            fees.BaseReserveDrops, fees.OwnerReserveDrops,
+            writerState.BalanceDrops, writerState.OwnerCount,
+            payerState.BalanceDrops, payerState.OwnerCount);
+    }
+
+    /// <summary>Spec 4.5's refusals 3–5: the writer's balance, the payer's, then the caller's budget against both requirements.</summary>
+    internal static void RequireBatch(BatchPublicationEstimate estimate, long? budgetDrops)
+    {
+        if (!estimate.WriterCovers)
+        {
+            throw new XrplFileException(XrplFileError.InsufficientBalance,
+                $"the writer needs {estimate.WriterRequiredDrops} drops and can spend {estimate.WriterSpendableDrops}");
+        }
+
+        if (!estimate.PayerCovers)
+        {
+            throw new XrplFileException(XrplFileError.PayerInsufficientBalance,
+                $"the payer needs {estimate.PayerRequiredDrops} drops and can spend {estimate.PayerSpendableDrops}");
+        }
+
+        long required = estimate.WriterRequiredDrops + estimate.PayerRequiredDrops;
+
+        if (budgetDrops is { } ceiling && required > ceiling)
+        {
+            throw new XrplFileException(XrplFileError.BudgetExceeded,
+                $"the run needs {required} drops across both accounts and the budget allows {ceiling}");
+        }
+    }
+
+    /// <summary>
     /// Refuses a run the caller's ceiling forbids, then one the account cannot carry. The ceiling
     /// comes first because it is the caller's own decision and needs no excuse from the network.
     /// </summary>
@@ -190,7 +284,7 @@ public static class PublicationEstimator
     /// How many memos the block list takes. Counted by packing real entries rather than by
     /// arithmetic, because the packer is greedy and its own code is the only honest answer.
     /// </summary>
-    private static int BlockListMemos(int blocks)
+    internal static int BlockListMemoCount(int blocks)
     {
         string hash = new('0', 64);
         List<BlockEntry> entries = [.. Enumerable.Range(0, blocks).Select(i => new BlockEntry(i, hash, 999_999_999))];

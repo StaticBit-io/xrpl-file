@@ -75,6 +75,25 @@ public interface ILedgerSource
     Task<long> CurrentLedgerAsync(CancellationToken cancellationToken);
 
     /// <summary>
+    /// The latest validated ledger index, then each account's next sequence read at exactly that
+    /// ledger (spec B6). A ledger that cannot be read at that index fails the snapshot; it never
+    /// falls back to "validated". An account the ledger does not carry has sequence zero.
+    /// </summary>
+    Task<LedgerSnapshot> SnapshotAsync(IReadOnlyList<string> accounts, CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"{GetType().Name} does not take ledger snapshots");
+
+    /// <summary>The <c>fee</c> method's open-ledger fee and base fee (spec B15).</summary>
+    Task<OpenLedgerFee> OpenLedgerFeeAsync(CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"{GetType().Name} does not read the open-ledger fee");
+
+    /// <summary>
+    /// Whether the validated ledger's <c>Amendments</c> object lists the amendment named
+    /// <paramref name="name"/> (spec B14, 4.3). No such object means nothing is enabled.
+    /// </summary>
+    Task<bool> IsAmendmentEnabledAsync(string name, CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"{GetType().Name} does not read amendments");
+
+    /// <summary>
     /// What the node says about an account that is about to receive everything another account
     /// holds. Answers <see cref="DestinationState.Absent"/> for an account the ledger does not
     /// carry, the same way <see cref="AccountStateAsync"/> answers <see cref="AccountState.Absent"/>

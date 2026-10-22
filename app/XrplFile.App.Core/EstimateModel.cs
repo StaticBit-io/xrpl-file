@@ -15,11 +15,19 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
 
     public string? Message { get; private set; }
 
+    /// <summary>The two-account estimate, when the request has a payer (spec 6.2); otherwise null.</summary>
+    public BatchPublicationEstimate? BatchEstimate { get; private set; }
+
+    /// <summary>"Batch, paid by &lt;label&gt;." for a Batch request, otherwise null (spec 6.2).</summary>
+    public string? MethodLine { get; private set; }
+
     public bool CanPublish =>
-        Estimate is not null
-        && Estimate.BalanceCovers
-        && Estimate.FeeDropsPerTransaction <= int.MaxValue
-        && !PublishPolicy.HasNoTicketRoom(Estimate);
+        BatchEstimate is { } batch
+            ? batch.WriterCovers && batch.PayerCovers
+            : Estimate is not null
+                && Estimate.BalanceCovers
+                && Estimate.FeeDropsPerTransaction <= int.MaxValue
+                && !PublishPolicy.HasNoTicketRoom(Estimate);
 
     public async Task EstimateAsync(PublishRequest request, CancellationToken cancellationToken)
     {
@@ -28,6 +36,14 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         Estimate = null;
         NodeUrl = null;
         Message = null;
+        BatchEstimate = null;
+        MethodLine = null;
+
+        if (request.PayerAccount is { } payer)
+        {
+            await EstimateBatchAsync(request, payer, cancellationToken).ConfigureAwait(false);
+            return;
+        }
 
         try
         {
@@ -79,6 +95,54 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
                 + $"{XrpAmount.Format(Estimate.SpendableDrops)}. {ReserveSentence(Estimate)}"
                 + "Fund it, or publish a smaller file.";
         }
+    }
+
+    private async Task EstimateBatchAsync(PublishRequest request, string payer, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using ILedgerConnection connection =
+                await connections.ConnectAsync(request.Network, cancellationToken).ConfigureAwait(false);
+
+            NodeUrl = connection.Url;
+
+            SessionOptions options = new() { StateDirectory = paths.StateDirectory };
+
+            BatchEstimate = await PublicationSession.EstimateAsync(
+                connection.Source, request.Account, payer, request.File.Length, options, cancellationToken).ConfigureAwait(false);
+        }
+        catch (XrplFileException ex)
+        {
+            // Nothing has started, so "listed under unfinished runs" would be false (Spec question 6).
+            Message = ex.Error == XrplFileError.FeeTooHigh ? PublishErrorMessages.FeeTooHighNow : PublishErrorMessages.For(ex);
+            return;
+        }
+
+        MethodLine = $"Batch, paid by {request.PayerLabel ?? payer}.";
+        Message = ShortfallOf(BatchEstimate, request);
+    }
+
+    /// <summary>The account that is short, by label, with what it needs and what it can spend (spec 6.2); null when both cover.</summary>
+    public static string? ShortfallOf(BatchPublicationEstimate estimate, PublishRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(estimate);
+        ArgumentNullException.ThrowIfNull(request);
+
+        List<string> lines = [];
+
+        if (!estimate.WriterCovers)
+        {
+            lines.Add($"The writer {request.WriterLabel ?? request.Account} needs {XrpAmount.Format(estimate.WriterRequiredDrops)} "
+                + $"and can spend {XrpAmount.Format(estimate.WriterSpendableDrops)}.");
+        }
+
+        if (!estimate.PayerCovers)
+        {
+            lines.Add($"The payer {request.PayerLabel ?? request.PayerAccount} needs {XrpAmount.Format(estimate.PayerRequiredDrops)} "
+                + $"and can spend {XrpAmount.Format(estimate.PayerSpendableDrops)}.");
+        }
+
+        return lines.Count == 0 ? null : string.Join(" ", lines);
     }
 
     /// <summary>

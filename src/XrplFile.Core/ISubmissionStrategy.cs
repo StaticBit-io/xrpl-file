@@ -4,7 +4,14 @@ namespace XrplFile;
 public sealed record MemoSubmission(string MemoTypeHex, string MemoDataHex, string? MemoFormatHex);
 
 /// <summary>Where a memo landed: its position in the batch, and the transaction that carried it.</summary>
-public sealed record SubmittedMemo(int Index, string TxHash);
+public sealed record SubmittedMemo(int Index, string TxHash)
+{
+    /// <summary>
+    /// The ledger the memo landed in, when the strategy read it off the record it confirmed the memo
+    /// by; null when it did not. The writer then needs no <c>tx</c> lookup per memo (Spec question 23).
+    /// </summary>
+    public long? LedgerIndex { get; init; }
+}
 
 /// <summary>
 /// How a set of memos reaches the ledger.
@@ -28,7 +35,7 @@ public interface ISubmissionStrategy : IAsyncDisposable
     /// It is on the interface because it is the one number somebody else has to agree with. A run
     /// is approved against an estimate priced at some fee; a strategy that charges another turns
     /// that approval into a statement about a run nobody is going to submit, which is why
-    /// <see cref="PublicationSession.StartAsync"/> compares the two and refuses to start.
+    /// <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> compares the two and refuses to start.
     /// </summary>
     long FeeDropsPerTransaction { get; }
 
@@ -38,7 +45,7 @@ public interface ISubmissionStrategy : IAsyncDisposable
     /// It is on the interface for the same reason the fee is: somebody else has to agree with it.
     /// A publication is recorded, reported and read under one writer, and a strategy signing as
     /// another account would put the rest of a file into a history nobody is going to look in — so
-    /// <see cref="PublicationSession.StartAsync"/> and <see cref="PublicationSession.ResumeAsync"/>
+    /// <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> and <see cref="PublicationSession.ResumeAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, SessionOptions, CancellationToken)"/>
     /// compare this against the writer they were given, and refuse when it differs.
     /// </summary>
     string Account { get; }

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Xrpl.AddressCodec;
 
 namespace XrplFile;
 
@@ -24,6 +25,18 @@ namespace XrplFile;
 /// What has landed so far, by index. A resume does not trust this — the ledger decides — but it
 /// carries the run's report through an interruption.
 /// </param>
+/// <param name="Strategy">
+/// How the run submits (spec B16): "sequence" or "tickets" in version 2, absent in a version-2 file
+/// written before this was recorded; "batch" in version 3. A run resumes on the strategy it recorded.
+/// </param>
+/// <param name="SourcePath">The absolute path the file was read from, so a resume need not ask for it (spec B17).</param>
+/// <param name="ManifestHash">The manifest's hash once the run is done (spec B27).</param>
+/// <param name="Payer">Version 3: the classic address that signs and pays for the outers.</param>
+/// <param name="PayerKeyReference">Version 3: the payer's key, as the caller references it.</param>
+/// <param name="Fence">
+/// Version 3: the highest deadline any transmission of the run registered, written before that
+/// transmission is first sent (spec B23); 0 before the first one.
+/// </param>
 public sealed record PublicationState(
     int Version,
     string Network,
@@ -36,16 +49,34 @@ public sealed record PublicationState(
     string? Root,
     long StartedInLedger,
     string Phase,
-    IReadOnlyDictionary<int, string> ChunkHashes)
+    IReadOnlyDictionary<int, string> ChunkHashes,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Strategy = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourcePath = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ManifestHash = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Payer = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PayerKeyReference = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Fence = null)
 {
     /// <summary>
-    /// 2 since <see cref="Root"/> became something a run records at its start rather than at its
+    /// Sequence and ticket runs. 2 since <see cref="Root"/> became something a run records at its start rather than at its
     /// end. A version 1 file names a started run with no root in it, and a resume that read one
     /// would have nothing to check the bytes it was handed against — so those files are refused
     /// by <see cref="Load"/> and listed as unreadable by <see cref="PublicationSession.Unfinished"/>,
     /// which is where a person can still see the account and the ledger they name.
     /// </summary>
     public const int CurrentVersion = 2;
+
+    /// <summary>
+    /// Batch runs (spec B16). An application that predates them refuses this version, which is the
+    /// point: it cannot resume a Batch run as a one-account run and erase its payer on save.
+    /// </summary>
+    public const int BatchVersion = 3;
+
+    public const string SequenceStrategyName = "sequence";
+
+    public const string TicketStrategyName = "tickets";
+
+    public const string BatchStrategyName = "batch";
 
     /// <summary>The one this file ends with, on every platform, so two hosts write the same bytes.</summary>
     private const string LineEnding = "\n";
@@ -82,8 +113,42 @@ public sealed record PublicationState(
         PublicationState? state = JsonSerializer.Deserialize<PublicationState>(File.ReadAllText(path), Options);
 
         if (state is null) throw new FormatException($"{path} did not deserialize as a publication state");
-        if (state.Version != CurrentVersion) throw new FormatException($"state version {state.Version} is not one this library reads");
 
-        return state;
+        if (state.Version == CurrentVersion)
+        {
+            if (state.Strategy is not (null or SequenceStrategyName or TicketStrategyName))
+            {
+                throw new FormatException($"a version {CurrentVersion} state records the strategy '{state.Strategy}', which is not one it can carry");
+            }
+
+            return state;
+        }
+
+        if (state.Version == BatchVersion)
+        {
+            if (!string.Equals(state.Strategy, BatchStrategyName, StringComparison.Ordinal))
+            {
+                throw new FormatException($"a version {BatchVersion} state must record the strategy '{BatchStrategyName}'");
+            }
+
+            if (state.Payer is null || !XrplCodec.IsValidClassicAddress(state.Payer))
+            {
+                throw new FormatException($"a version {BatchVersion} state must name its payer by classic address");
+            }
+
+            if (string.IsNullOrWhiteSpace(state.PayerKeyReference))
+            {
+                throw new FormatException($"a version {BatchVersion} state must name its payer's key");
+            }
+
+            if (state.Fence is null)
+            {
+                throw new FormatException($"a version {BatchVersion} state must record its fence");
+            }
+
+            return state;
+        }
+
+        throw new FormatException($"state version {state.Version} is not one this library reads");
     }
 }

@@ -41,6 +41,18 @@ public sealed record RunSnapshot(
 
     /// <summary>What one ticket locks, in drops, from the same estimate. Zero until it is taken.</summary>
     public long OwnerReserveDrops { get; init; }
+
+    /// <summary>Whether the run publishes through Batch, with a payer (spec 6.1).</summary>
+    public bool UsesBatch { get; init; }
+
+    /// <summary>The run's state file, once it has one: what Resume on the failed-run screen resumes (spec B19).</summary>
+    public string? StatePath { get; init; }
+
+    /// <summary>When this run was started, on the run's clock (spec 6.3: the elapsed time).</summary>
+    public DateTimeOffset? StartedAt { get; init; }
+
+    /// <summary>The file's size, which says how many passes are still to come (spec B21).</summary>
+    public long FileBytes { get; init; }
 }
 
 /// <summary>
@@ -56,8 +68,16 @@ public sealed class PublicationRun(
     IKeyVault vault,
     RunPaths paths,
     IPublicationHistory history,
-    VaultAutoLock? autoLock = null)
+    VaultAutoLock? autoLock = null,
+    TimeProvider? time = null,
+    BatchStrategyOptions? batchOptions = null)
 {
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private bool _usesBatch;
+    private string? _statePath;
+    private DateTimeOffset? _startedAt;
+    private long _fileBytes;
+
     private readonly Lock _gate = new();
 
     private CancellationTokenSource? _cancellation;
@@ -114,6 +134,10 @@ public sealed class PublicationRun(
                 {
                     UsesTickets = _usesTickets,
                     OwnerReserveDrops = _ownerReserveDrops,
+                    UsesBatch = _usesBatch,
+                    StatePath = _statePath,
+                    StartedAt = _startedAt,
+                    FileBytes = _fileBytes,
                 };
             }
         }
@@ -178,6 +202,10 @@ public sealed class PublicationRun(
             _historyNote = null;
             _usesTickets = false;
             _ownerReserveDrops = 0;
+            _usesBatch = false;
+            _statePath = null;
+            _startedAt = null;
+            _fileBytes = 0;
 
             // Bumped here, not only in Begin: Reset accepts on the same "not Running" state Begin
             // does, and a history append from the run just cleared can still be in flight when it
@@ -218,6 +246,10 @@ public sealed class PublicationRun(
             _ownerReserveDrops = 0;
             _name = request.Name;
             _network = request.Network;
+            _usesBatch = request.PayerAccount is not null;
+            _statePath = statePath;
+            _startedAt = _time.GetUtcNow();
+            _fileBytes = request.File.Length;
             _completion = Task.Run(() => RunAsync(request, statePath, cancellation.Token, generation));
         }
 
@@ -228,14 +260,10 @@ public sealed class PublicationRun(
     {
         PublicationRunState finalState;
         PublicationReport? report = null;
+        PublicationState? finished = null;
+        string? finishedPath = null;
         string? failure = null;
-
-        // What the failure sentence may say about money (see PublishErrorMessages.ForRun). Moved to
-        // WhileSubmitting only once a session exists: StartAsync writes the state file before its
-        // first transaction, and ResumeAsync only reads the ledger.
-        RunFailurePoint point = statePath is null ? RunFailurePoint.BeforeSubmitting : RunFailurePoint.BeforeResuming;
-        bool usesTickets = false;
-        long ownerReserveDrops = 0;
+        RunAttempt attempt = new() { Point = statePath is null ? RunFailurePoint.BeforeSubmitting : RunFailurePoint.BeforeResuming };
 
         try
         {
@@ -246,103 +274,24 @@ public sealed class PublicationRun(
 
             try
             {
-                SessionOptions estimateOptions = new()
-                {
-                    StateDirectory = paths.StateDirectory,
-                    TicketsPerBatch = PublishPolicy.TicketsPerBatch,
-                };
+                // A run resumes on the strategy it recorded (spec B16); a fresh one is Batch when it has a payer (spec B4).
+                PublicationState? recorded = statePath is null ? null : PublicationState.Load(statePath);
+                bool batch = recorded is null ? request.PayerAccount is not null : recorded.Version == PublicationState.BatchVersion;
 
-                // Estimated again here rather than carried from the screen: the node's price moves,
-                // and StartAsync refuses a strategy priced differently (FeeMismatch). This is also
-                // what the budget is set from, so a run cannot quietly cost more than what was just
-                // priced.
-                PublicationEstimate estimate = await PublicationSession.EstimateAsync(
-                    connection.Source, request.Account, request.File.Length, estimateOptions, cancellationToken)
-                    .ConfigureAwait(false);
-
-                // PublishPolicy.Create's own remarks say every caller checks this first and that
-                // reaching it otherwise is a defect -- but EstimateModel's own check only ever gates
-                // a fresh Start: it runs once, against a screen the person is looking at, and this
-                // estimate is a second, independent one taken right here because the node's price
-                // can have moved since. UnfinishedModel.ResumeAsync reaches PublicationRun.Resume,
-                // and so this method, without ever going through EstimateModel at all, so checking
-                // only there would leave a resumed run free to reach PublishPolicy.Create's own
-                // defect exception. Checked again here instead, which covers both callers with the
-                // one sentence this application actually has for it, before either one reveals a key
-                // or spends anything on a strategy this price can never be used to build.
-                if (estimate.FeeDropsPerTransaction > int.MaxValue)
-                {
-                    throw new FeeTooLargeForApplicationException();
-                }
-
-                usesTickets = PublishPolicy.UsesTickets(estimate);
-                ownerReserveDrops = estimate.OwnerReserveDrops;
-
-                // Pinned to this run's generation, like every other write after Begin: a newer run's
-                // snapshot must not inherit this one's answer.
+                // The strategy actually run decides what the screen assumes about its pace, not the request: a resume runs the recorded one.
                 lock (_gate)
                 {
-                    if (_generation == generation)
-                    {
-                        _usesTickets = usesTickets;
-                        _ownerReserveDrops = ownerReserveDrops;
-                    }
+                    if (_generation == generation) _usesBatch = batch;
                 }
 
-                SessionOptions options = new()
-                {
-                    StateDirectory = paths.StateDirectory,
-                    TicketsPerBatch = PublishPolicy.TicketsPerBatch,
-                    BudgetDrops = estimate.RequiredDrops,
-                };
+                (report, finished, finishedPath) = batch
+                    ? await RunBatchAsync(request, statePath, connection, attempt, generation, cancellationToken).ConfigureAwait(false)
+                    : await RunOneAccountAsync(request, statePath, recorded, connection, attempt, generation, cancellationToken).ConfigureAwait(false);
 
-                VaultSigner signer = await VaultSigner
-                    .CreateAsync(vault, request.KeyReference, cancellationToken, autoLock).ConfigureAwait(false);
-
-                ISubmissionStrategy strategy = PublishPolicy.Create(estimate, connection, signer);
-
-                try
-                {
-                    PublicationSession session = statePath is null
-                        ? await PublicationSession.StartAsync(
-                            strategy,
-                            connection.Source,
-                            request.File,
-                            request.Type,
-                            request.Name,
-                            request.Account,
-                            request.KeyReference,
-                            request.Network,
-                            options,
-                            cancellationToken).ConfigureAwait(false)
-                        : await PublicationSession.ResumeAsync(
-                            strategy, connection.Source, request.File, statePath, options, cancellationToken)
-                            .ConfigureAwait(false);
-
-                    point = RunFailurePoint.WhileSubmitting;
-
-                    report = await session
-                        .RunAsync(new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false);
-
-                    finalState = PublicationRunState.Succeeded;
-                }
-                finally
-                {
-                    // Disposal is cleanup, not part of what the run is about, and its own outcome
-                    // must never be able to override the one just decided above: a paid publication
-                    // that already has its report in hand must not be reported Failed with the
-                    // report thrown away because closing the strategy afterwards happened to throw.
-                    // Every strategy this application builds today either swallows its own disposal
-                    // errors or does nothing (SequenceStrategy.DisposeAsync is a no-op; TicketStrategy
-                    // does not throw from disposing its queue), so this is not reachable yet — but
-                    // the previous version of this method did not depend on that being true, and
-                    // this one does, so the dependency is closed here rather than left implicit.
-                    await DisposeQuietlyAsync(strategy).ConfigureAwait(false);
-                }
+                finalState = PublicationRunState.Succeeded;
             }
             finally
             {
-                // Same reasoning as the strategy's own disposal above, one level out.
                 await DisposeQuietlyAsync(connection).ConfigureAwait(false);
             }
         }
@@ -357,7 +306,7 @@ public sealed class PublicationRun(
         }
         catch (XrplFileException ex)
         {
-            failure = PublishErrorMessages.ForRun(ex, point, usesTickets, ownerReserveDrops);
+            failure = PublishErrorMessages.ForRun(ex, attempt.Point, attempt.UsesTickets, attempt.OwnerReserveDrops);
             finalState = PublicationRunState.Failed;
         }
         catch (VaultException ex)
@@ -368,6 +317,11 @@ public sealed class PublicationRun(
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             failure = "The publication's state could not be written to disk, so the run was stopped.";
+            finalState = PublicationRunState.Failed;
+        }
+        catch (Exception ex) when (ex is FormatException or System.Text.Json.JsonException)
+        {
+            failure = "This run's state file could not be read, so it cannot be resumed.";
             finalState = PublicationRunState.Failed;
         }
         catch (Exception)
@@ -421,14 +375,15 @@ public sealed class PublicationRun(
             {
                 HistoryAppendResult appended = history.Append(new PublicationRecord(
                     report!.Link.ToString(),
-                    request.Name,
-                    request.File.Length,
-                    request.Type,
-                    request.Network,
-                    request.Account,
+                    finished!.Name ?? request.Name,
+                    finished.Size,
+                    finished.Type,
+                    finished.Network,
+                    finished.Writer,
                     report.Transactions,
                     report.FeeDropsEstimated,
-                    report.FinishedAt));
+                    report.FinishedAt,
+                    finished.Payer));
 
                 // Taken from Append's own return value, not from a shared property read afterward:
                 // IPublicationHistory.Append is documented to return only its own call's outcome, so
@@ -459,6 +414,10 @@ public sealed class PublicationRun(
                         if (_generation == generation) _historyNote = appended.Note;
                     }
                 }
+
+                // History holds the link now, so the run's state has nothing left to protect, and a
+                // record the person later forgets cannot come back from it (Spec question 22).
+                if (appended.Recorded) DeleteState(finishedPath!);
             }
             catch (Exception ex)
             {
@@ -491,6 +450,207 @@ public sealed class PublicationRun(
                 _cancellation?.Dispose();
                 _cancellation = null;
             }
+        }
+    }
+
+    /// <summary>What <see cref="PublishErrorMessages.ForRun"/> may say about money, as the run learns it.</summary>
+    private sealed class RunAttempt
+    {
+        public RunFailurePoint Point { get; set; }
+
+        public bool UsesTickets { get; set; }
+
+        public long OwnerReserveDrops { get; set; }
+    }
+
+    /// <summary>A one-account run: the code this method held before Batch, resuming on the recorded strategy.</summary>
+    private async Task<(PublicationReport Report, PublicationState State, string StatePath)> RunOneAccountAsync(
+        PublishRequest request, string? statePath, PublicationState? recorded, ILedgerConnection connection, RunAttempt attempt,
+        int generation, CancellationToken cancellationToken)
+    {
+        SessionOptions estimateOptions = new()
+        {
+            StateDirectory = paths.StateDirectory,
+            TicketsPerBatch = PublishPolicy.TicketsPerBatch,
+        };
+
+        // Estimated again here rather than carried from the screen: the node's price moves,
+        // and StartAsync refuses a strategy priced differently (FeeMismatch). This is also
+        // what the budget is set from, so a run cannot quietly cost more than what was just
+        // priced.
+        PublicationEstimate estimate = await PublicationSession.EstimateAsync(
+            connection.Source, request.Account, request.File.Length, estimateOptions, cancellationToken).ConfigureAwait(false);
+
+        // PublishPolicy.Create's own remarks say every caller checks this first and that
+        // reaching it otherwise is a defect -- but EstimateModel's own check only ever gates
+        // a fresh Start: it runs once, against a screen the person is looking at, and this
+        // estimate is a second, independent one taken right here because the node's price
+        // can have moved since. UnfinishedModel.ResumeAsync reaches PublicationRun.Resume,
+        // and so this method, without ever going through EstimateModel at all, so checking
+        // only there would leave a resumed run free to reach PublishPolicy.Create's own
+        // defect exception. Checked again here instead, which covers both callers with the
+        // one sentence this application actually has for it, before either one reveals a key
+        // or spends anything on a strategy this price can never be used to build.
+        if (estimate.FeeDropsPerTransaction > int.MaxValue) throw new FeeTooLargeForApplicationException();
+
+        attempt.UsesTickets = recorded?.Strategy is { } name ? name == PublicationState.TicketStrategyName : PublishPolicy.UsesTickets(estimate);
+        attempt.OwnerReserveDrops = estimate.OwnerReserveDrops;
+
+        // Pinned to this run's generation, like every other write after Begin: a newer run's
+        // snapshot must not inherit this one's answer.
+        lock (_gate)
+        {
+            if (_generation == generation)
+            {
+                _usesTickets = attempt.UsesTickets;
+                _ownerReserveDrops = attempt.OwnerReserveDrops;
+            }
+        }
+
+        SessionOptions options = new()
+        {
+            StateDirectory = paths.StateDirectory,
+            TicketsPerBatch = PublishPolicy.TicketsPerBatch,
+            BudgetDrops = estimate.RequiredDrops,
+            SourcePath = request.SourcePath,
+        };
+
+        VaultSigner signer = await VaultSigner.CreateAsync(vault, request.KeyReference, cancellationToken, autoLock).ConfigureAwait(false);
+        ISubmissionStrategy probe = PublishPolicy.CreateFor(recorded?.Strategy, estimate, connection, signer);
+
+        try
+        {
+            PublicationSession session = statePath is null
+                ? await PublicationSession.StartAsync(
+                    probe, connection.Source, request.File, request.Type, request.Name, request.Account,
+                    request.KeyReference, request.Network, options, cancellationToken).ConfigureAwait(false)
+                : await PublicationSession.ResumeAsync(probe, connection.Source, request.File, statePath, options, cancellationToken)
+                    .ConfigureAwait(false);
+
+            RecordStatePath(generation, session.StatePath);
+            attempt.Point = RunFailurePoint.WhileSubmitting;
+
+            PublicationReport report = await session.RunAsync(new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false);
+            return (report, session.State, session.StatePath);
+        }
+        finally
+        {
+            // Disposal is cleanup, not part of what the run is about, and its own outcome
+            // must never be able to override the one just decided: a paid publication
+            // that already has its report in hand must not be reported Failed with the
+            // report thrown away because closing the strategy afterwards happened to throw.
+            await DisposeQuietlyAsync(probe).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// A Batch run (spec 6.1): both keys from the vault, the strategy built by the session through
+    /// <see cref="PublishPolicy.CreateBatch"/>. A resume passes the payer the request names -- the
+    /// recorded one, or the replacement the person chose (spec B18) -- and reports the fence wait.
+    /// </summary>
+    /// <remarks>
+    /// Both signers keep their derived wallet for the run, because a Batch run signs far more often than a
+    /// one-account run does, and the wallet is dropped on every way out of this method, including a
+    /// start or a resume the session refuses: a cached wallet outlives a lock that was undone and an entry
+    /// that was deleted, so nothing but <see cref="VaultSigner.ClearCache"/> bounds it.
+    /// </remarks>
+    private async Task<(PublicationReport Report, PublicationState State, string StatePath)> RunBatchAsync(
+        PublishRequest request, string? statePath, ILedgerConnection connection, RunAttempt attempt, int generation,
+        CancellationToken cancellationToken)
+    {
+        string payer = request.PayerAccount ?? throw new InvalidOperationException("a Batch run's request names its payer");
+        string payerReference = request.PayerReference ?? throw new InvalidOperationException("a Batch run's request names its payer's key");
+
+        VaultSigner? writerSigner = null;
+        VaultSigner? payerSigner = null;
+        BatchStrategy? built = null;
+
+        try
+        {
+            VaultSigner writer = writerSigner = await VaultSigner
+                .CreateAsync(vault, request.KeyReference, cancellationToken, autoLock, cacheWallet: true).ConfigureAwait(false);
+            BatchSignerCreated?.Invoke(writer);
+
+            VaultSigner payerKey = payerSigner = await VaultSigner
+                .CreateAsync(vault, payerReference, cancellationToken, autoLock, cacheWallet: true).ConfigureAwait(false);
+            BatchSignerCreated?.Invoke(payerKey);
+
+            BatchStrategy Build(BatchBudget budget, IBatchFenceRecorder fence) =>
+                built = PublishPolicy.CreateBatch(budget, fence, connection, writer, payerKey, batchOptions);
+
+            TimeSpan fencePoll = batchOptions?.ChainCheck ?? TimeSpan.FromSeconds(1);
+            PublicationSession session;
+
+            if (statePath is null)
+            {
+                SessionOptions estimateOptions = new() { StateDirectory = paths.StateDirectory };
+                BatchPublicationEstimate estimate = await PublicationSession.EstimateAsync(
+                    connection.Source, request.Account, payer, request.File.Length, estimateOptions, cancellationToken).ConfigureAwait(false);
+
+                SessionOptions options = new()
+                {
+                    StateDirectory = paths.StateDirectory,
+                    BudgetDrops = estimate.WriterRequiredDrops + estimate.PayerRequiredDrops,
+                    SourcePath = request.SourcePath,
+                    FencePoll = fencePoll,
+                };
+
+                session = await PublicationSession.StartAsync(
+                    Build, connection.Source, request.File, request.Type, request.Name, request.Account, request.KeyReference,
+                    payer, payerReference, request.Network, options, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                SessionOptions options = new() { StateDirectory = paths.StateDirectory, SourcePath = request.SourcePath, FencePoll = fencePoll };
+
+                session = await PublicationSession.ResumeAsync(
+                    Build, connection.Source, request.File, statePath, payer, payerReference, options,
+                    new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false);
+            }
+
+            RecordStatePath(generation, session.StatePath);
+            attempt.Point = RunFailurePoint.WhileSubmitting;
+
+            PublicationReport report = await session.RunAsync(new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false);
+            return (report, session.State, session.StatePath);
+        }
+        finally
+        {
+            writerSigner?.ClearCache();
+            payerSigner?.ClearCache();
+
+            if (built is not null) await DisposeQuietlyAsync(built).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Called with each signer a Batch run creates, before anything is signed with it. A seam for the
+    /// tests, which keep the signers to check that the run dropped their cached wallets.
+    /// </summary>
+    internal Action<VaultSigner>? BatchSignerCreated { get; set; }
+
+    /// <summary>Pins the state file onto this run's snapshot, as every other write after Begin is pinned.</summary>
+    private void RecordStatePath(int generation, string statePath)
+    {
+        lock (_gate)
+        {
+            if (_generation == generation) _statePath = statePath;
+        }
+    }
+
+    /// <summary>
+    /// Removes a finished run's state file. One that cannot be removed now is removed at the next
+    /// start-up, which finds its link already listed (<c>PublicationHistory.RecordFinishedRuns</c>, Task 22).
+    /// </summary>
+    private static void DeleteState(string statePath)
+    {
+        try
+        {
+            File.Delete(statePath);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Left for the next start-up.
         }
     }
 

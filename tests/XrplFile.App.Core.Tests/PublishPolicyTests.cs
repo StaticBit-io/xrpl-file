@@ -96,4 +96,49 @@ public sealed class PublishPolicyTests
         Assert.False(PublishPolicy.UsesTickets(98_000L));
         Assert.True(PublishPolicy.UsesTickets(98_001L));
     }
+
+    [Fact]
+    public async Task A_batch_strategy_is_built_from_the_sessions_budget_with_both_signers()
+    {
+        await using ILedgerConnection connection = await new FakeConnectionFactory().ConnectAsync("testnet", TestContext.Current.CancellationToken);
+        ITransactionSigner writer = new WalletSigner(XrplWallet.Generate());
+        ITransactionSigner payer = new WalletSigner(XrplWallet.Generate());
+
+        BatchStrategy strategy = PublishPolicy.CreateBatch(new BatchBudget(15, 30, 1000, 1000), new NoFence(), connection, writer, payer);
+
+        Assert.Equal(15, strategy.FeeDropsPerTransaction);
+        Assert.Equal(writer.Account, strategy.Account);
+        Assert.Equal(payer.Account, strategy.Payer);
+    }
+
+    [Theory]
+    [InlineData("tickets", typeof(TicketStrategy))]
+    [InlineData("sequence", typeof(SequenceStrategy))]
+    public async Task A_run_resumes_on_the_strategy_it_recorded_whatever_its_size(string recorded, Type expected)
+    {
+        FakeConnectionFactory connections = new();
+        await using ILedgerConnection connection = await connections.ConnectAsync("testnet", TestContext.Current.CancellationToken);
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            connections.Ledger, "rWriter", 2000, PublishPolicy.TicketsPerBatch, TestContext.Current.CancellationToken);
+
+        ISubmissionStrategy strategy = PublishPolicy.CreateFor(recorded, estimate, connection, new WalletSigner(XrplWallet.Generate()));
+
+        Assert.IsType(expected, strategy);
+    }
+
+    [Fact]
+    public async Task A_run_that_recorded_no_strategy_resumes_on_the_existing_policy()
+    {
+        FakeConnectionFactory connections = new();
+        await using ILedgerConnection connection = await connections.ConnectAsync("testnet", TestContext.Current.CancellationToken);
+        PublicationEstimate estimate = await PublicationEstimator.EstimateAsync(
+            connections.Ledger, "rWriter", 2000, PublishPolicy.TicketsPerBatch, TestContext.Current.CancellationToken);
+
+        Assert.IsType<SequenceStrategy>(PublishPolicy.CreateFor(null, estimate, connection, new WalletSigner(XrplWallet.Generate())));
+    }
+
+    private sealed class NoFence : IBatchFenceRecorder
+    {
+        public Task RecordFenceAsync(long deadline, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
 }

@@ -18,15 +18,149 @@ public readonly record struct RunView(
     int Percent,
     string? TicketNote,
     bool TicketsLocked,
-    string? StateNote);
+    string? StateNote,
+    bool CanResume,
+    string? StatePath);
 
 /// <summary>
 /// The run screen (design 4.3). It decides nothing about the run itself — that lives in
 /// <see cref="PublicationRun"/>, which survives this screen — and only turns the run's state into
 /// what a person reads.
 /// </summary>
-public sealed class RunModel(PublicationRun run)
+public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
 {
+    /// <summary>The window the rate is measured over (spec B21).</summary>
+    public static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(30);
+
+    /// <summary>The Batch path's rate before thirty seconds of data: the platform's conservative figure (spec B21).</summary>
+    public const double BatchPriorMemosPerSecond = 70;
+
+    /// <summary>One settle per pass still to come: about three ledgers, the landing and the two settle ledgers (spec B21).</summary>
+    public static readonly TimeSpan SettlePerPass = LedgerTiming.ApproximateLedgerInterval * 3;
+
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly Lock _samplesGate = new();
+    private readonly List<ProgressSample> _samples = [];
+
+    private readonly record struct ProgressSample(DateTimeOffset At, string Stage, long Done);
+
+    /// <summary>The progress line for this snapshot now, the rate measured from what this model has seen.</summary>
+    internal string Describe(RunSnapshot snapshot)
+    {
+        DateTimeOffset now = _time.GetUtcNow();
+        return StageTextOf(snapshot, now, RateOf(snapshot, now));
+    }
+
+    /// <summary>
+    /// Memos per second over the last <see cref="RateWindow"/> of this stage, or null until the stage
+    /// has been watched that long. Samples are taken as the screen renders, once a second.
+    /// </summary>
+    private double? RateOf(RunSnapshot snapshot, DateTimeOffset now)
+    {
+        if (snapshot.Progress is not { } progress) return null;
+
+        lock (_samplesGate)
+        {
+            if (_samples.Count > 0 && !string.Equals(_samples[^1].Stage, progress.Stage, StringComparison.Ordinal)) _samples.Clear();
+
+            _samples.Add(new ProgressSample(now, progress.Stage, progress.Done));
+            _samples.RemoveAll(sample => now - sample.At > RateWindow * 2);
+
+            if (now - _samples[0].At < RateWindow) return null;
+
+            ProgressSample from = _samples.Last(sample => now - sample.At >= RateWindow);
+            double seconds = (now - from.At).TotalSeconds;
+
+            return seconds <= 0 ? null : (progress.Done - from.Done) / seconds;
+        }
+    }
+
+    /// <summary>
+    /// The progress line (spec 6.3): "Writing the file — 1,240 of 7,124 · 52 chunks/s · about 2 min left ·
+    /// 0:24 elapsed". Time left is what remains at the measured rate plus one settle per pass still to
+    /// come (spec B21); before a rate is measured the Batch path uses its prior and shows no rate, the
+    /// ticket path says "estimating…", and so does any stage whose measured rate is zero. A resume's
+    /// fence wait has its own line.
+    /// </summary>
+    public static string StageTextOf(RunSnapshot snapshot, DateTimeOffset now, double? rate)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        if (snapshot.Progress is not { } progress) return "Starting";
+
+        if (progress.Stage == "fence")
+        {
+            long ledgers = Math.Max(0, progress.Total - progress.Done);
+            return $"Waiting for earlier transactions to expire — about {Duration(LedgerTiming.ApproximateLedgerInterval * ledgers)}";
+        }
+
+        string elapsed = snapshot.StartedAt is { } started ? $" · {Clock(now - started)} elapsed" : string.Empty;
+        string head = $"{StageNameOf(progress.Stage)} — {progress.Done:N0} of {progress.Total:N0}";
+
+        if (progress.Stage is not ("chunks" or "lists")) return head + elapsed;
+
+        string unit = progress.Stage == "chunks" ? "chunks/s" : "lists/s";
+        long remaining = Math.Max(0, progress.Total - progress.Done);
+
+        // Every memo of the pass is in; the pass still settles and the writer still has work, so no
+        // figure of seconds is claimed for it (Spec question 23).
+        if (remaining == 0) return $"{head} · finishing this pass{elapsed}";
+        TimeSpan settles = SettlePerPass * PassesAfter(progress.Stage, snapshot.FileBytes);
+
+        if (rate is { } measured && measured > 0)
+        {
+            return $"{head} · {measured:N0} {unit} · about {Duration(TimeSpan.FromSeconds(remaining / measured) + settles)} left{elapsed}";
+        }
+
+        if (rate is null && snapshot.UsesBatch)
+        {
+            return $"{head} · about {Duration(TimeSpan.FromSeconds(remaining / BatchPriorMemosPerSecond) + settles)} left{elapsed}";
+        }
+
+        return $"{head} · estimating…{elapsed}";
+    }
+
+    /// <summary>
+    /// Whether the failed-run screen offers Resume (spec B19): the run failed and its state file is
+    /// still there and unfinished, which is when the unfinished-runs list shows it.
+    /// </summary>
+    public static bool IsResumable(RunSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        if (snapshot.State != PublicationRunState.Failed || snapshot.StatePath is not { } path || !File.Exists(path)) return false;
+
+        try
+        {
+            return !string.Equals(PublicationState.Load(path).Phase, "done", StringComparison.Ordinal);
+        }
+        catch (Exception e) when (e is FormatException or System.Text.Json.JsonException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The passes still to come after this stage: a list pass when the file has more than one block, and the manifest.</summary>
+    private static int PassesAfter(string stage, long fileBytes)
+    {
+        bool lists = fileBytes > 0 && FileTree.BlockCount(FileTree.ChunkCount(fileBytes, MemoLayout.ChunkBytes)) > 1;
+        return stage == "chunks" ? (lists ? 2 : 1) : 1;
+    }
+
+    private static string Duration(TimeSpan span)
+    {
+        double seconds = Math.Max(1, Math.Ceiling(span.TotalSeconds));
+        return seconds < 60 ? $"{seconds:0} s" : $"{Math.Ceiling(seconds / 60):0} min";
+    }
+
+    private static string Clock(TimeSpan span)
+    {
+        TimeSpan whole = TimeSpan.FromSeconds(Math.Max(0, Math.Floor(span.TotalSeconds)));
+        return whole.TotalHours >= 1
+            ? $"{(int)whole.TotalHours}:{whole.Minutes:00}:{whole.Seconds:00}"
+            : $"{(int)whole.TotalMinutes}:{whole.Seconds:00}";
+    }
+
     public RunSnapshot Snapshot => run.Snapshot;
 
     /// <summary>
@@ -73,9 +207,7 @@ public sealed class RunModel(PublicationRun run)
 
     public string? Link => Snapshot.Report?.Link.ToString();
 
-    public string StageText => Snapshot.Progress is { } progress
-        ? $"{StageNameOf(progress.Stage)} — {progress.Done:N0} of {progress.Total:N0}"
-        : "Starting";
+    public string StageText => Describe(run.Snapshot);
 
     public int Percent => Snapshot.Progress is { } progress ? PercentOf(progress) : 0;
 
@@ -127,13 +259,13 @@ public sealed class RunModel(PublicationRun run)
             Link: snapshot.Report?.Link.ToString(),
             Failure: snapshot.Failure,
             HistoryNote: snapshot.HistoryNote,
-            StageText: snapshot.Progress is { } progress
-                ? $"{StageNameOf(progress.Stage)} — {progress.Done:N0} of {progress.Total:N0}"
-                : "Starting",
+            StageText: Describe(snapshot),
             Percent: snapshot.Progress is { } percentProgress ? PercentOf(percentProgress) : 0,
             TicketNote: TicketNoteOf(snapshot),
             TicketsLocked: TicketsLockedOf(snapshot),
-            StateNote: StateNoteOf(snapshot));
+            StateNote: StateNoteOf(snapshot),
+            CanResume: IsResumable(snapshot),
+            StatePath: snapshot.StatePath);
     }
 
     /// <inheritdoc cref="TicketNoteOf"/>

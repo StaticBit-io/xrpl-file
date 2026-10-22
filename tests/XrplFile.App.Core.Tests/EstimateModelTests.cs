@@ -162,4 +162,81 @@ public sealed class EstimateModelTests : IDisposable
         Assert.True(model.CanPublish);
         Assert.Null(model.Message);
     }
+
+    private static PublishRequest BatchRequest(int size = 4096) =>
+        new(new byte[size], "application/octet-stream", "file.bin", "ref-1", "rWriter", "standalone", "ref-2", "rPayer")
+        {
+            WriterLabel = "Writer key",
+            PayerLabel = "Payer key",
+        };
+
+    [Fact]
+    public async Task A_request_with_a_payer_gets_the_two_account_estimate_and_names_the_method()
+    {
+        _connections.Ledger.Balances["rWriter"] = 100_000_000;
+        _connections.Ledger.Balances["rPayer"] = 100_000_000;
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(BatchRequest(), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(model.BatchEstimate);
+        Assert.Null(model.Estimate);
+        Assert.True(model.CanPublish);
+        Assert.Equal("Batch, paid by Payer key.", model.MethodLine);
+        Assert.Null(model.Message);
+    }
+
+    [Fact]
+    public async Task A_short_payer_is_named_with_what_it_needs_and_can_spend()
+    {
+        _connections.Ledger.Balances["rWriter"] = 100_000_000;
+        _connections.Ledger.Balances["rPayer"] = 1_000;
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(BatchRequest(), TestContext.Current.CancellationToken);
+
+        BatchPublicationEstimate estimate = model.BatchEstimate!;
+        Assert.False(model.CanPublish);
+        Assert.Equal(
+            $"The payer Payer key needs {XrpAmount.Format(estimate.PayerRequiredDrops)} and can spend {XrpAmount.Format(estimate.PayerSpendableDrops)}.",
+            model.Message);
+    }
+
+    [Fact]
+    public async Task A_short_writer_is_named_the_same_way()
+    {
+        _connections.Ledger.Balances["rWriter"] = 0;
+        _connections.Ledger.Balances["rPayer"] = 100_000_000;
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(BatchRequest(), TestContext.Current.CancellationToken);
+
+        BatchPublicationEstimate estimate = model.BatchEstimate!;
+        Assert.Equal(
+            $"The writer Writer key needs {XrpAmount.Format(estimate.WriterRequiredDrops)} and can spend {XrpAmount.Format(estimate.WriterSpendableDrops)}.",
+            model.Message);
+    }
+
+    [Fact]
+    public async Task A_network_without_Batch_is_told_to_choose_Nobody()
+    {
+        _connections.Ledger.EnabledAmendments.Clear();
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(BatchRequest(), TestContext.Current.CancellationToken);
+
+        Assert.False(model.CanPublish);
+        Assert.Equal(PublishErrorMessages.For(XrplFileError.BatchNotEnabled), model.Message);
+    }
+
+    [Fact]
+    public async Task Fees_too_high_at_estimate_time_do_not_mention_an_unfinished_run()
+    {
+        _connections.Ledger.OpenLedgerFee = new OpenLedgerFee(250, 10);
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(BatchRequest(), TestContext.Current.CancellationToken);
+
+        Assert.Equal(PublishErrorMessages.FeeTooHighNow, model.Message);
+    }
 }

@@ -52,6 +52,8 @@ public sealed class XrplClientLedgerSink : ILedgerSink
             throw new InvalidOperationException("a sink built over a request delegate submits and looks up, it does not read sequences");
         }
 
+        await ClientKeeper.For(_client).EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+
         AccountInfo info = await _client.AccountInfo(
             new AccountInfoRequest(account)
             {
@@ -134,6 +136,28 @@ public sealed class XrplClientLedgerSink : ILedgerSink
             $"the node answered neither submit nor tx for transaction {hash} in {MaxSubmitAttempts} attempts");
     }
 
+    public async Task<string> SubmitBlobAsync(string txBlob, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(txBlob);
+
+        try
+        {
+            NodeAnswer answer = await AskAsync(new SubmitRequest { TxBlob = txBlob }, cancellationToken).ConfigureAwait(false);
+
+            return answer.Result.TryGetProperty("engine_result", out JsonElement code) ? code.GetString() ?? string.Empty
+                : answer.Result.TryGetProperty("error", out JsonElement error) ? "error:" + error.GetString()
+                : answer.Result.GetRawText();
+        }
+        catch (RippledException e)
+        {
+            return "error:" + e.Classify().RawError;
+        }
+        catch (Exception e) when (DidNotAnswer(e, cancellationToken))
+        {
+            throw new XrplFileException(XrplFileError.NodeUnreachable, $"the node did not answer a submit: {e.Message}", inner: e);
+        }
+    }
+
     /// <summary>The answers that mean the node took the transaction: it may yet apply, and is not a refusal.</summary>
     private static bool TookIt(string outcome) =>
         outcome.StartsWith("tes", StringComparison.Ordinal)
@@ -142,12 +166,14 @@ public sealed class XrplClientLedgerSink : ILedgerSink
 
     /// <summary>
     /// A request the node did not answer (spec I14): a connection closed, lost or never made, a
-    /// timeout, a response the SDK could not read, or a cancellation the caller's token did not
-    /// cause — the SDK cancels requests in flight when the network drops. A node's own error answer
-    /// is a <see cref="RippledException"/> and is not this.
+    /// timeout, a response the SDK could not read, a reconnect that the <see cref="ClientKeeper"/>
+    /// gave up on (it reports <see cref="XrplFileError.NodeUnreachable"/>), or a cancellation the
+    /// caller's token did not cause — the SDK cancels requests in flight when the network drops. A
+    /// node's own error answer is a <see cref="RippledException"/> and is not this.
     /// </summary>
     private static bool DidNotAnswer(Exception e, CancellationToken cancellationToken) =>
         e is XrplException and not RippledException
+        || e is XrplFileException { Error: XrplFileError.NodeUnreachable }
         || e is System.TimeoutException
         || (e is OperationCanceledException && !cancellationToken.IsCancellationRequested);
 
@@ -208,6 +234,8 @@ public sealed class XrplClientLedgerSink : ILedgerSink
 
     private async Task<NodeAnswer> SendAsync(BaseRequest request, CancellationToken cancellationToken)
     {
+        await ClientKeeper.For(_client!).EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+
         Task<XrplResponse<object>> pending = request switch
         {
             SubmitRequest submit => _client!.GRequest<object, SubmitRequest>(submit, cancellationToken),

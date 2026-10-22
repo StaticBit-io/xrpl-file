@@ -22,6 +22,15 @@ public interface ILedgerSink
         Dictionary<string, object> transaction, ITransactionSigner signer, CancellationToken cancellationToken);
 
     /// <summary>
+    /// One transmission of a blob already signed (spec B24): the node's <c>engine_result</c>, or
+    /// <c>error:&lt;code&gt;</c> for an error answer. No retry and no lookup -- the caller owns both.
+    /// A transmission the node did not answer throws <see cref="XrplFileException"/> with
+    /// <see cref="XrplFileError.NodeUnreachable"/>, and the next call on this sink reconnects.
+    /// </summary>
+    Task<string> SubmitBlobAsync(string txBlob, CancellationToken cancellationToken) =>
+        throw new NotSupportedException($"{GetType().Name} does not submit signed blobs");
+
+    /// <summary>
     /// How many of the node's answers so far carried <c>"warning": "load"</c> — the client is nearing
     /// the node's rate limit (spec 4.8). Only grows. Zero for an implementation that does not talk to
     /// a rate-limited node; a decorator that wraps one should forward it.

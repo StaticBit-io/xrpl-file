@@ -8,7 +8,8 @@ namespace XrplFile.Keys;
 /// The seed is revealed, derived into a wallet, used for one signature and dropped: task 0
 /// measured <see cref="XrplWallet.FromSeed"/> at 0.66–0.71 ms per call, so the roughly 21,000
 /// signatures of a 20 MB publication cost about 15 seconds against a run of tens of minutes —
-/// cheap enough that nothing is cached and a secret's lifetime here is one operation.
+/// cheap enough that, by default, nothing is cached and a secret's lifetime here is one operation.
+/// A caller that signs thousands of transactions in one session can opt into a wallet cache.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -43,6 +44,9 @@ public sealed class VaultSigner : ITransactionSigner
     private readonly IKeyVault _vault;
     private readonly string _reference;
     private readonly VaultAutoLock? _autoLock;
+    private readonly bool _cacheWallet;
+    private readonly Lock _cacheGate = new();
+    private XrplWallet? _cached;
 
     /// <param name="vault">The vault holding the key. Its lock state decides whether a signature is possible.</param>
     /// <param name="reference">The entry to sign with. A signer never falls back on another one.</param>
@@ -53,7 +57,16 @@ public sealed class VaultSigner : ITransactionSigner
     /// touches one. Optional: a caller with no idle lock configured passes nothing, and every
     /// existing caller of this constructor keeps compiling unchanged.
     /// </param>
-    public VaultSigner(IKeyVault vault, string reference, string account, string publicKey, VaultAutoLock? autoLock = null)
+    /// <param name="cacheWallet">
+    /// <see langword="true"/> to keep the wallet derived from the seed for the signer's session
+    /// instead of deriving it again for every signature. The cache is dropped by
+    /// <see cref="ClearCache"/> and by the first signature made while the vault is locked, which
+    /// then fails as <see cref="VaultError.Locked"/> like any other. A lock followed by an unlock
+    /// before the next signature, or an entry deleted after caching, does not drop it: the owner
+    /// must call <see cref="ClearCache"/> when its run ends.
+    /// </param>
+    public VaultSigner(
+        IKeyVault vault, string reference, string account, string publicKey, VaultAutoLock? autoLock = null, bool cacheWallet = false)
     {
         ArgumentNullException.ThrowIfNull(vault);
         ArgumentException.ThrowIfNullOrWhiteSpace(reference);
@@ -63,6 +76,7 @@ public sealed class VaultSigner : ITransactionSigner
         _vault = vault;
         _reference = reference;
         _autoLock = autoLock;
+        _cacheWallet = cacheWallet;
         Account = account;
         PublicKey = publicKey;
     }
@@ -85,8 +99,9 @@ public sealed class VaultSigner : ITransactionSigner
     /// The idle lock the created signer touches on every signature, or <see langword="null"/> for
     /// none. See the type's remarks.
     /// </param>
+    /// <param name="cacheWallet">Whether the created signer keeps its derived wallet. See the constructor.</param>
     public static async Task<VaultSigner> CreateAsync(
-        IKeyVault vault, string reference, CancellationToken cancellationToken, VaultAutoLock? autoLock = null)
+        IKeyVault vault, string reference, CancellationToken cancellationToken, VaultAutoLock? autoLock = null, bool cacheWallet = false)
     {
         ArgumentNullException.ThrowIfNull(vault);
 
@@ -110,7 +125,7 @@ public sealed class VaultSigner : ITransactionSigner
                 $"The entry at reference '{reference}' records an address that does not match its key.");
         }
 
-        return new VaultSigner(vault, reference, entry.Info.Address, wallet.PublicKey, autoLock);
+        return new VaultSigner(vault, reference, entry.Info.Address, wallet.PublicKey, autoLock, cacheWallet);
     }
 
     /// <inheritdoc/>
@@ -122,11 +137,7 @@ public sealed class VaultSigner : ITransactionSigner
         // Throws VaultException with Locked when the vault is shut and NoSuchEntry when the entry
         // is gone. Both are left to travel as they are: a caller that has to tell "unlock and try
         // again" from "this run's key no longer exists" can only do it from the typed error.
-        VaultEntry entry = await _vault.RevealAsync(_reference, Reason, cancellationToken).ConfigureAwait(false);
-
-        // See the same call in CreateAsync: the seed is self-describing, so the SDK ignores this
-        // argument today. Passed anyway so the call states what it means.
-        XrplWallet wallet = XrplWallet.FromSeed(entry.Secret, masterAddress: null, algorithm: entry.Info.Algorithm);
+        XrplWallet wallet = await WalletAsync(cancellationToken).ConfigureAwait(false);
 
         // A copy, because the SDK writes the signature back into the dictionary it is handed and
         // the caller's transaction is not this method's to change.
@@ -140,5 +151,43 @@ public sealed class VaultSigner : ITransactionSigner
         // Upper case, exactly as WalletSigner returns it: a hash whose case differs is a hash no
         // comparison against an account_tx answer will match.
         return new SignedTransaction(signed.TxBlob, signed.Hash.ToUpperInvariant());
+    }
+
+    /// <summary>
+    /// Drops the wallet a caching signer holds, so the next signature reads the vault again. This
+    /// is what bounds the wallet's lifetime: the session that built the signer calls it when its
+    /// run ends. A locked vault drops the wallet only at the next signature, and only if it is
+    /// still locked then.
+    /// </summary>
+    public void ClearCache()
+    {
+        lock (_cacheGate) _cached = null;
+    }
+
+    private async Task<XrplWallet> WalletAsync(CancellationToken cancellationToken)
+    {
+        if (_cacheWallet)
+        {
+            lock (_cacheGate)
+            {
+                // Drops the wallet at the first signature made while the vault is locked. It cannot see
+                // a lock that was undone before this call, or an entry deleted since: ClearCache bounds that.
+                if (!_vault.IsUnlocked) _cached = null;
+                else if (_cached is { } cached) return cached;
+            }
+        }
+
+        VaultEntry entry = await _vault.RevealAsync(_reference, Reason, cancellationToken).ConfigureAwait(false);
+
+        // See the same call in CreateAsync: the seed is self-describing, so the SDK ignores this
+        // argument today. Passed anyway so the call states what it means.
+        XrplWallet wallet = XrplWallet.FromSeed(entry.Secret, masterAddress: null, algorithm: entry.Info.Algorithm);
+
+        if (_cacheWallet)
+        {
+            lock (_cacheGate) _cached = wallet;
+        }
+
+        return wallet;
     }
 }

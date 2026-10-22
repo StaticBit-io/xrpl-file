@@ -24,13 +24,16 @@ namespace XrplFile;
 /// <param name="FeeDropsEstimated">
 /// Publication scope. What the approved estimate implies the whole file cost, the tidy-up left out:
 /// <see cref="Transactions"/> at the fee that estimate was priced with, which
-/// <see cref="PublicationSession.StartAsync"/> and <see cref="PublicationSession.ResumeAsync"/>
+/// <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> and <see cref="PublicationSession.ResumeAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, SessionOptions, CancellationToken)"/>
 /// have already made the strategy agree with. It is not what the ledger debited, and it is not
 /// named as if it were: every retry a strategy makes is a transaction this number cannot see,
 /// nothing here reads a fee back off the ledger, and on a resume it prices an earlier session's
 /// transactions at this session's fee. Reconciling against the account is still the account's job.
 /// What the publication and its tidy-up cost is <c>FeeDropsEstimated + TicketReleaseFeeDrops</c>,
 /// and it may have cost up to <see cref="TicketReleaseFeeDropsInDoubt"/> more.
+/// For a Batch run this is the writer's part only — its solo transactions at the approved unit — and
+/// <see cref="PayerFeeDrops"/> is what the payer paid; <see cref="Transactions"/> then counts the memos
+/// (chunks, lists, manifest), inners and solos alike.
 /// </param>
 /// <param name="StartedAt">
 /// Session scope: when this session began. A resumed publication's earlier sessions are not in it
@@ -107,4 +110,14 @@ public sealed record PublicationReport(
     /// Such a spend may apply until its LastLedgerSequence passes. Null when the counts were lost.
     /// </summary>
     public long? TicketReleaseFeeDropsInDoubt { get; init; }
+
+    /// <summary>The Batch run's payer, or null for a run with one account.</summary>
+    public string? Payer { get; init; }
+
+    /// <summary>
+    /// Session scope: what the payer paid in this session — the <c>Fee</c> of every outer this session
+    /// signed that settlement found applied, matched by hash (spec B29). Null when there is no payer,
+    /// or when settlement could not attribute it; never a guess.
+    /// </summary>
+    public long? PayerFeeDrops { get; init; }
 }

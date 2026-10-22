@@ -795,6 +795,59 @@ public class TicketStrategyTests
         Assert.Single(Ridden(sink));
     }
 
+    [Fact]
+    public async Task Progress_moves_as_each_sweep_poll_finds_memos_not_once_per_batch()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        // Position 0 is the mint; the third memo shows up only two sweeps later.
+        sink.QueuedUntilSweep[3] = 2;
+        List<int> reports = [];
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        await strategy.SubmitAllAsync(Memos(3), new SynchronousProgress<int>(reports.Add), TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, reports[0]);
+        Assert.Equal(3, reports[^1]);
+        Assert.Equal(reports.Order(), reports);
+    }
+
+    [Fact]
+    public async Task Progress_on_tickets_never_counts_a_memo_that_failed()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        sink.FailMarkers.Add(MemoLayout.ChunkMarkerHex(1));
+        List<int> reports = [];
+
+        // A short batch timeout: the failing memo would otherwise wait the full five seconds per attempt.
+        await using TicketStrategy strategy = new(sink, ledger, Signer, new TicketStrategyOptions
+        {
+            TicketsPerBatch = 100,
+            SweepPoll = TimeSpan.FromMilliseconds(1),
+            BatchTimeout = TimeSpan.FromMilliseconds(200),
+            ValidationPoll = TimeSpan.FromMilliseconds(1),
+        });
+
+        await Assert.ThrowsAsync<XrplFileException>(() => strategy.SubmitAllAsync(
+            Memos(3), new SynchronousProgress<int>(reports.Add), TestContext.Current.CancellationToken));
+
+        Assert.Equal(2, reports.Max());
+    }
+
+    [Fact]
+    public async Task Every_ticketed_memo_says_which_ledger_it_is_in()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        await using TicketStrategy strategy = Strategy(sink, ledger);
+
+        foreach (SubmittedMemo memo in await strategy.SubmitAllAsync(Memos(5), null, TestContext.Current.CancellationToken))
+        {
+            Assert.Equal((await ledger.TransactionAsync(memo.TxHash, TestContext.Current.CancellationToken))!.LedgerIndex, memo.LedgerIndex);
+        }
+    }
+
     /// <summary>Plants <see cref="Straggler"/> in the ledger just before the first memo submission, one ledger past the window's floor.</summary>
     private sealed class PlantingSink(FakeLedgerSink inner, FakeLedgerSource ledger) : ILedgerSink
     {

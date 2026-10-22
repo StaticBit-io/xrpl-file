@@ -39,6 +39,155 @@ public sealed class FakeLedgerSource : ILedgerSource
 
     private readonly Dictionary<string, IReadOnlyList<LiveTicket>> _liveTickets = new(StringComparer.Ordinal);
 
+    /// <summary>Each account's next sequence from the ledger it was recorded at on: what a snapshot reads at a ledger.</summary>
+    private readonly Dictionary<string, SortedList<long, uint>> _sequences = new(StringComparer.Ordinal);
+
+    private int _snapshotFailures;
+    private int _snapshotReads;
+    private int _historyHideReads;
+
+    /// <summary>
+    /// Raised at the start of every <see cref="SnapshotAsync"/> and <see cref="CurrentLedgerAsync"/>,
+    /// outside this fake's lock. <see cref="FakeBatchLedgerSink"/> closes a ledger here, so time on
+    /// this fake moves at the pace its reader asks.
+    /// </summary>
+    public event Action? LedgerRead;
+
+    /// <summary>What <see cref="OpenLedgerFeeAsync"/> answers once <see cref="OpenLedgerFeeScript"/> is empty.</summary>
+    public OpenLedgerFee OpenLedgerFee { get; set; } = new(10, 10);
+
+    /// <summary>Answers <see cref="OpenLedgerFeeAsync"/> gives first, one per call.</summary>
+    public Queue<OpenLedgerFee> OpenLedgerFeeScript { get; } = new();
+
+    /// <summary>The amendments this fake ledger enables, by name.</summary>
+    public HashSet<string> EnabledAmendments { get; } = new(StringComparer.Ordinal) { Amendments.Batch };
+
+    /// <summary>Thrown by <see cref="IsAmendmentEnabledAsync"/> instead of answering.</summary>
+    public Exception? AmendmentFailure { get; set; }
+
+    /// <summary>How many of the next snapshots fail as a ledger that cannot be read at its index.</summary>
+    public int SnapshotFailures
+    {
+        get { lock (_gate) return _snapshotFailures; }
+        set { lock (_gate) _snapshotFailures = value; }
+    }
+
+    /// <summary>How many snapshots were asked for, failed ones included.</summary>
+    public int SnapshotReads
+    {
+        get { lock (_gate) return _snapshotReads; }
+    }
+
+    /// <summary>Records account_tx leaves out while <see cref="HistoryHideReads"/> lasts: a history index that lags the ledger.</summary>
+    public Func<LedgerTransaction, bool>? HistoryHides { get; set; }
+
+    /// <summary>How many more account_tx calls <see cref="HistoryHides"/> applies to.</summary>
+    public int HistoryHideReads
+    {
+        get { lock (_gate) return _historyHideReads; }
+        set { lock (_gate) _historyHideReads = value; }
+    }
+
+    /// <summary>Records each account's next sequence as of <paramref name="ledger"/>, and validates that ledger.</summary>
+    /// <param name="ledger">The ledger index the sequences hold from.</param>
+    /// <param name="sequences">Each account's next sequence there.</param>
+    public void RecordSequences(long ledger, IReadOnlyDictionary<string, uint> sequences)
+    {
+        lock (_gate) RecordSequencesLocked(ledger, sequences);
+    }
+
+    /// <summary>
+    /// Validates ledger <paramref name="ledger"/> in one step: its records and every account's
+    /// sequences become visible together, so a reader sees a ledger with its history and its
+    /// sequences or neither. <see cref="FakeBatchLedgerSink"/> closes a ledger through this.
+    /// </summary>
+    /// <param name="ledger">The ledger index being validated.</param>
+    /// <param name="records">What the ledger holds, in canonical order.</param>
+    /// <param name="sequences">Each account's next sequence as of that ledger.</param>
+    public void Publish(long ledger, IReadOnlyList<LedgerTransaction> records, IReadOnlyDictionary<string, uint> sequences)
+    {
+        lock (_gate)
+        {
+            _transactions.AddRange(records);
+            RecordSequencesLocked(ledger, sequences);
+        }
+    }
+
+    /// <summary>Call under the gate.</summary>
+    private void RecordSequencesLocked(long ledger, IReadOnlyDictionary<string, uint> sequences)
+    {
+        foreach ((string account, uint sequence) in sequences)
+        {
+            if (!_sequences.TryGetValue(account, out SortedList<long, uint>? history))
+            {
+                history = [];
+                _sequences[account] = history;
+            }
+
+            history[ledger] = sequence;
+        }
+
+        if (ledger > _currentLedger) _currentLedger = ledger;
+    }
+
+    /// <summary>Sets AccountRoot's TicketCount under the lock <see cref="AccountStateAsync"/> reads it under.</summary>
+    /// <param name="account">The account's classic address.</param>
+    /// <param name="count">Its live ticket count.</param>
+    public void SetTicketCount(string account, int count)
+    {
+        lock (_gate) TicketCounts[account] = count;
+    }
+
+    public Task<LedgerSnapshot> SnapshotAsync(IReadOnlyList<string> accounts, CancellationToken cancellationToken)
+    {
+        LedgerRead?.Invoke();
+
+        lock (_gate)
+        {
+            _snapshotReads++;
+
+            if (_snapshotFailures > 0)
+            {
+                _snapshotFailures--;
+                return Task.FromException<LedgerSnapshot>(
+                    new XrplFileException(XrplFileError.NodeUnreachable, "fake: the ledger could not be read at the index asked for"));
+            }
+
+            Dictionary<string, uint> sequences = new(StringComparer.Ordinal);
+            foreach (string account in accounts) sequences[account] = SequenceAt(account, _currentLedger);
+
+            return Task.FromResult(new LedgerSnapshot(_currentLedger, sequences));
+        }
+    }
+
+    /// <summary>The account's next sequence at <paramref name="ledger"/>. Call under the gate.</summary>
+    private uint SequenceAt(string account, long ledger)
+    {
+        if (!_sequences.TryGetValue(account, out SortedList<long, uint>? history)) return 0;
+
+        for (int i = history.Count - 1; i >= 0; i--)
+        {
+            if (history.Keys[i] <= ledger) return history.Values[i];
+        }
+
+        return 0;
+    }
+
+    public Task<OpenLedgerFee> OpenLedgerFeeAsync(CancellationToken cancellationToken)
+    {
+        lock (_gate) return Task.FromResult(OpenLedgerFeeScript.TryDequeue(out OpenLedgerFee? next) ? next : OpenLedgerFee);
+    }
+
+    public Task<bool> IsAmendmentEnabledAsync(string name, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            return AmendmentFailure is { } failure
+                ? Task.FromException<bool>(failure)
+                : Task.FromResult(EnabledAmendments.Contains(name));
+        }
+    }
+
     private int _transactionLookups;
 
     private long _loadWarnings;
@@ -241,10 +390,14 @@ public sealed class FakeLedgerSource : ILedgerSource
                 }
             }
 
+            bool hiding = HistoryHides is not null && _historyHideReads > 0;
+            if (hiding) _historyHideReads--;
+
             IEnumerable<(LedgerTransaction Tx, int Position)> matching = _transactions
                 .Select((tx, position) => (Tx: tx, Position: position))
                 .Where(pair => Touches(pair.Tx, account)
-                    && pair.Tx.LedgerIndex >= fromLedger && pair.Tx.LedgerIndex <= toLedger);
+                    && pair.Tx.LedgerIndex >= fromLedger && pair.Tx.LedgerIndex <= toLedger
+                    && !(hiding && HistoryHides!(pair.Tx)));
 
             ordered = forward
                 ? [.. matching.OrderBy(pair => pair.Tx.LedgerIndex).ThenBy(pair => pair.Position).Select(pair => pair.Tx)]
@@ -391,6 +544,8 @@ public sealed class FakeLedgerSource : ILedgerSource
 
     public Task<long> CurrentLedgerAsync(CancellationToken cancellationToken)
     {
+        LedgerRead?.Invoke();
+
         lock (_gate)
         {
             _currentLedgerCalls++;

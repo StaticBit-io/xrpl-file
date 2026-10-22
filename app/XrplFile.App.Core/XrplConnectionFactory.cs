@@ -17,7 +17,7 @@ public sealed class XrplConnectionFactory(INodeSettingsStore settings) : IConnec
 
         try
         {
-            client = new XrplClient(url);
+            client = ClientKeeper.CreateClient(url);
             await client.Connect(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -72,6 +72,7 @@ public sealed class XrplConnectionFactory(INodeSettingsStore settings) : IConnec
         {
             try
             {
+                ClientKeeper.Retire(_client);
                 await _client.Disconnect().ConfigureAwait(false);
             }
             catch (Exception)
