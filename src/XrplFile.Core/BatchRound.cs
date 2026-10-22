@@ -15,6 +15,10 @@ internal sealed class BatchRound(
     private const int MaxTransmissions = 4;
 
     private readonly Lock _latestGate = new();
+    private readonly Lock _historyGate = new();
+    private readonly List<LedgerTransaction> _writerHistory = [];
+    private readonly HashSet<string> _writerHashes = new(StringComparer.OrdinalIgnoreCase);
+    private long _writerReadFrom;
     private LedgerSnapshot? _latest;
     private DateTimeOffset _latestAt;
     private long _highestLedger;
@@ -53,8 +57,8 @@ internal sealed class BatchRound(
                 settled = await SendSoloAsync(solo, unit, registry, cancellationToken).ConfigureAwait(false);
             }
 
-            RoundResult result = await BatchSweep.FinalAsync(context, memos, pending, registry.Candidates, start, settled, cancellationToken)
-                .ConfigureAwait(false);
+            RoundResult result = await BatchSweep.FinalAsync(
+                context, memos, pending, registry.Candidates, start, settled, KnownWriterHistory(), cancellationToken).ConfigureAwait(false);
             progress.Found(result.Landed.Keys);
 
             return result;
@@ -97,6 +101,7 @@ internal sealed class BatchRound(
 
                 progress.Found(BatchSweep.Outcome(context, memos, pending, registry.Candidates, records, []).Landed.Keys);
                 from = Math.Max(from, records.Count == 0 ? from : records.Max(tx => tx.LedgerIndex));
+                RememberWriterHistory(records, from);
             }
             catch (Exception e) when (!(e is OperationCanceledException && cancellationToken.IsCancellationRequested))
             {
@@ -104,6 +109,34 @@ internal sealed class BatchRound(
                 // parser could not make sense of -- progress is display-only and must not replace the
                 // round's own result; only the loop's own cancellation ends it.
             }
+        }
+    }
+
+    /// <summary>
+    /// Keeps what a progress sweep read for the final sweep (spec B20, B30). The next sweep starts at
+    /// <paramref name="readFrom"/> again, so only the ledgers below it are complete here.
+    /// </summary>
+    private void RememberWriterHistory(IReadOnlyList<LedgerTransaction> records, long readFrom)
+    {
+        lock (_historyGate)
+        {
+            foreach (LedgerTransaction tx in records)
+            {
+                if (_writerHashes.Add(tx.Hash)) _writerHistory.Add(tx);
+            }
+
+            _writerReadFrom = readFrom;
+        }
+    }
+
+    private BatchSweep.KnownHistory? KnownWriterHistory()
+    {
+        lock (_historyGate)
+        {
+            if (_writerReadFrom == 0) return null;
+
+            return new BatchSweep.KnownHistory(
+                [.. _writerHistory.Where(tx => tx.LedgerIndex < _writerReadFrom).OrderBy(tx => tx.LedgerIndex)], _writerReadFrom);
         }
     }
 

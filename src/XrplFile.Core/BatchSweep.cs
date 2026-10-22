@@ -8,21 +8,32 @@ namespace XrplFile;
 /// </summary>
 internal static class BatchSweep
 {
+    /// <param name="known">
+    /// The writer's records the round's progress sweeps already read, or null. Only the ledgers from
+    /// <see cref="KnownHistory.ReadFrom"/> on are read again: on a 7 MB run on testnet, reading the
+    /// writer's whole round again took 14 s of the run's 114.
+    /// </param>
     public static async Task<RoundResult> FinalAsync(
         BatchContext context, IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> pending,
-        IReadOnlyList<BatchCandidate> candidates, LedgerSnapshot start, LedgerSnapshot settled, CancellationToken cancellationToken)
+        IReadOnlyList<BatchCandidate> candidates, LedgerSnapshot start, LedgerSnapshot settled, KnownHistory? known,
+        CancellationToken cancellationToken)
     {
         if (settled.LedgerIndex <= start.LedgerIndex) return RoundResult.Empty;
 
         string writer = context.Writer.Account;
         string payer = context.Payer.Account;
         DateTimeOffset giveUp = context.Options.Time.GetUtcNow() + context.Options.HistoryLagLimit;
+        bool reuse = known is not null && known.ReadFrom > start.LedgerIndex + 1;
 
         while (true)
         {
-            List<LedgerTransaction> writerRecords = Own(await BatchReads.RetryAsync(
-                token => HistoryAsync(context.Source, writer, start.LedgerIndex + 1, settled.LedgerIndex, token),
-                context.Options, cancellationToken).ConfigureAwait(false), writer);
+            long writerFrom = reuse ? Math.Min(known!.ReadFrom, settled.LedgerIndex) : start.LedgerIndex + 1;
+            IReadOnlyList<LedgerTransaction> read = await BatchReads.RetryAsync(
+                token => HistoryAsync(context.Source, writer, writerFrom, settled.LedgerIndex, token),
+                context.Options, cancellationToken).ConfigureAwait(false);
+            List<LedgerTransaction> writerRecords = Own(
+                reuse ? [.. known!.Records.Where(tx => tx.LedgerIndex > start.LedgerIndex && tx.LedgerIndex < writerFrom), .. read] : read,
+                writer);
             List<LedgerTransaction> payerRecords = Own(await BatchReads.RetryAsync(
                 token => HistoryAsync(context.Source, payer, start.LedgerIndex + 1, settled.LedgerIndex, token),
                 context.Options, cancellationToken).ConfigureAwait(false), payer);
@@ -34,6 +45,10 @@ internal static class BatchSweep
                 RequireIdentity(context, identity, writerRecords, payerRecords);
                 return Outcome(memos, pending, identity, writerRecords, payerRecords);
             }
+
+            // A gap below where the progress sweeps stopped would never be read again: account_tx that
+            // lagged behind one of them is read over the whole round from here on, as without them.
+            reuse = false;
 
             if (context.Options.Time.GetUtcNow() >= giveUp)
             {
@@ -178,6 +193,12 @@ internal static class BatchSweep
                 ? _outers.Contains(parent)
                 : _solo is not null && string.Equals(tx.Hash, _solo, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// The writer's records a round's progress sweeps read, in ledger order: complete as account_tx
+    /// gave them below <paramref name="ReadFrom"/>, the ledger the next read would have started at.
+    /// </summary>
+    internal sealed record KnownHistory(IReadOnlyList<LedgerTransaction> Records, long ReadFrom);
 
     /// <summary>The records the account sent: account_tx also returns what others sent to it, which is not "of" it.</summary>
     private static List<LedgerTransaction> Own(IReadOnlyList<LedgerTransaction> records, string account) =>

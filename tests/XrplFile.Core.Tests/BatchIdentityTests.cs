@@ -95,6 +95,47 @@ public class BatchIdentityTests
     }
 
     [Fact]
+    public async Task The_final_sweep_reads_the_writer_only_from_where_the_progress_sweeps_left_off()
+    {
+        BatchTestNode node = new();
+        node.Sink.SubmitDelay = TimeSpan.FromMilliseconds(20);
+        await using BatchStrategy strategy = node.Strategy(BatchTestNode.ProgressOptions with { InitialWindow = 2, MaxWindow = 2 });
+
+        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(64), null, Token);
+
+        Assert.Equal(64, landed.Count);
+        List<AccountTransactionsCall> calls = [.. node.Ledger.Calls];
+        int payerRead = calls.FindIndex(call => call.Account == node.Payer.Account);
+        AccountTransactionsCall progressFirst = calls.First(call => call.Account == node.Writer.Account);
+        AccountTransactionsCall finalWriter = calls.Take(payerRead).Last(call => call.Account == node.Writer.Account);
+        Assert.True(finalWriter.FromLedger > progressFirst.FromLedger, $"the final sweep read the writer from {finalWriter.FromLedger} again");
+    }
+
+    [Fact]
+    public async Task A_record_the_progress_sweeps_missed_is_found_by_reading_the_round_in_full()
+    {
+        BatchTestNode node = new();
+        node.Sink.SubmitDelay = TimeSpan.FromMilliseconds(20);
+        string hidden = MemoLayout.ChunkMarkerHex(3);
+
+        // Lags only until the final sweep reads the payer: what the progress sweeps kept lacks the
+        // record, and so does the first final read, which starts past its ledger.
+        node.Ledger.HistoryHides = tx => string.Equals(tx.MemoTypeHex, hidden, StringComparison.OrdinalIgnoreCase)
+            && !node.Ledger.Calls.Any(call => call.Account == node.Payer.Account);
+        node.Ledger.HistoryHideReads = int.MaxValue;
+        await using BatchStrategy strategy = node.Strategy(BatchTestNode.ProgressOptions with { InitialWindow = 2, MaxWindow = 2 });
+
+        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(64), null, Token);
+
+        Assert.Equal(64, landed.Count);
+        Assert.Single(strategy.Trace, entry => entry.StartsWith("round:", StringComparison.Ordinal));
+        List<AccountTransactionsCall> calls = [.. node.Ledger.Calls];
+        int payerRead = calls.FindIndex(call => call.Account == node.Payer.Account);
+        long start = calls.First(call => call.Account == node.Writer.Account).FromLedger;
+        Assert.Contains(calls.Skip(payerRead), call => call.Account == node.Writer.Account && call.FromLedger == start);
+    }
+
+    [Fact]
     public async Task A_history_that_never_covers_the_round_fails_with_NodeLacksHistory()
     {
         BatchTestNode node = new();
