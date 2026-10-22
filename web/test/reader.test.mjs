@@ -319,3 +319,111 @@ test('close() during a pending handshake leaves no socket behind and rejects the
     globalThis.WebSocket = original;
   }
 });
+
+// The 2,500,500-byte vector puts 100 chunks in a ledger, so block 1 starts in the ledger that
+// holds chunks 1000..1099, which block 0 ends in, and block 2 in the one holding 2000..2099. A
+// reader that walks each block from its own first ledger reads those two ledgers twice.
+async function open(reader) {
+  const record = await reader.manifest(link);
+  return { record, blocks: await reader.blockList(record) };
+}
+
+async function blockBytes(vector, block) {
+  const all = await vectorFileBytes(vector.seed, vector.size);
+  return all.subarray(block * 1024 * vector.chunk, (block + 1) * 1024 * vector.chunk);
+}
+
+test('blocks sharing a ledger take each record from the node once', async () => {
+  const vector = await vectorFile(2500500);
+  const source = await sourceFor(2500500);
+  const reader = new XrplFileReader(source);
+  const { record, blocks } = await open(reader);
+  assert.equal(blocks[1].l, blocks[0].l + 10);
+  const listCalls = source.calls.length;
+  const listRecords = source.yielded;
+
+  for (const [i, block] of blocks.entries()) assert.deepEqual(await reader.block(record, block), await blockBytes(vector, i));
+
+  assert.equal(source.yielded - listRecords, vector.chunks);
+  const walks = source.calls.slice(listCalls);
+  assert.equal(walks.length, 1);
+  assert.equal(walks[0].fromLedger, blocks[0].l);
+});
+
+test('a shared ledger whose next block comes first is replayed, not read again', async () => {
+  // Canonical order inside a ledger is not index order: here block 1's chunks come before block
+  // 0's last ones, so block 0 reads to the shared ledger's end and block 1's chunks in it are
+  // already behind the walk when block 1 starts.
+  const vector = await vectorFile(2500500);
+  const ledger = await vectorLedger(vector);
+  const shared = ledger.find((tx) => chunkIndexOf(tx.memoTypeHex) === 1000).ledgerIndex;
+  const sharedChunks = ledger.filter((tx) => tx.ledgerIndex === shared);
+  const source = new FakeSource([
+    ...ledger.filter((tx) => tx.ledgerIndex !== shared),
+    ...sharedChunks.filter((tx) => chunkIndexOf(tx.memoTypeHex) >= 1024),
+    ...sharedChunks.filter((tx) => chunkIndexOf(tx.memoTypeHex) < 1024),
+  ]);
+  const reader = new XrplFileReader(source);
+  const { record, blocks } = await open(reader);
+  const listCalls = source.calls.length;
+  const listRecords = source.yielded;
+
+  assert.deepEqual(await reader.block(record, blocks[0]), await blockBytes(vector, 0));
+  assert.deepEqual(await reader.block(record, blocks[1]), await blockBytes(vector, 1));
+
+  assert.equal(source.calls.length - listCalls, 1);
+  // Block 0 reads 1,100 records, the whole shared ledger included; block 1 takes the 76 of its
+  // own that ledger holds from what block 0 read and the other 948 from the node.
+  assert.equal(source.yielded - listRecords, 1100 + 948);
+});
+
+test('a wrong copy in a shared ledger still wins over the real one after it', async () => {
+  // The first copy in canonical order is the chunk, whether the walk meets it from the node or
+  // among what the block before it read. Here the wrong copy of chunk 1024 is the shared ledger's
+  // first record, read by block 0's walk, which has no use for it.
+  const ledger = await vectorLedger(await vectorFile(2500500));
+  const at = ledger.findIndex((tx) => chunkIndexOf(tx.memoTypeHex) === 1000);
+  const real = ledger.find((tx) => chunkIndexOf(tx.memoTypeHex) === 1024);
+  ledger.splice(at, 0, { ...real, hash: labelHash('wrong:1024'), memoDataHex: 'F'.repeat(real.memoDataHex.length) });
+
+  await rejectsWith(new XrplFileReader(new FakeSource(ledger)).read(link), 'BlockMismatch', 1);
+});
+
+test("a copy before a block's first ledger is not its chunk, even when an earlier block read it", async () => {
+  // Block 0's walk passes this copy of chunk 1024; block 1's range starts after it, so a fresh
+  // walk for block 1 never meets it, and neither may what block 1 takes from block 0.
+  const vector = await vectorFile(2500500);
+  const ledger = await vectorLedger(vector);
+  const real = ledger.find((tx) => chunkIndexOf(tx.memoTypeHex) === 1024);
+  const at = ledger.findIndex((tx) => chunkIndexOf(tx.memoTypeHex) === 500);
+  ledger.splice(at, 0, { ...real, hash: labelHash('early:1024'), ledgerIndex: ledger[at].ledgerIndex, memoDataHex: 'F'.repeat(real.memoDataHex.length) });
+
+  assert.deepEqual((await new XrplFileReader(new FakeSource(ledger)).read(link)).bytes, await vectorFileBytes(vector.seed, vector.size));
+});
+
+test("a walk the node stopped answering is taken again from the block's own ledger", async () => {
+  const vector = await vectorFile(2500500);
+  const source = await sourceFor(2500500);
+  const reader = new XrplFileReader(source);
+  const { record, blocks } = await open(reader);
+  const listCalls = source.calls.length;
+
+  // Block 0 takes 1,024 records of the walk; carried on into block 1, it fails 500 later.
+  source.failAfter = 1524;
+  await reader.block(record, blocks[0]);
+  await rejectsWith(reader.block(record, blocks[1]), 'NodeUnreachable');
+  const retried = await reader.block(record, blocks[1]);
+
+  assert.deepEqual(retried, await blockBytes(vector, 1));
+  assert.deepEqual(source.calls.slice(listCalls).map((call) => call.fromLedger), [blocks[0].l, blocks[1].l]);
+});
+
+test('blocks read at the same time each come out whole', async () => {
+  const vector = await vectorFile(2500500);
+  const reader = new XrplFileReader(await sourceFor(2500500));
+  const { record, blocks } = await open(reader);
+
+  const read = await Promise.all(blocks.map((block) => reader.block(record, block)));
+
+  for (const [i, bytes] of read.entries()) assert.deepEqual(bytes, await blockBytes(vector, i));
+});

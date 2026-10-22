@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { vectorBytes } from '../src/vector-stream.mjs';
 import { split, chunkMarkerHex, listMarkerHex, MANIFEST_MARKER_HEX, JSON_FORMAT_HEX } from '../src/tree.mjs';
 import { hex, utf8Hex } from '../src/hex.mjs';
+import { XrplFileError } from '../src/link.mjs';
 
 export const WRITER = 'rVectorWriter';
 
@@ -91,6 +92,12 @@ export class FakeSource {
     this.transactions = [...transactions];
     this.earliest = earliest;
     this.calls = [];
+    // Every record accountTransactions has handed out, over all walks.
+    this.yielded = 0;
+    // The next walk answers this many records and then fails the way a connection dropped between
+    // two pages does, once. A failure only at the start of a walk cannot reach a reader that
+    // carries a walk over from one block to the next.
+    this.failAfter = null;
   }
 
   get accountTransactionsCalls() {
@@ -103,12 +110,19 @@ export class FakeSource {
 
   async *accountTransactions(account, fromLedger, toLedger, forward) {
     this.calls.push({ account, fromLedger, toLedger, forward });
+    const failAfter = this.failAfter;
+    this.failAfter = null;
     const matching = this.transactions
       .map((tx, position) => ({ tx, position }))
       .filter(({ tx }) => tx.account === account && tx.ledgerIndex >= fromLedger && tx.ledgerIndex <= toLedger)
       .sort((a, b) => (a.tx.ledgerIndex - b.tx.ledgerIndex) || (a.position - b.position));
     if (!forward) matching.reverse();
-    for (const { tx } of matching) yield tx;
+    let handed = 0;
+    for (const { tx } of matching) {
+      if (handed++ === failAfter) throw new XrplFileError('NodeUnreachable', `fake: the node stopped answering after ${failAfter} records`);
+      this.yielded++;
+      yield tx;
+    }
   }
 
   async earliestLedger() {

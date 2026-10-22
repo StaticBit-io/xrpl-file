@@ -3,16 +3,23 @@ import { MAINNET_FIRST_LEDGER } from './ledger.mjs';
 import { BLOCK_CHUNKS, isManifest, chunkIndexOf, listIndexOf, decodeEntries, rootHex, blockHash, chunkCount } from './tree.mjs';
 import { decodeManifest, inconsistency } from './manifest.mjs';
 import { hex, unhex, hexUtf8 } from './hex.mjs';
+import { ForwardHistory } from './history.mjs';
 
 /**
  * Reads a file out of the ledger and verifies every byte against the manifest's root — the
  * .NET XrplFileReader's algorithm, rule for rule.
+ *
+ * One instance is meant for one read: its block walks share what they took from the node (see
+ * ForwardHistory), so reading the blocks in order takes each record once.
  */
 export class XrplFileReader {
   /** @param source anything with transaction(hash), accountTransactions(account, from, to, forward), earliestLedger() */
   constructor(source, { maxBytes = 20_000_000 } = {}) {
     this.source = source;
     this.maxBytes = maxBytes;
+    // Shared by the blocks of one read: a block starts in the ledger the block before it ended
+    // in, and walking each block afresh read that ledger twice.
+    this.history = new ForwardHistory(source);
   }
 
   async read(link, onProgress = () => {}) {
@@ -145,7 +152,7 @@ export class XrplFileReader {
     const chunks = new Array(count).fill(null);
     let found = 0;
 
-    for await (const tx of this.source.accountTransactions(record.writer, entry.l, manifest.lastLedger, true)) {
+    for await (const tx of this.history.walk(record.writer, entry.l, manifest.lastLedger)) {
       if (!isMine(tx, record.writer, manifest)) continue;
       const index = chunkIndexOf(tx.memoTypeHex);
       if (index === null || index < firstChunk || index > lastChunk || tx.memoDataHex === null) continue;
