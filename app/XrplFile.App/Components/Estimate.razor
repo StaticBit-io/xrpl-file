@@ -144,8 +144,8 @@
         {
             // False here would mean a run is already going, which reaching this screen through
             // Publish.razor already rules out: that screen only ever shows this one when
-            // RunModel.IsActive is false. Nothing further is done with the result -- Publish.razor's
-            // own poll notices IsActive flip and swaps to <Run /> within one second either way.
+            // RunModel.IsRunning is false. Nothing further is done with the result -- Publish.razor's
+            // own poll notices IsRunning flip and swaps to <Run /> within one second either way.
             // The estimated request, not the parameter: EstimateModel may have dropped a payer that
             // would have paid for nothing (PublishPolicy.Effective), and the run must be what was priced.
             PublishRequest request = Model.Request ?? Request;

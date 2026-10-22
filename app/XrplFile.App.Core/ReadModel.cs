@@ -108,8 +108,28 @@ public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore
     }
 
     /// <summary>
-    /// Back to an empty entry screen: no link and no lookup. What putting a finished read away
-    /// calls, so the next read does not start from the previous one's link and manifest.
+    /// Starts reading the file the last lookup found and, once the read has started, empties this
+    /// screen, so the link box under the finished result is ready for the next file. A finished read
+    /// on <paramref name="run"/> is simply replaced; a running one refuses (<see cref="ReadRun.Start"/>),
+    /// and then nothing here changes. <see langword="false"/> when nothing started.
+    /// </summary>
+    public bool StartRead(ReadRun run)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+
+        ReadLookupSnapshot lookup = Snapshot;
+
+        // CanRead means a manifest without a message, and LookUpAsync only ever publishes a manifest
+        // together with the link it parsed, so Parsed is set whenever this passes.
+        if (!lookup.CanRead || !run.Start(lookup.Parsed!, lookup.Manifest!)) return false;
+
+        Reset();
+        return true;
+    }
+
+    /// <summary>
+    /// Back to an empty entry screen: no link and no lookup. What starting a read calls, so the next
+    /// read does not start from the previous one's link and manifest.
     /// </summary>
     public void Reset()
     {

@@ -280,11 +280,10 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     public RunSnapshot Snapshot => run.Snapshot;
 
     /// <summary>
-    /// Whether there is a run to show at all. <see cref="PublicationRunState.Idle"/> means nothing
-    /// has started yet, or a finished run's outcome was already put away by <see cref="Dismiss"/> —
-    /// both read as "show the picker instead of this screen", which is a decision, not a fact this
-    /// application's one caller (Publish.razor) should make itself by comparing
-    /// <see cref="Snapshot"/>.State to <see cref="PublicationRunState.Idle"/> in its own markup.
+    /// Whether there is a run to show at all, running or finished. <see cref="PublicationRunState.Idle"/>
+    /// means nothing has started yet, or a finished run's outcome was put away by <see cref="Dismiss"/>.
+    /// The Publish tab asks <see cref="IsRunning"/> and <see cref="IsFinished"/> instead, because it
+    /// draws the two differently.
     /// </summary>
     public bool IsActive => Snapshot.State != PublicationRunState.Idle;
 
@@ -307,6 +306,13 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     }
 
     public bool CanCancel => Snapshot.State == PublicationRunState.Running;
+
+    /// <summary>
+    /// Whether a publication is under way. Only then does the Publish tab show the run alone; a
+    /// finished run's outcome sits above the picker, so it never stands between the person and the
+    /// next publication.
+    /// </summary>
+    public bool IsRunning => Snapshot.State == PublicationRunState.Running;
 
     public bool IsFinished => Snapshot.State is
         PublicationRunState.Succeeded or PublicationRunState.Failed or PublicationRunState.Cancelled;

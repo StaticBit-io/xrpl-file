@@ -161,6 +161,55 @@ public sealed class ReadModelTests : IDisposable
         Assert.True(model.CanRead);
     }
 
+    /// <summary>
+    /// The finished screen keeps the link box under the result, so a new read starts from there
+    /// without anything being put away first, and switching tabs in between changes nothing.
+    /// </summary>
+    [Fact]
+    public async Task A_finished_read_does_not_stand_between_the_person_and_the_next_one()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        XrplFileLink first = await PublishAsync(_connections, "first.json", "application/json", 597);
+        XrplFileLink second = await PublishAsync(_connections, "second.bin", "application/octet-stream", 3000);
+        using ReadRun run = new(_connections, new FakeFilePicker());
+        ReadModel model = NewModel();
+
+        model.Link = first.ToString();
+        await model.LookUpAsync(token);
+        Assert.True(model.StartRead(run));
+
+        Assert.Equal(string.Empty, model.Link);
+        Assert.Null(model.Manifest);
+        await run.Completion;
+        Assert.Equal(ReadState.Succeeded, run.Snapshot.State);
+
+        ShellModel shell = new();
+        shell.Show(AppTab.History);
+        shell.Show(AppTab.Read);
+
+        model.Link = second.ToString();
+        await model.LookUpAsync(token);
+        Assert.True(model.StartRead(run));
+        await run.Completion;
+
+        Assert.Equal(ReadState.Succeeded, run.Snapshot.State);
+        Assert.Equal("second.bin", run.Snapshot.Name);
+        Assert.Equal(string.Empty, model.Link);
+    }
+
+    [Fact]
+    public void Nothing_starts_without_a_manifest_to_read()
+    {
+        using ReadRun run = new(_connections, new FakeFilePicker());
+        ReadModel model = NewModel();
+        model.Link = "typed but not looked up";
+
+        Assert.False(model.StartRead(run));
+
+        Assert.Equal(ReadState.Idle, run.Snapshot.State);
+        Assert.Equal("typed but not looked up", model.Link);
+    }
+
     [Fact]
     public async Task Changing_the_link_after_a_successful_lookup_forgets_the_previous_manifest()
     {

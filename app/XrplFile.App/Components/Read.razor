@@ -2,24 +2,20 @@
 @inject ReadModel Model
 @inject ReadRun Run
 
-@* Design 4.1 and 4.2: the Read tab. It draws exactly one of four things, and which one is entirely
-   Snapshot's and Model's own decision -- this markup only names the branch, never computes it. A
-   running read is its own branch (progress and Cancel); Succeeded, Failed and Cancelled share a
-   second branch, selected by Snapshot.IsFinished rather than by comparing State against three named
-   values here, the same way RunModel.IsFinished decides that question for Run.razor (design C2) --
-   moved onto ReadSnapshot itself, since this screen has no wrapping model of its own the way
-   Run.razor has RunModel, and every field on that shared branch still differs only in what it says:
-   all three are "the read is over, offer a way back". The fourth branch is Idle, where Model itself
-   decides between "no manifest yet" (Model.Manifest is null) and "a manifest with a Read button"
-   (CanRead already folds in both the manifest and any message the lookup produced).
+@* Design 4.1 and 4.2: the Read tab. A running read is drawn alone (progress and Cancel), so it
+   cannot be left by accident. Otherwise the entry screen is always there: the link box, the lookup
+   and the Read button. A finished read (Snapshot.IsFinished: Succeeded, Failed or Cancelled) adds
+   its outcome above them and stays there until the next Read replaces it. Nobody has to put it away
+   first: a "Dismiss" button there was not seen as the way to a new read. Which branch draws is
+   Snapshot's and Model's own decision; this markup only names it.
 
    A save that throws while the read itself succeeded leaves State at Succeeded with Failure set
    (ReadRun.SaveAsync never writes State) -- the Succeeded branch draws that sentence exactly like
-   the Failed branch draws its own, because the only other control next to a silent failure here is
-   Dismiss, which deletes the one copy of the file that was just read. The Save button is disabled
-   while Snapshot.Saving is true, straight off the run: nothing destructive happens from a second
-   click (SaveAsync's own generation guard, see its remarks), but a control is not left enabled for
-   the duration of an operation this screen already knows is running.
+   the Failed branch draws its own, because the next Read deletes the one copy of the file that was
+   just read. The Save button is disabled while Snapshot.Saving is true, straight off the run:
+   nothing destructive happens from a second click (SaveAsync's own generation guard, see its
+   remarks), but a control is not left enabled for the duration of an operation this screen already
+   knows is running.
 
    Snapshot is taken once, at the top of this render, into a local -- not read field by field -- for
    the same reason Run.razor takes RunModel.Capture() once: ReadRun runs the block loop on a
@@ -61,42 +57,6 @@
         </div>
     </div>
 }
-else if (snapshot.IsFinished)
-{
-    <div class="xf-page">
-        <h1 class="xf-title">Reading</h1>
-
-        @if (snapshot.State == ReadState.Succeeded)
-        {
-            <div class="alert alert-success">
-                <p class="mb-2">@(snapshot.Name is { } name ? $"Read \"{name}\" successfully." : "Read successfully.")</p>
-                <button type="button" class="btn btn-outline-secondary" disabled="@snapshot.Saving" @onclick="SaveAsync">
-                    Save&hellip;
-                </button>
-                @if (snapshot.Saved)
-                {
-                    <p class="mt-2 mb-0">Saved.</p>
-                }
-                @if (snapshot.Failure is not null)
-                {
-                    <div class="alert alert-danger mt-2 mb-0">@snapshot.Failure</div>
-                }
-            </div>
-        }
-        else if (snapshot.State == ReadState.Failed)
-        {
-            <div class="alert alert-danger">@snapshot.Failure</div>
-        }
-        else
-        {
-            <div class="alert alert-secondary">Cancelled. Nothing was saved.</div>
-        }
-
-        <div class="xf-actionbar">
-            <button type="button" class="btn btn-primary" @onclick="Dismiss">Dismiss</button>
-        </div>
-    </div>
-}
 else
 {
     // Taken once, the same reason Snapshot is taken once at the top of this whole render (see the
@@ -107,6 +67,35 @@ else
 
     <div class="xf-page">
         <h1 class="xf-title">Read a file</h1>
+
+        @if (snapshot.IsFinished)
+        {
+            @if (snapshot.State == ReadState.Succeeded)
+            {
+                <div class="alert alert-success">
+                    <p class="mb-2">@(snapshot.Name is { } name ? $"Read \"{name}\" successfully." : "Read successfully.")</p>
+                    <button type="button" class="btn btn-outline-secondary" disabled="@snapshot.Saving" @onclick="SaveAsync">
+                        Save&hellip;
+                    </button>
+                    @if (snapshot.Saved)
+                    {
+                        <p class="mt-2 mb-0">Saved.</p>
+                    }
+                    @if (snapshot.Failure is not null)
+                    {
+                        <div class="alert alert-danger mt-2 mb-0">@snapshot.Failure</div>
+                    }
+                </div>
+            }
+            else if (snapshot.State == ReadState.Failed)
+            {
+                <div class="alert alert-danger">@snapshot.Failure</div>
+            }
+            else
+            {
+                <div class="alert alert-secondary">Cancelled. Nothing was saved.</div>
+            }
+        }
 
         <section class="xf-card">
             <div class="mb-3">
@@ -176,32 +165,13 @@ else
 
     private Task LookUpAsync() => Model.LookUpAsync(_lifetime.Token);
 
-    // CanRead is what gates this button (disabled unless it is true), and CanRead is defined as
-    // Manifest is not null && Message is null. That alone does not guarantee Parsed is set too --
-    // LookUpAsync's "no node URL configured" refusal, for one, sets Message and returns with Parsed
-    // set but Manifest still null, which CanRead already reads as false. What actually backs the
-    // null-forgiving operators below is ordering, not pairing: LookUpAsync's finally only ever
-    // assigns Manifest after it has already assigned Parsed (ReadModel.cs), so Manifest being non-null
-    // is itself proof Parsed was set first. CanRead being true (Manifest is not null) therefore already
-    // is the model's guarantee that Parsed is set too. Read through Model.Snapshot rather than
-    // Model.Parsed/Model.Manifest separately, so this call sees the same lookup the button that
-    // triggered it was drawn from, not two independent reads that could straddle a lookup that landed
-    // in between.
-    private void StartRead()
-    {
-        ReadLookupSnapshot lookup = Model.Snapshot;
-        Run.Start(lookup.Parsed!, lookup.Manifest!);
-    }
+    // ReadModel.StartRead reads its own lookup, starts the read and only then empties the link box,
+    // so the result of the previous read stays above it until this click replaces it.
+    private void StartRead() => Model.StartRead(Run);
 
     private void Cancel() => Run.Cancel();
 
     private Task SaveAsync() => Run.SaveAsync(_lifetime.Token);
-
-    private void Dismiss()
-    {
-        Run.Reset();
-        Model.Reset();
-    }
 
     public void Dispose()
     {

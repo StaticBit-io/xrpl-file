@@ -343,6 +343,31 @@ public sealed class RunModelTests : VaultHarness
     }
 
     [Fact]
+    public async Task Only_a_running_publication_keeps_the_picker_away()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (PublicationRun run, PublishRequest request) = await ReadyAsync(token);
+        RunModel model = new(run, new ManualTimeProvider());
+
+        Assert.False(model.IsRunning);
+
+        Assert.True(run.Start(request));
+        Assert.True(model.IsRunning);
+        await run.Completion;
+
+        Assert.False(model.IsRunning);
+        Assert.True(model.IsFinished);
+
+        ShellModel shell = new();
+        shell.Show(AppTab.History);
+        shell.Show(AppTab.Publish);
+
+        Assert.True(run.Start(request with { File = new byte[5000], Name = "second.bin" }));
+        await run.Completion;
+        Assert.Equal("second.bin", model.Snapshot.Name);
+    }
+
+    [Fact]
     public void Closing_over_a_ticketed_run_says_the_tickets_stay_and_what_each_one_holds()
     {
         RunSnapshot snapshot = new(PublicationRunState.Running, null, null, null, "big.bin", "1", null)
