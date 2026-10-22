@@ -41,7 +41,7 @@ public partial class App : Application
 		MainPage page = new();
 		StartupLog.Write("CreateWindow: MainPage constructed");
 
-		Window window = new(page) { Title = "XrplFile.App" };
+		Window window = new(page) { Title = "XRPL File" };
 
 		// The one teardown hook this application has, and the reason it is wired here rather than
 		// left to VaultAutoLock's idle timer to eventually catch up (see MauiProgram's remarks on

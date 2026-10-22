@@ -26,9 +26,13 @@
         <MauiXamlInflator>SourceGen</MauiXamlInflator>
 
         <!-- Display name -->
-        <ApplicationTitle>XrplFile.App</ApplicationTitle>
+        <ApplicationTitle>XRPL File</ApplicationTitle>
 
-        <!-- App Identifier -->
+        <!-- App Identifier. Left at the template value on purpose: on an unpackaged Windows app MAUI
+             keeps FileSystem.AppDataDirectory, and with it SecureStorage's securestorage.dat (the
+             device-unlock secret, SecureStorageDeviceSecretStore), under
+             %LOCALAPPDATA%\<publisher>\<ApplicationId>. Renaming it would silently orphan every
+             secret already stored there. -->
         <ApplicationId>com.companyname.xrplfile.app</ApplicationId>
 
         <!-- Versions -->
@@ -44,10 +48,10 @@
 
     <ItemGroup>
         <!-- App Icon -->
-        <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+        <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" />
 
         <!-- Splash Screen -->
-        <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
+        <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#0D0D0D" BaseSize="128,128" />
 
         <!-- Images -->
         <MauiImage Include="Resources\Images\*" />
