@@ -111,7 +111,7 @@
 @code {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private Timer? _pollTimer;
     private bool _disposed;
     private bool _resuming;
@@ -126,7 +126,7 @@
 
         try
         {
-            if (!await Unfinished.ResumeByPathAsync(statePath, _cts.Token)) _resumeMessage = Unfinished.Message;
+            if (!await Unfinished.ResumeByPathAsync(statePath, _lifetime.Token)) _resumeMessage = Unfinished.Message;
         }
         finally
         {
@@ -167,13 +167,12 @@
     }
 
     private Task CopyLinkAsync() =>
-        Model.Link is { } link ? Clipboard.CopyAsync(link, _cts.Token) : Task.CompletedTask;
+        Model.Link is { } link ? Clipboard.CopyAsync(link, _lifetime.Token) : Task.CompletedTask;
 
     public void Dispose()
     {
         _disposed = true;
         _pollTimer?.Dispose();
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

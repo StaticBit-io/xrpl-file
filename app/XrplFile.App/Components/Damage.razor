@@ -39,7 +39,7 @@
     [Parameter]
     public EventCallback OnChanged { get; set; }
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private bool _busy;
 
     private async Task AcknowledgeAsync()
@@ -53,7 +53,7 @@
         StateHasChanged();
         try
         {
-            await Model.AcknowledgeDamageAsync(_cts.Token);
+            await Model.AcknowledgeDamageAsync(_lifetime.Token);
         }
         finally
         {
@@ -65,7 +65,6 @@
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

@@ -47,7 +47,7 @@ else
     [Parameter]
     public EventCallback OnBack { get; set; }
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private Timer? _pollTimer;
     private bool _busy;
     private bool _copying;
@@ -92,7 +92,7 @@ else
         StateHasChanged();
         try
         {
-            await Model.ShowAsync(Reference, _cts.Token);
+            await Model.ShowAsync(Reference, _lifetime.Token);
         }
         catch (VaultException ex)
         {
@@ -117,7 +117,7 @@ else
         StateHasChanged();
         try
         {
-            await Model.CopyAsync(Clipboard, _cts.Token);
+            await Model.CopyAsync(Clipboard, _lifetime.Token);
         }
         catch (InvalidOperationException)
         {
@@ -146,7 +146,6 @@ else
         _disposed = true;
         _pollTimer?.Dispose();
         Model.Hide();
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

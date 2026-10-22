@@ -158,7 +158,7 @@ else
     [Parameter]
     public EventCallback OnBack { get; set; }
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private bool _busy;
 
     /// <summary>
@@ -168,7 +168,7 @@ else
     /// </summary>
     private bool Ready => string.Equals(Model.CurrentReference, Reference, StringComparison.Ordinal);
 
-    protected override async Task OnInitializedAsync() => await Model.SelectAsync(Reference, _cts.Token);
+    protected override async Task OnInitializedAsync() => await Model.SelectAsync(Reference, _lifetime.Token);
 
     private async Task PreflightAsync()
     {
@@ -181,7 +181,7 @@ else
         StateHasChanged();
         try
         {
-            await Model.PreflightAsync(_cts.Token);
+            await Model.PreflightAsync(_lifetime.Token);
         }
         finally
         {
@@ -200,7 +200,7 @@ else
         StateHasChanged();
         try
         {
-            await Model.CloseAsync(_cts.Token);
+            await Model.CloseAsync(_lifetime.Token);
         }
         finally
         {
@@ -212,7 +212,6 @@ else
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

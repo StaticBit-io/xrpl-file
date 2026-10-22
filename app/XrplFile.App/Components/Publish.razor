@@ -16,7 +16,7 @@
    The one-second timer exists only to make PublicationRun's own background progress visible: its
    Snapshot changes on a task this screen never awaits, and without a poll forcing a render, <Run />
    would go on showing whatever it read at its last user-triggered render. Copied verbatim from
-   Shell.razor's own poll, at the same interval and with the same Timer/CancellationTokenSource/
+   Shell.razor's own poll, at the same interval and with the same Timer/ScreenLifetime/
    _disposed shape, so the two screens can never notice a change at different moments. Dismissing a
    run from <Run /> also calls StateHasChanged directly, through OnDismissed, rather than waiting on
    this same poll: without it, this branch would go on showing <Run /> — now re-rendering itself
@@ -96,7 +96,7 @@ else
     /// </summary>
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private Timer? _pollTimer;
     private bool _disposed;
     private bool _estimated;
@@ -104,8 +104,8 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        await Model.RefreshKeysAsync(_cts.Token);
-        await Model.RefreshPayerAsync(_cts.Token);
+        await Model.RefreshKeysAsync(_lifetime.Token);
+        await Model.RefreshPayerAsync(_lifetime.Token);
 
         // Started only once the first refresh has run, matching Shell.razor's own reasoning: a tick
         // can then never race the first render.
@@ -131,14 +131,14 @@ else
     private async Task SelectKeyAsync(string reference)
     {
         Model.SelectKey(reference);
-        await Model.RefreshPayerAsync(_cts.Token);
+        await Model.RefreshPayerAsync(_lifetime.Token);
     }
 
     private void OnPayerChanged(ChangeEventArgs change) => Model.SelectPayer(change.Value as string);
 
     private async Task PickAsync()
     {
-        await Model.PickFileAsync(_cts.Token);
+        await Model.PickFileAsync(_lifetime.Token);
 
         if (Model.LastPickerFailure is { } failure)
         {
@@ -148,7 +148,7 @@ else
 
     private async Task EstimateAsync()
     {
-        PublishRequest? request = await Model.BuildRequestAsync(_cts.Token);
+        PublishRequest? request = await Model.BuildRequestAsync(_lifetime.Token);
         if (request is null)
         {
             return;
@@ -174,7 +174,6 @@ else
         // Set before the timer is disposed, for the reason Shell.razor's own Dispose explains.
         _disposed = true;
         _pollTimer?.Dispose();
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

@@ -167,7 +167,7 @@ else
         Container,
     }
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private Mode _mode = Mode.Generate;
 
     private string _label = string.Empty;
@@ -220,7 +220,7 @@ else
         StateHasChanged();
         try
         {
-            byte[]? bytes = await FilePicker.PickFileAsync(_cts.Token);
+            byte[]? bytes = await FilePicker.PickFileAsync(_lifetime.Token);
             if (bytes is null)
             {
                 return;
@@ -278,7 +278,7 @@ else
         string? previewAddress = Model.Preview?.Address;
         try
         {
-            string reference = await Model.StoreAsync(_cts.Token);
+            string reference = await Model.StoreAsync(_lifetime.Token);
             if (reference == string.Empty)
             {
                 return;
@@ -321,7 +321,6 @@ else
         // stray Preview or Problem left from the Generate or Import routes (see its own remarks), so
         // this is a clean slate for the next time the screen opens, not just the container route.
         Model.CloseContainer();
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

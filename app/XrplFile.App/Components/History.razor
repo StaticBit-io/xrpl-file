@@ -90,11 +90,11 @@
 </div>
 
 @code {
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
 
     protected override void OnInitialized() => Model.Refresh();
 
-    private Task CopyAsync(PublicationRecord record) => Model.CopyLinkAsync(record, _cts.Token);
+    private Task CopyAsync(PublicationRecord record) => Model.CopyLinkAsync(record, _lifetime.Token);
 
     private void Forget(PublicationRecord record) => Model.Forget(record);
 
@@ -109,7 +109,6 @@
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

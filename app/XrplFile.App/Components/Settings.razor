@@ -155,7 +155,7 @@
 </div>
 
 @code {
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private readonly Dictionary<string, string> _nodeEdits = new(StringComparer.Ordinal);
     private readonly HashSet<string> _customRows = new(StringComparer.Ordinal);
     private bool _showChangePassword;
@@ -169,7 +169,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _deviceUnlockEnabled = await Model.IsEnabledAsync(_cts.Token);
+        _deviceUnlockEnabled = await Model.IsEnabledAsync(_lifetime.Token);
 
         NodeSettings.Refresh();
         RestartNodeEdits();
@@ -280,7 +280,7 @@
 
         try
         {
-            string? path = await FilePicker.PickExistingFilePathAsync(_cts.Token);
+            string? path = await FilePicker.PickExistingFilePathAsync(_lifetime.Token);
             if (path is null)
             {
                 return;
@@ -315,23 +315,22 @@
             // them while routing the other through VaultErrorMessages two lines below.
             if (turnOn)
             {
-                await Model.EnableAsync(_cts.Token);
+                await Model.EnableAsync(_lifetime.Token);
             }
             else
             {
-                await Model.DisableAsync(_cts.Token);
+                await Model.DisableAsync(_lifetime.Token);
             }
         }
         finally
         {
-            _deviceUnlockEnabled = await Model.IsEnabledAsync(_cts.Token);
+            _deviceUnlockEnabled = await Model.IsEnabledAsync(_lifetime.Token);
             _busy = false;
         }
     }
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

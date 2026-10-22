@@ -36,7 +36,7 @@
    The one-second timer exists for the same reason as Publish.razor's and Shell.razor's own pollers:
    a run's Snapshot changes on a task this component never awaits, so nothing here repaints on
    progress without a render forced from outside it. Copied verbatim from Shell.razor's own poll, at
-   the same interval and the same Timer/CancellationTokenSource/_disposed shape, so every screen that
+   the same interval and the same Timer/ScreenLifetime/_disposed shape, so every screen that
    polls agrees on when it looks again. *@
 
 @{
@@ -150,7 +150,7 @@ else
     /// </summary>
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private Timer? _pollTimer;
     private bool _disposed;
 
@@ -174,7 +174,7 @@ else
         });
     }
 
-    private Task LookUpAsync() => Model.LookUpAsync(_cts.Token);
+    private Task LookUpAsync() => Model.LookUpAsync(_lifetime.Token);
 
     // CanRead is what gates this button (disabled unless it is true), and CanRead is defined as
     // Manifest is not null && Message is null. That alone does not guarantee Parsed is set too --
@@ -195,7 +195,7 @@ else
 
     private void Cancel() => Run.Cancel();
 
-    private Task SaveAsync() => Run.SaveAsync(_cts.Token);
+    private Task SaveAsync() => Run.SaveAsync(_lifetime.Token);
 
     private void Dismiss()
     {
@@ -208,7 +208,6 @@ else
         // Set before the timer is disposed, for the reason Shell.razor's own Dispose explains.
         _disposed = true;
         _pollTimer?.Dispose();
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

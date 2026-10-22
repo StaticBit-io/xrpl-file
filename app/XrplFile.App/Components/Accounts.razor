@@ -14,7 +14,7 @@
    row on its own; AccountsModel's own remarks on why opening one connection per row would make the
    list slower than useful.
 
-   The timer is copied from Shell.razor and Publish.razor -- same Timer / CancellationTokenSource /
+   The timer is copied from Shell.razor and Publish.razor -- same Timer / ScreenLifetime /
    _disposed shape -- and, like Publish.razor's, only redraws: the countdown on a row ("about 14
    minutes") is computed from the clock each time it renders. Asking the node again for the funding
    sub-screen's balance is not done here: Funding.razor polls for itself every ten seconds and redraws
@@ -162,7 +162,7 @@
     /// remarks at the top of this file for why this differs from Shell.razor's and Publish.razor's own interval.</summary>
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private Timer? _pollTimer;
     private bool _disposed;
     private SubView _view = SubView.List;
@@ -170,7 +170,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await Model.RefreshAsync(_cts.Token);
+        await Model.RefreshAsync(_lifetime.Token);
 
         // Started only once the first refresh has run, matching Shell.razor's own reasoning: a tick
         // can then never race the first render.
@@ -209,7 +209,7 @@
         // before that method's own first await -- capturing the Task and rendering once before
         // awaiting it is what makes the button's disabled state visible for the whole call rather
         // than only after it finishes.
-        Task refresh = Model.RefreshFromLedgerAsync(reference, _cts.Token);
+        Task refresh = Model.RefreshFromLedgerAsync(reference, _lifetime.Token);
         StateHasChanged();
         await refresh;
         StateHasChanged();
@@ -219,7 +219,7 @@
     {
         _activeReference = null;
         _view = SubView.List;
-        await Model.RefreshAsync(_cts.Token);
+        await Model.RefreshAsync(_lifetime.Token);
     }
 
     public void Dispose()
@@ -227,7 +227,6 @@
         // Set before the timer is disposed, for the reason Shell.razor's own Dispose explains.
         _disposed = true;
         _pollTimer?.Dispose();
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

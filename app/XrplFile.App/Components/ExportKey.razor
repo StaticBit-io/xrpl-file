@@ -91,7 +91,7 @@ else
     [Parameter]
     public EventCallback OnBack { get; set; }
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private string _password = string.Empty;
     private byte[]? _container;
     private QrPayload? _qr;
@@ -114,7 +114,7 @@ else
         byte[] passwordBytes = Encoding.UTF8.GetBytes(_password);
         try
         {
-            _container = await Model.ToContainerAsync(Reference, passwordBytes, _cts.Token);
+            _container = await Model.ToContainerAsync(Reference, passwordBytes, _lifetime.Token);
         }
         finally
         {
@@ -149,7 +149,7 @@ else
             // The entry is marked exported only once the platform actually wrote the bytes, and
             // what a platform failure means -- report it, or let it crash -- is Model.SaveToFileAsync's
             // decision, not this markup's; see its own remarks for why.
-            _saved = await Model.SaveToFileAsync(Reference, _container, _cts.Token);
+            _saved = await Model.SaveToFileAsync(Reference, _container, _lifetime.Token);
         }
         finally
         {
@@ -179,7 +179,7 @@ else
         if (_pendingMatrix is { } matrix)
         {
             _pendingMatrix = null;
-            await JS.InvokeVoidAsync("drawQrMatrix", _cts.Token, _qrCanvas, matrix);
+            await JS.InvokeVoidAsync("drawQrMatrix", _lifetime.Token, _qrCanvas, matrix);
         }
     }
 
@@ -187,7 +187,7 @@ else
     {
         if (_showQr && _qr is { FitsOneCode: true })
         {
-            await JS.InvokeVoidAsync("clearQrCanvas", _cts.Token, _qrCanvas);
+            await JS.InvokeVoidAsync("clearQrCanvas", _lifetime.Token, _qrCanvas);
         }
 
         await OnBack.InvokeAsync();
@@ -195,7 +195,6 @@ else
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

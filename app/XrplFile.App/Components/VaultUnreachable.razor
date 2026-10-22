@@ -66,7 +66,7 @@
     [Parameter]
     public EventCallback OnChanged { get; set; }
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private bool _busy;
     private VaultLocationModel.Outcome? _actionOutcome;
 
@@ -83,7 +83,7 @@
 
         try
         {
-            await Model.RefreshAsync(_cts.Token);
+            await Model.RefreshAsync(_lifetime.Token);
         }
         finally
         {
@@ -106,7 +106,7 @@
 
         try
         {
-            string? path = await FilePicker.PickExistingFilePathAsync(_cts.Token);
+            string? path = await FilePicker.PickExistingFilePathAsync(_lifetime.Token);
             if (path is null)
             {
                 return;
@@ -136,7 +136,6 @@
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

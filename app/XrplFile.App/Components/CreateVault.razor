@@ -47,7 +47,7 @@
     [Parameter]
     public EventCallback OnChanged { get; set; }
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private string _password = string.Empty;
     private bool _busy;
 
@@ -65,7 +65,7 @@
         _password = string.Empty;
         try
         {
-            await Model.CreateAsync(passwordBytes, _cts.Token);
+            await Model.CreateAsync(passwordBytes, _lifetime.Token);
         }
         finally
         {
@@ -78,7 +78,6 @@
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

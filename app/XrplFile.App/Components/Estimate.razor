@@ -115,7 +115,7 @@
 </div>
 
 @code {
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private bool _starting;
 
     [Parameter, EditorRequired]
@@ -128,7 +128,7 @@
     [Parameter]
     public EventCallback OnStarted { get; set; }
 
-    protected override async Task OnInitializedAsync() => await Model.EstimateAsync(Request, _cts.Token);
+    protected override async Task OnInitializedAsync() => await Model.EstimateAsync(Request, _lifetime.Token);
 
     private Task Back() => OnBack.InvokeAsync();
 
@@ -160,7 +160,6 @@
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

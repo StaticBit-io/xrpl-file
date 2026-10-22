@@ -56,7 +56,7 @@ else if (_ready)
                     @foreach (AppTab tab in RailTabs)
                     {
                         <button type="button" class="xf-rail-item" aria-current="@(Tabs.Tab == tab ? "page" : null)"
-                                @onclick="() => Tabs.Show(tab)">
+                                @onclick="() => ShowTab(tab)">
                             @Icon(tab)<span>@tab</span>
                         </button>
                     }
@@ -67,37 +67,48 @@ else if (_ready)
                 </nav>
 
                 <main id="xf-content" class="xf-content" tabindex="-1" @ref="_content">
-                    @if (Tabs.Tab == AppTab.Keys)
-                    {
-                        <KeyList />
-                    }
-                    else if (Tabs.Tab == AppTab.Publish)
-                    {
-                        <Publish />
-                    }
-                    else if (Tabs.Tab == AppTab.History)
-                    {
-                        <History />
-                    }
-                    else if (Tabs.Tab == AppTab.Settings)
-                    {
-                        <Settings />
-                    }
-                    else if (Tabs.Tab == AppTab.Accounts)
-                    {
-                        <Accounts />
-                    }
-                    else if (Tabs.Tab == AppTab.Read)
-                    {
-                        <Read />
-                    }
+                    <ScreenErrorBoundary @ref="_boundary">
+                        <ChildContent>
+                            @if (Tabs.Tab == AppTab.Keys)
+                            {
+                                <KeyList />
+                            }
+                            else if (Tabs.Tab == AppTab.Publish)
+                            {
+                                <Publish />
+                            }
+                            else if (Tabs.Tab == AppTab.History)
+                            {
+                                <History />
+                            }
+                            else if (Tabs.Tab == AppTab.Settings)
+                            {
+                                <Settings />
+                            }
+                            else if (Tabs.Tab == AppTab.Accounts)
+                            {
+                                <Accounts />
+                            }
+                            else if (Tabs.Tab == AppTab.Read)
+                            {
+                                <Read />
+                            }
+                        </ChildContent>
+                        <ErrorContent>
+                            <div class="xf-page">
+                                <div class="alert alert-danger" role="alert">
+                                    This screen stopped because of an error. Choose a tab to carry on.
+                                </div>
+                            </div>
+                        </ErrorContent>
+                    </ScreenErrorBoundary>
                 </main>
 
                 <nav class="xf-tabbar" aria-label="Main">
                     @foreach (AppTab tab in TabbarTabs)
                     {
                         <button type="button" class="xf-tab" aria-current="@(Tabs.Tab == tab ? "page" : null)"
-                                @onclick="() => Tabs.Show(tab)">
+                                @onclick="() => ShowTab(tab)">
                             @Icon(tab)<span>@tab</span>
                         </button>
                     }
@@ -141,7 +152,7 @@ else
     /// </summary>
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private Timer? _lockPollTimer;
     private bool _disposed;
     private bool _ready;
@@ -159,6 +170,7 @@ else
     private ElementReference _moreButton;
     private ElementReference _firstMoreItem;
     private ElementReference _content;
+    private ScreenErrorBoundary? _boundary;
     private bool _focusFirstMoreItem;
     private bool _focusMoreButton;
     private bool _focusContent;
@@ -218,8 +230,18 @@ else
     /// </summary>
     private void ChooseFromMore(AppTab tab)
     {
-        Tabs.Show(tab);
+        ShowTab(tab);
         _focusContent = true;
+    }
+
+    /// <summary>
+    /// Choosing a tab, even the one already open, is also how a screen that failed inside the
+    /// boundary is left: the boundary drops its error before the chosen screen is drawn.
+    /// </summary>
+    private void ShowTab(AppTab tab)
+    {
+        _boundary?.Recover();
+        Tabs.Show(tab);
     }
 
     /// <summary>Called by shell.js when the window widens past the phone layout, where More has no place.</summary>
@@ -259,6 +281,7 @@ else
     {
         if (!_disposed)
         {
+            _boundary?.Recover();
             StateHasChanged();
         }
     });
@@ -269,7 +292,7 @@ else
 
         try
         {
-            await Model.RefreshAsync(_cts.Token);
+            await Model.RefreshAsync(_lifetime.Token);
         }
         catch (Exception e)
         {
@@ -302,7 +325,7 @@ else
 
             // One file read, here, rather than one per tick: NoticeLock deliberately leaves
             // DeviceUnlockOffered alone, and the unlock screen this is about to show needs it.
-            await Model.RefreshAsync(_cts.Token);
+            await Model.RefreshAsync(_lifetime.Token);
             StateHasChanged();
         });
     }
@@ -321,7 +344,6 @@ else
         Tabs.Changed -= OnTabChanged;
         _self?.Dispose();
         _lockPollTimer?.Dispose();
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

@@ -131,7 +131,7 @@
         Reveal,
     }
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private SubView _view = SubView.List;
     private string? _activeReference;
     private KeyRow? _pendingDeleteRow;
@@ -141,7 +141,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await Model.RefreshAsync(_cts.Token);
+        await Model.RefreshAsync(_lifetime.Token);
     }
 
     private void OpenReveal(string reference)
@@ -160,7 +160,7 @@
     {
         _activeReference = null;
         _view = SubView.List;
-        await Model.RefreshAsync(_cts.Token);
+        await Model.RefreshAsync(_lifetime.Token);
     }
 
     private async Task PrepareDeleteAsync(KeyRow row)
@@ -168,7 +168,7 @@
         _deleteProblem = null;
         try
         {
-            _deleteWarning = await DeleteModel.PrepareAsync(row.Reference, _cts.Token);
+            _deleteWarning = await DeleteModel.PrepareAsync(row.Reference, _lifetime.Token);
             _pendingDeleteRow = row;
         }
         catch (VaultException ex)
@@ -197,10 +197,10 @@
         StateHasChanged();
         try
         {
-            await DeleteModel.DeleteAsync(pending.Reference, _cts.Token);
+            await DeleteModel.DeleteAsync(pending.Reference, _lifetime.Token);
             _pendingDeleteRow = null;
             _deleteWarning = null;
-            await Model.RefreshAsync(_cts.Token);
+            await Model.RefreshAsync(_lifetime.Token);
         }
         catch (VaultException ex)
         {
@@ -214,7 +214,6 @@
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

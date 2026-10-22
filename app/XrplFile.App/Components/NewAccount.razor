@@ -41,7 +41,7 @@
     [Parameter]
     public EventCallback OnDone { get; set; }
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private bool _busy;
 
     protected override void OnInitialized() => Choices.Refresh();
@@ -57,7 +57,7 @@
         StateHasChanged();
         try
         {
-            string? reference = await Model.CreateAsync(_cts.Token);
+            string? reference = await Model.CreateAsync(_lifetime.Token);
             if (reference is not null)
             {
                 // Cleared only on success, matching AddKey.razor's own reasoning: a refused label or
@@ -77,7 +77,6 @@
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

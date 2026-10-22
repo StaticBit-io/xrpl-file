@@ -90,7 +90,7 @@ else
     [Parameter]
     public EventCallback OnBack { get; set; }
 
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private ElementReference _qrCanvas;
     private bool[][]? _pendingMatrix;
     private bool _copying;
@@ -108,20 +108,20 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        await Model.SelectAsync(Reference, _cts.Token);
+        await Model.SelectAsync(Reference, _lifetime.Token);
 
         if (!Ready)
         {
             return;
         }
 
-        await Model.RefreshAsync(_cts.Token);
+        await Model.RefreshAsync(_lifetime.Token);
 
         _pendingMatrix = Model.QrPayload is { } payload ? QrMatrix.Build(payload) : null;
 
         // Not awaited: the loop runs for as long as the account is missing, and rendering must not wait
         // on it. It ends on its own when the account exists or this component is disposed.
-        _ = PollAsync(_cts.Token);
+        _ = PollAsync(_lifetime.Token);
     }
 
     private async Task PollAsync(CancellationToken cancellationToken)
@@ -162,7 +162,7 @@ else
         StateHasChanged();
         try
         {
-            await Model.RefreshAsync(_cts.Token);
+            await Model.RefreshAsync(_lifetime.Token);
         }
         catch (OperationCanceledException)
         {
@@ -178,7 +178,7 @@ else
         if (_pendingMatrix is { } matrix)
         {
             _pendingMatrix = null;
-            await JS.InvokeVoidAsync("drawQrMatrix", _cts.Token, _qrCanvas, matrix);
+            await JS.InvokeVoidAsync("drawQrMatrix", _lifetime.Token, _qrCanvas, matrix);
         }
     }
 
@@ -193,7 +193,7 @@ else
         StateHasChanged();
         try
         {
-            await Model.CopyAddressAsync(_cts.Token);
+            await Model.CopyAddressAsync(_lifetime.Token);
         }
         finally
         {
@@ -206,7 +206,6 @@ else
     public void Dispose()
     {
         _disposed = true;
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }

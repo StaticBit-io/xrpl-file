@@ -103,11 +103,11 @@
 </div>
 
 @code {
-    private readonly CancellationTokenSource _cts = new();
+    private readonly ScreenLifetime _lifetime = new();
     private bool _busy;
     private string? _payerChoice;
 
-    protected override async Task OnInitializedAsync() => await Model.RefreshAsync(_cts.Token);
+    protected override async Task OnInitializedAsync() => await Model.RefreshAsync(_lifetime.Token);
 
     private async Task ResumeAsync(UnfinishedRow row)
     {
@@ -120,7 +120,7 @@
         StateHasChanged();
         try
         {
-            await Model.ResumeAsync(row, _cts.Token);
+            await Model.ResumeAsync(row, _lifetime.Token);
         }
         finally
         {
@@ -138,7 +138,7 @@
         _busy = true;
         try
         {
-            await Model.ResumeWithPayerAsync(row, _payerChoice, _cts.Token);
+            await Model.ResumeWithPayerAsync(row, _payerChoice, _lifetime.Token);
         }
         finally
         {
@@ -150,7 +150,6 @@
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _cts.Dispose();
+        _lifetime.End();
     }
 }
