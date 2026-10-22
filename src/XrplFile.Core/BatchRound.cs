@@ -312,6 +312,7 @@ internal sealed class BatchRound(
                 }
 
                 context.Trace.Add($"transmit:{candidate.Ordinal}:{answer ?? "no answer"}");
+                if (answer is not null) progress.Sent();
 
                 if (answer is not null && IsMalformed(answer))
                 {

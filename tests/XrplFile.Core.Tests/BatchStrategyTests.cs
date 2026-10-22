@@ -369,6 +369,34 @@ public class BatchStrategyTests
         Assert.Equal(40, (await run).Count);
     }
 
+    [Fact]
+    public async Task A_pass_says_it_is_sending_once_its_first_batch_is_answered_before_any_memo_is_found()
+    {
+        // The first progress sweep finds landed memos 5 s or more into sending; until then the run
+        // screen had nothing to go on and said "Starting" while batches were going out.
+        BatchTestNode node = new();
+        GatedBlobSink gate = new(node.Sink, gateAt: 1);
+        List<int> reports = [];
+        Lock reportsGate = new();
+        SynchronousProgress<int> progress = new(done => { lock (reportsGate) reports.Add(done); });
+        await using BatchStrategy strategy = node.Strategy(BatchTestNode.FastOptions with { InitialWindow = 1 }, sink: gate);
+
+        Task<IReadOnlyList<SubmittedMemo>> run = strategy.SubmitAllAsync(BatchTestNode.Memos(40), progress, Token);
+        await gate.Reached.WaitAsync(TimeSpan.FromSeconds(20), Token);
+        await Task.Delay(200, Token);
+        int beforeAnswer;
+        lock (reportsGate) beforeAnswer = reports.Count;
+
+        gate.Release();
+        await run;
+
+        Assert.Equal(0, beforeAnswer);
+        Assert.Equal(0, reports[0]);
+        Assert.Single(reports, done => done == 0);
+        Assert.Equal(40, reports[^1]);
+        Assert.Equal(reports.Order(), reports);
+    }
+
     /// <summary>
     /// Holds the first blob submitted until the second has been answered, so the second outer reaches
     /// the node first whatever the speed of the machine (a timed delay of the fake raced with signing
