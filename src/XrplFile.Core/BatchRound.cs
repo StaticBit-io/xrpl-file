@@ -146,9 +146,17 @@ internal sealed class BatchRound(
         Interlocked.Exchange(ref _allowance, start.SequenceOf(Payer) + (long)Options.MaxAhead);
 
         List<Task> transmissions = [];
+        Lock resendGate = new();
+        List<Task> resends = [];
         using CancellationTokenSource transmitting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         using CancellationTokenSource checking = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        Task checks = ChainCheckLoopAsync(plan, start, registry, checking.Token);
+
+        void Resend(BatchCandidate outer)
+        {
+            lock (resendGate) resends.Add(TransmitAsync(outer, registry, slotHeld: false, transmitting, transmitting.Token));
+        }
+
+        Task checks = ChainCheckLoopAsync(plan, start, registry, Resend, checking.Token);
         ExceptionDispatchInfo? failure = null;
         LedgerSnapshot? settled = null;
 
@@ -215,7 +223,14 @@ internal sealed class BatchRound(
             // A run that failed here fails unsettled; the fence already covers everything registered (spec B23).
             if (failure is null && Volatile.Read(ref _fatal) is null)
             {
-                settled = await SettleAsync(registry.Candidates, cancellationToken).ConfigureAwait(false);
+                // The last outers are often still waiting on one that was exhausted when sending ended.
+                settled = await SettleAsync(registry.Candidates, cancellationToken, snapshot =>
+                {
+                    if (!registry.IsHalted && BatchChain.Verdict(plan, start, registry.Outers, snapshot, Writer, Payer) is null)
+                    {
+                        ResendExhausted(registry.Outers, (long)snapshot.SequenceOf(Payer) - start.SequenceOf(Payer), Resend);
+                    }
+                }).ConfigureAwait(false);
             }
         }
         finally
@@ -224,6 +239,10 @@ internal sealed class BatchRound(
             // transmission outlives it.
             await transmitting.CancelAsync().ConfigureAwait(false);
             await DrainAsync(transmissions).ConfigureAwait(false);
+
+            List<Task> resent;
+            lock (resendGate) resent = [.. resends];
+            await DrainAsync(resent).ConfigureAwait(false);
         }
 
         failure?.Throw();
@@ -268,7 +287,7 @@ internal sealed class BatchRound(
 
     /// <summary>
     /// Transmits one registered candidate (spec submit-answer table): busy answers and lost answers
-    /// are transport retries of the same blob, <see cref="BatchStrategyOptions.TransportRetryStep"/> ×
+    /// are transport retries of the same blob, <see cref="BatchStrategyOptions.TransportRetryStep"/> Г—
     /// (retry + 1) apart, up to four transmissions in all; <c>telINSUF_FEE_P</c> is not resent, since
     /// the next round reads the unit again; any other answer leaves it to settlement; a malformed one
     /// fails the run. A halted round sends no first copy of anything: the candidate stays registered
@@ -330,6 +349,8 @@ internal sealed class BatchRound(
                     await Task.Delay(Options.TransportRetryStep * transmission, Options.Time, cancellationToken).ConfigureAwait(false);
                 }
             }
+
+            candidate.MarkExhausted();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -361,7 +382,8 @@ internal sealed class BatchRound(
     /// cannot be made -- the node unreachable past its limit, a ledger that stopped -- is fatal: it
     /// halts the round, so a sender waiting for allowance is released rather than left waiting.
     /// </summary>
-    private async Task ChainCheckLoopAsync(RoundPlan plan, LedgerSnapshot start, BatchRegistry registry, CancellationToken cancellationToken)
+    private async Task ChainCheckLoopAsync(
+        RoundPlan plan, LedgerSnapshot start, BatchRegistry registry, Action<BatchCandidate> resend, CancellationToken cancellationToken)
     {
         try
         {
@@ -379,6 +401,8 @@ internal sealed class BatchRound(
 
                 // Raised only by a snapshot that passed the check (spec B10).
                 Interlocked.Exchange(ref _allowance, snapshot.SequenceOf(Payer) + (long)Options.MaxAhead);
+
+                ResendExhausted(registry.Outers, (long)snapshot.SequenceOf(Payer) - start.SequenceOf(Payer), resend);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -389,6 +413,28 @@ internal sealed class BatchRound(
         {
             Interlocked.CompareExchange(ref _fatal, e, null);
             await registry.HaltAsync("fatal", CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Sends again the outer B's sequence stopped at when its transmissions are exhausted, and the
+    /// exhausted outers behind it, in order, as many as the window holds now (spec B8 as amended
+    /// 2026-10-22). Left to its deadline, it held every later outer for about 70 s, though the
+    /// ledger had room again a few ledgers later. It is the same signed blob, so it stays one candidate.
+    /// </summary>
+    private void ResendExhausted(IReadOnlyList<BatchCandidate> outers, long consumed, Action<BatchCandidate> resend)
+    {
+        if (consumed < 0 || consumed >= outers.Count || !outers[(int)consumed].IsExhausted) return;
+
+        int room = context.Window.Size;
+
+        for (int k = (int)consumed; k < outers.Count && room > 0; k++)
+        {
+            if (!outers[k].TryResume()) continue;
+
+            context.Trace.Add($"resend:{outers[k].Ordinal}");
+            resend(outers[k]);
+            room--;
         }
     }
 
@@ -407,12 +453,14 @@ internal sealed class BatchRound(
     /// Waits until every candidate is resolved (spec B9), then <see cref="BatchStrategyOptions.SettleLedgers"/>
     /// more ledgers, and returns the settling snapshot.
     /// </summary>
-    private async Task<LedgerSnapshot> SettleAsync(IReadOnlyList<BatchCandidate> candidates, CancellationToken cancellationToken)
+    private async Task<LedgerSnapshot> SettleAsync(
+        IReadOnlyList<BatchCandidate> candidates, CancellationToken cancellationToken, Action<LedgerSnapshot>? waiting = null)
     {
         LedgerSnapshot snapshot = await SnapshotAsync(cancellationToken).ConfigureAwait(false);
 
         while (!candidates.All(candidate => candidate.IsResolvedBy(snapshot)))
         {
+            waiting?.Invoke(snapshot);
             await Task.Delay(Options.ChainCheck, Options.Time, cancellationToken).ConfigureAwait(false);
             snapshot = await SnapshotAsync(cancellationToken).ConfigureAwait(false);
         }

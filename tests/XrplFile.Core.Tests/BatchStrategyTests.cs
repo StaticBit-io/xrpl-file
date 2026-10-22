@@ -118,6 +118,55 @@ public class BatchStrategyTests
         Assert.All((await node.LandedByMarkerAsync()).Values, copies => Assert.Single(copies));
     }
 
+    /// <summary>
+    /// Testnet, 2026-10-22: a full open ledger answers a Batch <c>telCAN_NOT_QUEUE</c>, since a Batch is
+    /// never queued. An outer refused four times was left to its deadline, every outer behind it waited
+    /// on B's sequence, and a 7 MB run stood still for 88 s. Sent again while B waits on it, it lands
+    /// once the ledger has room, and the round goes on without waiting out the deadline.
+    /// </summary>
+    [Fact]
+    public async Task Outers_refused_busy_four_times_are_sent_again_while_the_payer_waits_on_them()
+    {
+        BatchTestNode node = new(sink =>
+        {
+            for (int copy = 1; copy <= 4; copy++)
+            {
+                sink.AnswerAt[(BatchTestNode.PayerStart, copy)] = "telCAN_NOT_QUEUE";
+                sink.AnswerAt[(BatchTestNode.PayerStart + 1, copy)] = "telCAN_NOT_QUEUE";
+            }
+        });
+
+        // One candidate per memo: a round that stalled could not send them again.
+        await using BatchStrategy strategy = node.Strategy(BatchTestNode.FastOptions with { MaxAttemptsPerMemo = 1 });
+
+        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
+
+        Assert.Equal(24, landed.Count);
+        Assert.DoesNotContain("halt:stalled", strategy.Trace);
+        Assert.Single(strategy.Trace, entry => entry.StartsWith("round:", StringComparison.Ordinal));
+        Assert.Contains(node.Sink.Transmissions, t => t.Sequence == BatchTestNode.PayerStart + 1 && t.Answer == "tesSUCCESS");
+    }
+
+    [Fact]
+    public async Task A_diverged_round_does_not_send_an_exhausted_outer_again()
+    {
+        BatchTestNode node = new(sink =>
+        {
+            sink.OuterResult[BatchTestNode.PayerStart] = "tecFAKE";
+            for (int copy = 1; copy <= 4; copy++) sink.AnswerAt[(BatchTestNode.PayerStart + 1, copy)] = "telCAN_NOT_QUEUE";
+        });
+        await using BatchStrategy strategy = node.Strategy();
+
+        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
+
+        Assert.Equal(24, landed.Count);
+
+        // B would pay for an outer whose inners can no longer apply. Whether the chain check halted the
+        // round while it sent, or settlement met the divergence after sending ended, it is not sent again.
+        uint first = node.Sink.Transmissions.Where(t => t.Sequence == BatchTestNode.PayerStart + 1).Select(t => t.LastLedger).First();
+        Assert.Equal(4, node.Sink.Transmissions.Count(t => t.Sequence == BatchTestNode.PayerStart + 1 && t.LastLedger == first));
+    }
+
     [Fact]
     public async Task A_tec_outer_is_seen_as_divergence_and_its_memos_are_sent_again()
     {

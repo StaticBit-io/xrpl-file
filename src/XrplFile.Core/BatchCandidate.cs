@@ -12,6 +12,7 @@ internal sealed class BatchCandidate(
     public const int SoloOrdinal = -1;
 
     private volatile bool _resolved;
+    private int _exhausted;
 
     public int Ordinal { get; } = ordinal;
 
@@ -37,6 +38,18 @@ internal sealed class BatchCandidate(
     public bool IsResolved => _resolved;
 
     public void MarkResolved() => _resolved = true;
+
+    /// <summary>
+    /// Every transmission of its last series came back busy or unanswered, so nothing is sending it
+    /// any more (spec submit-answer table). For a Batch that is usually a full open ledger: a Batch is
+    /// never queued, and the node answers <c>telCAN_NOT_QUEUE</c>.
+    /// </summary>
+    public bool IsExhausted => Volatile.Read(ref _exhausted) == 1;
+
+    public void MarkExhausted() => Volatile.Write(ref _exhausted, 1);
+
+    /// <summary>Claims an exhausted candidate for a new series of transmissions; false when one is already sending it.</summary>
+    public bool TryResume() => Interlocked.CompareExchange(ref _exhausted, 0, 1) == 1;
 
     /// <summary>
     /// Resolved once the snapshot's ledger is past its deadline, or its account's sequence is past its
