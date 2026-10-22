@@ -214,6 +214,13 @@ A reader MUST NOT deliver bytes of a block whose hash does not match its entry, 
 report the block index (`BlockMismatch`). A block short of its full chunk count by the time the
 range `[l, last]` is exhausted is `ChunkMissing`, also reported with the block index.
 
+Step 6 describes what each block's read sees, not how often the node is asked. A block usually
+starts in the ledger the block before it ended in, so a reader MAY keep the writer's transactions
+from one block's read and give the next block those from its `l` on, followed by the rest of the
+same forward read. The validated ledgers in `[first, last]` do not change, so the next block sees
+exactly the transactions, in exactly the canonical order, that a read of its own from `l` would
+return. The reference readers do this within one read, holding at most 4,096 transactions.
+
 ### Nodes
 
 Reading needs a node that holds the ledgers in `[first, last]` and the manifest's ledger.

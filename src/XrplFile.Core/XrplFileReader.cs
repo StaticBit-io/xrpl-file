@@ -15,11 +15,18 @@ public sealed record ReadResult(Manifest Manifest, string Writer, IReadOnlyList<
 /// Reads a file out of the ledger and verifies every byte against the manifest's root. The
 /// algorithm is the one the format document describes, and the browser library repeats it
 /// rule for rule; the shared vectors keep the two in step.
+///
+/// One instance is meant for one read: its block walks share what they took from the node (see
+/// <see cref="ForwardHistory"/>), so reading the blocks in order takes each record once.
 /// </summary>
 public sealed class XrplFileReader(ILedgerSource source, ReaderOptions? options = null)
 {
     private readonly ILedgerSource _source = source;
     private readonly ReaderOptions _options = options ?? new ReaderOptions();
+
+    // Shared by the blocks of one read: a block starts in the ledger the block before it ended in,
+    // and walking each block afresh read that ledger twice.
+    private readonly ForwardHistory _history = new(source);
 
     public async Task<ReadResult> ReadAsync(XrplFileLink link, CancellationToken cancellationToken)
     {
@@ -185,7 +192,7 @@ public sealed class XrplFileReader(ILedgerSource source, ReaderOptions? options 
         byte[]?[] chunks = new byte[count][];
         int found = 0;
 
-        await foreach (LedgerTransaction tx in _source.AccountTransactionsAsync(record.Writer, block.FirstLedger, manifest.LastLedger, forward: true, cancellationToken).ConfigureAwait(false))
+        await foreach (LedgerTransaction tx in _history.WalkAsync(record.Writer, block.FirstLedger, manifest.LastLedger, cancellationToken).ConfigureAwait(false))
         {
             if (!IsMine(tx, record.Writer, manifest)) continue;
 

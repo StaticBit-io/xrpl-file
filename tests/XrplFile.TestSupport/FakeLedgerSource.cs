@@ -353,6 +353,18 @@ public sealed class FakeLedgerSource : ILedgerSource
     /// </summary>
     public Exception? AccountTransactionsFailure { get; set; }
 
+    /// <summary>
+    /// The next <see cref="AccountTransactionsAsync"/> walk answers this many records and then
+    /// fails the way a connection dropped between two pages does, once. A failure only at the
+    /// start of a walk cannot reach a reader that carries a walk over from one block to the next.
+    /// </summary>
+    public int? HistoryFailsAfter { get; set; }
+
+    /// <summary>Every record <see cref="AccountTransactionsAsync"/> has handed out, over all walks.</summary>
+    public long RecordsYielded => Interlocked.Read(ref _recordsYielded);
+
+    private long _recordsYielded;
+
     public async IAsyncEnumerable<LedgerTransaction> AccountTransactionsAsync(
         string account, long fromLedger, long toLedger, bool forward, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -369,10 +381,13 @@ public sealed class FakeLedgerSource : ILedgerSource
         }
 
         List<LedgerTransaction> ordered;
+        int? failAfter;
 
         lock (_gate)
         {
             Calls.Add(new AccountTransactionsCall(account, fromLedger, toLedger, forward));
+            failAfter = HistoryFailsAfter;
+            HistoryFailsAfter = null;
 
             for (int i = _delayed.Count - 1; i >= 0; i--)
             {
@@ -404,9 +419,18 @@ public sealed class FakeLedgerSource : ILedgerSource
                 : [.. matching.OrderByDescending(pair => pair.Tx.LedgerIndex).ThenByDescending(pair => pair.Position).Select(pair => pair.Tx)];
         }
 
+        int handed = 0;
+
         foreach (LedgerTransaction tx in ordered)
         {
             await Task.Yield();
+
+            if (handed++ == failAfter)
+            {
+                throw new XrplFileException(XrplFileError.NodeUnreachable, $"fake: the node stopped answering after {failAfter} records");
+            }
+
+            Interlocked.Increment(ref _recordsYielded);
             yield return tx;
         }
     }

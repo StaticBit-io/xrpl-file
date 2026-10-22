@@ -386,4 +386,158 @@ public class XrplFileReaderTests
         Assert.Equal(blocks[2].FirstLedger, blockCall.FromLedger);
         Assert.True(blockCall.Forward);
     }
+
+    // The 2,500,500-byte vector puts 100 chunks in a ledger, so block 1 starts in the ledger that
+    // holds chunks 1000..1099, which block 0 ends in, and block 2 in the one holding 2000..2099.
+    // A reader that walks each block from its own first ledger reads those two ledgers twice.
+    private static async Task<(ManifestRecord Manifest, IReadOnlyList<BlockEntry> Blocks)> OpenAsync(XrplFileReader reader)
+    {
+        ManifestRecord manifest = await reader.ManifestAsync(Vectors.Link, TestContext.Current.CancellationToken);
+        return (manifest, await reader.BlockListAsync(manifest, TestContext.Current.CancellationToken));
+    }
+
+    private static byte[] BlockBytes(VectorFile vector, int block) =>
+        [.. VectorStream.Bytes(vector.Seed, vector.Size).Skip(block * FileTree.BlockChunks * vector.Chunk).Take(FileTree.BlockChunks * vector.Chunk)];
+
+    [Fact]
+    public async Task Blocks_sharing_a_ledger_take_each_record_from_the_node_once()
+    {
+        VectorFile vector = Vectors.File(2500500);
+        FakeLedgerSource source = SourceFor(2500500);
+        XrplFileReader reader = new(source);
+        (ManifestRecord manifest, IReadOnlyList<BlockEntry> blocks) = await OpenAsync(reader);
+        Assert.Equal(blocks[0].FirstLedger + 10, blocks[1].FirstLedger);
+        int listCalls = source.AccountTransactionsCalls;
+        long listRecords = source.RecordsYielded;
+
+        for (int block = 0; block < blocks.Count; block++)
+        {
+            Assert.Equal(BlockBytes(vector, block), await reader.BlockAsync(manifest, blocks[block], TestContext.Current.CancellationToken));
+        }
+
+        Assert.Equal(manifest.Manifest.ChunkCount, source.RecordsYielded - listRecords);
+        AccountTransactionsCall walk = Assert.Single(source.Calls.Skip(listCalls));
+        Assert.Equal(blocks[0].FirstLedger, walk.FromLedger);
+    }
+
+    [Fact]
+    public async Task A_shared_ledger_whose_next_block_comes_first_is_replayed_not_read_again()
+    {
+        // Canonical order inside a ledger is not index order: here block 1's chunks come before
+        // block 0's last ones, so block 0 reads to the shared ledger's end and block 1's chunks
+        // in it are already behind the walk when block 1 starts.
+        VectorFile vector = Vectors.File(2500500);
+        List<LedgerTransaction> ledger = Vectors.Ledger(vector);
+        long shared = ledger.Single(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 1000).LedgerIndex;
+        List<LedgerTransaction> sharedChunks = [.. ledger.Where(tx => tx.LedgerIndex == shared)];
+        ledger.RemoveAll(tx => tx.LedgerIndex == shared);
+        ledger.AddRange(sharedChunks.Where(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) >= 1024));
+        ledger.AddRange(sharedChunks.Where(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) < 1024));
+        FakeLedgerSource source = new FakeLedgerSource().AddRange(ledger);
+        XrplFileReader reader = new(source);
+        (ManifestRecord manifest, IReadOnlyList<BlockEntry> blocks) = await OpenAsync(reader);
+        int listCalls = source.AccountTransactionsCalls;
+        long listRecords = source.RecordsYielded;
+
+        Assert.Equal(BlockBytes(vector, 0), await reader.BlockAsync(manifest, blocks[0], TestContext.Current.CancellationToken));
+        Assert.Equal(BlockBytes(vector, 1), await reader.BlockAsync(manifest, blocks[1], TestContext.Current.CancellationToken));
+
+        Assert.Single(source.Calls.Skip(listCalls));
+        // Block 0 reads 1,100 records, the whole shared ledger included; block 1 takes the 76 of
+        // its own that ledger holds from what block 0 read and the other 948 from the node.
+        Assert.Equal(1100 + 948, source.RecordsYielded - listRecords);
+    }
+
+    [Fact]
+    public async Task A_wrong_copy_in_a_shared_ledger_still_wins_over_the_real_one_after_it()
+    {
+        // The first copy in canonical order is the chunk, whether the walk meets it from the node
+        // or among what the block before it read. Here the wrong copy of chunk 1024 is the shared
+        // ledger's first record, read by block 0's walk, which has no use for it.
+        List<LedgerTransaction> ledger = Vectors.Ledger(Vectors.File(2500500));
+        int at = ledger.FindIndex(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 1000);
+        LedgerTransaction real = ledger.Single(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 1024);
+        ledger.Insert(at, real with { Hash = Vectors.Hash("wrong:1024"), MemoDataHex = new string('F', real.MemoDataHex!.Length) });
+        FakeLedgerSource source = new FakeLedgerSource().AddRange(ledger);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => new XrplFileReader(source).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.BlockMismatch, error.Error);
+        Assert.Equal(1, error.Block);
+    }
+
+    [Fact]
+    public async Task A_copy_before_a_blocks_first_ledger_is_not_its_chunk_even_when_an_earlier_block_read_it()
+    {
+        // Block 0's walk passes this copy of chunk 1024; block 1's range starts after it, so a
+        // fresh walk for block 1 never meets it, and neither may what block 1 takes from block 0.
+        VectorFile vector = Vectors.File(2500500);
+        List<LedgerTransaction> ledger = Vectors.Ledger(vector);
+        LedgerTransaction real = ledger.Single(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 1024);
+        LedgerTransaction middle = ledger.Single(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 500);
+        ledger.Insert(ledger.IndexOf(middle), real with { Hash = Vectors.Hash("early:1024"), LedgerIndex = middle.LedgerIndex, MemoDataHex = new string('F', real.MemoDataHex!.Length) });
+        FakeLedgerSource source = new FakeLedgerSource().AddRange(ledger);
+
+        ReadResult result = await new XrplFileReader(source).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken);
+
+        Assert.Equal(VectorStream.Bytes(vector.Seed, vector.Size), result.Bytes);
+    }
+
+    [Fact]
+    public async Task A_walk_the_node_stopped_answering_is_taken_again_from_the_blocks_own_ledger()
+    {
+        VectorFile vector = Vectors.File(2500500);
+        FakeLedgerSource source = SourceFor(2500500);
+        XrplFileReader reader = new(source);
+        (ManifestRecord manifest, IReadOnlyList<BlockEntry> blocks) = await OpenAsync(reader);
+        int listCalls = source.AccountTransactionsCalls;
+
+        // Block 0 takes 1,024 records of the walk; carried on into block 1, it fails 500 later.
+        source.HistoryFailsAfter = 1524;
+        await reader.BlockAsync(manifest, blocks[0], TestContext.Current.CancellationToken);
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => reader.BlockAsync(manifest, blocks[1], TestContext.Current.CancellationToken));
+        byte[] retried = await reader.BlockAsync(manifest, blocks[1], TestContext.Current.CancellationToken);
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+        Assert.Equal(BlockBytes(vector, 1), retried);
+        Assert.Equal([blocks[0].FirstLedger, blocks[1].FirstLedger], source.Calls.Skip(listCalls).Select(call => call.FromLedger));
+    }
+
+    [Fact]
+    public async Task A_walk_is_not_carried_on_under_another_callers_token()
+    {
+        // A carried-over walk keeps the token it was started with; going on with it for a caller
+        // holding another one would leave that caller unable to cancel its own requests.
+        VectorFile vector = Vectors.File(2500500);
+        FakeLedgerSource source = SourceFor(2500500);
+        XrplFileReader reader = new(source);
+        (ManifestRecord manifest, IReadOnlyList<BlockEntry> blocks) = await OpenAsync(reader);
+        using CancellationTokenSource first = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        using CancellationTokenSource second = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        int listCalls = source.AccountTransactionsCalls;
+
+        await reader.BlockAsync(manifest, blocks[0], first.Token);
+        await first.CancelAsync();
+        byte[] next = await reader.BlockAsync(manifest, blocks[1], second.Token);
+
+        Assert.Equal(BlockBytes(vector, 1), next);
+        Assert.Equal([blocks[0].FirstLedger, blocks[1].FirstLedger], source.Calls.Skip(listCalls).Select(call => call.FromLedger));
+    }
+
+    [Fact]
+    public async Task Blocks_read_at_the_same_time_each_come_out_whole()
+    {
+        VectorFile vector = Vectors.File(2500500);
+        XrplFileReader reader = new(SourceFor(2500500));
+        (ManifestRecord manifest, IReadOnlyList<BlockEntry> blocks) = await OpenAsync(reader);
+
+        byte[][] read = await Task.WhenAll(blocks.Select(block => reader.BlockAsync(manifest, block, TestContext.Current.CancellationToken)));
+
+        for (int block = 0; block < blocks.Count; block++)
+        {
+            Assert.Equal(BlockBytes(vector, block), read[block]);
+        }
+    }
 }
