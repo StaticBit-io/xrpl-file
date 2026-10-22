@@ -187,6 +187,73 @@ public sealed class EstimateModelTests : IDisposable
     }
 
     [Fact]
+    public async Task A_file_too_small_for_Batch_is_estimated_for_the_writer_alone()
+    {
+        _connections.Ledger.Balances["rWriter"] = 100_000_000;
+        _connections.Ledger.Balances["rPayer"] = 100_000_000;
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(BatchRequest(size: 597), TestContext.Current.CancellationToken);
+
+        Assert.Null(model.BatchEstimate);
+        Assert.NotNull(model.Estimate);
+        Assert.Null(model.MethodLine);
+        Assert.Equal(EstimateModel.TooSmallForBatchNote, model.Note);
+        Assert.True(model.CanPublish);
+
+        PublishRequest effective = model.Request!;
+        Assert.Null(effective.PayerReference);
+        Assert.Null(effective.PayerAccount);
+        Assert.Null(effective.PayerLabel);
+        Assert.Equal("rWriter", effective.Account);
+        Assert.Equal(597, effective.File.Length);
+    }
+
+    [Fact]
+    public async Task A_file_with_at_least_one_batch_keeps_its_payer_and_says_nothing_extra()
+    {
+        _connections.Ledger.Balances["rWriter"] = 100_000_000;
+        _connections.Ledger.Balances["rPayer"] = 100_000_000;
+        PublishRequest request = BatchRequest(size: MemoLayout.ChunkBytes + 1);
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(BatchRequest(size: 597), TestContext.Current.CancellationToken);
+        await model.EstimateAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.True(model.BatchEstimate!.Batches > 0);
+        Assert.Null(model.Note);
+        Assert.Same(request, model.Request);
+    }
+
+    [Fact]
+    public async Task A_request_without_a_payer_is_estimated_as_it_was_asked()
+    {
+        _connections.Ledger.Balances["rWriter"] = 100_000_000;
+        PublishRequest request = Request(size: 597);
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Same(request, model.Request);
+        Assert.Null(model.Note);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(597)]
+    [InlineData(MemoLayout.ChunkBytes)]
+    [InlineData(MemoLayout.ChunkBytes + 1)]
+    [InlineData(2 * MemoLayout.ChunkBytes)]
+    [InlineData(2 * MemoLayout.ChunkBytes + 1)]
+    public async Task Too_small_for_Batch_is_exactly_the_library_estimate_having_no_batch(int size)
+    {
+        BatchPublicationEstimate estimate = await PublicationEstimator.EstimateBatchAsync(
+            _connections.Ledger, "rWriter", "rPayer", size, TestContext.Current.CancellationToken);
+
+        Assert.Equal(estimate.Batches == 0, PublishPolicy.TooSmallForBatch(size));
+    }
+
+    [Fact]
     public async Task A_short_payer_is_named_with_what_it_needs_and_can_spend()
     {
         _connections.Ledger.Balances["rWriter"] = 100_000_000;

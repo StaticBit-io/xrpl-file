@@ -45,6 +45,11 @@ reconnect, it assigned sequences the previous round had already consumed, and it
 below that round's own transactions and took them for foreign ones (`AccountInUse`). B6 now keeps
 the validated ledger of a run's snapshots from moving down.
 
+**Amended 2026-10-22 for a file too small for Batch.** A file of one chunk gave a Batch estimate of
+0 batches and 2 solo transactions: the payer paid nothing, yet the screen showed its whole block and
+the run recorded it. Such a request now drops its payer (section 6.2) and publishes on the
+no-payer policy of B4.
+
 ## 1. What is known
 
 From the spike, measured on the `xrpl-file-ci` stand (xrpld 3.3.0) and on testnet (xrpld 3.4.1,
@@ -439,6 +444,17 @@ When the request has a payer, the card shows:
 Amounts are in XRP and the unit in drops, as the screen already does. The shortfall message names
 the account that is short: "The payer `<label>` needs X XRP and can spend Y." Without a payer, the
 card is today's ticket estimate.
+
+**Too small for Batch (amended 2026-10-22).** When a Batch estimate of the file would hold 0
+batches, every memo is a solo the writer pays for, and the payer would pay nothing. This happens
+exactly when the file is one chunk: the manifest is always a pass of one, and a block list exists
+only past 1,024 chunks. The publication then uses no payer at all: `PublishPolicy.TooSmallForBatch`
+decides it from the size, `PublishPolicy.Effective` drops the payer from the request, and
+`EstimateModel` estimates and starts that request. The card is the writer's own estimate, with the
+muted note "Too small for Batch — the writer pays its few transactions itself." The run, its state
+file and its History record name no payer, and the policy of B4 picks `SequenceStrategy`. The
+choice in "Paid by" stays as the person left it, and it is not remembered as the network's
+default, because no run used it.
 
 ### 6.3 Run
 

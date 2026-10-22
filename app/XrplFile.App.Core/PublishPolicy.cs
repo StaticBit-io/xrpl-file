@@ -53,6 +53,29 @@ public static class PublishPolicy
         FileTree.ChunkCount(fileBytes, MemoLayout.ChunkBytes) + 1 >= TicketThreshold;
 
     /// <summary>
+    /// Whether a Batch run of a file this size would contain no Batch transaction at all, so a payer
+    /// would pay nothing and the writer would send every memo itself (Batch spec 6, amendment
+    /// 2026-10-22). Such a request is published without a payer, on the one-account policy above.
+    /// The chunk pass alone decides it: the manifest is always a pass of one, and a block list exists
+    /// only past 1,024 chunks, so with fewer than two chunks every pass is a single memo sent solo.
+    /// </summary>
+    public static bool TooSmallForBatch(long fileBytes) =>
+        FileTree.ChunkCount(fileBytes, MemoLayout.ChunkBytes) < 2;
+
+    /// <summary>
+    /// The request a publication actually runs with: the same one, except that a payer is dropped
+    /// when <see cref="TooSmallForBatch"/> says it would pay for nothing.
+    /// </summary>
+    public static PublishRequest Effective(PublishRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return request.PayerAccount is not null && TooSmallForBatch(request.File.Length)
+            ? request with { PayerReference = null, PayerAccount = null, PayerLabel = null }
+            : request;
+    }
+
+    /// <summary>
     /// Whether the run would use tickets on an account where none can be minted or reused: every
     /// live-ticket slot is taken by tickets this application did not leave. A run that would not
     /// use tickets is unaffected.

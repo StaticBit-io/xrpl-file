@@ -21,6 +21,18 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
     /// <summary>"Batch, paid by &lt;label&gt;." for a Batch request, otherwise null (spec 6.2).</summary>
     public string? MethodLine { get; private set; }
 
+    /// <summary>Said under the estimate when a chosen payer was dropped because the file is too small for Batch.</summary>
+    public const string TooSmallForBatchNote = "Too small for Batch — the writer pays its few transactions itself.";
+
+    /// <summary>
+    /// The request a run started from this estimate uses (<see cref="PublishPolicy.Effective"/>):
+    /// what was estimated, which is not always what was asked for. Null before the first estimate.
+    /// </summary>
+    public PublishRequest? Request { get; private set; }
+
+    /// <summary><see cref="TooSmallForBatchNote"/> when the payer was dropped, otherwise null.</summary>
+    public string? Note { get; private set; }
+
     public bool CanPublish =>
         BatchEstimate is { } batch
             ? batch.WriterCovers && batch.PayerCovers
@@ -38,6 +50,11 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         Message = null;
         BatchEstimate = null;
         MethodLine = null;
+
+        PublishRequest effective = PublishPolicy.Effective(request);
+        Request = effective;
+        Note = ReferenceEquals(effective, request) ? null : TooSmallForBatchNote;
+        request = effective;
 
         if (request.PayerAccount is { } payer)
         {
