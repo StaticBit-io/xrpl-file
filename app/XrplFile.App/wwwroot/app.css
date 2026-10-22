@@ -273,7 +273,7 @@ progress { accent-color: var(--mint); }
 
 /* ---- Pages ---- */
 
-.xf-page { box-sizing: border-box; max-width: 920px; padding: 20px 26px; min-width: 0; }
+.xf-page { box-sizing: border-box; max-width: 1600px; padding: 20px 26px; min-width: 0; }
 .xf-title { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 14px; }
 .xf-section-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); font-weight: 500; margin: 0 0 12px; }
 .xf-card {
@@ -294,6 +294,15 @@ progress { accent-color: var(--mint); }
 .xf-num { font-variant-numeric: tabular-nums; }
 .xf-figure { font-variant-numeric: tabular-nums; color: var(--beige); font-weight: 600; }
 .xf-muted { color: var(--text-secondary); }
+
+/* ---- Wide windows ---- */
+
+/* The page grows with the window, but only a card whose own content is a data table uses that width,
+   with the heading row above it so its button lines up with the table's edge: prose, forms and
+   key/value tables keep a 920 px measure, where a line still reads and a label stays near its value. */
+@media (min-width: 1100px) {
+    .xf-page > :not(.xf-page-head, .xf-card:has(> .table:not(.xf-kv-table))) { max-width: 920px; }
+}
 
 /* ---- Medium windows ---- */
 
@@ -320,11 +329,15 @@ progress { accent-color: var(--mint); }
 
 @media (min-width: 720px) {
     .xf-more, .xf-more-backdrop { display: none; }
+}
 
+@media (min-width: 1100px) {
     /* overflow-wrap: anywhere lets table auto-layout shrink a column to one character, so an address
-       that is a cell's own content is kept whole while there is room. Below 720px it wraps again.
-       Addresses inside a sentence in a cell keep wrapping (a long one would push the actions column
-       out of the card), and .xf-link is left alone: a published link must keep wrapping anywhere. */
+       that is a cell's own content is kept whole where a data table's card has the page's width.
+       Below 1100px it wraps again: kept whole there, an address alone pushed the Keys table out of
+       its card at 900px. Addresses inside a sentence in a cell keep wrapping (a long one would push
+       the actions column out of the card), and .xf-link is left alone: a published link must keep
+       wrapping anywhere. */
     td > code:not(.xf-link), td > .xf-mono:not(.xf-link) { white-space: nowrap; overflow-wrap: normal; }
 }
 
