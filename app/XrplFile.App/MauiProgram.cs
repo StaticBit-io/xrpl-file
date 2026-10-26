@@ -249,6 +249,9 @@ public static class MauiProgram
         });
         services.AddSingleton<IPublicationHistory>(provider => provider.GetRequiredService<PublicationHistory>());
 
+        // The display may still turn off; only system sleep is held off, and only while a run works (spec S13).
+        services.AddSingleton<IKeepAwake>(new ThreadKeepAwake(new WindowsExecutionState(), line => StartupLog.Write(line)));
+
         // A singleton because a publication outlives the screen that started it (design F5). It is
         // handed the same VaultAutoLock the signer uses, so progress in a stage that signs nothing
         // still counts as activity (design 10) -- exactly how TouchingVault is built one block above.
@@ -258,7 +261,8 @@ public static class MauiProgram
             provider.GetRequiredService<RunPaths>(),
             provider.GetRequiredService<IPublicationHistory>(),
             autoLock,
-            provider.GetRequiredService<TimeProvider>()));
+            provider.GetRequiredService<TimeProvider>(),
+            keepAwake: provider.GetRequiredService<IKeepAwake>()));
 
         services.AddSingleton<PublishModel>();
         services.AddSingleton<EstimateModel>();

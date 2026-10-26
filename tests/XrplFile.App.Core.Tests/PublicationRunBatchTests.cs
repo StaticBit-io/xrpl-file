@@ -32,7 +32,7 @@ public sealed class PublicationRunBatchTests : VaultHarness
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private async Task<(PublicationRun Run, PublishRequest Request, PublicationHistory History, KeyVault Vault)> ReadyAsync(int size = 20_000)
+    private async Task<(PublicationRun Run, PublishRequest Request, PublicationHistory History, KeyVault Vault)> ReadyAsync(int size = 20_000, IKeepAwake? keepAwake = null)
     {
         KeyVault vault = NewVault();
         await vault.CreateAsync(Password("a master password"), Token);
@@ -49,7 +49,7 @@ public sealed class PublicationRunBatchTests : VaultHarness
         _connections.Ledger.Balances[payer.ClassicAddress] = 100_000_000;
 
         PublicationHistory history = new(Paths.HistoryPath);
-        PublicationRun run = new(_connections, vault, Paths, history, batchOptions: Fast);
+        PublicationRun run = new(_connections, vault, Paths, history, batchOptions: Fast, keepAwake: keepAwake);
 
         // On disk because a resume opens the recorded path itself.
         string path = Path.Combine(_directory, "file.bin");
@@ -60,6 +60,56 @@ public sealed class PublicationRunBatchTests : VaultHarness
             payerRef, payer.ClassicAddress, path);
 
         return (run, request, history, vault);
+    }
+
+    private static void AssertHeldAndClearedOnOneThread(RecordingExecutionState state)
+    {
+        Assert.Equal(["require", "clear"], state.Calls.Select(call => call.Call));
+        Assert.Equal(state.Calls[0].Thread, state.Calls[1].Thread);
+    }
+
+    [Fact]
+    public async Task A_run_that_succeeds_holds_the_computer_awake_from_start_to_end_on_one_thread()
+    {
+        RecordingExecutionState state = new();
+        (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync(keepAwake: new ThreadKeepAwake(state));
+
+        Assert.True(run.Start(request));
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
+        AssertHeldAndClearedOnOneThread(state);
+    }
+
+    [Fact]
+    public async Task A_run_that_fails_lets_the_computer_sleep_again()
+    {
+        RecordingExecutionState state = new();
+        (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync(keepAwake: new ThreadKeepAwake(state));
+        _connections.ConnectThrows = new XrplFileException(XrplFileError.NodeUnreachable, "fake: no node");
+
+        Assert.True(run.Start(request));
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
+        AssertHeldAndClearedOnOneThread(state);
+    }
+
+    [Fact]
+    public async Task A_cancelled_run_lets_the_computer_sleep_again()
+    {
+        RecordingExecutionState state = new();
+        (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync(keepAwake: new ThreadKeepAwake(state));
+        _connections.BatchSink!.Transmitting = transmission =>
+        {
+            if (transmission.Ordinal == 1) run.Cancel();
+        };
+
+        Assert.True(run.Start(request));
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Cancelled, run.Snapshot.State);
+        AssertHeldAndClearedOnOneThread(state);
     }
 
     [Fact]

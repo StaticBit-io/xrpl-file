@@ -84,7 +84,8 @@ public sealed class PublicationRun(
     VaultAutoLock? autoLock = null,
     TimeProvider? time = null,
     BatchStrategyOptions? batchOptions = null,
-    Func<string, IPublicationSource>? openSource = null)
+    Func<string, IPublicationSource>? openSource = null,
+    IKeepAwake? keepAwake = null)
 {
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly Func<string, IPublicationSource> _openSource = openSource ?? (path => FilePublicationSource.Open(path));
@@ -350,6 +351,8 @@ public sealed class PublicationRun(
 
         try
         {
+            // First, so that a resume's hashing and reconciliation are covered too (spec S13).
+            keepAwake?.Acquire();
             paths.EnsureCreated();
 
             // Before any node is contacted: a recorded file that cannot be opened needs no connection to say so.
@@ -462,6 +465,8 @@ public sealed class PublicationRun(
         {
             // Released before the terminal state is published, so a screen that sees the run end finds the file free.
             if (source is not null) await DisposeQuietlyAsync(source).ConfigureAwait(false);
+
+            keepAwake?.Release();
         }
 
         // Every connection and strategy acquired above has already been disposed (quietly; see the
