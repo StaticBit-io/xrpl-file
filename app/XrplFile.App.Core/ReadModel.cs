@@ -7,25 +7,10 @@ namespace XrplFile.App.Core;
 /// </summary>
 public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore nodes)
 {
-    /// <summary>
-    /// The largest file this application reads — read from <see cref="ReaderOptions.MaxBytes"/>'s
-    /// own default rather than copied as a literal, so this and <see cref="ReadRun"/> (which
-    /// constructs its own <see cref="ReaderOptions"/> and reads the same property) cannot drift
-    /// apart the way a hard-coded copy of the same number already had within this one part. With the
-    /// file streamed to disk rather than held in memory this is policy rather than architecture
-    /// (design H7): what argues against raising it is the node, not this application. Twenty
-    /// megabytes at roughly a kilobyte of file per memo is on the order of twenty thousand
-    /// requests -- design H7's own text says "two hundred megabytes ... two hundred thousand
-    /// requests", off by the same factor of ten in both figures; not corrected there, since it is
-    /// the binding spec and this fix is scoped to the code comment it was copied into.
-    /// </summary>
-    public static readonly long MaxBytes = new ReaderOptions().MaxBytes;
-
     private static readonly ReadLookupSnapshot Empty = new(null, null, null, null);
 
     private readonly Lock _gate = new();
 
-    private long _ceiling = MaxBytes;
     private string _link = string.Empty;
     private ReadLookupSnapshot _snapshot = Empty;
 
@@ -99,8 +84,11 @@ public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore
 
     public bool CanRead => Snapshot.CanRead;
 
-    /// <summary>The ceiling, so a size refusal can be tested without publishing a large file.</summary>
-    internal void SetCeilingForTests(long ceiling) => _ceiling = ceiling;
+    /// <summary>
+    /// How long the read takes at the reader's measured pace (spec S15), shown with the size before
+    /// the person agrees; null before a manifest is looked up.
+    /// </summary>
+    public TimeSpan? ReadDuration => Manifest is { } record ? PublicationDuration.ForRead(record.Manifest) : null;
 
     public void Clear()
     {
@@ -207,23 +195,10 @@ public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore
 
                 nodeUrlResult = connection.Url;
 
-                // MaxBytes is inert here: ManifestAsync never consults ReaderOptions.MaxBytes (only
-                // ReadAsync does), so passing the ceiling through the constructor buys nothing for
-                // this call by itself. It is passed anyway because this is the same reader a later
-                // read of the actual blocks would reuse. The explicit size check just below this is
-                // what actually refuses an oversized file here — do not remove it on the assumption
-                // that the line above already covers it.
-                XrplFileReader reader = new(connection.Source, new ReaderOptions { MaxBytes = _ceiling });
+                XrplFileReader reader = new(connection.Source);
                 ManifestRecord record = await reader.ManifestAsync(parsed, cancellationToken).ConfigureAwait(false);
 
                 manifestResult = record;
-
-                // Refused here rather than in the run, so the person is told before they agree
-                // rather than after they have waited.
-                if (record.Manifest.Size > _ceiling)
-                {
-                    messageResult = ReadErrorMessages.For(XrplFileError.TooLarge);
-                }
             }
             catch (XrplFileException ex)
             {

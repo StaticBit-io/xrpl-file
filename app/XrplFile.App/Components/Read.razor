@@ -118,6 +118,7 @@ else
             <section class="xf-card">
                 <p class="mb-1">@(manifest.Manifest.Name ?? "(no name)")</p>
                 <p class="mb-1">@manifest.Manifest.Size.ToString("N0") bytes</p>
+                <p class="mb-1">About @DurationText.Of(PublicationDuration.ForRead(manifest.Manifest)) to read</p>
                 <p class="mb-1">@manifest.Manifest.Type</p>
                 <p class="mb-1">Written by <span class="xf-mono">@manifest.Writer</span></p>
                 <p class="mb-1">@manifest.Manifest.Blocks block(s)</p>

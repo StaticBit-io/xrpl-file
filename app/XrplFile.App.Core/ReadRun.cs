@@ -311,21 +311,6 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
 
         try
         {
-            ReaderOptions options = new();
-
-            // The first of the four things design 3.1 moves out of ReadAsync
-            // (XrplFileReader.cs:29-32), checked before a connection is even opened. ReadModel's own
-            // ceiling check is what keeps the person from being offered a button for an oversized
-            // file, but Start is public and can be handed a ManifestRecord from anywhere else, so
-            // this loop has to be correct about its own ceiling too, not merely rely on a caller
-            // upstream having already checked it.
-            if (manifest.Manifest.Size > options.MaxBytes)
-            {
-                throw new XrplFileException(
-                    XrplFileError.TooLarge,
-                    $"the file is {manifest.Manifest.Size} bytes and this reader stops at {options.MaxBytes}");
-            }
-
             ILedgerConnection connection =
                 await connections.ConnectAsync(link.Network, cancellationToken).ConfigureAwait(false);
 
@@ -342,7 +327,7 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
                         $"this node keeps history from ledger {first} and the file starts at {manifest.Manifest.FirstLedger}");
                 }
 
-                XrplFileReader reader = new(connection.Source, options);
+                XrplFileReader reader = new(connection.Source);
 
                 // Verified against the manifest's root inside the library before a single block is read.
                 IReadOnlyList<BlockEntry> blocks =

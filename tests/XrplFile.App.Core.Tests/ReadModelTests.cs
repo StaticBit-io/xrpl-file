@@ -33,20 +33,6 @@ public sealed class ReadModelTests : IDisposable
         new(_connections, new FileNodeSettingsStore(Path.Combine(_directory, "node-urls.json")));
 
     [Fact]
-    public void MaxBytes_is_the_readers_own_default_not_a_copy_of_it()
-    {
-        // Round 2's N1 finding corrected an earlier version of this comment, which wrongly credited
-        // Ruling 8 -- that ruling is about the duplicated "no node URL" sentence, not this ceiling,
-        // and was never applied here. The actual remedy: derive the number rather than let a second
-        // literal drift from the library's own, the same fix PublishModel.ReaderDefaultMaxBytes
-        // needed for the identical reason once round 2 found it was still a bare literal too
-        // (PublishModelTests' own ReaderDefaultMaxBytes_is_the_readers_own_default_not_a_copy_of_it).
-        // ReadModel.MaxBytes is now `new ReaderOptions().MaxBytes` by construction, so this is a
-        // change-detector for exactly one thing -- somebody reintroducing a literal here.
-        Assert.Equal(new ReaderOptions().MaxBytes, ReadModel.MaxBytes);
-    }
-
-    [Fact]
     public async Task A_link_that_does_not_parse_is_refused_without_asking_a_node()
     {
         ReadModel model = NewModel();
@@ -105,21 +91,18 @@ public sealed class ReadModelTests : IDisposable
     }
 
     [Fact]
-    public async Task A_file_past_the_ceiling_is_refused_before_a_block_is_fetched()
+    public async Task A_looked_up_file_says_how_long_it_takes_to_read()
     {
-        // The manifest is read, so the size is known before anything large is moved. The ceiling
-        // check belongs here rather than in the run, so the person is told before they agree.
-        XrplFileLink link = await PublishAsync(_connections, "big.bin", "application/octet-stream", 4096);
-
+        XrplFileLink link = await PublishAsync(_connections, "photo.png", "image/png", 4096);
         ReadModel model = NewModel();
-        model.SetCeilingForTests(1024);
-        model.Link = link.ToString();
+        Assert.Null(model.ReadDuration);
 
+        model.Link = link.ToString();
         await model.LookUpAsync(TestContext.Current.CancellationToken);
 
-        Assert.NotNull(model.Manifest);
-        Assert.False(model.CanRead);
-        Assert.Equal(ReadErrorMessages.For(XrplFileError.TooLarge), model.Message);
+        // Five chunks and no block list, at 0.7 s per 400 records.
+        Assert.True(model.CanRead);
+        Assert.Equal(TimeSpan.FromSeconds(5 * 0.7 / 400), model.ReadDuration);
     }
 
     [Fact]

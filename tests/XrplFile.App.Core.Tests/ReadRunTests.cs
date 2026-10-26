@@ -465,35 +465,23 @@ public sealed class ReadRunTests : IDisposable
     }
 
     [Fact]
-    public async Task A_manifest_larger_than_the_ceiling_is_refused_before_any_block_is_fetched()
+    public async Task A_manifest_larger_than_the_readers_default_is_not_refused_for_its_size()
     {
-        // The first of the four things design 3.1 moves out of ReadAsync. ReadModel.LookUpAsync
-        // already refuses an oversized manifest before a person is ever offered a read button
-        // (ReadModel.cs) -- this proves ReadRun.Start is correct on its own terms too, since it is
-        // public and can be handed a ManifestRecord from anywhere else, not only from ReadModel.
         (ReadRun run, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
 
-        // Built with `with` rather than by publishing an oversized file for real: Manifest and
-        // ManifestRecord are both records, and nothing about the ceiling check depends on the bytes
-        // actually existing in the ledger -- it runs before a connection is even opened.
+        // Built with `with`: the claim of size is what used to be refused before a connection opened.
+        // The run now goes to the node, and whatever it finds there is not a refusal for size.
         ManifestRecord oversized = manifest with
         {
             Manifest = manifest.Manifest with { Size = new ReaderOptions().MaxBytes + 1 },
         };
-
         int connectionsBefore = _connections.Connections;
 
         Assert.True(run.Start(link, oversized));
         await run.Completion;
 
-        ReadSnapshot snapshot = run.Snapshot;
-        Assert.Equal(ReadState.Failed, snapshot.State);
-        Assert.Equal(ReadErrorMessages.For(XrplFileError.TooLarge), snapshot.Failure);
-
-        // Refused before ConnectAsync, not merely before a block: no new connection was opened for
-        // this run at all.
-        Assert.Equal(connectionsBefore, _connections.Connections);
-        Assert.Null(run.TemporaryPathForTests);
+        Assert.NotEqual(ReadErrorMessages.For(XrplFileError.TooLarge), run.Snapshot.Failure);
+        Assert.True(_connections.Connections > connectionsBefore);
     }
 
     [Fact]
