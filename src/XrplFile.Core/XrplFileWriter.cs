@@ -204,11 +204,17 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
             // Batch publications are sampled (spec S9, S21); ticket and sequence ones, at most 64 MiB
             // and with no bytes checked as their memos land, are read back in full. The block list read
             // back equals the plan, so the plan's count is the list's.
-            IReadOnlyList<int> visit = _strategy is BatchStrategy
+            bool sampled = _strategy is BatchStrategy;
+            IReadOnlyList<int> visit = sampled
                 ? PublicationCheck.SampleBlocks(manifest.Root, entries.Count)
                 : [.. Enumerable.Range(0, entries.Count)];
 
-            await ReadBlocksBackAsync(file, entries, visit, manifest, writer, lastLedger, progress, cancellationToken).ConfigureAwait(false);
+            // The history cache serves a block that starts where the one before it ended (spec S26);
+            // the sample's blocks are rarely adjacent, so it would only hold up to 4,096 records with their
+            // memo data while each walk passes through, long enough for the GC to promote them all.
+            int historyCache = sampled ? 0 : ForwardHistory.DefaultMaxRecords;
+
+            await ReadBlocksBackAsync(file, entries, visit, manifest, writer, lastLedger, historyCache, progress, cancellationToken).ConfigureAwait(false);
         }
 
         SubmittedMemos manifestLanded = await _strategy.SubmitAllAsync([ManifestPlan.Memo(manifest)], null, cancellationToken).ConfigureAwait(false);
@@ -308,9 +314,9 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
     /// </summary>
     private async Task ReadBlocksBackAsync(
         IPublicationSource file, IReadOnlyList<BlockEntry> plan, IReadOnlyList<int> visit, Manifest manifest, string writer,
-        long lastLedger, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
+        long lastLedger, int historyCache, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
     {
-        XrplFileReader reader = new(_source, new ReaderOptions { MaxBytes = long.MaxValue });
+        XrplFileReader reader = new(_source, new ReaderOptions { MaxBytes = long.MaxValue, HistoryCacheRecords = historyCache });
         ManifestRecord unpublished = new(manifest, writer, lastLedger + 1, string.Empty);
         IReadOnlyList<BlockEntry> published = await ReadBackAsync(
             () => reader.BlockListAsync(unpublished, cancellationToken), cancellationToken).ConfigureAwait(false);
