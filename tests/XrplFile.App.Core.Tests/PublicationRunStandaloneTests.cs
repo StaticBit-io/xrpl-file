@@ -65,7 +65,7 @@ public sealed class PublicationRunStandaloneTests : VaultHarness
         RunPaths paths = new(_directory);
         PublicationRun run = new(connections, vault, paths, new PublicationHistory(paths.HistoryPath));
 
-        PublishRequest Request(string name) => new(
+        PublishRequest Request(string name) => Requests.Fresh(
             RandomNumberGenerator.GetBytes(256 * 1024), "application/octet-stream", name, writerKey, writer.ClassicAddress, "1",
             payerKey, payer.ClassicAddress);
 

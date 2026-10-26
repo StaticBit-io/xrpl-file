@@ -305,7 +305,7 @@ public sealed class RunModelTests : VaultHarness
 
         RunPaths paths = new(_directory);
         PublicationRun run = new(connections ?? fallback, vault, paths, new PublicationHistory(paths.HistoryPath));
-        PublishRequest request = new(
+        PublishRequest request = Requests.Fresh(
             new byte[4096], "application/octet-stream", "file.bin", reference, wallet.ClassicAddress, "1");
 
         return (run, request);
@@ -327,7 +327,7 @@ public sealed class RunModelTests : VaultHarness
         Assert.False(model.IsActive);
         Assert.Null(model.Link);
 
-        Assert.True(run.Start(request with { File = new byte[5000], Name = "second.bin" }));
+        Assert.True(run.Start(request with { Size = 5000, Source = new MemoryPublicationSource(new byte[5000]), Name = "second.bin" }));
         await run.Completion;
 
         Assert.True(model.IsFinished);
@@ -347,7 +347,7 @@ public sealed class RunModelTests : VaultHarness
         await run.Completion;
         string first = model.Link!;
 
-        Assert.True(run.Start(request with { File = new byte[5000], Name = "second.bin" }));
+        Assert.True(run.Start(request with { Size = 5000, Source = new MemoryPublicationSource(new byte[5000]), Name = "second.bin" }));
         await run.Completion;
 
         Assert.Equal("second.bin", model.Snapshot.Name);
@@ -374,7 +374,7 @@ public sealed class RunModelTests : VaultHarness
         shell.Show(AppTab.History);
         shell.Show(AppTab.Publish);
 
-        Assert.True(run.Start(request with { File = new byte[5000], Name = "second.bin" }));
+        Assert.True(run.Start(request with { Size = 5000, Source = new MemoryPublicationSource(new byte[5000]), Name = "second.bin" }));
         await run.Completion;
         Assert.Equal("second.bin", model.Snapshot.Name);
     }

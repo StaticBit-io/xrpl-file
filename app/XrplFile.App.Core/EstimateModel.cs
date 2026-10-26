@@ -6,8 +6,18 @@ namespace XrplFile.App.Core;
 /// peak ticket reserve a sequence run never pays — so showing it unchanged overstates the cost and
 /// never understates it, and a second estimator would be one nothing validates.
 /// </summary>
-public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths)
+public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths, Func<string, IPublicationSource>? open = null)
 {
+    private readonly Func<string, IPublicationSource> _open = open ?? (path => FilePublicationSource.Open(path));
+    private readonly Lock _gate = new();
+    private IPublicationSource? _held;
+
+    /// <summary>
+    /// Bumped by every estimate, hand-off and discard: an estimate keeps the source it opened only
+    /// when nothing of the kind happened while it ran, so a screen left mid-estimate leaves no file open.
+    /// </summary>
+    private int _generation;
+
     public PublicationEstimate? Estimate { get; private set; }
 
     /// <summary>The node the estimate came from, which is also the node a run would go to.</summary>
@@ -41,16 +51,105 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
                 && Estimate.FeeDropsPerTransaction <= int.MaxValue
                 && !PublishPolicy.HasNoTicketRoom(Estimate);
 
+    /// <summary>What a run started from this estimate may spend (spec S25); null while the estimate cannot be published.</summary>
+    public SpendingApproval? Approval { get; private set; }
+
+    /// <summary>
+    /// The estimated request with the held file and the approval, for a run to take (spec S24, S25).
+    /// The model lets go of the file: from here on it is the caller's, and a discard does not touch it.
+    /// Null when there is nothing to publish.
+    /// </summary>
+    public PublishRequest? HandOff()
+    {
+        lock (_gate)
+        {
+            if (_held is not { } source || Request is not { } request || !CanPublish || Approval is not { } approval) return null;
+
+            _held = null;
+            _generation++;
+            return request with { Source = source, Approval = approval };
+        }
+    }
+
+    /// <summary>Lets the held file go (spec S24): Back, another file, another key, or leaving the screen.</summary>
+    public async Task DiscardAsync()
+    {
+        IPublicationSource? held;
+
+        lock (_gate)
+        {
+            held = _held;
+            _held = null;
+            _generation++;
+        }
+
+        if (held is not null) await held.DisposeAsync().ConfigureAwait(false);
+    }
+
     public async Task EstimateAsync(PublishRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        if (request.SourcePath is not { } path)
+        {
+            throw new ArgumentException("an estimate is of a file on disk, which it holds until the run takes it", nameof(request));
+        }
+
+        int generation;
+        IPublicationSource? previous;
+
+        lock (_gate)
+        {
+            generation = ++_generation;
+            previous = _held;
+            _held = null;
+        }
+
+        if (previous is not null) await previous.DisposeAsync().ConfigureAwait(false);
 
         Estimate = null;
         NodeUrl = null;
         Message = null;
         BatchEstimate = null;
         MethodLine = null;
+        Approval = null;
 
+        IPublicationSource source;
+
+        try
+        {
+            source = _open(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Message = "That file could not be read.";
+            return;
+        }
+
+        bool kept = false;
+
+        try
+        {
+            // The size priced is the size of what is held, whatever the picker measured earlier.
+            await EstimateHeldAsync(request with { Size = source.Length }, cancellationToken).ConfigureAwait(false);
+
+            lock (_gate)
+            {
+                if (generation == _generation)
+                {
+                    _held = source;
+                    kept = true;
+                }
+            }
+        }
+        finally
+        {
+            if (!kept) await source.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task EstimateHeldAsync(PublishRequest request, CancellationToken cancellationToken)
+    {
         PublishRequest effective = PublishPolicy.Effective(request);
         Request = effective;
         Note = ReferenceEquals(effective, request) ? null : TooSmallForBatchNote;
@@ -76,7 +175,7 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
             };
 
             Estimate = await PublicationSession.EstimateAsync(
-                connection.Source, request.Account, request.File.Length, options, cancellationToken)
+                connection.Source, request.Account, request.Size, options, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (XrplFileException ex)
@@ -112,6 +211,8 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
                 + $"{XrpAmount.Format(Estimate.SpendableDrops)}. {ReserveSentence(Estimate)}"
                 + "Fund it, or publish a smaller file.";
         }
+
+        SetApprovalIfPublishable();
     }
 
     private async Task EstimateBatchAsync(PublishRequest request, string payer, CancellationToken cancellationToken)
@@ -126,7 +227,7 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
             SessionOptions options = new() { StateDirectory = paths.StateDirectory };
 
             BatchEstimate = await PublicationSession.EstimateAsync(
-                connection.Source, request.Account, payer, request.File.Length, options, cancellationToken).ConfigureAwait(false);
+                connection.Source, request.Account, payer, request.Size, options, cancellationToken).ConfigureAwait(false);
         }
         catch (XrplFileException ex)
         {
@@ -137,6 +238,16 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
 
         MethodLine = $"Batch, paid by {request.PayerLabel ?? payer}.";
         Message = ShortfallOf(BatchEstimate, request);
+        SetApprovalIfPublishable();
+    }
+
+    private void SetApprovalIfPublishable()
+    {
+        if (!CanPublish) return;
+
+        Approval = BatchEstimate is { } batch
+            ? SpendingApproval.For(batch, Request!.Account, Request.PayerAccount!)
+            : SpendingApproval.For(Estimate!, Request!.Account);
     }
 
     /// <summary>The account that is short, by label, with what it needs and what it can spend (spec 6.2); null when both cover.</summary>

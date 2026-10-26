@@ -50,9 +50,14 @@ public sealed class PublicationRunBatchTests : VaultHarness
 
         PublicationHistory history = new(Paths.HistoryPath);
         PublicationRun run = new(_connections, vault, Paths, history, batchOptions: Fast);
-        PublishRequest request = new(
-            VectorStream.Bytes("app-batch", size), "application/octet-stream", "file.bin", writerRef, writer.ClassicAddress, "testnet",
-            payerRef, payer.ClassicAddress, Path.Combine(_directory, "file.bin"));
+
+        // On disk because a resume opens the recorded path itself.
+        string path = Path.Combine(_directory, "file.bin");
+        byte[] bytes = VectorStream.Bytes("app-batch", size);
+        await File.WriteAllBytesAsync(path, bytes, Token);
+        PublishRequest request = Requests.Fresh(
+            bytes, "application/octet-stream", "file.bin", writerRef, writer.ClassicAddress, "testnet",
+            payerRef, payer.ClassicAddress, path);
 
         return (run, request, history, vault);
     }
@@ -69,7 +74,7 @@ public sealed class PublicationRunBatchTests : VaultHarness
         Assert.Equal(PublicationRunState.Succeeded, snapshot.State);
         Assert.True(snapshot.UsesBatch);
         Assert.NotNull(snapshot.StatePath);
-        Assert.Equal(request.File.Length, snapshot.FileBytes);
+        Assert.Equal(request.Size, snapshot.FileBytes);
 
         PublicationRecord record = Assert.Single(history.Read());
         Assert.Equal(request.PayerAccount, record.Payer);
@@ -123,7 +128,7 @@ public sealed class PublicationRunBatchTests : VaultHarness
         string statePath = run.Snapshot.StatePath!;
         _connections.BatchSink.Transmitting = null;
 
-        Assert.True(run.Resume(statePath, request));
+        Assert.True(run.Resume(statePath, request with { Source = null }));
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
@@ -139,6 +144,8 @@ public sealed class PublicationRunBatchTests : VaultHarness
         string reference = await vault.StoreAsync(new NewVaultEntry(VaultEntryKind.Generated, "w", "testnet", wallet.ClassicAddress, wallet.Seed), Token);
         _connections.Ledger.Balances[wallet.ClassicAddress] = 100_000_000;
         byte[] file = new byte[4096];
+        string filePath = Path.Combine(_directory, "f.bin");
+        await File.WriteAllBytesAsync(filePath, file, Token);
 
         Directory.CreateDirectory(Paths.StateDirectory);
         string statePath = Path.Combine(Paths.StateDirectory, "1-run.json");
@@ -148,7 +155,7 @@ public sealed class PublicationRunBatchTests : VaultHarness
             Strategy: PublicationState.TicketStrategyName).Save(statePath);
 
         PublicationRun run = new(_connections, vault, Paths, new PublicationHistory(Paths.HistoryPath));
-        Assert.True(run.Resume(statePath, new PublishRequest(file, "application/octet-stream", "f.bin", reference, wallet.ClassicAddress, "testnet")));
+        Assert.True(run.Resume(statePath, new PublishRequest(file.Length, "application/octet-stream", "f.bin", reference, wallet.ClassicAddress, "testnet", SourcePath: filePath)));
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
@@ -296,7 +303,7 @@ public sealed class PublicationRunBatchTests : VaultHarness
         };
         _connections.Ledger.Balances[request.PayerAccount!] = 0;
 
-        Assert.True(run.Resume(statePath, request));
+        Assert.True(run.Resume(statePath, request with { Source = null }));
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);

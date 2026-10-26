@@ -70,7 +70,7 @@ public static class PublishPolicy
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        return request.PayerAccount is not null && TooSmallForBatch(request.File.Length)
+        return request.PayerAccount is not null && TooSmallForBatch(request.Size)
             ? request with { PayerReference = null, PayerAccount = null, PayerLabel = null }
             : request;
     }

@@ -319,19 +319,23 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
     }
 
     /// <summary>
-    /// Reads the file and settles everything a run needs. Returns <see langword="null"/> when it
-    /// cannot, having set <see cref="Message"/> to why — a locked vault and a file that has gone
-    /// away between choosing it and pressing the button are both ordinary here.
+    /// Measures the file and settles everything a run needs, without reading its bytes: the estimate
+    /// opens and holds the file (spec S24). Returns <see langword="null"/> when it cannot, having set
+    /// <see cref="Message"/> to why — a locked vault and a file that has gone away between choosing it
+    /// and pressing the button are both ordinary here.
     /// </summary>
     public async Task<PublishRequest?> BuildRequestAsync(CancellationToken cancellationToken)
     {
         Describe();
         if (!CanEstimate || FilePath is null || SelectedKey is null) return null;
 
-        byte[] bytes;
+        long size;
+
         try
         {
-            bytes = await File.ReadAllBytesAsync(FilePath, cancellationToken).ConfigureAwait(false);
+            // Measured again rather than remembered: the file may have changed since it was picked. Its
+            // bytes are not read here: the estimate opens and holds it (spec S24).
+            size = new FileInfo(FilePath).Length;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -339,7 +343,7 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             return null;
         }
 
-        if (bytes.Length == 0)
+        if (size == 0)
         {
             Message = "That file is empty, and an empty file has nothing to publish.";
             return null;
@@ -377,7 +381,7 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
         VaultEntryInfo? payer = SelectedPayer;
 
         return new PublishRequest(
-            bytes,
+            size,
             TypeOf(FileName!),
             FileName!,
             SelectedKey.Reference,

@@ -44,8 +44,13 @@ public sealed class PublicationRunTests : VaultHarness
         _connections.Ledger.Balances[wallet.ClassicAddress] = 100_000_000;
 
         PublicationRun run = new(connections ?? _connections, vault, Paths, history ?? History);
-        PublishRequest request = new(
-            new byte[size], "application/octet-stream", "file.bin", reference, wallet.ClassicAddress, "1");
+
+        // On disk because a resume opens the recorded path itself.
+        string path = Path.Combine(_directory, "file.bin");
+        byte[] bytes = new byte[size];
+        await File.WriteAllBytesAsync(path, bytes, token);
+        PublishRequest request = Requests.Fresh(
+            bytes, "application/octet-stream", "file.bin", reference, wallet.ClassicAddress, "1", sourcePath: path);
 
         return (run, request);
     }
@@ -255,7 +260,7 @@ public sealed class PublicationRunTests : VaultHarness
 
         PublicationRun run = new(_connections, vault, Paths, gate);
 
-        run.Start(new PublishRequest(
+        run.Start(Requests.Fresh(
             new byte[4096], "application/octet-stream", "run1.bin", reference1, wallet1.ClassicAddress, "1"));
 
         // Run 1 has already published Succeeded (Append only runs after that -- see
@@ -281,7 +286,7 @@ public sealed class PublicationRunTests : VaultHarness
 
             // The second run, on the very same PublicationRun instance and the very same shared
             // history -- accepted only because _state is Succeeded, not Running.
-            Assert.True(run.Start(new PublishRequest(
+            Assert.True(run.Start(Requests.Fresh(
                 new byte[4096], "application/octet-stream", "run2.bin", reference2, wallet2.ClassicAddress, "1")));
             await run.Completion;
 
@@ -593,7 +598,7 @@ public sealed class PublicationRunTests : VaultHarness
         UnfinishedRun interrupted = Assert.Single(PublicationSession.Unfinished(Paths.StateDirectory));
 
         _connections.ConnectThrows = new XrplFileException(XrplFileError.NodeUnreachable, "no answer");
-        run.Resume(interrupted.Path, request);
+        run.Resume(interrupted.Path, request with { Source = null });
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
@@ -615,7 +620,7 @@ public sealed class PublicationRunTests : VaultHarness
         _connections.Sink.Throws.Clear();
 
         // The recorded strategy decides, not the request: this state file is a one-account run's.
-        run.Resume(interrupted.Path, request with { PayerAccount = XrplWallet.Generate().ClassicAddress, PayerReference = "unused" });
+        run.Resume(interrupted.Path, request with { Source = null, PayerAccount = XrplWallet.Generate().ClassicAddress, PayerReference = "unused" });
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
@@ -908,7 +913,7 @@ public sealed class PublicationRunTests : VaultHarness
         // 1,024,001 bytes: 1,025 chunks over two blocks (FileTree.BlockChunks is 1024), so the
         // read-back stage this test depends on has more than one block to scan and more than one
         // "read-back" report to touch on.
-        run.Start(new PublishRequest(
+        run.Start(Requests.Fresh(
             new byte[1_024_001], "application/octet-stream", "file.bin", reference, wallet.ClassicAddress, "1"));
         await run.Completion;
 
@@ -1025,7 +1030,7 @@ public sealed class PublicationRunTests : VaultHarness
         await run.Completion;
         Assert.True(run.Snapshot.UsesTickets);
 
-        Assert.True(run.Start(ticketed with { File = new byte[4096] }));
+        Assert.True(run.Start(ticketed with { Size = 4096, Source = new MemoryPublicationSource(new byte[4096]) }));
 
         Task reachedOrFinished = await Task.WhenAny(connectGate.Reached, run.Completion);
         if (!ReferenceEquals(reachedOrFinished, connectGate.Reached))

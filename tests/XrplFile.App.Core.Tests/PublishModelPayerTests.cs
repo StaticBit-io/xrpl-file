@@ -150,7 +150,7 @@ public sealed class PublishModelPayerTests : VaultHarness
         PublishRequest next = (await model.BuildRequestAsync(Token))!;
 
         Assert.Equal("second.bin", next.Name);
-        Assert.Equal(3000, next.File.Length);
+        Assert.Equal(3000, next.Size);
     }
 
     [Fact]

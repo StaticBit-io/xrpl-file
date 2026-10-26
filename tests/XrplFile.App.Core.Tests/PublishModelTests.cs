@@ -147,7 +147,7 @@ public sealed class PublishModelTests : VaultHarness
         Assert.NotNull(request);
         Assert.Equal("photo.png", request.Name);
         Assert.Equal("image/png", request.Type);
-        Assert.Equal(2048, request.File.Length);
+        Assert.Equal(2048, request.Size);
         Assert.Equal(reference, request.KeyReference);
         Assert.Equal("testnet", request.Network);
     }

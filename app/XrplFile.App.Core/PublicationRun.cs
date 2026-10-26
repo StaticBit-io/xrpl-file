@@ -77,9 +77,14 @@ public sealed class PublicationRun(
     IPublicationHistory history,
     VaultAutoLock? autoLock = null,
     TimeProvider? time = null,
-    BatchStrategyOptions? batchOptions = null)
+    BatchStrategyOptions? batchOptions = null,
+    Func<string, IPublicationSource>? openSource = null)
 {
     private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly Func<string, IPublicationSource> _openSource = openSource ?? (path => FilePublicationSource.Open(path));
+
+    /// <summary>State files whose recorded source the last resume found changed (spec B17); guarded by <see cref="_gate"/>.</summary>
+    private readonly HashSet<string> _rejectedSources = new(StringComparer.OrdinalIgnoreCase);
     private readonly RunTraceLog _traceLog = new(paths.TraceLogPath);
     private bool _usesBatch;
     private string? _statePath;
@@ -153,21 +158,40 @@ public sealed class PublicationRun(
         }
     }
 
-    /// <summary>Starts a publication. <see langword="false"/> when one is already going.</summary>
+    /// <summary>
+    /// Starts a publication with the file the estimate held and the approval it made (spec S24, S25).
+    /// <see langword="false"/> when one is already going; the request's source then stays the caller's.
+    /// On <see langword="true"/> the run owns the source and disposes it when it ends.
+    /// </summary>
     public bool Start(PublishRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        if (request.Source is null) throw new ArgumentException("a fresh run publishes the file its estimate held", nameof(request));
+        if (request.Approval is null) throw new ArgumentException("a fresh run spends what its estimate approved", nameof(request));
+
         return Begin(request, statePath: null);
     }
 
-    /// <summary>Resumes an interrupted one. <see langword="false"/> when one is already going.</summary>
+    /// <summary>
+    /// Resumes an interrupted one, opening the file at <see cref="PublishRequest.SourcePath"/> itself
+    /// (spec S7, S24). <see langword="false"/> when one is already going.
+    /// </summary>
     public bool Resume(string statePath, PublishRequest request)
     {
         ArgumentException.ThrowIfNullOrEmpty(statePath);
         ArgumentNullException.ThrowIfNull(request);
 
         return Begin(request, statePath);
+    }
+
+    /// <summary>
+    /// Whether the last resume of this run found the file at its recorded path changed (spec B17): the
+    /// next resume then asks for the file instead of trying the same path again.
+    /// </summary>
+    public bool HasRejectedSource(string statePath)
+    {
+        lock (_gate) return _rejectedSources.Contains(Path.GetFullPath(statePath));
     }
 
     public void Cancel()
@@ -261,7 +285,11 @@ public sealed class PublicationRun(
             _statePath = statePath;
             _startedAt = _time.GetUtcNow();
             _finishedAt = null;
-            _fileBytes = request.File.Length;
+            _fileBytes = request.Size;
+
+            // Inside the lock that starts the run, so a refusal this very run records cannot be erased
+            // by a removal that comes after it: a file the person just picked is a fresh try.
+            if (statePath is not null && !request.SourceRecorded) _rejectedSources.Remove(Path.GetFullPath(statePath));
             _completion = Task.Run(() => RunAsync(request, statePath, cancellation.Token, generation));
         }
 
@@ -290,9 +318,17 @@ public sealed class PublicationRun(
             return false;
         }
 
+        IPublicationSource? source = request.Source;
+
         try
         {
             paths.EnsureCreated();
+
+            // Before any node is contacted: a recorded file that cannot be opened needs no connection to say so.
+            source ??= OpenRecorded(request);
+
+            // A failed read of the file is told apart from a failed write of the state.
+            IPublicationSource reading = new ReadReportingSource(source, request.SourcePath);
 
             ILedgerConnection connection =
                 await connections.ConnectAsync(request.Network, cancellationToken).ConfigureAwait(false);
@@ -310,8 +346,8 @@ public sealed class PublicationRun(
                 }
 
                 (report, finished, finishedPath) = batch
-                    ? await RunBatchAsync(request, statePath, connection, attempt, generation, cancellationToken).ConfigureAwait(false)
-                    : await RunOneAccountAsync(request, statePath, recorded, connection, attempt, generation, cancellationToken).ConfigureAwait(false);
+                    ? await RunBatchAsync(request, reading, statePath, connection, attempt, generation, cancellationToken).ConfigureAwait(false)
+                    : await RunOneAccountAsync(request, reading, statePath, recorded, connection, attempt, generation, cancellationToken).ConfigureAwait(false);
 
                 finalState = PublicationRunState.Succeeded;
             }
@@ -332,6 +368,33 @@ public sealed class PublicationRun(
         catch (FeeTooLargeForApplicationException)
         {
             failure = PublishErrorMessages.FeeTooLargeForApplication;
+            finalState = PublicationRunState.Failed;
+        }
+        catch (SourceUnreadableException ex)
+        {
+            // Not marked as a rejected source: "has changed since the run started" is reserved for a
+            // size or root refusal (Spec question 10), and this message already sends the person to the picker.
+            failure = $"The file at {ex.Path} could not be read. Choose it again.";
+            finalState = PublicationRunState.Failed;
+        }
+        catch (SourceReadFailedException ex)
+        {
+            // Not the state file: the generic IOException clause below says the state could not be
+            // written, which would send the person after the wrong thing. The state is intact, so the
+            // run stays resumable once the file is back.
+            failure = ex.Path is null
+                ? "The file could not be read while it was being published. Make it available again and resume the run."
+                : $"The file at {ex.Path} could not be read while it was being published. Make it available again and resume the run.";
+            finalState = PublicationRunState.Failed;
+        }
+        catch (XrplFileException ex) when (ex is { Error: XrplFileError.ResumeMismatch, SourceChanged: true } && statePath is not null)
+        {
+            // Only a size or root refusal blames the file; a finished run, another chunk size or
+            // another writer is refused with ResumeMismatch too, and would open the picker for nothing.
+            lock (_gate) _rejectedSources.Add(Path.GetFullPath(statePath));
+            failure = request.SourceRecorded
+                ? $"The file at {request.SourcePath} has changed since the run started. Choose the original file."
+                : "That file is not the one this run was publishing.";
             finalState = PublicationRunState.Failed;
         }
         catch (XrplFileException ex)
@@ -366,6 +429,11 @@ public sealed class PublicationRun(
             // sentence for.
             failure = "Something went wrong that this application does not have a specific message for. The run was stopped.";
             finalState = PublicationRunState.Failed;
+        }
+        finally
+        {
+            // Released before the terminal state is published, so a screen that sees the run end finds the file free.
+            if (source is not null) await DisposeQuietlyAsync(source).ConfigureAwait(false);
         }
 
         // Every connection and strategy acquired above has already been disposed (quietly; see the
@@ -504,7 +572,7 @@ public sealed class PublicationRun(
 
     /// <summary>A one-account run: the code this method held before Batch, resuming on the recorded strategy.</summary>
     private async Task<(PublicationReport Report, PublicationState State, string StatePath)> RunOneAccountAsync(
-        PublishRequest request, string? statePath, PublicationState? recorded, ILedgerConnection connection, RunAttempt attempt,
+        PublishRequest request, IPublicationSource source, string? statePath, PublicationState? recorded, ILedgerConnection connection, RunAttempt attempt,
         int generation, CancellationToken cancellationToken)
     {
         SessionOptions estimateOptions = new()
@@ -518,7 +586,7 @@ public sealed class PublicationRun(
         // what the budget is set from, so a run cannot quietly cost more than what was just
         // priced.
         PublicationEstimate estimate = await PublicationSession.EstimateAsync(
-            connection.Source, request.Account, request.File.Length, estimateOptions, cancellationToken).ConfigureAwait(false);
+            connection.Source, request.Account, source.Length, estimateOptions, cancellationToken).ConfigureAwait(false);
 
         // PublishPolicy.Create's own remarks say every caller checks this first and that
         // reaching it otherwise is a defect -- but EstimateModel's own check only ever gates
@@ -552,6 +620,7 @@ public sealed class PublicationRun(
             TicketsPerBatch = PublishPolicy.TicketsPerBatch,
             BudgetDrops = estimate.RequiredDrops,
             SourcePath = request.SourcePath,
+            Approval = request.Approval,
         };
 
         VaultSigner signer = await VaultSigner.CreateAsync(vault, request.KeyReference, cancellationToken, autoLock).ConfigureAwait(false);
@@ -561,9 +630,10 @@ public sealed class PublicationRun(
         {
             PublicationSession session = statePath is null
                 ? await PublicationSession.StartAsync(
-                    probe, connection.Source, request.File, request.Type, request.Name, request.Account,
-                    request.KeyReference, request.Network, options, cancellationToken).ConfigureAwait(false)
-                : await PublicationSession.ResumeAsync(probe, connection.Source, request.File, statePath, options, cancellationToken)
+                    probe, connection.Source, source, request.Type, request.Name, request.Account,
+                    request.KeyReference, request.Network, options, new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false)
+                : await PublicationSession.ResumeAsync(
+                    probe, connection.Source, source, statePath, options, new SynchronousProgress(Observe), cancellationToken)
                     .ConfigureAwait(false);
 
             RecordStatePath(generation, session.StatePath);
@@ -595,7 +665,7 @@ public sealed class PublicationRun(
     /// that was deleted, so nothing but <see cref="VaultSigner.ClearCache"/> bounds it.
     /// </remarks>
     private async Task<(PublicationReport Report, PublicationState State, string StatePath)> RunBatchAsync(
-        PublishRequest request, string? statePath, ILedgerConnection connection, RunAttempt attempt, int generation,
+        PublishRequest request, IPublicationSource source, string? statePath, ILedgerConnection connection, RunAttempt attempt, int generation,
         CancellationToken cancellationToken)
     {
         string payer = request.PayerAccount ?? throw new InvalidOperationException("a Batch run's request names its payer");
@@ -622,7 +692,7 @@ public sealed class PublicationRun(
                 // Handed over before the strategy is built, so a build that throws still has its channel completed with the run.
                 attempt.Trace = trace;
                 trace.Post(string.Create(CultureInfo.InvariantCulture,
-                    $"{_time.GetUtcNow():O} batch run {StateFileOf(attempt)} network={request.Network} writer={request.Account} payer={request.PayerAccount} bytes={request.File.Length}"));
+                    $"{_time.GetUtcNow():O} batch run {StateFileOf(attempt)} network={request.Network} writer={request.Account} payer={request.PayerAccount} bytes={source.Length}"));
 
                 BatchStrategyOptions options = (batchOptions ?? new BatchStrategyOptions()) with
                 {
@@ -640,26 +710,30 @@ public sealed class PublicationRun(
             {
                 SessionOptions estimateOptions = new() { StateDirectory = paths.StateDirectory };
                 BatchPublicationEstimate estimate = await PublicationSession.EstimateAsync(
-                    connection.Source, request.Account, payer, request.File.Length, estimateOptions, cancellationToken).ConfigureAwait(false);
+                    connection.Source, request.Account, payer, source.Length, estimateOptions, cancellationToken).ConfigureAwait(false);
 
                 SessionOptions options = new()
                 {
                     StateDirectory = paths.StateDirectory,
-                    BudgetDrops = estimate.WriterRequiredDrops + estimate.PayerRequiredDrops,
                     SourcePath = request.SourcePath,
                     FencePoll = fencePoll,
+
+                    // The approval is this run's ceiling (spec S25). A budget priced from the estimate
+                    // taken a moment ago would refuse an approved fee unit that rose under its ceiling,
+                    // which is the very case the approval exists to allow.
+                    Approval = request.Approval,
                 };
 
                 session = await PublicationSession.StartAsync(
-                    Build, connection.Source, request.File, request.Type, request.Name, request.Account, request.KeyReference,
-                    payer, payerReference, request.Network, options, cancellationToken).ConfigureAwait(false);
+                    Build, connection.Source, source, request.Type, request.Name, request.Account, request.KeyReference,
+                    payer, payerReference, request.Network, options, new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false);
             }
             else
             {
                 SessionOptions options = new() { StateDirectory = paths.StateDirectory, SourcePath = request.SourcePath, FencePoll = fencePoll };
 
                 session = await PublicationSession.ResumeAsync(
-                    Build, connection.Source, request.File, statePath, payer, payerReference, options,
+                    Build, connection.Source, source, statePath, payer, payerReference, options,
                     new SynchronousProgress(Observe), cancellationToken).ConfigureAwait(false);
             }
 
@@ -736,6 +810,65 @@ public sealed class PublicationRun(
         {
             // Left for the next start-up.
         }
+    }
+
+    /// <summary>A resume reads the file the run recorded, held the same way an estimate holds it (spec S7, S24).</summary>
+    private IPublicationSource OpenRecorded(PublishRequest request)
+    {
+        string path = request.SourcePath ?? throw new InvalidOperationException("a resume's request names the file to read");
+
+        try
+        {
+            return _openSource(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new SourceUnreadableException(path, ex);
+        }
+    }
+
+    /// <summary>Local control flow, like <see cref="FeeTooLargeForApplicationException"/>: the recorded file could not be opened.</summary>
+    private sealed class SourceUnreadableException(string path, Exception inner) : Exception(path, inner)
+    {
+        public string Path { get; } = path;
+    }
+
+    /// <summary>Turns a failed read of the held file into <see cref="SourceReadFailedException"/>, so the run names the file and not the state.</summary>
+    private sealed class ReadReportingSource(IPublicationSource inner, string? path) : IPublicationSource
+    {
+        public long Length => inner.Length;
+
+        public int ReadChunk(long index, Span<byte> destination)
+        {
+            try
+            {
+                return inner.ReadChunk(index, destination);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new SourceReadFailedException(path, ex);
+            }
+        }
+
+        public async ValueTask<int> ReadChunkAsync(long index, Memory<byte> destination, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return await inner.ReadChunkAsync(index, destination, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new SourceReadFailedException(path, ex);
+            }
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>Local control flow: the held file failed a read during the run (a drive removed, a share gone, the file cut short).</summary>
+    private sealed class SourceReadFailedException(string? path, Exception inner) : Exception(path, inner)
+    {
+        public string? Path { get; } = path;
     }
 
     /// <summary>

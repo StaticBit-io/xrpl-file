@@ -276,58 +276,45 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
     }
 
     /// <summary>
-    /// The bytes at the path the run recorded, checked against its size and root (spec B17); null, with
-    /// <see cref="Message"/> saying why, when the file has moved, cannot be read, or has changed.
+    /// Why the recorded file cannot be used (spec B17), or null when it can be tried: it has gone, it
+    /// cannot be opened, its size changed, or the last resume found its bytes changed. Nothing is
+    /// read: the run opens the file and checks its root as it hashes it (spec S7).
     /// </summary>
-    private async Task<byte[]?> RecordedSourceAsync(UnfinishedRow row, CancellationToken cancellationToken)
+    private string? RecordedSourceProblem(UnfinishedRow row, string source)
     {
-        if (row.SourcePath is not { } source) return null;
+        if (!File.Exists(source)) return $"The file this run was publishing is no longer at {source}. Choose it again.";
 
-        if (!File.Exists(source))
-        {
-            Message = $"The file this run was publishing is no longer at {source}. Choose it again.";
-            return null;
-        }
-
-        byte[] bytes;
+        if (run.HasRejectedSource(row.Path)) return $"The file at {source} has changed since the run started. Choose the original file.";
 
         try
         {
-            bytes = await File.ReadAllBytesAsync(source, cancellationToken).ConfigureAwait(false);
+            if (new FileInfo(source).Length != row.Size) return $"The file at {source} has changed since the run started. Choose the original file.";
+
+            using Microsoft.Win32.SafeHandles.SafeFileHandle handle = File.OpenHandle(source, FileMode.Open, FileAccess.Read, FileShare.Read);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Message = $"The file at {source} could not be read. Choose it again.";
-            return null;
+            return $"The file at {source} could not be read. Choose it again.";
         }
 
-        if (!IsTheRunsFile(row, bytes))
-        {
-            Message = $"The file at {source} has changed since the run started. Choose the original file.";
-            return null;
-        }
-
-        return bytes;
+        return null;
     }
-
-    /// <summary>The same size and the same Merkle root as the run recorded: the same bytes are hashed and published.</summary>
-    private static bool IsTheRunsFile(UnfinishedRow row, byte[] bytes) =>
-        bytes.LongLength == row.Size && row.Root is { } root && bytes.Length > 0
-        && string.Equals(PublicationSession.RootOf(bytes), root, StringComparison.Ordinal);
 
     private async Task<bool> ResumeWithAsync(UnfinishedRow row, string? payerReference, string? payerAccount, CancellationToken cancellationToken)
     {
-        byte[]? bytes = await RecordedSourceAsync(row, cancellationToken).ConfigureAwait(false);
         string? sourcePath = row.SourcePath;
+        bool recorded = sourcePath is not null && (Message = RecordedSourceProblem(row, sourcePath)) is null;
 
-        if (bytes is null)
+        if (!recorded)
         {
             string? path = await picker.PickExistingFilePathAsync(cancellationToken).ConfigureAwait(false);
             if (path is null) return false;
 
+            long size;
+
             try
             {
-                bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+                size = new FileInfo(path).Length;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -336,20 +323,12 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
             }
 
             // Checked here so the person hears "that is not the same file" from the screen rather than
-            // from a run that starts, connects and then refuses. The library checks it again against the
-            // recorded Merkle root, which is the check that actually binds -- these only make the
-            // common mistake cheap.
-            if (bytes.LongLength != row.Size)
+            // from a run that starts and refuses. The run checks the root, which is what binds.
+            if (size != row.Size)
             {
                 Message =
-                    $"That file is {bytes.LongLength:N0} bytes and this run was publishing {row.Size:N0}. "
+                    $"That file is {size:N0} bytes and this run was publishing {row.Size:N0}. "
                     + "Resuming needs the same file the run started with.";
-                return false;
-            }
-
-            if (!IsTheRunsFile(row, bytes))
-            {
-                Message = "That file is not the one this run was publishing.";
                 return false;
             }
 
@@ -358,13 +337,9 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
 
         Message = null;
 
-        // The key, the type, the writer and the network all come from the state file rather than
-        // from this screen: PublicationSession.ResumeAsync takes them from there too, and a resume
-        // that disagreed with the state would be refused with ResumeMismatch after connecting.
-        // KeyReference above all -- PublicationRun builds its VaultSigner from it, and an empty one
-        // fails with NoSuchEntry at the worst possible moment.
+        // The key, the type, the writer and the network come from the state file, as the session takes them.
         PublishRequest request = new(
-            bytes,
+            row.Size,
             row.Type ?? "application/octet-stream",
             row.Name ?? Path.GetFileName(sourcePath ?? row.Path),
             row.KeyReference!,
@@ -372,7 +347,10 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
             row.Network!,
             row.IsBatch ? payerReference : null,
             row.IsBatch ? payerAccount : null,
-            sourcePath);
+            sourcePath)
+        {
+            SourceRecorded = recorded,
+        };
 
         if (!run.Resume(row.Path, request))
         {

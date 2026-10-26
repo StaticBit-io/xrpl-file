@@ -6,13 +6,14 @@ public sealed class EstimateModelTests : IDisposable
 {
     private readonly string _directory = Directory.CreateTempSubdirectory("xrpl-file-estimate-").FullName;
     private readonly FakeConnectionFactory _connections = new();
+    private readonly FakeFiles _files = new();
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
-    private EstimateModel NewModel() => new(_connections, new RunPaths(_directory));
+    private EstimateModel NewModel() => new(_connections, new RunPaths(_directory), _files.Open);
 
-    private static PublishRequest Request(int size = 4096) =>
-        new(new byte[size], "application/octet-stream", "file.bin", "ref-1", "rWriter", "standalone");
+    private PublishRequest Request(int size = 4096) =>
+        new(size, "application/octet-stream", "file.bin", "ref-1", "rWriter", "standalone", SourcePath: _files.Add($"file-{size}.bin", new byte[size]));
 
     [Fact]
     public async Task A_funded_account_gets_an_estimate_it_can_publish_from()
@@ -163,8 +164,8 @@ public sealed class EstimateModelTests : IDisposable
         Assert.Null(model.Message);
     }
 
-    private static PublishRequest BatchRequest(int size = 4096) =>
-        new(new byte[size], "application/octet-stream", "file.bin", "ref-1", "rWriter", "standalone", "ref-2", "rPayer")
+    private PublishRequest BatchRequest(int size = 4096) =>
+        new(size, "application/octet-stream", "file.bin", "ref-1", "rWriter", "standalone", "ref-2", "rPayer", _files.Add($"file-{size}.bin", new byte[size]))
         {
             WriterLabel = "Writer key",
             PayerLabel = "Payer key",
@@ -206,7 +207,7 @@ public sealed class EstimateModelTests : IDisposable
         Assert.Null(effective.PayerAccount);
         Assert.Null(effective.PayerLabel);
         Assert.Equal("rWriter", effective.Account);
-        Assert.Equal(597, effective.File.Length);
+        Assert.Equal(597, effective.Size);
     }
 
     [Fact]
@@ -222,7 +223,7 @@ public sealed class EstimateModelTests : IDisposable
 
         Assert.True(model.BatchEstimate!.Batches > 0);
         Assert.Null(model.Note);
-        Assert.Same(request, model.Request);
+        Assert.Equal(request, model.Request);
     }
 
     [Fact]
@@ -234,7 +235,7 @@ public sealed class EstimateModelTests : IDisposable
         EstimateModel model = NewModel();
         await model.EstimateAsync(request, TestContext.Current.CancellationToken);
 
-        Assert.Same(request, model.Request);
+        Assert.Equal(request, model.Request);
         Assert.Null(model.Note);
     }
 

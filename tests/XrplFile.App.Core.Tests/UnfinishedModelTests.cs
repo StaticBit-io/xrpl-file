@@ -242,7 +242,7 @@ public sealed class UnfinishedModelTests : VaultHarness
         RunPaths paths = Paths;
         PublicationRun run = new(gated, vault, paths, new PublicationHistory(paths.HistoryPath));
 
-        PublishRequest request = new(
+        PublishRequest request = Requests.Fresh(
             bytes, "application/octet-stream", "file.bin", reference, wallet.ClassicAddress, "1");
 
         await StartAndCancelAsync(run, gate, request);
@@ -301,7 +301,7 @@ public sealed class UnfinishedModelTests : VaultHarness
         PublicationHistory history = new(paths.HistoryPath);
         PublicationRun startingRun = new(gated, vault, paths, history);
 
-        PublishRequest request = new(
+        PublishRequest request = Requests.Fresh(
             bytes, "application/octet-stream", "file.bin", reference, wallet.ClassicAddress, "1");
 
         await StartAndCancelAsync(startingRun, gate, request);

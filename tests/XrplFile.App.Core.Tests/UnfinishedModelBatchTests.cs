@@ -158,14 +158,14 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
 
     [Theory]
     [InlineData("moved")]
-    [InlineData("changed")]
-    public async Task A_moved_or_changed_file_falls_back_to_the_picker_with_the_reason(string what)
+    [InlineData("resized")]
+    public async Task A_moved_or_resized_file_falls_back_to_the_picker_with_the_reason(string what)
     {
         byte[] bytes = new byte[3000];
         (UnfinishedModel model, _, _, string filePath, _) = await BatchRunAsync(bytes);
 
         if (what == "moved") File.Delete(filePath);
-        else await File.WriteAllBytesAsync(filePath, Enumerable.Repeat((byte)1, 3000).ToArray(), Token);
+        else await File.WriteAllBytesAsync(filePath, new byte[3001], Token);
 
         _picker.PathToReturn = null;
 
@@ -178,16 +178,72 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_file_that_cannot_be_opened_falls_back_to_the_picker_without_blaming_its_bytes()
+    {
+        (UnfinishedModel model, _, string statePath, string filePath, _) = await BatchRunAsync(new byte[3000]);
+        await using FileStream exclusive = new(filePath, FileMode.Open, FileAccess.Read, FileShare.None);
+        _picker.PathToReturn = null;
+
+        Assert.False(await model.ResumeAsync(model.Rows[0], Token));
+
+        Assert.Equal($"The file at {filePath} could not be read. Choose it again.", model.Message);
+        Assert.False(_run!.HasRejectedSource(statePath));
+    }
+
+    [Fact]
+    public async Task A_file_whose_bytes_changed_is_refused_by_the_run_and_the_next_resume_opens_the_picker()
+    {
+        (UnfinishedModel model, _, string statePath, string filePath, _) = await BatchRunAsync(new byte[3000]);
+        await File.WriteAllBytesAsync(filePath, Enumerable.Repeat((byte)1, 3000).ToArray(), Token);
+        _picker.PickThrows = new InvalidOperationException("the first resume trusts the recorded path");
+
+        Assert.True(await model.ResumeAsync(model.Rows[0], Token));
+        await _run!.Completion;
+
+        Assert.Equal(PublicationRunState.Failed, _run.Snapshot.State);
+        Assert.Equal($"The file at {filePath} has changed since the run started. Choose the original file.", _run.Snapshot.Failure);
+        Assert.True(_run.HasRejectedSource(statePath));
+
+        _picker.PickThrows = new InvalidOperationException("the picker was asked");
+        _run.Reset();
+        await model.RefreshAsync(Token);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => model.ResumeAsync(model.Rows[0], Token));
+        Assert.Equal($"The file at {filePath} has changed since the run started. Choose the original file.", model.Message);
+    }
+
+    [Fact]
     public async Task A_picked_file_that_is_not_the_runs_is_refused_by_its_root()
     {
-        (UnfinishedModel model, _, _, string filePath, _) = await BatchRunAsync(new byte[3000]);
+        (UnfinishedModel model, _, string statePath, string filePath, _) = await BatchRunAsync(new byte[3000]);
         File.Delete(filePath);
         string other = Path.Combine(_directory, "other.bin");
         await File.WriteAllBytesAsync(other, Enumerable.Repeat((byte)7, 3000).ToArray(), Token);
         _picker.PathToReturn = other;
 
+        Assert.True(await model.ResumeAsync(model.Rows[0], Token));
+        await _run!.Completion;
+
+        Assert.Equal(PublicationRunState.Failed, _run.Snapshot.State);
+        Assert.Equal("That file is not the one this run was publishing.", _run.Snapshot.Failure);
+        Assert.True(_run.HasRejectedSource(statePath));
+    }
+
+    [Fact]
+    public async Task A_picked_file_of_another_size_is_refused_on_the_screen_before_any_run_starts()
+    {
+        (UnfinishedModel model, _, _, string filePath, _) = await BatchRunAsync(new byte[3000]);
+        File.Delete(filePath);
+        string other = Path.Combine(_directory, "other.bin");
+        await File.WriteAllBytesAsync(other, new byte[2000], Token);
+        _picker.PathToReturn = other;
+
         Assert.False(await model.ResumeAsync(model.Rows[0], Token));
-        Assert.Equal("That file is not the one this run was publishing.", model.Message);
+
+        Assert.Equal(
+            "That file is 2,000 bytes and this run was publishing 3,000. Resuming needs the same file the run started with.",
+            model.Message);
+        Assert.Equal(PublicationRunState.Idle, _run!.Snapshot.State);
     }
 
     [Fact]
