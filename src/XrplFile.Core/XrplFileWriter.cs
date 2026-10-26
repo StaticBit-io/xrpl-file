@@ -59,11 +59,28 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
     /// forward, and the same stage is reported many times.
     /// </para>
     /// </param>
-    public async Task<PublishResult> PublishAsync(
+    public Task<PublishResult> PublishAsync(
         ReadOnlyMemory<byte> file, string type, string? name, string writer, string network,
+        LandedMemos? alreadyLanded, IProgress<PublishProgress>? progress, CancellationToken cancellationToken) =>
+        PublishAsync(new MemoryPublicationSource(file), blockHashes: null, type, name, writer, network, alreadyLanded, progress, cancellationToken);
+
+    /// <summary>
+    /// Publishes a file read a chunk at a time and never held whole (spec 4.3). The caller keeps
+    /// owning <paramref name="file"/>; reports and failures are as for the
+    /// <see cref="ReadOnlyMemory{T}"/> overload.
+    /// </summary>
+    public Task<PublishResult> PublishAsync(
+        IPublicationSource file, string type, string? name, string writer, string network,
+        LandedMemos? alreadyLanded, IProgress<PublishProgress>? progress, CancellationToken cancellationToken) =>
+        PublishAsync(file, blockHashes: null, type, name, writer, network, alreadyLanded, progress, cancellationToken);
+
+    /// <param name="blockHashes">The file's block hashes when the caller already streamed them (the session does, for the root), or null.</param>
+    internal async Task<PublishResult> PublishAsync(
+        IPublicationSource file, IReadOnlyList<byte[]>? blockHashes, string type, string? name, string writer, string network,
         LandedMemos? alreadyLanded, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
     {
-        if (file.IsEmpty) throw new ArgumentException("an empty file has no chunks and no root", nameof(file));
+        ArgumentNullException.ThrowIfNull(file);
+        if (file.Length == 0) throw new ArgumentException("an empty file has no chunks and no root", nameof(file));
         if (string.IsNullOrWhiteSpace(type)) throw new ArgumentException("a manifest needs a MIME type", nameof(type));
 
         // Before anything is submitted. The link is built from this at the very end, so a network
@@ -74,7 +91,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
         try
         {
-            return await PublishCoreAsync(file, type, name, writer, canonical, alreadyLanded, progress, cancellationToken).ConfigureAwait(false);
+            return await PublishCoreAsync(file, blockHashes, type, name, writer, canonical, alreadyLanded, progress, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException e) when (!cancellationToken.IsCancellationRequested)
         {
@@ -125,42 +142,49 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
             or System.TimeoutException;
 
     private async Task<PublishResult> PublishCoreAsync(
-        ReadOnlyMemory<byte> file, string type, string? name, string writer, string network,
+        IPublicationSource file, IReadOnlyList<byte[]>? blockHashes, string type, string? name, string writer, string network,
         LandedMemos? alreadyLanded, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
     {
-        IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
-        ChunkLanding landing = alreadyLanded?.Chunks ?? new ChunkLanding(chunks.Count);
+        long chunkCount = ChunkReads.ChunkCount(file.Length);
+        ChunkLanding landing = alreadyLanded?.Chunks ?? new ChunkLanding(chunkCount);
 
-        if (landing.ChunkCount != chunks.Count)
+        if (landing.ChunkCount != chunkCount)
         {
-            throw new ArgumentException($"the landed chunks describe {landing.ChunkCount} chunks and the file has {chunks.Count}", nameof(alreadyLanded));
+            throw new ArgumentException($"the landed chunks describe {landing.ChunkCount} chunks and the file has {chunkCount}", nameof(alreadyLanded));
+        }
+
+        IReadOnlyList<byte[]> blocks = blockHashes ?? await FileTree.BlockHashesAsync(file, null, cancellationToken).ConfigureAwait(false);
+
+        if (blocks.Count != landing.BlockCount)
+        {
+            throw new ArgumentException($"{blocks.Count} block hashes for a file of {landing.BlockCount} blocks", nameof(blockHashes));
         }
 
         // Chunks. What a resumed run found in the ledger is not sent again: it would be paid for
         // twice and put a second copy in the account's history.
-        List<int> missing = [.. Enumerable.Range(0, chunks.Count).Where(index => !landing.IsLanded(index))];
+        IndexRanges missing = landing.Missing();
 
         if (missing.Count > 0)
         {
             long carried = landing.Landed;
 
             SubmittedMemos sent = await _strategy.SubmitAllAsync(
-                [.. missing.Select(index => new MemoSubmission(MemoLayout.ChunkMarkerHex(index), MemoLayout.Hex(chunks[index]), null))],
-                new InlineProgress(done => progress?.Report(new PublishProgress("chunks", carried + done, chunks.Count))),
+                new LazyMemoList(file, missing),
+                new InlineProgress(done => progress?.Report(new PublishProgress("chunks", carried + done, chunkCount))),
                 cancellationToken).ConfigureAwait(false);
 
             await FoldAsync(sent, call => missing[call], landing, cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            progress?.Report(new PublishProgress("chunks", chunks.Count, chunks.Count));
+            progress?.Report(new PublishProgress("chunks", chunkCount, chunkCount));
         }
 
         // The window is the ledgers the chunks are actually in, not those of the first and last
         // index: a resumed run re-sends a low index late.
         LedgerRange window = landing.Window();
         long lastLedger = window.Last;
-        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(FileTree.BlockHashes(chunks), landing.BlockFirstLedgers());
+        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(blocks, landing.BlockFirstLedgers());
         IReadOnlyList<MemoSubmission> listMemos = ManifestPlan.ListMemos(entries);
 
         if (listMemos.Count > 0)
@@ -184,7 +208,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
         progress?.Report(new PublishProgress("manifest", 1, 1));
 
-        return new PublishResult(new XrplFileLink(network, manifestHash), manifest, writer, chunks.Count, listMemos.Count, manifestHash);
+        return new PublishResult(new XrplFileLink(network, manifestHash), manifest, writer, chunkCount, listMemos.Count, manifestHash);
     }
 
     /// <summary>
@@ -262,9 +286,13 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
         return last;
     }
 
-    /// <summary>Reads everything back through the reader a stranger would use, before the link exists.</summary>
+    /// <summary>
+    /// Reads every block back through the reader a stranger would use, before the link exists, and
+    /// compares it with the source chunk by chunk, one block in memory at a time. The ticket and
+    /// sequence paths keep this full read-back (spec S9).
+    /// </summary>
     private async Task ReadEverythingBackAsync(
-        ReadOnlyMemory<byte> file, Manifest manifest, string writer, long lastLedger, IProgress<PublishProgress>? progress,
+        IPublicationSource file, Manifest manifest, string writer, long lastLedger, IProgress<PublishProgress>? progress,
         CancellationToken cancellationToken)
     {
         XrplFileReader reader = new(_source, new ReaderOptions { MaxBytes = long.MaxValue });
@@ -272,28 +300,42 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
         IReadOnlyList<BlockEntry> published = await ReadBackAsync(
             () => reader.BlockListAsync(unpublished, cancellationToken), cancellationToken).ConfigureAwait(false);
 
-        long at = 0;
-
         for (int block = 0; block < published.Count; block++)
         {
             BlockEntry entry = published[block];
             byte[] content = await ReadBackAsync(
                 () => reader.BlockAsync(unpublished, entry, cancellationToken), cancellationToken).ConfigureAwait(false);
 
-            long remaining = file.Length - at;
-            if (content.Length > remaining)
-            {
-                throw new XrplFileException(XrplFileError.BlockMismatch,
-                    $"block {block} read back {content.Length} bytes but only {remaining} remain in the file", block);
-            }
+            await RequireSameAsSourceAsync(file, entry.Index, content, cancellationToken).ConfigureAwait(false);
+            progress?.Report(new PublishProgress("read-back", block + 1, published.Count));
+        }
+    }
 
-            if (!content.AsSpan().SequenceEqual(file.Span.Slice((int)at, content.Length)))
+    /// <summary>A block read back is exactly the source's chunks of that block, no more and no fewer bytes.</summary>
+    private static async Task RequireSameAsSourceAsync(IPublicationSource file, int block, byte[] content, CancellationToken cancellationToken)
+    {
+        long chunkCount = ChunkReads.ChunkCount(file.Length);
+        long first = (long)block * FileTree.BlockChunks;
+        long end = Math.Min(first + FileTree.BlockChunks, chunkCount);
+        byte[] buffer = new byte[MemoLayout.ChunkBytes];
+        int at = 0;
+
+        for (long chunk = first; chunk < end; chunk++)
+        {
+            int length = await file.ReadChunkAsync(chunk, buffer, cancellationToken).ConfigureAwait(false);
+
+            if (at + length > content.Length || !content.AsSpan(at, length).SequenceEqual(buffer.AsSpan(0, length)))
             {
                 throw new XrplFileException(XrplFileError.BlockMismatch, $"block {block} read back differs from the file", block);
             }
 
-            at += content.Length;
-            progress?.Report(new PublishProgress("read-back", block + 1, published.Count));
+            at += length;
+        }
+
+        if (at != content.Length)
+        {
+            throw new XrplFileException(XrplFileError.BlockMismatch,
+                $"block {block} read back {content.Length} bytes and the file has {at} in it", block);
         }
     }
 

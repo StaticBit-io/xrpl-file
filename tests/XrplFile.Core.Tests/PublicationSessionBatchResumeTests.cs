@@ -68,8 +68,7 @@ public class PublicationSessionBatchResumeTests : IDisposable
 
         AccountTransactionsCall firstRead = node.Ledger.Calls[callsBefore];
         Assert.True(firstRead.ToLedger > fence + 2, $"read at {firstRead.ToLedger} with the fence at {fence}");
-        Assert.NotEmpty(waited);
-        Assert.All(waited, progress => Assert.Equal("fence", progress.Stage));
+        Assert.Contains(waited, progress => progress.Stage == "fence");
 
         PublicationReport report = await resumed.RunAsync(null, Token);
         Assert.Equal(file, (await new XrplFileReader(node.Ledger).ReadAsync(report.Link, Token)).Bytes);
@@ -132,7 +131,7 @@ public class PublicationSessionBatchResumeTests : IDisposable
             Factory(node, node.Payer), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options,
             new SynchronousProgress<PublishProgress>(waited.Add), Token);
 
-        Assert.Empty(waited);
+        Assert.DoesNotContain(waited, progress => progress.Stage == "fence");
     }
 
     [Fact]

@@ -77,6 +77,13 @@ public sealed class XrplFileException : Exception
     /// <summary>For <see cref="XrplFileError.AccountInUse"/>: the account that was in use; otherwise null.</summary>
     public AccountRole? Role { get; }
 
+    /// <summary>
+    /// True when a resume was refused because the file differs from the one the run recorded (its
+    /// size or its root), and only then. A caller may then ask for the file again; for any other
+    /// <see cref="XrplFileError.ResumeMismatch"/> the file is not what is wrong.
+    /// </summary>
+    public bool SourceChanged { get; init; }
+
     public XrplFileException(
         XrplFileError error, string message, int? block = null, Exception? inner = null, string? engineResult = null,
         AccountRole? role = null)

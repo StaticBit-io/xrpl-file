@@ -99,7 +99,14 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
     private ISubmissionStrategy? _strategy;
     private readonly ILedgerSource _source;
-    private readonly ReadOnlyMemory<byte> _file;
+    private readonly IPublicationSource _file;
+
+    /// <summary>The file's block hashes, streamed once at start or resume (spec S3, S7) and handed to the writer.</summary>
+    private readonly IReadOnlyList<byte[]> _blockHashes;
+
+    /// <summary>Set when a <see cref="ReadOnlyMemory{T}"/> overload wrapped the bytes: the session then disposes the source (spec 4.1).</summary>
+    private bool _ownsFile;
+
     private readonly SessionOptions _options;
     private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
 
@@ -144,13 +151,14 @@ public sealed class PublicationSession : IBatchFenceRecorder
     private LandedMemos? _landed;
 
     private PublicationSession(
-        ISubmissionStrategy? strategy, ILedgerSource source, ReadOnlyMemory<byte> file,
+        ISubmissionStrategy? strategy, ILedgerSource source, IPublicationSource file, IReadOnlyList<byte[]> blockHashes,
         PublicationState state, string statePath, SessionOptions options, long feeDropsPerTransaction, int mints,
         int? mintsAtStart)
     {
         _strategy = strategy;
         _source = source;
         _file = file;
+        _blockHashes = blockHashes;
         _state = state;
         _options = options;
         _feeDropsPerTransaction = feeDropsPerTransaction;
@@ -203,13 +211,28 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// through <paramref name="strategyFactory"/> with this session as its fence recorder, and writes
     /// a version-3 state file -- all before a single transaction is submitted.
     /// </summary>
-    public static async Task<PublicationSession> StartAsync(
+    public static Task<PublicationSession> StartAsync(
         BatchStrategyFactory strategyFactory, ILedgerSource source, ReadOnlyMemory<byte> file, string type, string? name,
         string writer, string keyReference, string payer, string payerKeyReference, string network, SessionOptions options,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        OwningAsync(file, owned => StartAsync(
+            strategyFactory, source, owned, type, name, writer, keyReference, payer, payerKeyReference, network, options, null, cancellationToken));
+
+    /// <summary>
+    /// Starts a Batch run with the file read from a source (spec 4.3), refusing in the order
+    /// <see cref="StartAsync(BatchStrategyFactory, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, string, string, SessionOptions, CancellationToken)"/>
+    /// does. The source is borrowed: the session reads it and the caller disposes it. Its root is
+    /// streamed once the estimate has been accepted, reported as the <c>"hashing"</c> stage of
+    /// <paramref name="preparation"/>.
+    /// </summary>
+    public static async Task<PublicationSession> StartAsync(
+        BatchStrategyFactory strategyFactory, ILedgerSource source, IPublicationSource file, string type, string? name,
+        string writer, string keyReference, string payer, string payerKeyReference, string network, SessionOptions options,
+        IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(strategyFactory);
         ArgumentNullException.ThrowIfNull(options);
+        RequirePublishable(file);
         RequireNameableAccount(writer);
         ArgumentException.ThrowIfNullOrWhiteSpace(payerKeyReference);
 
@@ -225,16 +248,16 @@ public sealed class PublicationSession : IBatchFenceRecorder
         // are where a resume's history has to start being complete (spec 5.2 step 3).
         LedgerSnapshot started = await source.SnapshotAsync([writer], cancellationToken).ConfigureAwait(false);
         long startedIn = started.LedgerIndex;
-        IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
+        IReadOnlyList<byte[]> blocks = await HashAsync(file, preparation, cancellationToken).ConfigureAwait(false);
 
         PublicationState state = new(
             PublicationState.BatchVersion, network, writer, keyReference, type, name,
-            file.Length, MemoLayout.ChunkBytes, RootOf(chunks), startedIn, Phase: Stages[0],
+            file.Length, MemoLayout.ChunkBytes, FileTree.RootHexOf(blocks), startedIn, Phase: Stages[0],
             Strategy: PublicationState.BatchStrategyName, SourcePath: options.SourcePath,
             Payer: payer, PayerKeyReference: payerKeyReference, Fence: 0, StartSequence: started.SequenceOf(writer));
 
         string path = NewStatePath(options, startedIn, writer);
-        PublicationSession session = new(null, source, file, state, path, options, 0, 0, mintsAtStart: 0);
+        PublicationSession session = new(null, source, file, blocks, state, path, options, 0, 0, mintsAtStart: 0);
 
         await session.AttachBatchAsync(strategyFactory, estimate, resuming: false).ConfigureAwait(false);
         state.Save(path);
@@ -243,7 +266,8 @@ public sealed class PublicationSession : IBatchFenceRecorder
     }
 
     /// <summary>The root a file will publish under: over block hashes alone, as the writer computes it.</summary>
-    public static string RootOf(ReadOnlyMemory<byte> file) => RootOf(FileTree.Split(file, MemoLayout.ChunkBytes));
+    public static string RootOf(ReadOnlyMemory<byte> file) =>
+        FileTree.RootHexOf(FileTree.BlockHashes(FileTree.Split(file, MemoLayout.ChunkBytes)));
 
     /// <summary>
     /// The largest file a publication takes (spec S1): 16 GiB. Every chunk index stays an
@@ -254,6 +278,53 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// <summary>The root a source will publish under, in one streaming pass (spec S3, S7).</summary>
     public static async Task<string> RootOfAsync(IPublicationSource file, IProgress<long>? progress, CancellationToken cancellationToken) =>
         FileTree.RootHexOf(await FileTree.BlockHashesAsync(file, progress, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>An empty file has no root, and a file above <see cref="MaxPublicationBytes"/> is refused before anything is read (spec 4.1).</summary>
+    private static void RequirePublishable(IPublicationSource file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+
+        if (file.Length <= 0) throw new ArgumentException("an empty file has no chunks and no root", nameof(file));
+
+        if (file.Length > MaxPublicationBytes)
+        {
+            throw new XrplFileException(XrplFileError.TooLarge,
+                $"the file is {file.Length} bytes and a publication takes at most {MaxPublicationBytes}");
+        }
+    }
+
+    /// <summary>The file's block hashes in one streaming pass, reported as the "hashing" stage in chunks (spec 5.3).</summary>
+    private static Task<IReadOnlyList<byte[]>> HashAsync(IPublicationSource file, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
+    {
+        long chunks = ChunkReads.ChunkCount(file.Length);
+        IProgress<long>? hashed = preparation is null ? null : new Hashed(done => preparation.Report(new PublishProgress("hashing", done, chunks)));
+
+        return FileTree.BlockHashesAsync(file, hashed, cancellationToken);
+    }
+
+    /// <summary>Reports on the hashing thread, like the writer's own adapter, rather than posting through <see cref="Progress{T}"/>.</summary>
+    private sealed class Hashed(Action<long> report) : IProgress<long>
+    {
+        public void Report(long value) => report(value);
+    }
+
+    /// <summary>Wraps bytes for the <see cref="ReadOnlyMemory{T}"/> overloads; the session that results owns it.</summary>
+    private static async Task<PublicationSession> OwningAsync(ReadOnlyMemory<byte> bytes, Func<IPublicationSource, Task<PublicationSession>> start)
+    {
+        MemoryPublicationSource owned = new(bytes);
+
+        try
+        {
+            PublicationSession session = await start(owned).ConfigureAwait(false);
+            session._ownsFile = true;
+            return session;
+        }
+        catch
+        {
+            await owned.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
 
     /// <summary>
     /// A BatchStrategy needs the session's own fence recorder and a version-3 state; the one-account
@@ -370,11 +441,25 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// and writes the state file — all before a single transaction is submitted. A run that is
     /// going to fail on money fails here, where it has cost nothing.
     /// </summary>
-    public static async Task<PublicationSession> StartAsync(
+    public static Task<PublicationSession> StartAsync(
         ISubmissionStrategy strategy, ILedgerSource source, ReadOnlyMemory<byte> file, string type, string? name,
-        string writer, string keyReference, string network, SessionOptions options, CancellationToken cancellationToken)
+        string writer, string keyReference, string network, SessionOptions options, CancellationToken cancellationToken) =>
+        OwningAsync(file, owned => StartAsync(strategy, source, owned, type, name, writer, keyReference, network, options, null, cancellationToken));
+
+    /// <summary>
+    /// Starts a run with the file read from a source (spec 4.3), refusing in the order
+    /// <see cref="StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/>
+    /// does. The source is borrowed: the session reads it and the caller disposes it. Its root is
+    /// streamed once, after every refusal that needs no read, and reported as the <c>"hashing"</c>
+    /// stage of <paramref name="preparation"/>.
+    /// </summary>
+    public static async Task<PublicationSession> StartAsync(
+        ISubmissionStrategy strategy, ILedgerSource source, IPublicationSource file, string type, string? name,
+        string writer, string keyReference, string network, SessionOptions options, IProgress<PublishProgress>? preparation,
+        CancellationToken cancellationToken)
     {
         RequireNotBatch(strategy);
+        RequirePublishable(file);
 
         // The writer becomes part of a file name below, so it is checked before anything at all
         // happens. An XRPL account is base58 and cannot hold a separator or a dot-dot; something
@@ -418,8 +503,8 @@ public sealed class PublicationSession : IBatchFenceRecorder
         // transaction still needs an identity to be resumed by. The root is over block hashes
         // only (see RootOf), so it is the same root the manifest will carry once the real
         // per-block ledgers are known.
-        IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
-        string root = RootOf(chunks);
+        IReadOnlyList<byte[]> blocks = await HashAsync(file, preparation, cancellationToken).ConfigureAwait(false);
+        string root = FileTree.RootHexOf(blocks);
 
         PublicationState state = new(
             PublicationState.CurrentVersion, network, writer, keyReference, type, name,
@@ -435,7 +520,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         state.Save(path);
 
         return new PublicationSession(
-            strategy, source, file, state, path, options, estimate.FeeDropsPerTransaction, estimate.Mints,
+            strategy, source, file, blocks, state, path, options, estimate.FeeDropsPerTransaction, estimate.Mints,
             mintsAtStart: strategy.TicketMints);
     }
 
@@ -458,11 +543,24 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// already in the ledger are priced again, and their tickets with them. A budget sized for the
     /// original run therefore carries the resume as well; one sized for the remainder refuses it.
     /// </summary>
-    public static async Task<PublicationSession> ResumeAsync(
+    public static Task<PublicationSession> ResumeAsync(
         ISubmissionStrategy strategy, ILedgerSource source, ReadOnlyMemory<byte> file,
-        string statePath, SessionOptions options, CancellationToken cancellationToken)
+        string statePath, SessionOptions options, CancellationToken cancellationToken) =>
+        OwningAsync(file, owned => ResumeAsync(strategy, source, owned, statePath, options, null, cancellationToken));
+
+    /// <summary>
+    /// Picks a run back up with the file read from a source (spec 4.3), as
+    /// <see cref="ResumeAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, SessionOptions, CancellationToken)"/>
+    /// does. The source is borrowed: the session reads it and the caller disposes it. Its root is
+    /// streamed before the ledger is read, reported as the <c>"hashing"</c> stage of
+    /// <paramref name="preparation"/>.
+    /// </summary>
+    public static async Task<PublicationSession> ResumeAsync(
+        ISubmissionStrategy strategy, ILedgerSource source, IPublicationSource file,
+        string statePath, SessionOptions options, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
     {
         RequireNotBatch(strategy);
+        RequirePublishable(file);
 
         PublicationState state = PublicationState.Load(statePath);
 
@@ -483,17 +581,17 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 $"{statePath} records a Batch run, which resumes with its payer rather than on one account");
         }
 
-        IReadOnlyList<byte[]> chunks = RequireResumable(state, statePath, file);
+        IReadOnlyList<byte[]> blocks = await RequireResumableAsync(state, statePath, file, preparation, cancellationToken).ConfigureAwait(false);
 
         PublicationSession session = new(
-            strategy, source, file, state, statePath, options, 0, 0, mintsAtStart: null);
+            strategy, source, file, blocks, state, statePath, options, 0, 0, mintsAtStart: null);
         session.RecordSourcePath(options.SourcePath);
         long to = await source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<LedgerTransaction> history = await session.HistoryAsync(to, cancellationToken).ConfigureAwait(false);
-        session._landed = session.Reconcile(chunks, history);
+        session._landed = await session.ReconcileAsync(history, cancellationToken).ConfigureAwait(false);
 
         // Nothing is sent, so nothing has to be affordable (spec B27).
-        if (session.FindManifest(chunks, session._landed, history) is { } done)
+        if (session.FindManifest(session._landed, history) is { } done)
         {
             session._alreadyPublished = done;
             return session;
@@ -529,12 +627,26 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// only then builds the strategy. Nothing the interrupted run sent can apply once the fence has
     /// passed, so the ledger's answer read after it is final.
     /// </summary>
-    public static async Task<PublicationSession> ResumeAsync(
+    public static Task<PublicationSession> ResumeAsync(
         BatchStrategyFactory strategyFactory, ILedgerSource source, ReadOnlyMemory<byte> file, string statePath,
         string payer, string payerKeyReference, SessionOptions options, IProgress<PublishProgress>? fenceProgress,
+        CancellationToken cancellationToken) =>
+        OwningAsync(file, owned => ResumeAsync(
+            strategyFactory, source, owned, statePath, payer, payerKeyReference, options, fenceProgress, cancellationToken));
+
+    /// <summary>
+    /// Picks a Batch run back up with the file read from a source (spec 4.3). The source is
+    /// borrowed: the session reads it and the caller disposes it. Its root is streamed first,
+    /// reported as the <c>"hashing"</c> stage of <paramref name="preparation"/>, which also hears
+    /// the <c>"fence"</c> wait.
+    /// </summary>
+    public static async Task<PublicationSession> ResumeAsync(
+        BatchStrategyFactory strategyFactory, ILedgerSource source, IPublicationSource file, string statePath,
+        string payer, string payerKeyReference, SessionOptions options, IProgress<PublishProgress>? preparation,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(strategyFactory);
+        RequirePublishable(file);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(payerKeyReference);
 
@@ -551,19 +663,19 @@ public sealed class PublicationSession : IBatchFenceRecorder
             throw new ArgumentException("a Batch run's payer is another account than its writer (spec B1)", nameof(payer));
         }
 
-        IReadOnlyList<byte[]> chunks = RequireResumable(state, statePath, file);
+        IReadOnlyList<byte[]> blocks = await RequireResumableAsync(state, statePath, file, preparation, cancellationToken).ConfigureAwait(false);
 
-        await WaitForFenceAsync(source, state, options, fenceProgress, cancellationToken).ConfigureAwait(false);
+        await WaitForFenceAsync(source, state, options, preparation, cancellationToken).ConfigureAwait(false);
 
-        PublicationSession session = new(null, source, file, state, statePath, options, 0, 0, mintsAtStart: 0);
+        PublicationSession session = new(null, source, file, blocks, state, statePath, options, 0, 0, mintsAtStart: 0);
         session.RecordSourcePath(options.SourcePath);
 
         // One complete read serves both: a manifest search over a second read could miss what the
         // reconciliation saw, and send a second manifest (spec B27).
         IReadOnlyList<LedgerTransaction> history = await session.CompleteHistoryAsync(cancellationToken).ConfigureAwait(false);
-        session._landed = session.Reconcile(chunks, history);
+        session._landed = await session.ReconcileAsync(history, cancellationToken).ConfigureAwait(false);
 
-        if (session.FindManifest(chunks, session._landed, history) is { } done)
+        if (session.FindManifest(session._landed, history) is { } done)
         {
             session._alreadyPublished = done;
             return session;
@@ -574,14 +686,14 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
         await RequireBatchEnabledAsync(source, cancellationToken).ConfigureAwait(false);
 
-        int blocks = FileTree.BlockCount(chunks.Count);
-        int lists = blocks > 1 ? PublicationEstimator.BlockListMemoCount(blocks) : 0;
-        long missingChunks = chunks.Count - session._landed.Chunks.Landed;
+        int blockCount = blocks.Count;
+        int lists = blockCount > 1 ? PublicationEstimator.BlockListMemoCount(blockCount) : 0;
+        long missingChunks = ChunkReads.ChunkCount(file.Length) - session._landed.Chunks.Landed;
 
         // Lists are priced in full: their bytes depend on ledgers only the writer knows by now, and
         // there are few of them.
         BatchPublicationEstimate estimate = await PublicationEstimator
-            .EstimateBatchAsync(source, state.Writer, payer, missingChunks, blocks, lists, cancellationToken).ConfigureAwait(false);
+            .EstimateBatchAsync(source, state.Writer, payer, missingChunks, blockCount, lists, cancellationToken).ConfigureAwait(false);
 
         RequireFeeWithinLimit(estimate);
         PublicationEstimator.RequireBatch(estimate, options.BudgetDrops);
@@ -664,11 +776,11 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// those bytes is the one. A manifest with the same root and other bytes is another publication's
     /// and is not adopted.
     /// </summary>
-    private PublishResult? FindManifest(IReadOnlyList<byte[]> chunks, LandedMemos landed, IReadOnlyList<LedgerTransaction> history)
+    private PublishResult? FindManifest(LandedMemos landed, IReadOnlyList<LedgerTransaction> history)
     {
         if (!landed.Chunks.IsComplete) return null;
 
-        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(FileTree.BlockHashes(chunks), landed.Chunks.BlockFirstLedgers());
+        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(_blockHashes, landed.Chunks.BlockFirstLedgers());
         IReadOnlyList<MemoSubmission> listMemos = ManifestPlan.ListMemos(entries);
         LedgerRange window = landed.Chunks.Window();
         long lastLedger = window.Last;
@@ -693,14 +805,15 @@ public sealed class PublicationSession : IBatchFenceRecorder
             if (!tx.Validated || !tx.Succeeded || !string.Equals(tx.Account, state.Writer, StringComparison.Ordinal)) continue;
             if (!MemoLayout.IsManifest(tx.MemoTypeHex) || !string.Equals(tx.MemoDataHex, data, StringComparison.OrdinalIgnoreCase)) continue;
 
-            return new PublishResult(new XrplFileLink(state.Network, tx.Hash), manifest, state.Writer, chunks.Count, listMemos.Count, tx.Hash);
+            return new PublishResult(new XrplFileLink(state.Network, tx.Hash), manifest, state.Writer, landed.Chunks.ChunkCount, listMemos.Count, tx.Hash);
         }
 
         return null;
     }
 
-    /// <summary>The checks every resume makes before it reads the ledger; returns the file's chunks.</summary>
-    private static IReadOnlyList<byte[]> RequireResumable(PublicationState state, string statePath, ReadOnlyMemory<byte> file)
+    /// <summary>The checks every resume makes before it reads the ledger; returns the file's block hashes (spec S7).</summary>
+    private static async Task<IReadOnlyList<byte[]>> RequireResumableAsync(
+        PublicationState state, string statePath, IPublicationSource file, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
     {
         if (string.Equals(state.Phase, "done", StringComparison.Ordinal))
         {
@@ -711,7 +824,10 @@ public sealed class PublicationSession : IBatchFenceRecorder
         if (state.Size != file.Length)
         {
             throw new XrplFileException(XrplFileError.ResumeMismatch,
-                $"{statePath} was started for {state.Size} bytes and this file is {file.Length}");
+                $"{statePath} was started for {state.Size} bytes and this file is {file.Length}")
+            {
+                SourceChanged = true,
+            };
         }
 
         // The run's indices mean nothing under a different chunk size: PublishCoreAsync always
@@ -727,23 +843,25 @@ public sealed class PublicationSession : IBatchFenceRecorder
         // is the identity, so it is what the check is made of -- and a file that does not carry one
         // is refused rather than resumed without it, because skipping the check is exactly how a
         // resume publishes the wrong bytes under a started run's name.
-        IReadOnlyList<byte[]> chunks = FileTree.Split(file, state.Chunk);
-
         if (state.Root is not { } recorded)
         {
             throw new XrplFileException(XrplFileError.ResumeMismatch,
                 $"{statePath} records no root, so there is nothing to check this file against");
         }
 
-        string root = RootOf(chunks);
+        IReadOnlyList<byte[]> blocks = await HashAsync(file, preparation, cancellationToken).ConfigureAwait(false);
+        string root = FileTree.RootHexOf(blocks);
 
         if (!string.Equals(recorded, root, StringComparison.Ordinal))
         {
             throw new XrplFileException(XrplFileError.ResumeMismatch,
-                $"{statePath} was started for a file rooted at {recorded} and this one roots at {root}");
+                $"{statePath} was started for a file rooted at {recorded} and this one roots at {root}")
+            {
+                SourceChanged = true,
+            };
         }
 
-        return chunks;
+        return blocks;
     }
 
     /// <summary>A picked file at a new place is where the next resume reads from (spec B17).</summary>
@@ -774,10 +892,12 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// carry per-block ledgers that are not known until the chunks are reconciled; they are
     /// collected raw and checked byte for byte by the writer, which is where they are built.
     /// </summary>
-    private LandedMemos Reconcile(IReadOnlyList<byte[]> chunks, IReadOnlyList<LedgerTransaction> history)
+    private async Task<LandedMemos> ReconcileAsync(IReadOnlyList<LedgerTransaction> history, CancellationToken cancellationToken)
     {
-        ChunkLanding landing = new(chunks.Count);
+        long chunkCount = ChunkReads.ChunkCount(_file.Length);
+        ChunkLanding landing = new(chunkCount);
         Dictionary<int, LandedMemo> landedLists = [];
+        byte[] buffer = new byte[MemoLayout.ChunkBytes];
 
         foreach (LedgerTransaction tx in history)
         {
@@ -786,11 +906,13 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
             if (MemoLayout.ChunkIndexOf(tx.MemoTypeHex) is { } chunkIndex)
             {
-                if (chunkIndex < 0 || chunkIndex >= chunks.Count) continue;
-                if (!string.Equals(data, MemoLayout.Hex(chunks[(int)chunkIndex]), StringComparison.OrdinalIgnoreCase)) continue;
+                if (chunkIndex < 0 || chunkIndex >= chunkCount || landing.IsLanded(chunkIndex)) continue;
 
-                // First in canonical order, exactly as a reader will resolve it.
-                landing.Land(chunkIndex, tx.LedgerIndex);
+                int length = await _file.ReadChunkAsync(chunkIndex, buffer, cancellationToken).ConfigureAwait(false);
+
+                // First in canonical order, exactly as a reader will resolve it; a copy with other
+                // bytes is another file's straggler and is not adopted (spec I12).
+                if (ChunkReads.MatchesHex(data, buffer.AsSpan(0, length))) landing.Land(chunkIndex, tx.LedgerIndex);
                 continue;
             }
 
@@ -854,9 +976,6 @@ public sealed class PublicationSession : IBatchFenceRecorder
         }
     }
 
-    /// <summary>The file's root, computed the way the writer will compute it -- over block hashes alone.</summary>
-    private static string RootOf(IReadOnlyList<byte[]> chunks) => FileTree.RootHexOf(FileTree.BlockHashes(chunks));
-
     public async Task<PublicationReport> RunAsync(IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
     {
         // A publication is paid for once. A second call would republish every chunk and pay for it
@@ -896,7 +1015,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
             XrplFileWriter writer = new(Strategy, _source, new WriterOptions { ReadBack = _options.ReadBack });
 
             PublishResult result = await writer.PublishAsync(
-                _file, started.Type, started.Name, started.Writer, started.Network, _landed,
+                _file, _blockHashes, started.Type, started.Name, started.Writer, started.Network, _landed,
                 new PhaseRecordingProgress(this, progress), cancellationToken).ConfigureAwait(false);
 
             Advance("done", result.Manifest.Root, result.ManifestHash);
@@ -942,6 +1061,8 @@ public sealed class PublicationSession : IBatchFenceRecorder
             // A run that threw is over too. Its money is spent, and starting again from the top is
             // a decision for a caller who has re-checked the account, not for a retry loop.
             Interlocked.Exchange(ref _run, 2);
+
+            if (_ownsFile) await _file.DisposeAsync().ConfigureAwait(false);
         }
     }
 

@@ -74,6 +74,30 @@ public sealed class ChunkLanding
         return firsts;
     }
 
+    /// <summary>The chunks that have not landed, ascending, as ranges.</summary>
+    internal IndexRanges Missing()
+    {
+        List<(long Start, int Length)> ranges = [];
+        long start = -1;
+
+        for (long chunk = 0; chunk < ChunkCount; chunk++)
+        {
+            bool landed = (_landed[chunk >> 6] & (1UL << (int)(chunk & 63))) != 0;
+
+            if (!landed && start < 0) start = chunk;
+
+            if (landed && start >= 0)
+            {
+                ranges.Add((start, (int)(chunk - start)));
+                start = -1;
+            }
+        }
+
+        if (start >= 0) ranges.Add((start, (int)(ChunkCount - start)));
+
+        return IndexRanges.Of(ranges);
+    }
+
     /// <summary>The first ledger of any chunk and the last ledger of any chunk.</summary>
     public LedgerRange Window()
     {

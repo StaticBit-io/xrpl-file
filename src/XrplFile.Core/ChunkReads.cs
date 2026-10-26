@@ -27,6 +27,17 @@ internal static class ChunkReads
         }
     }
 
+    /// <summary>Whether a record's MemoData is exactly these bytes, compared without building a string per record.</summary>
+    public static bool MatchesHex(string? memoDataHex, ReadOnlySpan<byte> chunk)
+    {
+        if (memoDataHex is null || memoDataHex.Length != chunk.Length * 2) return false;
+
+        Span<byte> decoded = stackalloc byte[MemoLayout.ChunkBytes];
+        System.Buffers.OperationStatus status = Convert.FromHexString(memoDataHex, decoded, out _, out int written);
+
+        return status == System.Buffers.OperationStatus.Done && decoded[..written].SequenceEqual(chunk);
+    }
+
     public static IOException EndedEarly(long index, long at, long length) =>
         new($"the file ended at byte {at}, inside chunk {index}; it was {length} bytes when it was opened");
 }
