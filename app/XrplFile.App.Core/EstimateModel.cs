@@ -13,8 +13,9 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
     private IPublicationSource? _held;
 
     /// <summary>
-    /// Bumped by every estimate, hand-off and discard: an estimate keeps the source it opened only
-    /// when nothing of the kind happened while it ran, so a screen left mid-estimate leaves no file open.
+    /// Bumped by every estimate, hand-off and discard: an estimate keeps the source it opened, and
+    /// publishes its figures, only when nothing of the kind happened while it ran, so a screen left
+    /// mid-estimate leaves no file open and an older estimate cannot land next to a newer one's file.
     /// </summary>
     private int _generation;
 
@@ -59,16 +60,16 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
 
     public void Confirm(bool understood) => Confirmed = understood;
 
-    public bool CanPublish => IsAffordable && (!NeedsConfirmation || Confirmed);
+    public bool CanPublish => IsAffordable(Estimate, BatchEstimate) && (!NeedsConfirmation || Confirmed);
 
     /// <summary>Whether the estimate could be published once confirmed: the accounts cover it and the run can be priced and placed.</summary>
-    private bool IsAffordable =>
-        BatchEstimate is { } batch
+    private static bool IsAffordable(PublicationEstimate? estimate, BatchPublicationEstimate? batchEstimate) =>
+        batchEstimate is { } batch
             ? batch.WriterCovers && batch.PayerCovers
-            : Estimate is not null
-                && Estimate.BalanceCovers
-                && Estimate.FeeDropsPerTransaction <= int.MaxValue
-                && !PublishPolicy.HasNoTicketRoom(Estimate);
+            : estimate is not null
+                && estimate.BalanceCovers
+                && estimate.FeeDropsPerTransaction <= int.MaxValue
+                && !PublishPolicy.HasNoTicketRoom(estimate);
 
     /// <summary>
     /// What a run started from this estimate may spend (spec S25); null while the estimate cannot be
@@ -103,11 +104,10 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
             held = _held;
             _held = null;
             _generation++;
-        }
 
-        Summary = null;
-        Confirmed = false;
-        _approval = null;
+            // With no file held there is nothing the estimate could be published from.
+            Clear();
+        }
 
         if (held is not null) await held.DisposeAsync().ConfigureAwait(false);
     }
@@ -129,18 +129,10 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
             generation = ++_generation;
             previous = _held;
             _held = null;
+            Clear();
         }
 
         if (previous is not null) await previous.DisposeAsync().ConfigureAwait(false);
-
-        Estimate = null;
-        NodeUrl = null;
-        Message = null;
-        BatchEstimate = null;
-        MethodLine = null;
-        Summary = null;
-        Confirmed = false;
-        _approval = null;
 
         IPublicationSource source;
 
@@ -150,7 +142,15 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Message = "That file could not be read.";
+            Publish(generation, new Outcome { Message = "That file could not be read." }, held: null);
+            return;
+        }
+
+        // The size checked and priced is the size of what is held, whatever the picker measured earlier.
+        if (SizeRefusal(source.Length, request.PayerAccount) is { } refusal)
+        {
+            Publish(generation, new Outcome { Message = refusal }, held: null);
+            await source.DisposeAsync().ConfigureAwait(false);
             return;
         }
 
@@ -158,17 +158,9 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
 
         try
         {
-            // The size priced is the size of what is held, whatever the picker measured earlier.
-            await EstimateHeldAsync(request with { Size = source.Length }, cancellationToken).ConfigureAwait(false);
+            Outcome outcome = await EstimateHeldAsync(request with { Size = source.Length }, cancellationToken).ConfigureAwait(false);
 
-            lock (_gate)
-            {
-                if (generation == _generation)
-                {
-                    _held = source;
-                    kept = true;
-                }
-            }
+            kept = Publish(generation, outcome, source);
         }
         finally
         {
@@ -176,25 +168,109 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         }
     }
 
-    private async Task EstimateHeldAsync(PublishRequest request, CancellationToken cancellationToken)
+    /// <summary>
+    /// The size policy of <see cref="PublishModel"/> (spec S1, S16) applied to the file the estimate
+    /// holds: the picker measured it earlier, and a file can grow between picking and estimating.
+    /// </summary>
+    private static string? SizeRefusal(long length, string? payerAccount)
+    {
+        if (length > PublishModel.MaxPublicationBytes) return PublishModel.TooLargeMessage;
+        if (length > PublishModel.TicketPathMaxBytes && payerAccount is null) return PublishModel.PayerRequiredMessage;
+
+        return null;
+    }
+
+    /// <summary>
+    /// What one estimate worked out, kept apart from the model until <see cref="Publish"/> finds the
+    /// estimate still current: an older one finishing late must not land its figures and approval next
+    /// to a newer one's held file.
+    /// </summary>
+    private sealed class Outcome
+    {
+        public PublishRequest? Request { get; init; }
+
+        public string? Note { get; init; }
+
+        public string? NodeUrl { get; set; }
+
+        public PublicationEstimate? Estimate { get; set; }
+
+        public BatchPublicationEstimate? BatchEstimate { get; set; }
+
+        public string? Message { get; set; }
+
+        public string? MethodLine { get; set; }
+
+        public CostSummary? Summary { get; set; }
+
+        public SpendingApproval? Approval { get; set; }
+    }
+
+    /// <summary>Called under <see cref="_gate"/>.</summary>
+    private void Clear()
+    {
+        Estimate = null;
+        NodeUrl = null;
+        Message = null;
+        BatchEstimate = null;
+        MethodLine = null;
+        Request = null;
+        Note = null;
+        Summary = null;
+        Confirmed = false;
+        _approval = null;
+    }
+
+    /// <summary>
+    /// Takes an outcome and the file it was made from, but only when no other estimate, hand-off or
+    /// discard happened while it ran. True when the model now holds the file.
+    /// </summary>
+    private bool Publish(int generation, Outcome outcome, IPublicationSource? held)
+    {
+        lock (_gate)
+        {
+            if (generation != _generation) return false;
+
+            Request = outcome.Request;
+            Note = outcome.Note;
+            NodeUrl = outcome.NodeUrl;
+            Estimate = outcome.Estimate;
+            BatchEstimate = outcome.BatchEstimate;
+            Message = outcome.Message;
+            MethodLine = outcome.MethodLine;
+            Summary = outcome.Summary;
+            Confirmed = false;
+            _approval = outcome.Approval;
+            _held = held;
+
+            return held is not null;
+        }
+    }
+
+    private async Task<Outcome> EstimateHeldAsync(PublishRequest request, CancellationToken cancellationToken)
     {
         PublishRequest effective = PublishPolicy.Effective(request);
-        Request = effective;
-        Note = ReferenceEquals(effective, request) ? null : TooSmallForBatchNote;
+        Outcome outcome = new()
+        {
+            Request = effective,
+            Note = ReferenceEquals(effective, request) ? null : TooSmallForBatchNote,
+        };
         request = effective;
 
         if (request.PayerAccount is { } payer)
         {
-            await EstimateBatchAsync(request, payer, cancellationToken).ConfigureAwait(false);
-            return;
+            await EstimateBatchAsync(outcome, request, payer, cancellationToken).ConfigureAwait(false);
+            return outcome;
         }
+
+        PublicationEstimate estimate;
 
         try
         {
             await using ILedgerConnection connection =
                 await connections.ConnectAsync(request.Network, cancellationToken).ConfigureAwait(false);
 
-            NodeUrl = connection.Url;
+            outcome.NodeUrl = connection.Url;
 
             SessionOptions options = new()
             {
@@ -202,84 +278,91 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
                 TicketsPerBatch = PublishPolicy.TicketsPerBatch,
             };
 
-            Estimate = await PublicationSession.EstimateAsync(
+            estimate = await PublicationSession.EstimateAsync(
                 connection.Source, request.Account, request.Size, options, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (XrplFileException ex)
         {
-            Message = PublishErrorMessages.For(ex);
-            return;
+            outcome.Message = PublishErrorMessages.For(ex);
+            return outcome;
         }
 
-        Summary = CostSummary.Of(Estimate, Request!);
+        outcome.Estimate = estimate;
+        outcome.Summary = CostSummary.Of(estimate, request);
 
-        if (Estimate.FeeDropsPerTransaction > int.MaxValue)
+        if (estimate.FeeDropsPerTransaction > int.MaxValue)
         {
             // Both strategy option types take an int fee, and the run prices its strategy from this
             // number so the session does not refuse it with FeeMismatch. A price this large is not a
             // situation the protocol produces; it is one this application says no to rather than
             // wraps around. PublicationRun.RunAsync re-checks this same thing for itself before a
             // resume (which never reaches this model at all) and uses this exact sentence too.
-            Message = PublishErrorMessages.FeeTooLargeForApplication;
-            return;
+            outcome.Message = PublishErrorMessages.FeeTooLargeForApplication;
+            return outcome;
         }
 
-        if (PublishPolicy.HasNoTicketRoom(Estimate))
+        if (PublishPolicy.HasNoTicketRoom(estimate))
         {
-            Message =
+            outcome.Message =
                 $"This account already holds the {TicketStrategy.MaxLiveTickets} tickets the XRP Ledger allows, none of them "
                 + "recognisably left by this application, so a file this size has nowhere to put its own. Publish a smaller file, "
                 + "which needs no tickets, or use another account.";
-            return;
+            return outcome;
         }
 
-        if (!Estimate.BalanceCovers)
+        if (!estimate.BalanceCovers)
         {
-            Message =
-                $"This publication needs {XrpAmount.Format(Estimate.RequiredDrops)} and the account can spend "
-                + $"{XrpAmount.Format(Estimate.SpendableDrops)}. {ReserveSentence(Estimate)}"
+            outcome.Message =
+                $"This publication needs {XrpAmount.Format(estimate.RequiredDrops)} and the account can spend "
+                + $"{XrpAmount.Format(estimate.SpendableDrops)}. {ReserveSentence(estimate)}"
                 + "Fund it, or publish a smaller file.";
         }
 
-        SetApprovalIfPublishable();
+        SetApprovalIfPublishable(outcome);
+        return outcome;
     }
 
-    private async Task EstimateBatchAsync(PublishRequest request, string payer, CancellationToken cancellationToken)
+    private async Task EstimateBatchAsync(Outcome outcome, PublishRequest request, string payer, CancellationToken cancellationToken)
     {
+        BatchPublicationEstimate estimate;
+
         try
         {
             await using ILedgerConnection connection =
                 await connections.ConnectAsync(request.Network, cancellationToken).ConfigureAwait(false);
 
-            NodeUrl = connection.Url;
+            outcome.NodeUrl = connection.Url;
 
             SessionOptions options = new() { StateDirectory = paths.StateDirectory };
 
-            BatchEstimate = await PublicationSession.EstimateAsync(
+            estimate = await PublicationSession.EstimateAsync(
                 connection.Source, request.Account, payer, request.Size, options, cancellationToken).ConfigureAwait(false);
         }
         catch (XrplFileException ex)
         {
             // Nothing has started, so "listed under unfinished runs" would be false (Spec question 6).
-            Message = ex.Error == XrplFileError.FeeTooHigh ? PublishErrorMessages.FeeTooHighNow : PublishErrorMessages.For(ex);
+            outcome.Message = ex.Error == XrplFileError.FeeTooHigh ? PublishErrorMessages.FeeTooHighNow : PublishErrorMessages.For(ex);
             return;
         }
 
-        MethodLine = $"Batch, paid by {request.PayerLabel ?? payer}.";
-        Summary = CostSummary.Of(BatchEstimate, request);
-        Message = ShortfallOf(BatchEstimate, request);
-        SetApprovalIfPublishable();
+        outcome.BatchEstimate = estimate;
+        outcome.MethodLine = $"Batch, paid by {request.PayerLabel ?? payer}.";
+        outcome.Summary = CostSummary.Of(estimate, request);
+        outcome.Message = ShortfallOf(estimate, request);
+        SetApprovalIfPublishable(outcome);
     }
 
-    private void SetApprovalIfPublishable()
+    private static void SetApprovalIfPublishable(Outcome outcome)
     {
         // Made before the confirmation: Approval hands it out only once CanPublish agrees.
-        if (!IsAffordable) return;
+        if (!IsAffordable(outcome.Estimate, outcome.BatchEstimate)) return;
 
-        _approval = BatchEstimate is { } batch
-            ? SpendingApproval.For(batch, Request!.Account, Request.PayerAccount!)
-            : SpendingApproval.For(Estimate!, Request!.Account);
+        PublishRequest request = outcome.Request!;
+
+        outcome.Approval = outcome.BatchEstimate is { } batch
+            ? SpendingApproval.For(batch, request.Account, request.PayerAccount!)
+            : SpendingApproval.For(outcome.Estimate!, request.Account);
     }
 
     /// <summary>The account that is short, by label, with what it needs and what it can spend (spec 6.2); null when both cover.</summary>

@@ -61,12 +61,13 @@ public sealed class HeldSourceTests : VaultHarness
         EstimateModel model = Model();
         await model.EstimateAsync(Picked("a.bin", 4_096), Token);
 
+        PublicationEstimate estimate = model.Estimate!;
         PublishRequest handed = model.HandOff()!;
         await model.DiscardAsync();
 
         Assert.Same(_files.Opened[0], handed.Source);
         Assert.False(_files.Opened[0].Disposed);
-        Assert.Equal(SpendingApproval.For(model.Estimate!, "rWriter"), handed.Approval);
+        Assert.Equal(SpendingApproval.For(estimate, "rWriter"), handed.Approval);
         Assert.Equal(4_096, handed.Size);
     }
 
