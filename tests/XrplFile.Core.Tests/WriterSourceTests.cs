@@ -27,6 +27,27 @@ public class WriterSourceTests
         Assert.Equal(3 * 2_501, file.Reads);
     }
 
+    [Theory]
+    [InlineData(1_024_000)]
+    [InlineData(1_024_001)]
+    public async Task The_full_read_back_checks_a_file_at_a_block_boundary_against_the_source(int size)
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        await using SequenceStrategy strategy = new(sink, new WalletSigner(Wallet), new SequenceStrategyOptions { ValidationPoll = TimeSpan.FromMilliseconds(1) });
+        byte[] bytes = VectorStream.Bytes("writer-boundary", size);
+        List<PublishProgress> reports = [];
+
+        PublishResult result = await new XrplFileWriter(strategy, ledger).PublishAsync(
+            new MemoryPublicationSource(bytes), "application/octet-stream", null, Wallet.ClassicAddress, "testnet", null,
+            new SynchronousProgress<PublishProgress>(reports.Add), Token);
+
+        // A mismatch in the last block (a short or an extra chunk) would have thrown BlockMismatch before the manifest.
+        Assert.Contains(reports, report => report.Stage == "read-back");
+        Assert.Equal(result.Manifest.Size, size);
+        Assert.Equal(bytes, (await new XrplFileReader(ledger, new ReaderOptions { MaxBytes = long.MaxValue }).ReadAsync(result.Link, Token)).Bytes);
+    }
+
     [Fact]
     public async Task Block_hashes_handed_in_are_not_computed_again()
     {

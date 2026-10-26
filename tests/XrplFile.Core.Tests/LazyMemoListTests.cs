@@ -37,6 +37,36 @@ public class LazyMemoListTests
         Assert.Equal(MemoLayout.Hex(file.AsSpan(1_024_000)), memos[1_024].MemoDataHex);
     }
 
+    [Theory]
+    [InlineData(999, 1, 999)]
+    [InlineData(1_000, 1, 1_000)]
+    [InlineData(1_001, 2, 1)]
+    [InlineData(1_024_000, 1_024, 1_000)]
+    [InlineData(1_024_001, 1_025, 1)]
+    public void The_missing_chunks_of_a_fresh_file_are_all_of_them_and_the_last_is_the_remainder(int size, int chunks, int lastLength)
+    {
+        byte[] file = VectorStream.Bytes("lazy-boundary", size);
+        ChunkLanding landing = new(FileTree.ChunkCount(file.Length, MemoLayout.ChunkBytes));
+        LazyMemoList memos = new(new MemoryPublicationSource(file), landing.Missing());
+
+        Assert.Equal(chunks, memos.Count);
+        Assert.Equal(chunks - 1, memos.ChunkAt(chunks - 1));
+
+        long total = 0;
+
+        for (int index = 0; index < memos.Count; index++)
+        {
+            string data = memos[index].MemoDataHex;
+
+            Assert.NotEmpty(data);
+            Assert.Equal(index == chunks - 1 ? lastLength : MemoLayout.ChunkBytes, data.Length / 2);
+            total += data.Length / 2;
+        }
+
+        Assert.Equal(size, total);
+        Assert.Equal(MemoLayout.Hex(file.AsSpan((chunks - 1) * MemoLayout.ChunkBytes)), memos[chunks - 1].MemoDataHex);
+    }
+
     [Fact]
     public void Enumerating_reads_in_order_and_one_at_a_time()
     {

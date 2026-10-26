@@ -560,7 +560,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         string statePath, SessionOptions options, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
     {
         RequireNotBatch(strategy);
-        RequirePublishable(file);
+        ArgumentNullException.ThrowIfNull(file);
 
         PublicationState state = PublicationState.Load(statePath);
 
@@ -646,7 +646,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(strategyFactory);
-        RequirePublishable(file);
+        ArgumentNullException.ThrowIfNull(file);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(payerKeyReference);
 
@@ -821,6 +821,8 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 $"{statePath} describes a run that finished; publishing it again would put a second copy in the ledger");
         }
 
+        // A recorded size is always above zero and within the publication limit, so this one check
+        // also refuses an emptied file and one grown past the limit, as a file that changed (spec S7).
         if (state.Size != file.Length)
         {
             throw new XrplFileException(XrplFileError.ResumeMismatch,

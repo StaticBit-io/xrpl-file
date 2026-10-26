@@ -114,6 +114,59 @@ public sealed class SessionSourceTests : IDisposable
         Assert.Equal(VectorStream.Bytes("session-source", 2_500), (await new XrplFileReader(ledger).ReadAsync(report.Link, Token)).Bytes);
     }
 
+    [Fact]
+    public async Task A_resume_of_an_emptied_file_is_a_changed_file()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using SequenceStrategy strategy = new(sink, new WalletSigner(Wallet), new SequenceStrategyOptions { FeeDrops = 10 });
+        await using VectorPublicationSource started = new("session-source", 3_000);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, started, "text/plain", null, Wallet.ClassicAddress, "key", "testnet", Options, null, Token);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            strategy, ledger, new MemoryPublicationSource(ReadOnlyMemory<byte>.Empty), first.StatePath, Options, null, Token));
+
+        Assert.Equal(XrplFileError.ResumeMismatch, error.Error);
+        Assert.True(error.SourceChanged);
+    }
+
+    [Fact]
+    public async Task A_resume_of_a_file_grown_past_the_limit_is_a_changed_file()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using SequenceStrategy strategy = new(sink, new WalletSigner(Wallet), new SequenceStrategyOptions { FeeDrops = 10 });
+        await using VectorPublicationSource started = new("session-source", 3_000);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, started, "text/plain", null, Wallet.ClassicAddress, "key", "testnet", Options, null, Token);
+        await using UnreadableSource grown = new(PublicationSession.MaxPublicationBytes + 1);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            strategy, ledger, grown, first.StatePath, Options, null, Token));
+
+        Assert.Equal(XrplFileError.ResumeMismatch, error.Error);
+        Assert.True(error.SourceChanged);
+    }
+
+    [Fact]
+    public async Task A_resume_of_a_file_of_another_size_is_a_changed_file()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using SequenceStrategy strategy = new(sink, new WalletSigner(Wallet), new SequenceStrategyOptions { FeeDrops = 10 });
+        await using VectorPublicationSource started = new("session-source", 3_000);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, started, "text/plain", null, Wallet.ClassicAddress, "key", "testnet", Options, null, Token);
+        await using VectorPublicationSource longer = new("session-source", 3_001);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            strategy, ledger, longer, first.StatePath, Options, null, Token));
+
+        Assert.Equal(XrplFileError.ResumeMismatch, error.Error);
+        Assert.True(error.SourceChanged);
+    }
+
     /// <summary>A file too large to publish, which must never be read.</summary>
     private sealed class UnreadableSource(long length) : IPublicationSource
     {
