@@ -239,6 +239,12 @@ public sealed class PublishErrorMessagesTests
     }
 
     [Fact]
+    public void A_changed_estimate_asks_for_a_new_one()
+    {
+        Assert.Equal("Fees or balances changed since this was approved. Estimate it again.", PublishErrorMessages.For(XrplFileError.ApprovalExceeded));
+    }
+
+    [Fact]
     public void A_rejected_manifest_names_its_link()
     {
         XrplFileLink link = new("testnet", new string('A', 64));

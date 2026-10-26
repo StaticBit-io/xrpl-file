@@ -32,6 +32,18 @@ public sealed class SessionOptions
     /// <summary>The most the run may cost, or null for no ceiling of the caller's own.</summary>
     public long? BudgetDrops { get; init; }
 
+    /// <summary>
+    /// What a fresh run was approved to spend (spec S25), from the screen that showed its estimate.
+    /// Null approves the session's own estimate, which is what a library caller without a screen gets.
+    /// </summary>
+    public SpendingApproval? Approval { get; init; }
+
+    /// <summary>
+    /// Asked for a resume's approval after reconciliation, with a quote of the remaining work (spec S25).
+    /// Null approves that quote as it is.
+    /// </summary>
+    public ResumeApproval? ApproveResume { get; init; }
+
     public int TicketsPerBatch { get; init; } = 100;
 
     public bool ReadBack { get; init; } = true;
@@ -249,7 +261,12 @@ public sealed class PublicationSession : IBatchFenceRecorder
         }
 
         BatchPublicationEstimate estimate = await EstimateAsync(source, writer, payer, file.Length, options, cancellationToken).ConfigureAwait(false);
-        PublicationEstimator.RequireBatch(estimate, options.BudgetDrops);
+        SpendingApproval approval = options.Approval ?? SpendingApproval.For(estimate, writer, payer);
+        approval.Require(estimate, writer, payer);
+
+        // The balances must cover what the run may spend under the approval, not what the latest
+        // unit alone would cost.
+        PublicationEstimator.RequireBatch(approval.AtCeiling(estimate), options.BudgetDrops);
 
         // The ledger and the writer's sequence in it come from one snapshot (spec B6): together they
         // are where a resume's history has to start being complete (spec 5.2 step 3).
@@ -266,7 +283,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         string path = NewStatePath(options, startedIn, writer);
         PublicationSession session = new(null, source, file, blocks, state, path, options, 0, 0, mintsAtStart: 0);
 
-        await session.AttachBatchAsync(strategyFactory, estimate, resuming: false).ConfigureAwait(false);
+        await session.AttachBatchAsync(strategyFactory, estimate, approval.Budget(estimate), resuming: false).ConfigureAwait(false);
         state.Save(path);
 
         return session;
@@ -371,11 +388,9 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// Builds the run's strategy with this session as its fence recorder, and holds it to the state:
     /// the same writer, the same payer, and the estimate's unit (spec 4.1).
     /// </summary>
-    private async Task AttachBatchAsync(BatchStrategyFactory strategyFactory, BatchPublicationEstimate estimate, bool resuming)
+    private async Task AttachBatchAsync(
+        BatchStrategyFactory strategyFactory, BatchPublicationEstimate estimate, BatchBudget budget, bool resuming)
     {
-        BatchBudget budget = new(
-            estimate.FeeUnitDrops, estimate.FeeCeilingDrops, estimate.PayerFeeDropsWorstCase, estimate.WriterFeeDropsWorstCase);
-
         BatchStrategy strategy = strategyFactory(budget, this);
 
         Exception? refusal = null;
@@ -502,6 +517,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         // account holds, and a balance refusal would send the person to top it up for nothing.
         if (strategy is TicketStrategy) PublicationEstimator.RequireTicketSlot(estimate);
         PublicationEstimator.Require(estimate, options.BudgetDrops);
+        options.Approval?.Require(estimate, writer);
 
         long startedIn = await source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
 
@@ -621,6 +637,12 @@ public sealed class PublicationSession : IBatchFenceRecorder
         if (strategy is TicketStrategy) PublicationEstimator.RequireTicketSlot(estimate);
         PublicationEstimator.Require(estimate, options.BudgetDrops);
 
+        long missing = ChunkReads.ChunkCount(file.Length) - session._landed.Chunks.Landed;
+        SpendingApproval approval = options.ApproveResume is { } approve
+            ? await approve(new ResumeQuote(state.Writer, null, missing, estimate, null), cancellationToken).ConfigureAwait(false)
+            : SpendingApproval.For(estimate, state.Writer);
+        approval.Require(estimate, state.Writer);
+
         session._feeDropsPerTransaction = estimate.FeeDropsPerTransaction;
         session._mints = estimate.Mints;
 
@@ -704,9 +726,14 @@ public sealed class PublicationSession : IBatchFenceRecorder
             .EstimateBatchAsync(source, state.Writer, payer, missingChunks, blockCount, lists, cancellationToken).ConfigureAwait(false);
 
         RequireFeeWithinLimit(estimate);
-        PublicationEstimator.RequireBatch(estimate, options.BudgetDrops);
 
-        await session.AttachBatchAsync(strategyFactory, estimate, resuming: true).ConfigureAwait(false);
+        SpendingApproval approval = options.ApproveResume is { } approve
+            ? await approve(new ResumeQuote(state.Writer, payer, missingChunks, null, estimate), cancellationToken).ConfigureAwait(false)
+            : SpendingApproval.For(estimate, state.Writer, payer);
+        approval.Require(estimate, state.Writer, payer);
+        PublicationEstimator.RequireBatch(approval.AtCeiling(estimate), options.BudgetDrops);
+
+        await session.AttachBatchAsync(strategyFactory, estimate, approval.Budget(estimate), resuming: true).ConfigureAwait(false);
 
         return session;
     }

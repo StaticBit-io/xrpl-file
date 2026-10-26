@@ -64,6 +64,9 @@ public enum XrplFileError
     /// turns it into a success.
     /// </summary>
     ManifestRejected,
+
+    /// <summary>An estimate taken inside a run exceeds what the session was approved to spend (spec S25).</summary>
+    ApprovalExceeded,
 }
 
 /// <summary>Which of a Batch run's two accounts an error is about.</summary>

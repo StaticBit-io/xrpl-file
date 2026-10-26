@@ -73,7 +73,7 @@ public static class ReadErrorMessages
             or XrplFileError.SubmitRefused or XrplFileError.ValidationTimeout or XrplFileError.ResumeMismatch
             or XrplFileError.SessionAlreadyRun or XrplFileError.BatchNotEnabled or XrplFileError.PayerInsufficientBalance
             or XrplFileError.AccountInUse or XrplFileError.FeeTooHigh or XrplFileError.WriterWindowConflict
-            or XrplFileError.ManifestRejected =>
+            or XrplFileError.ManifestRejected or XrplFileError.ApprovalExceeded =>
             "Something went wrong that reading a file cannot cause. This is a defect in this application, not something you did.",
         _ => throw new ArgumentOutOfRangeException(nameof(error), error, "no sentence for this error"),
     };

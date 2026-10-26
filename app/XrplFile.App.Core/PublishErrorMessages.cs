@@ -122,6 +122,8 @@ public static class PublishErrorMessages
             + "resume it when fees are back down.",
         XrplFileError.WriterWindowConflict =>
             "The writer account carries other data for this file's chunks — was it used for another publication while this one was interrupted? Publish this file again from a fresh writer key.",
+        XrplFileError.ApprovalExceeded =>
+            "Fees or balances changed since this was approved. Estimate it again.",
         XrplFileError.ManifestRejected =>
             "The manifest landed, but reading it back did not give this file's description, so its link must not be shared. Publish the file again from a fresh writer key.",
         _ => throw new ArgumentOutOfRangeException(nameof(error), error, "no sentence for this error"),

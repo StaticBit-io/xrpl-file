@@ -90,7 +90,7 @@ public sealed class ReadErrorMessagesTests
     {
         string shared = ReadErrorMessages.For(XrplFileError.SubmitRefused);
 
-        foreach (XrplFileError error in new[] { XrplFileError.WriterWindowConflict, XrplFileError.ManifestRejected })
+        foreach (XrplFileError error in new[] { XrplFileError.WriterWindowConflict, XrplFileError.ManifestRejected, XrplFileError.ApprovalExceeded })
         {
             Assert.Equal(shared, ReadErrorMessages.For(error));
         }
