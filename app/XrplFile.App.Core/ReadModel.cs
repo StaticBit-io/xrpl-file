@@ -88,7 +88,7 @@ public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore
     /// How long the read takes at the reader's measured pace (spec S15), shown with the size before
     /// the person agrees; null before a manifest is looked up.
     /// </summary>
-    public TimeSpan? ReadDuration => Manifest is { } record ? PublicationDuration.ForRead(record.Manifest) : null;
+    public TimeSpan? ReadDuration => Snapshot.ReadDuration;
 
     public void Clear()
     {

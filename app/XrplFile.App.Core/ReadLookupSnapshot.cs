@@ -30,4 +30,10 @@ public sealed record ReadLookupSnapshot(
 {
     /// <summary>Whether there is a manifest in hand and nothing wrong with it.</summary>
     public bool CanRead => Manifest is not null && Message is null;
+
+    /// <summary>
+    /// How long the read takes at the reader's measured pace (spec S15); null without a manifest. Taken
+    /// from the same view as <see cref="Manifest"/>, so the screen shows a duration of the file it shows.
+    /// </summary>
+    public TimeSpan? ReadDuration => Manifest is { } record ? PublicationDuration.ForRead(record.Manifest) : null;
 }

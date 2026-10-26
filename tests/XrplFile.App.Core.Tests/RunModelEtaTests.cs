@@ -388,11 +388,11 @@ public sealed class RunModelEtaTests : IDisposable
     {
         string text = RunModel.StageTextOf(Running("hashing", 412_000, 1_689_810, batch: true, TimeSpan.FromSeconds(30)), Now, rate: null);
 
-        Assert.Equal("Hashing the file — 412,000 of 1,689,810 chunks · 0:30 elapsed", text);
+        Assert.Equal($"Hashing the file — {412_000:N0} of {1_689_810:N0} chunks · 0:30 elapsed", text);
     }
 
     [Fact]
-    public void Reading_the_history_says_so_before_and_after_its_first_thousand_records()
+    public void Reading_the_history_names_the_stage_and_adds_the_record_count_once_there_is_one()
     {
         Assert.Equal(
             "Reading the ledger history · 0:05 elapsed",
@@ -411,7 +411,7 @@ public sealed class RunModelEtaTests : IDisposable
             FinishedAt = Now - TimeSpan.FromSeconds(10),
         };
 
-        Assert.Equal("Stopped while hashing the file — 412,000 of 1,689,810 chunks · 0:30 elapsed", RunModel.StageTextOf(cancelled, Now, rate: null));
+        Assert.Equal($"Stopped while hashing the file — {412_000:N0} of {1_689_810:N0} chunks · 0:30 elapsed", RunModel.StageTextOf(cancelled, Now, rate: null));
     }
 
     [Fact]
