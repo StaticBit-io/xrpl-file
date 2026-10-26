@@ -350,6 +350,8 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
             sourcePath)
         {
             SourceRecorded = recorded,
+            WriterLabel = _labels.GetValueOrDefault(row.KeyReference ?? string.Empty),
+            PayerLabel = payerReference is null ? null : _labels.GetValueOrDefault(payerReference),
         };
 
         if (!run.Resume(row.Path, request))

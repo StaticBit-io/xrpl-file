@@ -34,6 +34,7 @@
 
 @{
     RunView view = Model.Capture();
+    if (view.Confirmation is null) _understood = false;
 }
 
 @if (!view.IsFinished)
@@ -46,6 +47,30 @@
             <div class="progress" role="progressbar" aria-valuenow="@view.Percent" aria-valuemin="0" aria-valuemax="100">
                 <div class="progress-bar" style="width: @(view.Percent)%">@view.Percent%</div>
             </div>
+
+            @if (view.Confirmation is { } confirm)
+            {
+                <h2 class="xf-section-title mt-4">Resuming costs</h2>
+                <table class="table xf-kv-table">
+                    <tbody>
+                        <tr><th>Time</th><td>@DurationText.Of(confirm.Duration)</td></tr>
+                        <tr><th>Transactions</th><td>@confirm.Transactions.ToString("N0")</td></tr>
+                        @foreach (AccountCost account in confirm.Accounts)
+                        {
+                            <tr><th>@account.Role @account.Name needs</th><td>@XrpAmount.Format(account.RequiredDrops)</td></tr>
+                            <tr><th>@account.Role fees in the worst case</th><td>@XrpAmount.Format(account.WorstCaseFeeDrops)</td></tr>
+                        }
+                    </tbody>
+                </table>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="xf-resume-understood" @bind="_understood" />
+                    <label class="form-check-label" for="xf-resume-understood">@EstimateModel.ConfirmationLabel</label>
+                </div>
+                <div class="xf-actionbar">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => Model.DeclineResume()">Stop</button>
+                    <button type="button" class="btn btn-primary" disabled="@(!_understood)" @onclick="() => Model.ConfirmResume()">Continue</button>
+                </div>
+            }
         </section>
 
         <div class="xf-actionbar">
@@ -111,6 +136,9 @@ else
     private Timer? _pollTimer;
     private bool _disposed;
     private bool _resuming;
+
+    /// <summary>The resume's checkbox; cleared whenever no confirmation is shown, so the next one starts unticked.</summary>
+    private bool _understood;
     private string? _resumeMessage;
 
     private async Task ResumeAsync(string statePath)

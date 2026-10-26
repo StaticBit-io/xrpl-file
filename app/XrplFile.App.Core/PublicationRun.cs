@@ -60,6 +60,12 @@ public sealed record RunSnapshot(
 
     /// <summary>The file's size, which says how many passes are still to come (spec B21).</summary>
     public long FileBytes { get; init; }
+
+    /// <summary>
+    /// What a resume will cost, while it waits for the person (spec S25); null when no resume is
+    /// waiting. <see cref="PublicationRun.AnswerConfirmation"/> answers it.
+    /// </summary>
+    public CostSummary? Confirmation { get; init; }
 }
 
 /// <summary>
@@ -105,6 +111,8 @@ public sealed class PublicationRun(
     private string? _historyNote;
     private bool _usesTickets;
     private long _ownerReserveDrops;
+    private CostSummary? _confirmation;
+    private TaskCompletionSource<bool>? _answer;
 
     /// <summary>
     /// Which run this is, counting from 1 at the first <see cref="Begin"/>. Exists only to pin a
@@ -153,6 +161,7 @@ public sealed class PublicationRun(
                     StartedAt = _startedAt,
                     FinishedAt = _finishedAt,
                     FileBytes = _fileBytes,
+                    Confirmation = _confirmation,
                 };
             }
         }
@@ -200,6 +209,22 @@ public sealed class PublicationRun(
     }
 
     /// <summary>
+    /// Answers a resume that waits for the person (spec S25): true goes on, false stops the run
+    /// before anything is sent. False when no resume is waiting.
+    /// </summary>
+    public bool AnswerConfirmation(bool approved)
+    {
+        TaskCompletionSource<bool>? answer;
+
+        lock (_gate)
+        {
+            answer = _answer;
+        }
+
+        return answer?.TrySetResult(approved) == true;
+    }
+
+    /// <summary>
     /// Cancels and waits for the run to actually stop. What the window-close handler calls before it
     /// locks the vault (design 9): locking first would kill the run at its next signature.
     /// <see langword="false"/> means the timeout expired with the run still going — the caller
@@ -241,6 +266,9 @@ public sealed class PublicationRun(
             _startedAt = null;
             _finishedAt = null;
             _fileBytes = 0;
+            _confirmation = null;
+            _answer?.TrySetCanceled();
+            _answer = null;
 
             // Bumped here, not only in Begin: Reset accepts on the same "not Running" state Begin
             // does, and a history append from the run just cleared can still be in flight when it
@@ -621,6 +649,7 @@ public sealed class PublicationRun(
             BudgetDrops = estimate.RequiredDrops,
             SourcePath = request.SourcePath,
             Approval = request.Approval,
+            ApproveResume = ApproveResume(request, generation),
         };
 
         VaultSigner signer = await VaultSigner.CreateAsync(vault, request.KeyReference, cancellationToken, autoLock).ConfigureAwait(false);
@@ -730,7 +759,13 @@ public sealed class PublicationRun(
             }
             else
             {
-                SessionOptions options = new() { StateDirectory = paths.StateDirectory, SourcePath = request.SourcePath, FencePoll = fencePoll };
+                SessionOptions options = new()
+                {
+                    StateDirectory = paths.StateDirectory,
+                    SourcePath = request.SourcePath,
+                    FencePoll = fencePoll,
+                    ApproveResume = ApproveResume(request, generation),
+                };
 
                 session = await PublicationSession.ResumeAsync(
                     Build, connection.Source, source, statePath, payer, payerReference, options,
@@ -811,6 +846,46 @@ public sealed class PublicationRun(
             // Left for the next start-up.
         }
     }
+
+    /// <summary>
+    /// A resume's approval (spec S25), made from the quote of what remains: given at once below the
+    /// threshold, asked of the person on the run screen above it. Declining is a cancellation.
+    /// </summary>
+    private ResumeApproval ApproveResume(PublishRequest request, int generation) => async (quote, cancellationToken) =>
+    {
+        CostSummary summary = quote.Batch is { } batch ? CostSummary.Of(batch, request) : CostSummary.Of(quote.OneAccount!, request);
+        SpendingApproval approval = quote.Batch is { } priced
+            ? SpendingApproval.For(priced, quote.Writer, quote.Payer!)
+            : SpendingApproval.For(quote.OneAccount!, quote.Writer);
+
+        if (!summary.NeedsConfirmation) return approval;
+
+        TaskCompletionSource<bool> answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        lock (_gate)
+        {
+            if (_generation != generation) throw new OperationCanceledException(cancellationToken);
+            _confirmation = summary;
+            _answer = answer;
+        }
+
+        try
+        {
+            using CancellationTokenRegistration cancelled = cancellationToken.Register(() => answer.TrySetCanceled(cancellationToken));
+
+            if (!await answer.Task.ConfigureAwait(false)) throw new OperationCanceledException("the person declined the resume's cost", cancellationToken);
+
+            return approval;
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _confirmation = null;
+                _answer = null;
+            }
+        }
+    };
 
     /// <summary>A resume reads the file the run recorded, held the same way an estimate holds it (spec S7, S24).</summary>
     private IPublicationSource OpenRecorded(PublishRequest request)

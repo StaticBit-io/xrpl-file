@@ -78,6 +78,26 @@ public sealed class RunModelEtaTests : IDisposable
     }
 
     [Fact]
+    public void A_Batch_pass_with_rounds_still_to_come_adds_a_settle_for_each()
+    {
+        const long fileBytes = 41_000_000;
+        string text = RunModel.StageTextOf(Running("chunks", 0, 41_000, batch: true, TimeSpan.FromSeconds(6), fileBytes), Now, rate: 70);
+
+        // 41,000 at 70/s is 586 s; two more rounds of this pass, the list pass and the manifest: 4 x 12 s. One settle
+        // per pass would give 610 s, which reads "10 min"; the rounds' 634 s read "11 min".
+        Assert.Equal($"Writing the file — 0 of {41_000:N0} · 70 chunks/s · about 11 min left · 0:06 elapsed", text);
+    }
+
+    [Fact]
+    public void The_read_back_says_how_long_its_remaining_blocks_take()
+    {
+        string text = RunModel.StageTextOf(Running("read-back", 1, 4, batch: true, TimeSpan.FromSeconds(10)), Now, rate: null);
+
+        // Three blocks of 1,024 records at 0.7 s per 400: 5.4 s.
+        Assert.Equal("Reading it back from the ledger — 1 of 4 · about 6 s left · 0:10 elapsed", text);
+    }
+
+    [Fact]
     public void A_span_just_over_a_minute_is_not_rounded_up_to_two()
     {
         // 16 ledgers at the approximate interval is 64 s, which used to read "about 2 min".

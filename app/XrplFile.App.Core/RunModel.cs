@@ -20,7 +20,8 @@ public readonly record struct RunView(
     bool TicketsLocked,
     string? StateNote,
     bool CanResume,
-    string? StatePath);
+    string? StatePath,
+    CostSummary? Confirmation);
 
 /// <summary>
 /// The run screen (design 4.3). It decides nothing about the run itself — that lives in
@@ -133,8 +134,8 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// <summary>
     /// The progress line (spec 6.3): "Writing the file — 1,240 of 7,124 · 52 chunks/s · about 2 min left ·
     /// 0:24 elapsed", and "Starting · 0:05 elapsed" until the first report. On the Batch path that
-    /// comes when the pass's first batch is answered, with nothing found landed yet. Time left is what remains at the measured rate plus one settle per pass still to
-    /// come (spec B21); before a rate is measured the Batch path uses its prior and shows no rate, the
+    /// comes when the pass's first batch is answered, with nothing found landed yet. Time left is what remains at the measured rate plus the settles still to
+    /// come (spec B21; <see cref="SettlesAfter"/>), and the read-back's own blocks at their rate; before a rate is measured the Batch path uses its prior and shows no rate, the
     /// ticket path says "estimating…", and so does any stage whose measured rate shows as zero. A
     /// resume's fence wait has its own line, where <paramref name="rate"/> is ledgers per second. A run
     /// that has stopped shows how long it took, never a rate or a time left.
@@ -168,6 +169,16 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
 
         string head = $"{StageNameOf(progress.Stage)} — {progress.Done:N0} of {progress.Total:N0}";
 
+        if (progress.Stage == "read-back")
+        {
+            long blocks = Math.Max(0, progress.Total - progress.Done);
+            TimeSpan left = rate is { } blocksPerSecond && blocksPerSecond > 0
+                ? TimeSpan.FromSeconds(blocks / blocksPerSecond)
+                : PublicationDuration.Reading(blocks * PublicationDuration.RecordsPerSampledBlock);
+
+            return blocks == 0 ? head + elapsed : $"{head} · about {DurationText.Of(left)} left{elapsed}";
+        }
+
         if (progress.Stage is not ("chunks" or "lists")) return head + elapsed;
 
         string unit = progress.Stage == "chunks" ? "chunks/s" : "lists/s";
@@ -176,7 +187,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
         // Every memo of the pass is in; the pass still settles and the writer still has work, so no
         // figure of seconds is claimed for it (Spec question 23).
         if (remaining == 0) return $"{head} · finishing this pass{elapsed}";
-        TimeSpan settles = SettlePerPass * PassesAfter(progress.Stage, snapshot.FileBytes);
+        TimeSpan settles = SettlesAfter(progress.Stage, remaining, snapshot.FileBytes, snapshot.UsesBatch);
 
         if (rate is { } measured && RateText(measured) is { } shown)
         {
@@ -242,6 +253,20 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// The settles still to come (spec S11, B21): on the Batch path one per round — the rounds of this
+    /// pass after the one in progress, and every round of the passes after it; on the ticket path one
+    /// per pass still to come.
+    /// </summary>
+    private static TimeSpan SettlesAfter(string stage, long remaining, long fileBytes, bool batch)
+    {
+        if (!batch) return SettlePerPass * PassesAfter(stage, fileBytes);
+
+        // A list pass of more than 16,384 memos would need 1.7 TB; one round per later pass is exact.
+        long thisPass = Math.Max(0, (remaining + BatchStrategyOptions.DefaultMaxRoundMemos - 1) / BatchStrategyOptions.DefaultMaxRoundMemos - 1);
+        return PublicationDuration.SettlePerRound * (thisPass + PassesAfter(stage, fileBytes));
     }
 
     /// <summary>The passes still to come after this stage: a list pass when the file has more than one block, and the manifest.</summary>
@@ -339,6 +364,12 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
 
     public void Cancel() => run.Cancel();
 
+    /// <summary>Goes on with a resume that waits for the person (spec S25); false when none is waiting.</summary>
+    public bool ConfirmResume() => run.AnswerConfirmation(true);
+
+    /// <summary>Stops a resume that waits for the person before anything is sent (spec S25); false when none is waiting.</summary>
+    public bool DeclineResume() => run.AnswerConfirmation(false);
+
     /// <summary>Puts the outcome away so the Publish tab can offer a new publication.</summary>
     public void Dismiss() => run.Reset();
 
@@ -372,7 +403,8 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
             TicketsLocked: TicketsLockedOf(snapshot),
             StateNote: StateNoteOf(snapshot),
             CanResume: IsResumable(snapshot),
-            StatePath: snapshot.StatePath);
+            StatePath: snapshot.StatePath,
+            Confirmation: snapshot.Confirmation);
     }
 
     /// <inheritdoc cref="TicketNoteOf"/>
