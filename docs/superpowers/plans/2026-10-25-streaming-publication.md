@@ -15,14 +15,14 @@
 - Repository: `E:\GIT\XRPL\xrpl-file`, branch as the executing session decides. Every path below is relative to it.
 - `Directory.Build.props`: `net10.0`, `LangVersion latest`, `Nullable enable`, `TreatWarningsAsErrors true`, `GenerateDocumentationFile true`. Every `<see cref>`, `<paramref>` and `<param>` must resolve or the build fails. Many XML docs cite `PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)` and `ResumeAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, SessionOptions, CancellationToken)`: those `ReadOnlyMemory<byte>` overloads stay (spec 4.1), so the crefs keep resolving.
 - No new NuGet packages. `System.Threading.Channels` is part of the shared framework.
-- Tests are xUnit v3 with the built-in `Assert`. `dotnet test` does not work in this repository. Run: `dotnet run --project tests/<Project> -- -class <FullName>`, `-method <FullName>`, `-trait- "Category=Integration"` (unit only). Add `-showLiveOutput` when a step says to read output. Web: `cd web && node --test test/*.test.mjs`.
+- Tests are xUnit v3 with the built-in `Assert`. `dotnet test` does not work in this repository. Run: `dotnet run --project tests/<Project> -- -class <FullName>`, `-method <FullName>`, `-trait- "Category=Integration"` (unit only; from Task 20 on, `-trait- "Category=Integration" -trait- "Category=Slow"`, or the unit run starts the memory probe, which takes hours). Add `-showLiveOutput` when a step says to read output. Web: `cd web && node --test test/*.test.mjs`.
 - Integration tests carry `[Trait("Category", "Integration")]` and `[Collection("Standalone")]` and read the node from `XRPL_FILE_NODE_URL`, else `ws://localhost:6006`. On this host the stand runs on `ws://localhost:16006`: `docker compose -p xrpl-file-ci -f .ci-config/docker-compose.ci.yml -f .ci-config/docker-compose.local-ports.yml up -d`, then set `XRPL_FILE_NODE_URL=ws://localhost:16006` for every stand run. Never start, stop or restart a compose project other than `xrpl-file-ci`; check with `docker ps --format '{{.Names}} {{.Label "com.docker.compose.project"}}'` first.
-- Slow tests carry `[Trait("Category", "Slow")]`; CI excludes them (Task 19 adds the filter).
+- Slow tests carry `[Trait("Category", "Slow")]`; CI excludes them (Task 20 adds the filter).
 - Code style: explicit types (no `var`); `async`/`await` with `CancellationToken` passed through; `ConfigureAwait(false)` in library code (`src/`, `app/XrplFile.App.Core`); comments explain why, never what; English only; match the surrounding idiom (long XML remarks on public types, `// ...` only where the neighbours have them). Core builds transactions as `Dictionary<string, object>`.
 - Exact values, verbatim from the spec: `MaxPublicationBytes` = 16 GiB (`16L * 1024 * 1024 * 1024`); `TicketPathMaxBytes` = 64 MiB (`64L * 1024 * 1024`); `MaxRoundMemos` = 16,384; trace ring and trace channel 10,000 entries each; reader history cache 4,096 records; Batch writing 85 and 70 memos/s; ticket writing 2 and 1 memos/s; sequence one memo per ledger; `LedgerTiming.ApproximateLedgerInterval` × 3 per round; reader 0.7 s per 400 records; sampled block ≈ 1,024 records; confirmation threshold: longer duration above 1 hour, or either account's worst case above 1 XRP (1,000,000 drops); activity lease touches immediately, then once a minute; `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` = `0x80000001`, cleared with `ES_CONTINUOUS` = `0x80000000`.
 - Exact sentences, verbatim: "Choose a payer — files larger than 64 MiB publish through Batch."; "This application publishes files up to 16 GiB."; "I understand the cost and the time"; "Fees or balances changed since this was approved. Estimate it again."; "The writer account carries other data for this file's chunks — was it used for another publication while this one was interrupted? Publish this file again from a fresh writer key."; "Hashing the file — 412,000 of 1,689,810 chunks" (the shape: `Hashing the file — {done:N0} of {total:N0} chunks`); "Reading the ledger history".
 - State JSON names, verbatim: version 2 and 3 no longer write `ChunkHashes` and still read files that carry it; new optional `ManifestStatus` (value `"landed, rejected"`) and `Failure` (value `"WriterWindowConflict"`), written only when set.
-- Every new `XrplFileError` value gets its sentence in `PublishErrorMessages` in the same task (spec B22); the exhaustiveness test in `tests/XrplFile.App.Core.Tests/PublishErrorMessagesTests.cs` fails otherwise.
+- Every new `XrplFileError` value gets its sentence in both message classes in the same task (spec B22): its own sentence in `PublishErrorMessages`, and in `ReadErrorMessages` a place in the publishing-only arm (reading cannot produce it). Each class's exhaustiveness test (`PublishErrorMessagesTests`, and `ReadErrorMessagesTests.Every_error_has_a_sentence`, whose switch throws for an unknown value) fails otherwise.
 - `XrplFile.App.Core` sees only Core's public API (Core's `InternalsVisibleTo` names `XrplFile.Core.Tests` and `XrplFile.TestSupport` only).
 - Save new and edited files as UTF-8; the literals carry "—", "…" and "·".
 - Commits: conventional, English, subject and body; no attribution lines of any kind (no `Co-Authored-By`, no "Generated with").
@@ -34,7 +34,7 @@
 2. **A pass that leaves exactly one memo for its last round** (`MaxRoundMemos` + 1 memos): the strategy sends that memo as a solo after the full round, and the estimator counts it as a solo the same way — tests in Tasks 4 and 10.
 3. **The held file is renamed or deleted from Explorer while the estimate or the run holds it**: Windows refuses, and the bytes published are the bytes estimated — test in Task 1 (rename and delete refused while held).
 4. **The person leaves the Estimate screen while the estimate is still being taken**: the source that estimate opened is disposed when it completes, not left open until the next estimate — test in Task 12.
-5. **Lock pressed while a resume waits for the person's confirmation**: the run cancels, the confirmation disappears from the run screen, the state file is unchanged and the run stays resumable — test in Task 16.
+5. **Lock pressed while a resume waits for the person's confirmation**: the run cancels, the confirmation disappears from the run screen, the state file is unchanged and the run stays resumable — test in Task 17.
 
 ---
 
@@ -61,9 +61,9 @@
 | `BatchStrategy.cs`, `BatchRound.cs`, `BatchSweep.cs`, `BatchRegistry.cs`, `BatchProgress.cs`, `BatchStrategyOptions.cs` | capped rounds, compact records, byte candidate counts | 4 |
 | `SweepRecord.cs`, `RoundMarkers.cs` (new, internal) | the S6 compact record; a round's marker map | 4 |
 | `LedgerTransaction.cs`, `XrplClientLedgerSource.cs` | + `TransactionIndex` | 4 |
-| `XrplFileException.cs` | + `WriterWindowConflict`, `ManifestRejected`, `ApprovalExceeded`; + `Link` | 5, 7, 11 |
+| `XrplFileException.cs` | + `SourceChanged`; + `WriterWindowConflict`, `ManifestRejected`, `ApprovalExceeded`; + `Link` | 3, 5, 7, 11 |
 | `Reconciliation.cs`, `SequenceRanges.cs` (new, internal) | streaming filtered reconciliation (S20) | 6 |
-| `PublicationCheck.cs` (new, internal) | S9(a) checks and the S21 sample | 7 |
+| `PublicationCheck.cs` (new, internal) | S9(a) checks, the list against the ledger, and the S21 sample | 7 |
 | `BatchTrace.cs` | ring of 10,000 and a listener (S18) | 8 |
 | `ForwardHistory.cs`, `XrplFileReader.cs` | the S26 cache | 9 |
 | `PublicationEstimate.cs`, `BatchPublicationEstimate.cs` | grouping per round; `Rounds` (S11) | 10 |
@@ -71,13 +71,13 @@
 
 **Test support (`tests/XrplFile.TestSupport`)**: `VectorPublicationSource.cs`, `CountingPublicationSource.cs` (Task 1).
 
-**App core (`app/XrplFile.App.Core`)**: `PublishRequest.cs`, `PublishModel.cs`, `PublishPolicy.cs`, `EstimateModel.cs`, `PublicationRun.cs`, `UnfinishedModel.cs` (12); `PublicationDuration.cs`, `CostSummary.cs`, `DurationText.cs`, `RunModel.cs`, `RunSnapshot` in `PublicationRun.cs` (13); `RunTraceChannel.cs`, `RunTraceLog.cs` (8); `KeepAwake.cs` (15); `ActivityLease.cs`, `UnlockModel.cs` (16); `ReadModel.cs`, `ReadRun.cs` (17); `PublishErrorMessages.cs` (5, 7, 11, 14).
+**App core (`app/XrplFile.App.Core`)**: `PublishRequest.cs`, `PublishModel.cs`, `PublishPolicy.cs`, `EstimateModel.cs`, `PublicationRun.cs`, `UnfinishedModel.cs` (12); `PublicationDuration.cs`, `CostSummary.cs`, `DurationText.cs`, `EstimateModel.cs` (13); `RunModel.cs`, `RunSnapshot` in `PublicationRun.cs` (14); `RunTraceChannel.cs`, `RunTraceLog.cs` (8); `KeepAwake.cs` (16); `ActivityLease.cs`, `UnlockModel.cs` (17); `ReadModel.cs`, `ReadRun.cs` (18); `PublishErrorMessages.cs` (5, 7, 11, 15); `ReadErrorMessages.cs` (5, 7, 11).
 
-**App (`app/XrplFile.App`)**: `Platform/WindowsExecutionState.cs` (15), `MauiProgram.cs` (15, 16), `Components/Estimate.razor` (12, 13), `Run.razor` (13), `Read.razor` (17), `Publish.razor` (14).
+**App (`app/XrplFile.App`)**: `Platform/WindowsExecutionState.cs` (16), `MauiProgram.cs` (16, 17), `Components/Estimate.razor` (12, 13), `Run.razor` (14), `Read.razor` (18), `Publish.razor` (15).
 
 **Web (`web/`)**: `src/history.mjs`, `src/reader.mjs`, `test/history.test.mjs` (9).
 
-**Memory probe (`tests/XrplFile.MemoryProbe`, new)**: the child process of S27 (19).
+**Memory probe (`tests/XrplFile.MemoryProbe`, new)**: the child process of S27 (20).
 
 ---
 
@@ -906,8 +906,8 @@ This is the breaking change to `ISubmissionStrategy`, applied to all three strat
 - Create: `src/XrplFile.Core/LedgerRange.cs`, `src/XrplFile.Core/LandedSet.cs`, `src/XrplFile.Core/ChunkLanding.cs`, `src/XrplFile.Core/SubmittedMemos.cs`
 - Create: `tests/XrplFile.TestSupport/SubmittedMemosTesting.cs`, `tests/XrplFile.TestSupport/LedgerRecords.cs`
 - Create: `tests/XrplFile.Core.Tests/fixtures/state/v2-tickets.json`, `v2-before-strategies.json`, `v2-done.json`, `v3-batch.json`
-- Modify: `src/XrplFile.Core/ISubmissionStrategy.cs`, `SequenceStrategy.cs:53-77`, `TicketStrategy.cs:132-246`, `BatchStrategy.cs:233-262`, `XrplFileWriter.cs` (records `LandedMemos`, `PublishResult`, `PublishCoreAsync`), `PublicationReport.cs`, `PublicationState.cs`, `PublicationSession.cs` (`Reconcile`, `FindManifest`, `RunAsync`, `Advance`, the state constructors, the Batch resume's missing count), `ManifestPlan.cs` (delete `FirstLedgers`)
-- Modify (tests): every file the compiler names — the known list is `tests/XrplFile.Core.Tests/{ScriptedStrategy,PublicationSessionTests,WriterReadBackTests,XrplFileWriterTests,WriterLedgerTests,VaultPublicationTests,ManifestReconciliationTests,PublicationSessionBatchResumeTests,PublicationSessionStandaloneTests,BatchPublicationStandaloneTests,BatchStrategyTests,BatchIdentityTests,BatchOutageTests,BatchRoundStartTests,TicketStrategyTests,TicketStrategyStandaloneTests,SequenceStrategyTests,PublicationStateTests}.cs`, `tests/XrplFile.App.Core.Tests/{PublicationRunBatchTests,UnfinishedModelBatchTests,UnfinishedModelTests}.cs`, `tests/XrplFile.Core.Tests/XrplFile.Core.Tests.csproj`
+- Modify: `src/XrplFile.Core/ISubmissionStrategy.cs`, `SequenceStrategy.cs:53-77`, `TicketStrategy.cs:132-246`, `BatchStrategy.cs:72-101`, `XrplFileWriter.cs` (records `LandedMemos`, `PublishResult`, `PublishCoreAsync`), `PublicationReport.cs`, `PublicationState.cs`, `PublicationSession.cs` (`Reconcile`, `FindManifest`, `RunAsync`, `Advance`, the state constructors, the Batch resume's missing count), `ManifestPlan.cs` (delete `FirstLedgers`)
+- Modify (tests): every file the compiler names — the known list is `tests/XrplFile.Core.Tests/{ScriptedStrategy,PublicationSessionTests,WriterReadBackTests,XrplFileWriterTests,WriterLedgerTests,VaultPublicationTests,ManifestReconciliationTests,PublicationSessionBatchResumeTests,PublicationSessionStandaloneTests,BatchPublicationStandaloneTests,BatchStrategyTests,BatchIdentityTests,BatchOutageTests,BatchRoundStartTests,TicketStrategyTests,TicketStrategyStandaloneTests,SequenceStrategyTests,PublicationStateTests}.cs`, `tests/XrplFile.App.Core.Tests/{PublicationRunBatchTests,UnfinishedModelBatchTests,UnfinishedModelTests,PublicationHistoryTests,RunModelEtaTests}.cs`, `tests/XrplFile.Core.Tests/XrplFile.Core.Tests.csproj`
 - Test: `tests/XrplFile.Core.Tests/SubmittedMemosTests.cs`, `tests/XrplFile.Core.Tests/ChunkLandingTests.cs`, `tests/XrplFile.Core.Tests/LegacyStateTests.cs`
 
 **Interfaces:**
@@ -1400,7 +1400,7 @@ and `return landed.Build();` at the end.
         return result.Build();
 ```
 
-`BatchStrategy.SubmitAllAsync` (lines 260-261): replace the final `return` with
+`BatchStrategy.SubmitAllAsync` (lines 99-100): replace the final `return` with
 
 ```csharp
         SubmittedMemosBuilder result = new(memos.Count, keepChunkFacts: false);
@@ -1757,9 +1757,9 @@ Migrate the existing tests mechanically — the compiler lists every site:
 
 The JSON literal with `"ChunkHashes": {}` in `PublicationSessionTests` (~856) stays: it now proves an old file still loads.
 
-- [ ] **Step 10: Fixtures captured from the current format, and the test that they still resume**
+- [ ] **Step 10: Fixtures in the current format, and the test that they still resume**
 
-These four files were written by the application as of `main` at `bc37d07` (`PublicationState.Save` of that commit); keep them byte for byte. Writer seed `sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r` (address `rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD`), payer seed `sEdV19BLfeQeKdEXyYA4NhjPJe6XBfG` (address `r3ofWfcM2UoBw6fnP7BFbsY5XneivkGyrY`), file `VectorStream.Bytes("legacy-state", 2_500)` (root `6EDDD4789DCA250C1AE69229121C6CB3EE0190E82A9BEF6F797F728EB8D3B7C8`). All values are throwaway test values.
+These four files are written by hand in the exact format `PublicationState.Save` produces at `bc37d07` (two-space indent, declaration order, nulls omitted, a trailing newline); keep them byte for byte. `Fixtures_are_byte_for_byte_what_Save_writes` below guards that claim, so a drift between them and the format fails a test instead of passing unnoticed. Writer seed `sEdSKaCy2JT7JaM7v95H9SxkhP9wS2r` (address `rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD`), payer seed `sEdV19BLfeQeKdEXyYA4NhjPJe6XBfG` (address `r3ofWfcM2UoBw6fnP7BFbsY5XneivkGyrY`), file `VectorStream.Bytes("legacy-state", 2_500)` (root `6EDDD4789DCA250C1AE69229121C6CB3EE0190E82A9BEF6F797F728EB8D3B7C8`). All values are throwaway test values.
 
 `tests/XrplFile.Core.Tests/fixtures/state/v2-tickets.json`:
 
@@ -1861,6 +1861,7 @@ Add to `tests/XrplFile.Core.Tests/XrplFile.Core.Tests.csproj`, in the `ItemGroup
 `tests/XrplFile.Core.Tests/LegacyStateTests.cs`:
 
 ```csharp
+using System.Text.RegularExpressions;
 using Xrpl.Wallet;
 using Xunit;
 
@@ -1896,6 +1897,29 @@ public sealed class LegacyStateTests : IDisposable
         FakeLedgerSource ledger = new() { Fees = new NetworkFees(10, 1_000_000, 200_000), CurrentLedger = 4_999 };
         ledger.Balances[WriterWallet.ClassicAddress] = 500_000_000;
         return ledger;
+    }
+
+    /// <summary>
+    /// The fixtures are hand-written; this pins them to the format: loaded and saved again, each is
+    /// itself minus its <c>ChunkHashes</c>, byte for byte up to line endings.
+    /// </summary>
+    [Theory]
+    [InlineData("v2-tickets.json")]
+    [InlineData("v2-before-strategies.json")]
+    [InlineData("v2-done.json")]
+    [InlineData("v3-batch.json")]
+    public void Fixtures_are_byte_for_byte_what_Save_writes(string name)
+    {
+        string path = Fixture(name);
+        string fixture = File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
+
+        // ChunkHashes in the middle of the object, then as its last member (no comma after it).
+        string expected = Regex.Replace(fixture, "\n  \"ChunkHashes\": \\{[^}]*\\},", string.Empty);
+        expected = Regex.Replace(expected, ",\n  \"ChunkHashes\": \\{[^}]*\\}\n", "\n");
+
+        PublicationState.Load(path).Save(path);
+
+        Assert.Equal(expected, File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1989,7 +2013,7 @@ still resume."
 
 **Files:**
 - Create: `src/XrplFile.Core/IndexRanges.cs`, `src/XrplFile.Core/LazyMemoList.cs`
-- Modify: `src/XrplFile.Core/ChunkLanding.cs` (add `Missing()`), `src/XrplFile.Core/ChunkReads.cs` (add `MatchesHex`), `src/XrplFile.Core/XrplFileWriter.cs` (public `PublishAsync` overloads, `PublishCoreAsync`, `ReadEverythingBackAsync`), `src/XrplFile.Core/PublicationSession.cs` (fields, constructor, source overloads of `StartAsync`/`ResumeAsync`, `RequireResumableAsync`, `ReconcileAsync`, `FindManifest`, `RunAsync`)
+- Modify: `src/XrplFile.Core/ChunkLanding.cs` (add `Missing()`), `src/XrplFile.Core/ChunkReads.cs` (add `MatchesHex`), `src/XrplFile.Core/XrplFileWriter.cs` (public `PublishAsync` overloads, `PublishCoreAsync`, `ReadEverythingBackAsync`), `src/XrplFile.Core/PublicationSession.cs` (fields, constructor, source overloads of `StartAsync`/`ResumeAsync`, `RequireResumableAsync`, `ReconcileAsync`, `FindManifest`, `RunAsync`), `src/XrplFile.Core/XrplFileException.cs` (+ `SourceChanged`)
 - Test: `tests/XrplFile.Core.Tests/LazyMemoListTests.cs`, `tests/XrplFile.Core.Tests/WriterSourceTests.cs`, `tests/XrplFile.Core.Tests/SessionSourceTests.cs`
 
 **Interfaces:**
@@ -2007,6 +2031,7 @@ still resume."
     - `ResumeAsync(BatchStrategyFactory strategyFactory, ILedgerSource source, IPublicationSource file, string statePath, string payer, string payerKeyReference, SessionOptions options, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)` — the Batch resume's preparation progress also carries the `"fence"` reports it carried before.
   - The four `ReadOnlyMemory<byte>` overloads keep their exact signatures, wrap the bytes in a `MemoryPublicationSource` the session owns, and dispose it when `RunAsync` ends or when starting fails.
   - A source longer than `PublicationSession.MaxPublicationBytes` is refused with `XrplFileError.TooLarge` before anything is read or estimated.
+  - `XrplFileException.SourceChanged : bool` (public, `init`) — true only on a resume's refusal because the file's size or root differs from the recorded one. Every other `ResumeMismatch` (a finished run, another chunk size, another writer) leaves it false, so the application blames the file only when the file is to blame (Task 12).
 
 - [ ] **Step 1: Write the failing lazy-list tests**
 
@@ -2404,7 +2429,26 @@ public sealed class SessionSourceTests : IDisposable
             strategy, ledger, other, first.StatePath, Options, null, Token));
 
         Assert.Equal(XrplFileError.ResumeMismatch, error.Error);
+        Assert.True(error.SourceChanged);
         Assert.Equal(reads, ledger.AccountTransactionsCalls);
+    }
+
+    [Fact]
+    public async Task A_resume_refused_for_its_chunk_size_does_not_blame_the_file()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using SequenceStrategy strategy = new(sink, new WalletSigner(Wallet), new SequenceStrategyOptions { FeeDrops = 10 });
+        await using VectorPublicationSource file = new("session-source", 3_000);
+        PublicationSession first = await PublicationSession.StartAsync(
+            strategy, ledger, file, "text/plain", null, Wallet.ClassicAddress, "key", "testnet", Options, null, Token);
+        (PublicationState.Load(first.StatePath) with { Chunk = 999 }).Save(first.StatePath);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            strategy, ledger, file, first.StatePath, Options, null, Token));
+
+        Assert.Equal(XrplFileError.ResumeMismatch, error.Error);
+        Assert.False(error.SourceChanged);
     }
 
     [Fact]
@@ -2723,7 +2767,8 @@ and likewise for the one-account `ResumeAsync(strategy, source, file, statePath,
     private static async Task<IReadOnlyList<byte[]>> RequireResumableAsync(
         PublicationState state, string statePath, IPublicationSource file, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
     {
-        // ... today's checks of the phase, the size and the chunk size, and "records no root", verbatim ...
+        // ... today's checks of the phase, the size and the chunk size, and "records no root", verbatim,
+        // except that the size check's throw gains the initializer { SourceChanged = true } ...
 
         IReadOnlyList<byte[]> blocks = await HashAsync(file, preparation, cancellationToken).ConfigureAwait(false);
         string root = FileTree.RootHexOf(blocks);
@@ -2731,7 +2776,10 @@ and likewise for the one-account `ResumeAsync(strategy, source, file, statePath,
         if (!string.Equals(recorded, root, StringComparison.Ordinal))
         {
             throw new XrplFileException(XrplFileError.ResumeMismatch,
-                $"{statePath} was started for a file rooted at {recorded} and this one roots at {root}");
+                $"{statePath} was started for a file rooted at {recorded} and this one roots at {root}")
+            {
+                SourceChanged = true,
+            };
         }
 
         return blocks;
@@ -2739,6 +2787,17 @@ and likewise for the one-account `ResumeAsync(strategy, source, file, statePath,
 ```
 
    The "records no root" check moves above the hashing so a file with no root is refused without a read.
+
+   In `XrplFileException`, add:
+
+```csharp
+    /// <summary>
+    /// True when a resume was refused because the file differs from the one the run recorded (its
+    /// size or its root), and only then. A caller may then ask for the file again; for any other
+    /// <see cref="XrplFileError.ResumeMismatch"/> the file is not what is wrong.
+    /// </summary>
+    public bool SourceChanged { get; init; }
+```
 
 6. `Reconcile` becomes asynchronous and reads the source instead of a split copy:
 
@@ -2817,6 +2876,7 @@ above 16 GiB. The ReadOnlyMemory overloads wrap their bytes and own them."
 - Create: `src/XrplFile.Core/SweepRecord.cs`, `src/XrplFile.Core/RoundMarkers.cs`
 - Modify: `src/XrplFile.Core/LedgerTransaction.cs` (+ `TransactionIndex`), `src/XrplFile.Core/XrplClientLedgerSource.cs:405-423` (parse it), `src/XrplFile.Core/BatchStrategyOptions.cs` (+ `MaxRoundMemos`), `src/XrplFile.Core/BatchStrategy.cs` (`SubmitAllAsync`, `RequireAnotherCandidate`, `RequireDistinctMarkers` removed, test seam), `src/XrplFile.Core/BatchRound.cs` (constructor, registry, markers, history), `src/XrplFile.Core/BatchRegistry.cs` (byte counts), `src/XrplFile.Core/BatchProgress.cs` (bit set), `src/XrplFile.Core/BatchSweep.cs` (compact records)
 - Test: `tests/XrplFile.Core.Tests/BatchRoundsTests.cs`, `tests/XrplFile.Core.Tests/SweepRecordTests.cs`, `tests/XrplFile.Core.Tests/XrplClientLedgerSourceTests.cs` (one test added)
+- Modify (tests): `tests/XrplFile.Core.Tests/BatchRegistryTests.cs` (candidate counts as `byte[]`), `tests/XrplFile.Core.Tests/BatchIdentityTests.cs` (the coverage and payer-fee tests move onto `SweepRecord`)
 
 **Interfaces:**
 - Consumes: Task 2 (`LandedSet`, `SubmittedMemosBuilder`, `SubmittedMemos`), Task 3 (`LazyMemoList.MarkerHexAt`).
@@ -2828,9 +2888,9 @@ above 16 GiB. The ReadOnlyMemory overloads wrap their bytes and own them."
   - `internal sealed class RoundMarkers(IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> pending)` — `bool TryIndexOf(string? memoTypeHex, out int callIndex)`, `bool Matches(int callIndex, string? memoDataHex)`, `static string MarkerHexAt(IReadOnlyList<MemoSubmission> memos, int index)`.
   - `BatchSweep.CompactHistoryAsync(ILedgerSource source, string account, long from, long to, RoundMarkers? markers, CancellationToken ct) : Task<IReadOnlyList<SweepRecord>>`; `BatchSweep.Covers(IEnumerable<SweepRecord> records, uint from, uint to)` (the `LedgerTransaction` overload and `HistoryAsync` stay for the session until Task 6).
   - `BatchRound(BatchContext context, IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> pending, byte[] candidatesPerMemo, BatchProgress progress)` with `internal BatchRegistry Registry`.
-  - `BatchRegistry(BatchFence fence, byte[] candidatesPerMemo, BatchTrace trace)`.
+  - `BatchRegistry(BatchFence fence, byte[] candidatesPerMemo, BatchTrace trace)` with `internal BatchFence Fence`.
   - `BatchProgress(IProgress<int>? inner, int count)`.
-  - `BatchStrategy.FinishedRegistries : IReadOnlyList<WeakReference>` (internal, a test seam: one per round run).
+  - `BatchStrategy.FinishedRegistries : IReadOnlyList<WeakReference>` and `BatchStrategy.RoundFences : IReadOnlyList<BatchFence>` (internal test seams: one entry per round run).
 
 **What lives where after this task (spec S5):** per pass, owned by one `SubmitAllAsync` call — the landed bits (`SubmittedMemosBuilder.Landed`), the progress bits (`BatchProgress`), and a `byte[]` of candidate counts that every round of the pass increments; per round, released when it ends — the plan, the registry with its signed blobs, the round's compact history and its marker map; per strategy (`BatchContext`, as now) — fence, spending, ledger floor, window, trace.
 
@@ -2873,9 +2933,13 @@ public class BatchRoundsTests
         await using BatchStrategy strategy = node.Strategy(Capped(64));
 
         await strategy.SubmitAllAsync(BatchTestNode.Memos(300), null, Token);
-        GC.Collect();
+
+        // Relies on finished async state machines dropping their locals, which holds without a
+        // debugger attached. Under a debugger, or with TPL async-debugging tracing on, the boxes keep
+        // their state and this test fails; run it without one.
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
-        GC.Collect();
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
 
         Assert.Equal(5, strategy.FinishedRegistries.Count);
         Assert.All(strategy.FinishedRegistries, registry => Assert.False(registry.IsAlive));
@@ -2928,17 +2992,38 @@ public class BatchRoundsTests
     }
 
     [Fact]
-    public async Task The_fence_only_rises_across_rounds()
+    public async Task Every_round_covers_its_deadlines_with_the_one_fence_of_the_strategy()
     {
         BatchTestNode node = new();
         await using BatchStrategy strategy = node.Strategy(Capped(16));
 
         await strategy.SubmitAllAsync(BatchTestNode.Memos(48), null, Token);
 
+        // Rising deadlines alone would pass with a fresh fence per round; the seam shows there is one.
+        Assert.Equal(3, strategy.RoundFences.Count);
+        Assert.Single(strategy.RoundFences.Distinct());
         IReadOnlyList<long> recorded = node.Fence.Recorded;
-        Assert.True(recorded.Count >= 3);
         Assert.Equal(recorded.Order(), recorded);
         Assert.Equal(recorded.Distinct().Count(), recorded.Count);
+    }
+
+    [Fact]
+    public async Task The_ledger_floor_outlives_a_round()
+    {
+        BatchTestNode node = new();
+        await using BatchStrategy strategy = node.Strategy(Capped(16) with { NodeOutageLimit = TimeSpan.FromMilliseconds(300) });
+        await strategy.SubmitAllAsync(BatchTestNode.Memos(16), null, Token);
+
+        // From now on every answer comes from a ledger the previous round already read past. A
+        // round with a floor of its own would plan from it; the strategy's floor refuses it as a
+        // node that is behind, until the outage limit ends the call.
+        node.Sink.AutoClose = false;
+        node.Ledger.CurrentLedger -= 10;
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => strategy.SubmitAllAsync(BatchTestNode.Memos(16), null, Token).WaitAsync(TimeSpan.FromSeconds(20), Token));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
     }
 
     [Fact]
@@ -3001,16 +3086,49 @@ public class SweepRecordTests
         Assert.DoesNotContain(typeof(SweepRecord).GetProperties(), property => property.Name.Contains("Memo", StringComparison.Ordinal));
     }
 
+    // The class is named as a string: ResultClass is internal, and a public test method may not
+    // take it as a parameter (CS0051).
     [Theory]
-    [InlineData("tesSUCCESS", ResultClass.Success)]
-    [InlineData("tecNO_PERMISSION", ResultClass.Claimed)]
-    [InlineData("tefPAST_SEQ", ResultClass.Other)]
-    [InlineData(null, ResultClass.Other)]
-    public void Results_fall_into_three_classes(string? result, ResultClass expected)
+    [InlineData("tesSUCCESS", "Success")]
+    [InlineData("tecNO_PERMISSION", "Claimed")]
+    [InlineData("tefPAST_SEQ", "Other")]
+    [InlineData(null, "Other")]
+    public void Results_fall_into_three_classes(string? result, string expected)
     {
         LedgerTransaction tx = new("AB", 42, "rWriter", result == "tesSUCCESS", true, result, null, null, null);
 
-        Assert.Equal(expected, SweepRecord.From(tx, null).Result);
+        Assert.Equal(expected, SweepRecord.From(tx, null).Result.ToString());
+    }
+
+    [Fact]
+    public void A_foreign_ticket_create_covers_its_own_sequence_and_every_ticket_it_took()
+    {
+        SweepRecord create = SweepRecord.From(new LedgerTransaction("C", 5, "rW", true, true, "tesSUCCESS", null, null, null)
+        {
+            TransactionType = "TicketCreate", Sequence = 10, TicketCount = 3,
+        }, null);
+        SweepRecord next = SweepRecord.From(new LedgerTransaction("N", 6, "rW", false, true, "tecFAKE", null, null, null) { Sequence = 14 }, null);
+
+        Assert.True(BatchSweep.Covers([create, next], 10, 15));
+        Assert.False(BatchSweep.Covers([create], 10, 15));
+        Assert.True(BatchSweep.Covers(Array.Empty<SweepRecord>(), 10, 10));
+    }
+
+    [Fact]
+    public void Payer_fees_are_counted_by_the_outer_hash_and_only_when_validated()
+    {
+        BatchCandidate outer = new(0, isOuter: true, "rPayer", 500, 900, 120, [0], new SignedTransaction("00", "AA"));
+        LedgerTransaction validated = new("AA", 5, "rPayer", true, true, "tesSUCCESS", null, null, null) { Fee = 120 };
+        SweepRecord ours = SweepRecord.From(validated, null);
+        SweepRecord pendingOne = SweepRecord.From(validated with { Validated = false, Fee = 999 }, null);
+        SweepRecord foreign = SweepRecord.From(validated with { Hash = "BB", Fee = 500 }, null);
+
+        RoundResult counted = BatchSweep.Outcome([outer], [], [ours, foreign]);
+        RoundResult skipped = BatchSweep.Outcome([outer], [], [pendingOne]);
+
+        Assert.Equal(120, counted.PayerFeeDrops);
+        Assert.Equal(0, skipped.PayerFeeDrops);
+        Assert.True(skipped.PayerFeeKnown);
     }
 
     [Fact]
@@ -3038,6 +3156,11 @@ In `tests/XrplFile.Core.Tests/XrplClientLedgerSourceTests.cs`, add:
 ```
 
 (Add `using System.Text.Json;` at the top of that file if it is not there.)
+
+Migrate the existing tests that the new signatures break:
+
+- `tests/XrplFile.Core.Tests/BatchRegistryTests.cs`: the counts are a `byte[]` indexed by memo. `A_candidate_is_registered_only_after_its_deadline_is_persisted` passes `new byte[6]`; `Registering_reserves_a_candidate_for_every_memo_it_carries` builds `byte[] candidates = new byte[2]; candidates[1] = 2;` and asserts `Assert.Equal(1, candidates[0]); Assert.Equal(3, candidates[1]);`; `After_a_halt_nothing_registers_and_nothing_is_reserved` and `A_fence_that_cannot_be_saved_registers_nothing` pass `byte[] candidates = new byte[2]` and replace `Assert.Empty(candidates)` with `Assert.All(candidates, count => Assert.Equal(0, count));`.
+- `tests/XrplFile.Core.Tests/BatchIdentityTests.cs`: delete `A_ticket_create_covers_its_own_sequence_and_its_tickets` and `A_payer_record_that_is_not_validated_is_not_counted_in_the_payer_fee`; `SweepRecordTests` above carries both over compact records (`Covers([], 10, 10)` would also be ambiguous between the two overloads). The identity tests of that file (foreign transactions answering `AccountInUse`) are unchanged and now run over compact records, because `FinalAsync` builds them.
 
 - [ ] **Step 2: Run them to see them fail**
 
@@ -3350,17 +3473,25 @@ internal sealed class BatchRound(
     internal BatchRegistry Registry { get; } = new(context.Fence, candidatesPerMemo, context.Trace);
 ```
 
+`BatchRegistry` exposes the fence it was built with, for the strategy's seam: `internal BatchFence Fence => fence;`.
+
 In `RunAsync`, delete `BatchRegistry registry = new(...)` and use `Registry` where `registry` was used; pass `_markers` to `BatchSweep.FinalAsync(context, _markers, Registry.Candidates, start, settled, KnownWriterHistory(), cancellationToken)`. In `ProgressLoopAsync`, read with `BatchSweep.CompactHistoryAsync(context.Source, Writer, from, to, _markers, cancellationToken)`, report `BatchSweep.Outcome(registry.Candidates, records, []).Landed.Keys`, and keep `records` as `IReadOnlyList<SweepRecord>` in `RememberWriterHistory`. `KnownWriterHistory` returns `new BatchSweep.KnownHistory([.. _writerHistory.Where(tx => tx.LedgerIndex < _writerReadFrom).OrderBy(tx => tx.LedgerIndex)], _writerReadFrom)`.
 
 - [ ] **Step 7: The strategy's passes as capped rounds**
 
-In `src/XrplFile.Core/BatchStrategy.cs`, add the field `private readonly List<WeakReference> _finishedRegistries = [];` and replace `SubmitAllAsync`, `RequireAnotherCandidate` and `RequireDistinctMarkers` with:
+In `src/XrplFile.Core/BatchStrategy.cs`, add the fields `private readonly List<WeakReference> _finishedRegistries = [];` and `private readonly List<BatchFence> _roundFences = [];` and replace `SubmitAllAsync`, `RequireAnotherCandidate` and `RequireDistinctMarkers` with:
 
 ```csharp
     /// <summary>One weak reference per round run, to its registry: a test seam that proves a round's blobs do not outlive it (spec S5).</summary>
     internal IReadOnlyList<WeakReference> FinishedRegistries
     {
         get { lock (_finishedRegistries) return [.. _finishedRegistries]; }
+    }
+
+    /// <summary>The fence each round ran with: a test seam that proves the fence is the strategy's, not the round's (spec S5).</summary>
+    internal IReadOnlyList<BatchFence> RoundFences
+    {
+        get { lock (_finishedRegistries) return [.. _roundFences]; }
     }
 
     public async Task<SubmittedMemos> SubmitAllAsync(
@@ -3401,7 +3532,11 @@ In `src/XrplFile.Core/BatchStrategy.cs`, add the field `private readonly List<We
         IReadOnlyList<MemoSubmission> memos, int[] pending, byte[] candidates, BatchProgress progress, CancellationToken cancellationToken)
     {
         BatchRound round = new(_context, memos, pending, candidates, progress);
-        lock (_finishedRegistries) _finishedRegistries.Add(new WeakReference(round.Registry));
+        lock (_finishedRegistries)
+        {
+            _finishedRegistries.Add(new WeakReference(round.Registry));
+            _roundFences.Add(round.Registry.Fence);
+        }
 
         return await round.RunAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -3437,7 +3572,7 @@ The class summary's sentence "the candidates per memo and the budget are counted
 
 - [ ] **Step 8: Run the tests**
 
-Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class XrplFile.Tests.BatchRoundsTests -class XrplFile.Tests.SweepRecordTests -class XrplFile.Tests.XrplClientLedgerSourceTests`
+Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class XrplFile.Tests.BatchRoundsTests -class XrplFile.Tests.SweepRecordTests -class XrplFile.Tests.XrplClientLedgerSourceTests -class XrplFile.Tests.BatchRegistryTests -class XrplFile.Tests.BatchIdentityTests`
 Expected: PASS.
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -trait- "Category=Integration"`
 Expected: PASS. A test that asserted "two memos carry the marker" across a whole call still passes, because the round check raises the same error and message.
@@ -3461,18 +3596,17 @@ gains TransactionIndex."
 ### Task 5: A conflicting copy fails the run (S17)
 
 **Files:**
-- Modify: `src/XrplFile.Core/XrplFileException.cs` (+ `WriterWindowConflict`), `src/XrplFile.Core/BatchSweep.cs` (`RequireNoConflict`), `src/XrplFile.Core/PublicationState.cs` (+ `Failure`), `src/XrplFile.Core/PublicationSession.cs` (`ReconcileAsync`, `RequireResumableAsync`, `RunAsync`, the Batch resume), `app/XrplFile.App.Core/PublishErrorMessages.cs`, `app/XrplFile.App.Core/RunModel.cs` (`IsResumable`)
-- Test: `tests/XrplFile.Core.Tests/WindowConflictTests.cs`, `tests/XrplFile.App.Core.Tests/PublishErrorMessagesTests.cs` (one test), `tests/XrplFile.App.Core.Tests/RunModelTests.cs` (one test)
+- Modify: `src/XrplFile.Core/XrplFileException.cs` (+ `WriterWindowConflict`), `src/XrplFile.Core/PublicationState.cs` (+ `Failure`), `src/XrplFile.Core/PublicationSession.cs` (`ReconcileAsync`, `RequireResumableAsync`, the Batch resume), `app/XrplFile.App.Core/PublishErrorMessages.cs`, `app/XrplFile.App.Core/ReadErrorMessages.cs` (the publishing-only arm), `app/XrplFile.App.Core/RunModel.cs` (`IsResumable`)
+- Test: `tests/XrplFile.Core.Tests/WindowConflictTests.cs`, `tests/XrplFile.App.Core.Tests/PublishErrorMessagesTests.cs` (one test), `tests/XrplFile.App.Core.Tests/ReadErrorMessagesTests.cs` (one test), `tests/XrplFile.App.Core.Tests/RunModelTests.cs` (one test)
 
 **Interfaces:**
 - Consumes: Task 4 (`SweepRecord`, `DataVerdict`, `MarkerKind`), Task 3 (`ReconcileAsync`, `RequireResumableAsync`, `ChunkReads.MatchesHex`).
 - Produces:
   - `XrplFileError.WriterWindowConflict`.
   - `PublicationState.Failure : string?` (JSON `Failure`, written only when set) and `public const string WriterWindowConflictFailure = "WriterWindowConflict"` on `PublicationState`.
-  - `internal static void BatchSweep.RequireNoConflict(IReadOnlyList<SweepRecord> writerRecords)`.
   - Every resume refuses a state whose `Failure` is `"WriterWindowConflict"` with `WriterWindowConflict`, before it hashes, waits or reads anything.
 
-**Scope (Spec question 4):** the conflict rule applies to Batch runs — their round sweeps and the reconciliation of a version-3 resume. A one-account run keeps rule I12: a copy with other bytes is a straggler and is ignored; its full read-back (S9) catches a block it would break.
+**Scope (Spec question 4):** the conflict rule applies to Batch runs, at the reconciliation of a version-3 resume. Within a round no separate check is needed: `BatchSweep.RequireIdentity` runs first and refuses any writer record that is not an inner of the round's own outers with `AccountInUse` (spec B12), and the round's own inners carry the round's own bytes, so a conflicting copy written during a round surfaces as B12 — which is what the spec's own rationale for S17 ("B12 stops concurrent use during a round") relies on. A one-account run keeps rule I12: a copy with other bytes is a straggler and is ignored; its full read-back (S9) catches a block it would break.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3578,20 +3712,6 @@ public sealed class WindowConflictTests : IDisposable
 
         Assert.Equal(file, (await new XrplFileReader(node.Ledger).ReadAsync(report.Link, Token)).Bytes);
     }
-
-    [Fact]
-    public void A_round_sweep_refuses_a_successful_chunk_record_whose_data_conflicts()
-    {
-        SweepRecord conflicting = new("AB", 9, "rW", null, true, ResultClass.Success, "AccountSet", 5, null, null, 0, "CD",
-            MarkerKind.Chunk, 3, 0, DataVerdict.Conflicts);
-        SweepRecord failed = conflicting with { Result = ResultClass.Claimed };
-        SweepRecord matching = conflicting with { Verdict = DataVerdict.Matches };
-
-        BatchSweep.RequireNoConflict([failed, matching]);
-        XrplFileException error = Assert.Throws<XrplFileException>(() => BatchSweep.RequireNoConflict([matching, conflicting]));
-
-        Assert.Equal(XrplFileError.WriterWindowConflict, error.Error);
-    }
 }
 ```
 
@@ -3606,6 +3726,21 @@ In `tests/XrplFile.App.Core.Tests/PublishErrorMessagesTests.cs`, add:
         Assert.Equal(
             "The writer account carries other data for this file's chunks — was it used for another publication while this one was interrupted? Publish this file again from a fresh writer key.",
             PublishErrorMessages.For(XrplFileError.WriterWindowConflict));
+    }
+```
+
+In `tests/XrplFile.App.Core.Tests/ReadErrorMessagesTests.cs`, add (Tasks 7 and 11 extend its list):
+
+```csharp
+    [Fact]
+    public void The_streaming_publication_errors_share_the_publishing_only_sentence()
+    {
+        string shared = ReadErrorMessages.For(XrplFileError.SubmitRefused);
+
+        foreach (XrplFileError error in new[] { XrplFileError.WriterWindowConflict })
+        {
+            Assert.Equal(shared, ReadErrorMessages.For(error));
+        }
     }
 ```
 
@@ -3630,7 +3765,7 @@ In `tests/XrplFile.App.Core.Tests/RunModelTests.cs`, add beside the existing `Is
 - [ ] **Step 2: Run them to see them fail**
 
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class XrplFile.Tests.WindowConflictTests`
-Expected: build error (`WriterWindowConflict`, `Failure`, `RequireNoConflict` missing).
+Expected: build error (`WriterWindowConflict`, `Failure` missing).
 
 - [ ] **Step 3: The error, the state field and the sentence**
 
@@ -3674,30 +3809,9 @@ and the constant
             "The writer account carries other data for this file's chunks — was it used for another publication while this one was interrupted? Publish this file again from a fresh writer key.",
 ```
 
-- [ ] **Step 4: The sweep refuses a conflict**
+`ReadErrorMessages.For(XrplFileError)`: add `or XrplFileError.WriterWindowConflict` to the publishing-only arm (the one ending `or XrplFileError.AccountInUse or XrplFileError.FeeTooHigh =>`). Reading cannot produce it, and the arm's `_ =>` fallback throws, which `Every_error_has_a_sentence` would catch.
 
-In `BatchSweep`, add and call it in `FinalAsync` right after `RequireIdentity(...)`:
-
-```csharp
-    /// <summary>
-    /// A validated, successful record of the writer that wears a chunk marker of this round's memos
-    /// with other bytes fails the run (spec S17). Identity runs first, so a foreign record is
-    /// <see cref="XrplFileError.AccountInUse"/> (spec B12), not a conflict.
-    /// </summary>
-    internal static void RequireNoConflict(IReadOnlyList<SweepRecord> writerRecords)
-    {
-        foreach (SweepRecord tx in writerRecords)
-        {
-            if (tx is { Validated: true, Result: ResultClass.Success, Marker: MarkerKind.Chunk, Verdict: DataVerdict.Conflicts })
-            {
-                throw new XrplFileException(XrplFileError.WriterWindowConflict,
-                    $"the writer's {tx.Hash} in ledger {tx.LedgerIndex} carries chunk {tx.MarkerIndex} with other data than this file's");
-            }
-        }
-    }
-```
-
-- [ ] **Step 5: Reconciliation, the record on the state, and the refusal on resume**
+- [ ] **Step 4: Reconciliation, the record on the state, and the refusal on resume**
 
 In `PublicationSession`:
 
@@ -3744,25 +3858,7 @@ In `PublicationSession`:
     }
 ```
 
-3. In `RunAsync`, around the writer call, catch the round sweep's conflict and record it:
-
-```csharp
-            PublishResult result;
-
-            try
-            {
-                result = await writer.PublishAsync(
-                    _file, _blockHashes, started.Type, started.Name, started.Writer, started.Network, _landed,
-                    new PhaseRecordingProgress(this, progress), cancellationToken).ConfigureAwait(false);
-            }
-            catch (XrplFileException e) when (e.Error == XrplFileError.WriterWindowConflict)
-            {
-                RecordFailure(PublicationState.WriterWindowConflictFailure);
-                throw;
-            }
-```
-
-4. In `RequireResumableAsync`, first of all (before the "done" check):
+3. In `RequireResumableAsync`, first of all (before the "done" check):
 
 ```csharp
         if (string.Equals(state.Failure, PublicationState.WriterWindowConflictFailure, StringComparison.Ordinal))
@@ -3774,7 +3870,7 @@ In `PublicationSession`:
 
   In the Batch `ResumeAsync`, move `RequireResumableAsync` so it stays before `WaitForFenceAsync` (it already is), so a recorded conflict waits for nothing.
 
-- [ ] **Step 6: No Resume button for such a run**
+- [ ] **Step 5: No Resume button for such a run**
 
 In `RunModel.IsResumable`, replace the `return !string.Equals(...Phase, "done"...)` with:
 
@@ -3783,22 +3879,23 @@ In `RunModel.IsResumable`, replace the `return !string.Equals(...Phase, "done"..
             return !string.Equals(state.Phase, "done", StringComparison.Ordinal) && state.Failure is null;
 ```
 
-- [ ] **Step 7: Run the tests**
+- [ ] **Step 6: Run the tests**
 
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class XrplFile.Tests.WindowConflictTests`
-Run: `dotnet run --project tests/XrplFile.App.Core.Tests -- -class XrplFile.App.Core.Tests.PublishErrorMessagesTests -class XrplFile.App.Core.Tests.RunModelTests`
+Run: `dotnet run --project tests/XrplFile.App.Core.Tests -- -class XrplFile.App.Core.Tests.PublishErrorMessagesTests -class XrplFile.App.Core.Tests.ReadErrorMessagesTests -class XrplFile.App.Core.Tests.RunModelTests`
 Run: both unit suites with `-trait- "Category=Integration"`.
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src app tests
 git commit -m "feat(core): a conflicting copy of a chunk fails a Batch run
 
 A validated, successful writer record with one of this publication's chunk
-markers and other data in the window stops the run with WriterWindowConflict,
-from a round's sweep or from a resume's reconciliation. The failure is written
+markers and other data in the window stops a resume's reconciliation with
+WriterWindowConflict; within a round, identity (B12) already refuses any
+record that is not the round's own. The failure is written
 to the state file, a resume reports it again without sending, and the run
 screen offers no Resume for it. One-account runs keep ignoring stragglers."
 ```
@@ -3965,23 +4062,6 @@ public sealed class StreamingReconciliationTests : IDisposable
     }
 
     [Fact]
-    public async Task A_list_memo_of_an_index_past_this_files_list_count_is_ignored()
-    {
-        FakeLedgerSource ledger = Node();
-        FakeLedgerSink sink = new(ledger);
-        byte[] file = VectorStream.Bytes("s20-index", 1_100_000);
-        await using SequenceStrategy strategy = new(sink, Signer, new SequenceStrategyOptions { FeeDrops = Fee, ValidationPoll = TimeSpan.FromMilliseconds(1) });
-        PublicationSession run = await PublicationSession.StartAsync(strategy, ledger, file, "application/octet-stream", null, Wallet.ClassicAddress, "key", "testnet", Options, Token);
-        PublicationReport original = await run.RunAsync(null, Token);
-        ForgetTheEnding(run.StatePath);
-        Plant(ledger, new string('3', 64), MemoLayout.ListMarkerHex(9_999), MemoLayout.Utf8Hex("[]"));
-
-        PublicationSession resumed = await PublicationSession.ResumeAsync(strategy, ledger, file, run.StatePath, Options, Token);
-
-        Assert.Equal(original.Link, (await resumed.RunAsync(null, Token)).Link);
-    }
-
-    [Fact]
     public async Task A_Batch_resume_whose_history_stream_breaks_part_way_starts_it_again_and_pays_for_nothing_twice()
     {
         BatchTestNode node = new();
@@ -4002,10 +4082,24 @@ public sealed class StreamingReconciliationTests : IDisposable
             node.Sink.Transmitting = null;
         }
 
+        // The break fires only in a walk of more than five records: make sure the first one is.
+        long startedIn = first.State.StartedInLedger;
+        int writerRecords = 0;
+        await foreach (LedgerTransaction _ in node.Ledger.AccountTransactionsAsync(node.Writer.Account, startedIn, node.Ledger.CurrentLedger, true, Token))
+        {
+            writerRecords++;
+        }
+
+        Assert.True(writerRecords > 5, $"the interrupted run left {writerRecords} writer records; the break needs more than five");
+        int callsBefore = node.Ledger.Calls.Count;
         node.Ledger.HistoryFailsAfter = 5;
 
         PublicationSession resumed = await PublicationSession.ResumeAsync(
             factory, node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options, null, Token);
+
+        // Broken once, read again from the start: two walks of the writer from the run's first ledger.
+        Assert.True(node.Ledger.Calls.Skip(callsBefore).Count(call => call.Account == node.Writer.Account && call.FromLedger == startedIn) >= 2);
+
         PublicationReport report = await resumed.RunAsync(null, Token);
 
         Assert.Equal(file, (await new XrplFileReader(node.Ledger).ReadAsync(report.Link, Token)).Bytes);
@@ -4342,7 +4436,7 @@ Batch `ResumeAsync` (source overload), after `session.RecordSourcePath(...)`:
         }
 ```
 
-Delete `BatchSweep.HistoryAsync` and the `Covers(IEnumerable<LedgerTransaction>, ...)` overload (nothing calls them now); keep `CoversCore` and the `SweepRecord` overload.
+Delete `BatchSweep.HistoryAsync` and the `Covers(IEnumerable<LedgerTransaction>, ...)` overload (nothing calls them now: Task 4 moved the tests that did onto `SweepRecord`); keep `CoversCore` and the `SweepRecord` overload. The `SweepRecord` overload's `<inheritdoc cref="Covers(IEnumerable{LedgerTransaction}, uint, uint)"/>` would no longer resolve (CS1574 is an error here), so give it the deleted overload's summary as its own `<summary>`.
 
 - [ ] **Step 6: Run the tests**
 
@@ -4370,22 +4464,23 @@ that breaks or does not cover the writer's sequences is read again."
 
 **Files:**
 - Create: `src/XrplFile.Core/PublicationCheck.cs`
-- Modify: `src/XrplFile.Core/XrplFileException.cs` (+ `ManifestRejected`, + `Link`), `src/XrplFile.Core/XrplFileWriter.cs` (verification before the manifest, the check after it), `src/XrplFile.Core/PublicationState.cs` (+ `ManifestStatus`), `src/XrplFile.Core/PublicationSession.cs` (`RunAsync`, both resumes, `RequireResumableAsync`), `app/XrplFile.App.Core/PublishErrorMessages.cs`, `app/XrplFile.App.Core/RunModel.cs` (`IsResumable`)
-- Test: `tests/XrplFile.Core.Tests/PublicationCheckTests.cs`, `tests/XrplFile.Core.Tests/SampledReadBackTests.cs`, `tests/XrplFile.Core.Tests/ManifestAcceptanceTests.cs`, `tests/XrplFile.App.Core.Tests/PublishErrorMessagesTests.cs` (one test)
+- Modify: `src/XrplFile.Core/XrplFileException.cs` (+ `ManifestRejected`, + `Link`), `src/XrplFile.Core/XrplFileWriter.cs` (verification before the manifest, the check after it), `src/XrplFile.Core/PublicationState.cs` (+ `ManifestStatus`), `src/XrplFile.Core/PublicationSession.cs` (`RunAsync`, both resumes, `RequireResumableAsync`), `app/XrplFile.App.Core/PublishErrorMessages.cs`, `app/XrplFile.App.Core/ReadErrorMessages.cs` (the publishing-only arm), `app/XrplFile.App.Core/RunModel.cs` (`IsResumable`)
+- Test: `tests/XrplFile.Core.Tests/PublicationCheckTests.cs`, `tests/XrplFile.Core.Tests/SampledReadBackTests.cs`, `tests/XrplFile.Core.Tests/ManifestAcceptanceTests.cs`, `tests/XrplFile.App.Core.Tests/PublishErrorMessagesTests.cs` (one test), `tests/XrplFile.App.Core.Tests/ReadErrorMessagesTests.cs` (one value added)
 
 **Interfaces:**
-- Consumes: Task 2 (`ChunkLanding`), Task 3 (`RequireSameAsSourceAsync`, `ReadEverythingBackAsync`, the generic `ReadBackAsync<T>` retry), Task 6 (`FindManifestAsync`).
+- Consumes: Task 2 (`ChunkLanding`), Task 3 (`RequireSameAsSourceAsync`, `ReadEverythingBackAsync`, the generic `ReadBackAsync<T>` retry), Task 5 (`ReadErrorMessagesTests.The_streaming_publication_errors_share_the_publishing_only_sentence`), Task 6 (`FindManifestAsync`, `FileTree.TryDecodeFragment`).
 - Produces:
   - `XrplFileError.ManifestRejected`; `XrplFileException.Link : XrplFileLink?` and a `link` constructor parameter (last, optional).
   - `PublicationState.ManifestStatus : string?` (JSON `ManifestStatus`, written only when set) and `public const string ManifestLandedRejected = "landed, rejected"`.
-  - `internal static class PublicationCheck` — `void RequireReachable(IReadOnlyList<BlockEntry> plan, ChunkLanding landing, Manifest manifest, IReadOnlyList<BlockEntry> listed)`; `IReadOnlyList<int> SampleBlocks(string rootHex, int blocks)`; `Task RequireAcceptedAsync(ILedgerSource source, XrplFileLink link, Manifest planned, string writer, CancellationToken cancellationToken)`.
+  - `internal static class PublicationCheck` — `void RequireReachable(IReadOnlyList<BlockEntry> plan, ChunkLanding landing, Manifest manifest)`; `void RequireListed(IReadOnlyList<BlockEntry> plan, IReadOnlyList<BlockEntry> published)`; `IReadOnlyList<int> SampleBlocks(string rootHex, int blocks)`; `Task RequireAcceptedAsync(ILedgerSource source, XrplFileLink link, Manifest planned, string writer, CancellationToken cancellationToken)`.
   - The writer's `"read-back"` stage counts blocks read: Total = the sample's size on the Batch path, the block count otherwise (spec 4.3).
 
 **Verification, as implemented:**
-- **S9(a), every path, no reads:** for every block, the plan's `FirstLedger` equals the block's first adopted ledger; every block's adopted ledgers lie inside `[manifest.FirstLedger, manifest.LastLedger]`; the block list's decoded entries equal the plan, ledgers included (a single-block file has no list, and its "list" is the plan).
+- **S9(a), every path, no reads:** for every block, the plan's `FirstLedger` equals the block's first adopted ledger; every block's adopted ledgers lie inside `[manifest.FirstLedger, manifest.LastLedger]`.
+- **List equals plan:** compared with the block list *as read from the ledger* by the read-back of S9(b) (`BlockListAsync`, rooted to the manifest root), ledgers included, on both paths. The list the writer built is derived from the plan, so comparing it with the plan would compare the run's data with itself; the list on the ledger is the one a reader uses, and the root does not cover ledgers, so only this comparison can fail. A single-block file has no list memo; the reader's "list" is then the manifest's own entry, which must equal the plan's one entry.
 - **S9(b), Batch:** the full block list through `BlockListAsync` (which roots it to the manifest root), then the blocks of S21 through `BlockAsync`, each compared with the source. **Ticket and sequence:** every block, as Task 3 left it.
 - **S21:** one block → `[0]`; up to four → all; otherwise `[0, n−1, r₁, r₂]` with rᵢ = 1 + (v mod (n−2)), v the first 8 bytes big-endian of SHA-256(root ‖ counter as 4 bytes big-endian), counter from 0, a duplicate skipped.
-- **S22, every path:** after the manifest lands, `ManifestAsync` on the real link; accepted when it reads, is of the writer, lies in a ledger after `LastLedger` (the reader's own rule) and encodes to the plan's exact JSON. `CorruptManifest` or a mismatch is a rejection: the state records `ManifestStatus = "landed, rejected"` and the hash, and the error carries the link. `NodeUnreachable` is retried three times like the read-back; `ManifestNotFound` three times, then `ValidationTimeout` (a transient lag must not become a permanent rejection). A manifest a resume recovers (B27) passes the same check before the run is called done. A state that records a rejection is refused by every resume with `ManifestRejected`, before anything is read.
+- **S22, every path:** after the manifest lands, `ManifestAsync` on the real link; accepted when it reads, is of the writer, lies in a ledger after `LastLedger` (the reader's own rule) and encodes to the plan's exact JSON. `CorruptManifest` or a mismatch is a rejection: the state records `ManifestStatus = "landed, rejected"` and the hash, and the error carries the link. `NodeUnreachable` is retried three times like the read-back; `ManifestNotFound` and `NodeLacksHistory` (what the reader throws when `tx` misses on a node whose history starts late, as many public testnet nodes and load-balanced clusters do) three times, then `ValidationTimeout` (a transient lag must not become a permanent rejection). A manifest a resume recovers (B27) passes the same check before the run is called done. A state that records a rejection is refused by every resume with `ManifestRejected`, before anything is read.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4437,7 +4532,8 @@ public class PublicationCheckTests
     {
         (List<BlockEntry> plan, ChunkLanding landing, Manifest manifest) = Published();
 
-        PublicationCheck.RequireReachable(plan, landing, manifest, plan);
+        PublicationCheck.RequireReachable(plan, landing, manifest);
+        PublicationCheck.RequireListed(plan, [.. plan.Select(entry => entry with { Hash = entry.Hash.ToLowerInvariant() })]);
     }
 
     [Fact]
@@ -4446,7 +4542,7 @@ public class PublicationCheckTests
         (List<BlockEntry> plan, ChunkLanding landing, Manifest manifest) = Published();
         List<BlockEntry> late = [plan[0] with { FirstLedger = 101 }, plan[1]];
 
-        XrplFileException error = Assert.Throws<XrplFileException>(() => PublicationCheck.RequireReachable(late, landing, manifest, late));
+        XrplFileException error = Assert.Throws<XrplFileException>(() => PublicationCheck.RequireReachable(late, landing, manifest));
 
         Assert.Equal(XrplFileError.BlockMismatch, error.Error);
         Assert.Equal(0, error.Block);
@@ -4458,18 +4554,18 @@ public class PublicationCheckTests
         (List<BlockEntry> plan, ChunkLanding landing, Manifest manifest) = Published();
 
         XrplFileException error = Assert.Throws<XrplFileException>(() =>
-            PublicationCheck.RequireReachable(plan, landing, manifest with { LastLedger = 101 }, plan));
+            PublicationCheck.RequireReachable(plan, landing, manifest with { LastLedger = 101 }));
 
         Assert.Equal(1, error.Block);
     }
 
     [Fact]
-    public void A_list_that_is_not_the_plan_fails()
+    public void A_list_on_the_ledger_that_is_not_the_plan_fails()
     {
-        (List<BlockEntry> plan, ChunkLanding landing, Manifest manifest) = Published();
+        (List<BlockEntry> plan, _, _) = Published();
         List<BlockEntry> listed = [plan[0], plan[1] with { FirstLedger = 103 }];
 
-        XrplFileException error = Assert.Throws<XrplFileException>(() => PublicationCheck.RequireReachable(plan, landing, manifest, listed));
+        XrplFileException error = Assert.Throws<XrplFileException>(() => PublicationCheck.RequireListed(plan, listed));
 
         Assert.Equal(XrplFileError.ListMismatch, error.Error);
     }
@@ -4479,6 +4575,7 @@ public class PublicationCheckTests
 `tests/XrplFile.Core.Tests/SampledReadBackTests.cs`:
 
 ```csharp
+using System.Runtime.CompilerServices;
 using Xunit;
 
 namespace XrplFile.Tests;
@@ -4519,6 +4616,61 @@ public class SampledReadBackTests
 
         Assert.Equal(3, reports.Where(progress => progress.Stage == "read-back").Select(progress => progress.Total).Distinct().Single());
         Assert.Equal(3, reports.Count(progress => progress.Stage == "read-back"));
+    }
+
+    [Fact]
+    public async Task A_block_list_on_the_ledger_whose_ledgers_differ_from_the_plan_fails_the_read_back()
+    {
+        BatchTestNode node = new();
+        await using BatchStrategy strategy = node.Strategy();
+        await using VectorPublicationSource file = new("sampled-list", 2 * 1_024_000);
+
+        // The strategy writes to the honest ledger; only the writer's read-back sees the shifted list.
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(strategy, new ListShiftingSource(node.Ledger)).PublishAsync(
+            file, "application/octet-stream", null, node.Writer.Account, "testnet", null, null, Token));
+
+        Assert.Equal(XrplFileError.ListMismatch, error.Error);
+        Assert.Contains("is not the plan", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Shows every block-list memo with its first entry's ledger moved one earlier. The root covers
+    /// block hashes and not ledgers, so the list still roots; it is not the plan.
+    /// </summary>
+    private sealed class ListShiftingSource(FakeLedgerSource inner) : ILedgerSource
+    {
+        public async IAsyncEnumerable<LedgerTransaction> AccountTransactionsAsync(
+            string account, long fromLedger, long toLedger, bool forward, [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await foreach (LedgerTransaction tx in inner.AccountTransactionsAsync(account, fromLedger, toLedger, forward, cancellationToken))
+            {
+                if (MemoLayout.ListIndexOf(tx.MemoTypeHex) is null || tx.MemoDataHex is null
+                    || !FileTree.TryDecodeFragment(MemoLayout.FromHexUtf8(tx.MemoDataHex), out IReadOnlyList<BlockEntry>? entries))
+                {
+                    yield return tx;
+                    continue;
+                }
+
+                List<BlockEntry> shifted = [entries[0] with { FirstLedger = entries[0].FirstLedger - 1 }, .. entries.Skip(1)];
+                yield return tx with { MemoDataHex = MemoLayout.Utf8Hex(FileTree.EncodeEntries(shifted)[0]) };
+            }
+        }
+
+        public Task<LedgerTransaction?> TransactionAsync(string hash, CancellationToken cancellationToken) => inner.TransactionAsync(hash, cancellationToken);
+
+        public Task<long?> EarliestLedgerAsync(CancellationToken cancellationToken) => inner.EarliestLedgerAsync(cancellationToken);
+
+        public Task<NetworkFees> FeesAsync(CancellationToken cancellationToken) => inner.FeesAsync(cancellationToken);
+
+        public Task<long> BalanceDropsAsync(string account, CancellationToken cancellationToken) => inner.BalanceDropsAsync(account, cancellationToken);
+
+        public Task<AccountState> AccountStateAsync(string account, CancellationToken cancellationToken) => inner.AccountStateAsync(account, cancellationToken);
+
+        public Task<IReadOnlyList<LiveTicket>> LiveTicketsAsync(string account, CancellationToken cancellationToken) => inner.LiveTicketsAsync(account, cancellationToken);
+
+        public Task<long> CurrentLedgerAsync(CancellationToken cancellationToken) => inner.CurrentLedgerAsync(cancellationToken);
+
+        public Task<DestinationState> DestinationAsync(string account, CancellationToken cancellationToken) => inner.DestinationAsync(account, cancellationToken);
     }
 }
 ```
@@ -4649,6 +4801,8 @@ public sealed class ManifestAcceptanceTests : IDisposable
 
 The writer reads back through the session's source, so `StartAsync(strategy, tampering, ...)` makes the run's own reads go through `TamperingSource`; only tx lookups of manifests are changed, so chunks, lists and the read-back are honest.
 
+In `tests/XrplFile.App.Core.Tests/ReadErrorMessagesTests.cs`, add `XrplFileError.ManifestRejected` to the array of `The_streaming_publication_errors_share_the_publishing_only_sentence` (Task 5).
+
 In `tests/XrplFile.App.Core.Tests/PublishErrorMessagesTests.cs`, add:
 
 ```csharp
@@ -4724,6 +4878,8 @@ and in `For(XrplFileException exception)`, after the sentence is chosen:
         if (exception is { Error: XrplFileError.ManifestRejected, Link: { } link }) sentence = $"{sentence} The link that was written: {link}.";
 ```
 
+`ReadErrorMessages.For(XrplFileError)`: add `or XrplFileError.ManifestRejected` to the publishing-only arm; reading cannot produce it.
+
 - [ ] **Step 4: `PublicationCheck`**
 
 `src/XrplFile.Core/PublicationCheck.cs`:
@@ -4746,7 +4902,7 @@ internal static class PublicationCheck
     private static readonly TimeSpan ManifestReadPause = TimeSpan.FromSeconds(1);
 
     /// <summary>Spec S9(a), for every block.</summary>
-    public static void RequireReachable(IReadOnlyList<BlockEntry> plan, ChunkLanding landing, Manifest manifest, IReadOnlyList<BlockEntry> listed)
+    public static void RequireReachable(IReadOnlyList<BlockEntry> plan, ChunkLanding landing, Manifest manifest)
     {
         for (int block = 0; block < plan.Count; block++)
         {
@@ -4768,9 +4924,23 @@ internal static class PublicationCheck
             }
         }
 
-        if (!listed.SequenceEqual(plan))
+    }
+
+    /// <summary>
+    /// The block list as read from the ledger equals the plan, ledgers included (spec S9). The root
+    /// covers block hashes only, so a list that roots correctly can still send a reader to the wrong
+    /// ledger; the list the writer built cannot show that, because it was built from the plan.
+    /// </summary>
+    public static void RequireListed(IReadOnlyList<BlockEntry> plan, IReadOnlyList<BlockEntry> published)
+    {
+        bool same = plan.Count == published.Count
+            && plan.Zip(published).All(pair => pair.First.Index == pair.Second.Index
+                && pair.First.FirstLedger == pair.Second.FirstLedger
+                && string.Equals(pair.First.Hash, pair.Second.Hash, StringComparison.OrdinalIgnoreCase));
+
+        if (!same)
         {
-            throw new XrplFileException(XrplFileError.ListMismatch, "the block list's entries are not the plan's");
+            throw new XrplFileException(XrplFileError.ListMismatch, "the block list on the ledger is not the plan");
         }
     }
 
@@ -4832,7 +5002,9 @@ internal static class PublicationCheck
 
     /// <summary>
     /// A node that did not answer, or does not show the transaction yet, is asked again: neither is a
-    /// rejection, which is permanent. Still missing after that, the run stops resumable.
+    /// rejection, which is permanent. A node whose history starts late answers a missing <c>tx</c>
+    /// with <see cref="XrplFileError.NodeLacksHistory"/>; a manifest that just landed is missing in
+    /// the same way. Still missing after that, the run stops resumable.
     /// </summary>
     private static async Task<ManifestRecord> ReadAsync(XrplFileReader reader, XrplFileLink link, CancellationToken cancellationToken)
     {
@@ -4842,11 +5014,12 @@ internal static class PublicationCheck
             {
                 return await reader.ManifestAsync(link, cancellationToken).ConfigureAwait(false);
             }
-            catch (XrplFileException e) when (e.Error is XrplFileError.NodeUnreachable or XrplFileError.ManifestNotFound && attempt < ManifestReadAttempts)
+            catch (XrplFileException e) when (e.Error is XrplFileError.NodeUnreachable or XrplFileError.ManifestNotFound or XrplFileError.NodeLacksHistory
+                && attempt < ManifestReadAttempts)
             {
                 await Task.Delay(ManifestReadPause, cancellationToken).ConfigureAwait(false);
             }
-            catch (XrplFileException e) when (e.Error == XrplFileError.ManifestNotFound)
+            catch (XrplFileException e) when (e.Error is XrplFileError.ManifestNotFound or XrplFileError.NodeLacksHistory)
             {
                 throw new XrplFileException(XrplFileError.ValidationTimeout,
                     $"the manifest {link.TxHash} landed and the node does not show it to a reader yet: {e.Message}", inner: e);
@@ -4866,10 +5039,7 @@ In `XrplFileWriter.PublishCoreAsync`, replace the block from `Manifest manifest 
 ```csharp
         Manifest manifest = ManifestPlan.Build(type, name, file.Length, entries, window.First, lastLedger, listMemos.Count);
 
-        IReadOnlyList<BlockEntry> listed = listMemos.Count == 0
-            ? entries
-            : FileTree.DecodeEntries(listMemos.Select(memo => MemoLayout.FromHexUtf8(memo.MemoDataHex)));
-        PublicationCheck.RequireReachable(entries, landing, manifest, listed);
+        PublicationCheck.RequireReachable(entries, landing, manifest);
 
         if (_options.ReadBack)
         {
@@ -4877,11 +5047,11 @@ In `XrplFileWriter.PublishCoreAsync`, replace the block from `Manifest manifest 
             // and with no bytes checked as their memos land, are read back in full.
             if (_strategy is BatchStrategy)
             {
-                await ReadSampleBackAsync(file, manifest, writer, lastLedger, progress, cancellationToken).ConfigureAwait(false);
+                await ReadSampleBackAsync(file, entries, manifest, writer, lastLedger, progress, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                await ReadEverythingBackAsync(file, manifest, writer, lastLedger, progress, cancellationToken).ConfigureAwait(false);
+                await ReadEverythingBackAsync(file, entries, manifest, writer, lastLedger, progress, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -4899,18 +5069,19 @@ In `XrplFileWriter.PublishCoreAsync`, replace the block from `Manifest manifest 
         return new PublishResult(link, manifest, writer, chunkCount, listMemos.Count, manifestHash);
 ```
 
-and add beside `ReadEverythingBackAsync`:
+`ReadEverythingBackAsync` (Task 3) gains the parameter `IReadOnlyList<BlockEntry> plan` after `file`, and right after it reads `published`: `PublicationCheck.RequireListed(plan, published);`. Add beside it:
 
 ```csharp
-    /// <summary>The full block list rooted to the manifest root, then the blocks of spec S21, each compared with the source.</summary>
+    /// <summary>The full block list rooted to the manifest root and compared with the plan, then the blocks of spec S21, each compared with the source.</summary>
     private async Task ReadSampleBackAsync(
-        IPublicationSource file, Manifest manifest, string writer, long lastLedger, IProgress<PublishProgress>? progress,
-        CancellationToken cancellationToken)
+        IPublicationSource file, IReadOnlyList<BlockEntry> plan, Manifest manifest, string writer, long lastLedger,
+        IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
     {
         XrplFileReader reader = new(_source, new ReaderOptions { MaxBytes = long.MaxValue });
         ManifestRecord unpublished = new(manifest, writer, lastLedger + 1, string.Empty);
         IReadOnlyList<BlockEntry> published = await ReadBackAsync(
             () => reader.BlockListAsync(unpublished, cancellationToken), cancellationToken).ConfigureAwait(false);
+        PublicationCheck.RequireListed(plan, published);
         IReadOnlyList<int> sample = PublicationCheck.SampleBlocks(manifest.Root, published.Count);
 
         for (int k = 0; k < sample.Count; k++)
@@ -4929,9 +5100,17 @@ and add beside `ReadEverythingBackAsync`:
 
 In `PublicationSession`:
 
-1. In `RunAsync`, extend the `catch` around the writer call (Task 5):
+1. In `RunAsync`, wrap the writer call so a rejection reaches the state before it reaches the caller:
 
 ```csharp
+            PublishResult result;
+
+            try
+            {
+                result = await writer.PublishAsync(
+                    _file, _blockHashes, started.Type, started.Name, started.Writer, started.Network, _landed,
+                    new PhaseRecordingProgress(this, progress), cancellationToken).ConfigureAwait(false);
+            }
             catch (XrplFileException e) when (e is { Error: XrplFileError.ManifestRejected, Link: { } rejected })
             {
                 RecordRejectedManifest(rejected.TxHash);
@@ -4991,7 +5170,7 @@ In `PublicationSession`:
 - [ ] **Step 7: Run the tests**
 
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class XrplFile.Tests.PublicationCheckTests -class XrplFile.Tests.SampledReadBackTests -class XrplFile.Tests.ManifestAcceptanceTests`
-Run: `dotnet run --project tests/XrplFile.App.Core.Tests -- -class XrplFile.App.Core.Tests.PublishErrorMessagesTests`
+Run: `dotnet run --project tests/XrplFile.App.Core.Tests -- -class XrplFile.App.Core.Tests.PublishErrorMessagesTests -class XrplFile.App.Core.Tests.ReadErrorMessagesTests`
 Run: both unit suites with `-trait- "Category=Integration"`.
 Expected: PASS. Tests that count `TransactionAsync` lookups after a publication (`WriterLedgerTests`) now see one more, for the manifest: assert on chunk hashes as Task 2 changed them, which excludes it.
 
@@ -5002,10 +5181,12 @@ git add src app tests
 git commit -m "feat(core): verify reachability, sample Batch read-backs, check the landed manifest
 
 Before the manifest, every publication checks that each block's first ledger
-is its earliest adopted chunk and that every chunk lies in the window. Batch
-publications then read the full block list and a sample seeded by the root:
-both end blocks and two middle ones; ticket and sequence publications keep the
-full read-back. After the manifest lands, and when a resume recovers one, the
+is its earliest adopted chunk and that every chunk lies in the window, and its
+read-back compares the block list on the ledger with the plan, ledgers
+included. Batch publications then read a sample seeded by the root: both end
+blocks and two middle ones; ticket and sequence publications keep the full
+read-back. A manifest not yet visible, or hidden by a node with short history,
+is read again before the run stops resumable. After the manifest lands, and when a resume recovers one, the
 link is read as a stranger would read it; a rejection is recorded on the
 state with the link and is never turned into success by a resume."
 ```
@@ -5402,13 +5583,15 @@ In `tests/XrplFile.Core.Tests/ForwardHistoryTests.cs`, add:
     {
         (FakeLedgerSource source, ManifestRecord record, List<BlockEntry> blocks) = OneCrowdedLedger();
         XrplFileReader cached = new(source);
-        XrplFileReader uncached = new(source, new ReaderOptions { HistoryCacheRecords = 0 });
         int[] order = [2, 0, 1, 0, 2];
 
         foreach (int block in order)
         {
             byte[] withCache = await cached.BlockAsync(record, blocks[block], TestContext.Current.CancellationToken);
-            byte[] withoutCache = await uncached.BlockAsync(record, blocks[block], TestContext.Current.CancellationToken);
+
+            // The baseline shares nothing: a fresh reader per block walks the node from the block's
+            // first ledger, so no cursor or cache of an earlier walk can stand behind its answer.
+            byte[] withoutCache = await new XrplFileReader(source).BlockAsync(record, blocks[block], TestContext.Current.CancellationToken);
 
             Assert.Equal(withoutCache, withCache);
         }
@@ -5594,10 +5777,10 @@ async function crowdedLedger() {
 test('a ledger larger than the cap and a revisited block read the same with and without the cache', async () => {
   const { source, record, blocks } = await crowdedLedger();
   const cached = new XrplFileReader(source);
-  const uncached = new XrplFileReader(source, { historyCacheRecords: 0 });
 
+  // The baseline shares nothing: a fresh reader per block walks from the block's first ledger.
   for (const block of [2, 0, 1, 0, 2]) {
-    assert.deepEqual(await cached.block(record, blocks[block]), await uncached.block(record, blocks[block]));
+    assert.deepEqual(await cached.block(record, blocks[block]), await new XrplFileReader(source).block(record, blocks[block]));
   }
 
   assert.ok(cached.history.peakHeld <= DEFAULT_MAX_RECORDS, `held ${cached.history.peakHeld}`);
@@ -5790,19 +5973,19 @@ round is a solo of the writer. The count is arithmetic, not a list of sizes."
 
 **Files:**
 - Create: `src/XrplFile.Core/SpendingApproval.cs`
-- Modify: `src/XrplFile.Core/XrplFileException.cs` (+ `ApprovalExceeded`), `src/XrplFile.Core/PublicationSession.cs` (`SessionOptions.Approval`, `SessionOptions.ApproveResume`; both starts, both resumes, `AttachBatchAsync`), `app/XrplFile.App.Core/PublishErrorMessages.cs`
-- Test: `tests/XrplFile.Core.Tests/SpendingApprovalTests.cs`, `tests/XrplFile.App.Core.Tests/PublishErrorMessagesTests.cs` (one test)
+- Modify: `src/XrplFile.Core/XrplFileException.cs` (+ `ApprovalExceeded`), `src/XrplFile.Core/PublicationSession.cs` (`SessionOptions.Approval`, `SessionOptions.ApproveResume`; both starts, both resumes, `AttachBatchAsync`), `app/XrplFile.App.Core/PublishErrorMessages.cs`, `app/XrplFile.App.Core/ReadErrorMessages.cs` (the publishing-only arm)
+- Test: `tests/XrplFile.Core.Tests/SpendingApprovalTests.cs`, `tests/XrplFile.App.Core.Tests/PublishErrorMessagesTests.cs` (one test), `tests/XrplFile.App.Core.Tests/ReadErrorMessagesTests.cs` (one value added)
 
 **Interfaces:**
 - Consumes: Task 10 (`BatchPublicationEstimate`), the existing `PublicationEstimate`, `BatchBudget`.
 - Produces (namespace `XrplFile`):
-  - `public sealed record SpendingApproval(string Writer, string? Payer, long FeeUnitCeilingDrops, long WriterCeilingDrops, long PayerCeilingDrops)` — `static SpendingApproval For(PublicationEstimate estimate, string writer)` (fee ceiling = `FeeDropsPerTransaction`, writer ceiling = `FeeDropsWorstCase`, payer 0), `static SpendingApproval For(BatchPublicationEstimate estimate, string writer, string payer)` (fee ceiling = `FeeCeilingDrops`, writer = `WriterFeeDropsWorstCase`, payer = `PayerFeeDropsWorstCase`), `internal void Require(PublicationEstimate estimate, string writer)`, `internal void Require(BatchPublicationEstimate estimate, string writer, string payer)`, `internal BatchBudget Budget(BatchPublicationEstimate estimate)`.
+  - `public sealed record SpendingApproval(string Writer, string? Payer, long FeeUnitCeilingDrops, long WriterCeilingDrops, long PayerCeilingDrops)` — `static SpendingApproval For(PublicationEstimate estimate, string writer)` (fee ceiling = `FeeDropsPerTransaction`, writer ceiling = `FeeDropsWorstCase`, payer 0), `static SpendingApproval For(BatchPublicationEstimate estimate, string writer, string payer)` (fee ceiling = `FeeCeilingDrops`, writer = `WriterFeeDropsWorstCase`, payer = `PayerFeeDropsWorstCase`), `internal void Require(PublicationEstimate estimate, string writer)`, `internal void Require(BatchPublicationEstimate estimate, string writer, string payer)`, `internal BatchPublicationEstimate AtCeiling(BatchPublicationEstimate estimate)`, `internal BatchBudget Budget(BatchPublicationEstimate estimate)`.
   - `public sealed record ResumeQuote(string Writer, string? Payer, long MissingChunks, PublicationEstimate? OneAccount, BatchPublicationEstimate? Batch)`.
   - `public delegate Task<SpendingApproval> ResumeApproval(ResumeQuote quote, CancellationToken cancellationToken)`.
   - `SessionOptions.Approval : SpendingApproval?` (fresh runs) and `SessionOptions.ApproveResume : ResumeApproval?` (resumes). Null keeps today's behaviour for a library caller: the session's own estimate is the approval.
   - `XrplFileError.ApprovalExceeded`, sentence "Fees or balances changed since this was approved. Estimate it again."
 
-**The rule (spec S25):** an approval names the writer, the payer, the fee-unit ceiling (B15) and each account's ceiling — worst-case fees (Spec question 2). A fresh run's approval comes from the caller (the Estimate screen); a resume's is asked for after reconciliation, from a quote of the remaining work. The session refuses, before anything is sent, any estimate it takes that exceeds the approval: a fee unit or per-transaction fee above the fee-unit ceiling, or either account's worst case above its ceiling. A Batch strategy's budget is the approval's: the round unit may rise to the approved fee-unit ceiling and the spending of each account to its ceiling (B26). A different writer or payer is a caller's mistake (`ArgumentException`).
+**The rule (spec S25):** an approval names the writer, the payer, the fee-unit ceiling (B15) and each account's ceiling — worst-case fees (Spec question 2). A fresh run's approval comes from the caller (the Estimate screen); a resume's is asked for after reconciliation, from a quote of the remaining work. The session refuses, before anything is sent, any estimate it takes that exceeds the approval. **Batch:** only exceeding a ceiling refuses. The re-estimated fee unit is compared with the approved fee-unit ceiling (B15 was designed to let the unit rise up to it), and each account's worst case is computed at the approved ceiling — the most B26 lets the run spend — and compared with that account's approved ceiling, which in effect asks that the run be no larger than the one approved. Balances are then checked against those same figures. A unit that rises from 15 to 18 drops under a ceiling of 30 therefore starts; a unit above 30 does not. **One-account:** the per-transaction fee is fixed in the strategy, so a fee above the approved one, or a worst case above the approved one, refuses. A Batch strategy's budget is the approval's: the round unit may rise to the approved fee-unit ceiling and the spending of each account to its ceiling (B26). A different writer or payer is a caller's mistake (`ArgumentException`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -5858,6 +6041,27 @@ public sealed class SpendingApprovalTests : IDisposable
             Options(approval), Token);
 
         Assert.Equal(new BatchBudget(estimate.FeeUnitDrops, approval.FeeUnitCeilingDrops, approval.PayerCeilingDrops, approval.WriterCeilingDrops), Assert.Single(budgets));
+    }
+
+    [Fact]
+    public async Task A_fee_unit_that_rises_under_the_approved_ceiling_still_starts()
+    {
+        BatchTestNode node = Funded();
+        List<BatchBudget> budgets = [];
+        byte[] file = VectorStream.Bytes("approval", 20_000);
+        BatchPublicationEstimate estimate = await PublicationSession.EstimateAsync(node.Ledger, node.Writer.Account, node.Payer.Account, file.Length, Options(), Token);
+        SpendingApproval approval = SpendingApproval.For(estimate, node.Writer.Account, node.Payer.Account);
+        Assert.Equal((15L, 30L), (estimate.FeeUnitDrops, approval.FeeUnitCeilingDrops));
+
+        // The open-ledger fee moves between the Estimate screen and the run, as testnet's does.
+        node.Ledger.OpenLedgerFee = new OpenLedgerFee(12, 10);
+
+        await PublicationSession.StartAsync(
+            Factory(node, budgets), node.Ledger, file, "text/plain", null, node.Writer.Account, "key-w", node.Payer.Account, "key-p", "testnet",
+            Options(approval), Token);
+
+        BatchBudget budget = Assert.Single(budgets);
+        Assert.Equal((18L, 30L), (budget.FeeUnitDrops, budget.FeeCeilingDrops));
     }
 
     [Fact]
@@ -5945,7 +6149,6 @@ public sealed class SpendingApprovalTests : IDisposable
         ResumeQuote asked = Assert.Single(quotes);
         Assert.Equal(node.Writer.Account, asked.Writer);
         Assert.Equal(node.Payer.Account, asked.Payer);
-        Assert.InRange(asked.MissingChunks, 1, 40);
         Assert.Equal(asked.MissingChunks, asked.Batch!.Chunks);
         Assert.Equal(asked.Batch.PayerFeeDropsWorstCase, Assert.Single(budgets).PayerBudgetDrops);
 
@@ -5970,6 +6173,8 @@ public sealed class SpendingApprovalTests : IDisposable
     }
 }
 ```
+
+In `tests/XrplFile.App.Core.Tests/ReadErrorMessagesTests.cs`, add `XrplFileError.ApprovalExceeded` to the array of `The_streaming_publication_errors_share_the_publishing_only_sentence` (Tasks 5 and 7).
 
 In `tests/XrplFile.App.Core.Tests/PublishErrorMessagesTests.cs`, add:
 
@@ -6030,18 +6235,35 @@ public sealed record SpendingApproval(string Writer, string? Payer, long FeeUnit
         }
     }
 
+    /// <summary>
+    /// Only exceeding a ceiling refuses (spec S25, B15): the unit may rise up to the approved ceiling,
+    /// and each worst case is taken at that ceiling, the most B26 lets the run spend, so it exceeds
+    /// its approved figure only when the run is larger than the one approved.
+    /// </summary>
     internal void Require(BatchPublicationEstimate estimate, string writer, string payer)
     {
         RequireAccounts(writer, payer);
+        BatchPublicationEstimate priced = AtCeiling(estimate);
 
-        if (estimate.FeeCeilingDrops > FeeUnitCeilingDrops
-            || estimate.WriterFeeDropsWorstCase > WriterCeilingDrops
-            || estimate.PayerFeeDropsWorstCase > PayerCeilingDrops)
+        if (estimate.FeeUnitDrops > FeeUnitCeilingDrops
+            || priced.WriterFeeDropsWorstCase > WriterCeilingDrops
+            || priced.PayerFeeDropsWorstCase > PayerCeilingDrops)
         {
-            throw Exceeded($"the run's ceiling is {estimate.FeeCeilingDrops} drops a unit, the writer's worst case {estimate.WriterFeeDropsWorstCase} and the payer's "
-                + $"{estimate.PayerFeeDropsWorstCase}; {FeeUnitCeilingDrops}, {WriterCeilingDrops} and {PayerCeilingDrops} were approved");
+            throw Exceeded($"the run's unit is {estimate.FeeUnitDrops} drops, and at the approved ceiling the writer's worst case is {priced.WriterFeeDropsWorstCase} "
+                + $"and the payer's {priced.PayerFeeDropsWorstCase}; {FeeUnitCeilingDrops}, {WriterCeilingDrops} and {PayerCeilingDrops} were approved");
         }
     }
+
+    /// <summary>
+    /// The estimate priced at the approved fee-unit ceiling. B26's worst cases are a count of units
+    /// times the ceiling, so they scale exactly.
+    /// </summary>
+    internal BatchPublicationEstimate AtCeiling(BatchPublicationEstimate estimate) => estimate with
+    {
+        FeeCeilingDrops = FeeUnitCeilingDrops,
+        PayerFeeDropsWorstCase = checked(estimate.PayerFeeDropsWorstCase / estimate.FeeCeilingDrops * FeeUnitCeilingDrops),
+        WriterFeeDropsWorstCase = checked(estimate.WriterFeeDropsWorstCase / estimate.FeeCeilingDrops * FeeUnitCeilingDrops),
+    };
 
     /// <summary>The strategy is built from the approval (spec S25), and B26's runtime count enforces each ceiling.</summary>
     internal BatchBudget Budget(BatchPublicationEstimate estimate) =>
@@ -6089,6 +6311,8 @@ public delegate Task<SpendingApproval> ResumeApproval(ResumeQuote quote, Cancell
             "Fees or balances changed since this was approved. Estimate it again.",
 ```
 
+`ReadErrorMessages.For(XrplFileError)`: add `or XrplFileError.ApprovalExceeded` to the publishing-only arm.
+
 - [ ] **Step 4: The session takes approvals**
 
 `SessionOptions`:
@@ -6111,12 +6335,14 @@ In `PublicationSession`:
 
 1. `AttachBatchAsync(BatchStrategyFactory strategyFactory, BatchPublicationEstimate estimate, BatchBudget budget, bool resuming)` — the caller passes the budget; the method's own `new BatchBudget(...)` line goes.
 2. One-account `StartAsync` (source overload), after `PublicationEstimator.Require(estimate, options.BudgetDrops);`: `options.Approval?.Require(estimate, writer);`
-3. Batch `StartAsync` (source overload), after `PublicationEstimator.RequireBatch(...)`:
+3. Batch `StartAsync` (source overload), in place of the existing `PublicationEstimator.RequireBatch(estimate, options.BudgetDrops);`:
 
 ```csharp
         SpendingApproval approval = options.Approval ?? SpendingApproval.For(estimate, writer, payer);
         approval.Require(estimate, writer, payer);
 ```
+
+   followed by `PublicationEstimator.RequireBatch(approval.AtCeiling(estimate), options.BudgetDrops);`: the balances must cover what the run may spend under the approval, not what the latest unit alone would cost.
 
    and `AttachBatchAsync(strategyFactory, estimate, approval.Budget(estimate), resuming: false)`. Both approval checks of the starts come before the hashing of Task 3, so a refused run reads nothing of the file.
 4. One-account `ResumeAsync`, after its `PublicationEstimator.Require(...)`:
@@ -6129,13 +6355,14 @@ In `PublicationSession`:
         approval.Require(estimate, state.Writer);
 ```
 
-5. Batch `ResumeAsync`, after `PublicationEstimator.RequireBatch(...)`:
+5. Batch `ResumeAsync`, in place of the existing `PublicationEstimator.RequireBatch(estimate, options.BudgetDrops);` (the quote is priced from the estimate, then balances are checked at the approved ceiling as in item 3):
 
 ```csharp
         SpendingApproval approval = options.ApproveResume is { } approve
             ? await approve(new ResumeQuote(state.Writer, payer, missingChunks, null, estimate), cancellationToken).ConfigureAwait(false)
             : SpendingApproval.For(estimate, state.Writer, payer);
         approval.Require(estimate, state.Writer, payer);
+        PublicationEstimator.RequireBatch(approval.AtCeiling(estimate), options.BudgetDrops);
 
         await session.AttachBatchAsync(strategyFactory, estimate, approval.Budget(estimate), resuming: true).ConfigureAwait(false);
 ```
@@ -6145,7 +6372,7 @@ In `PublicationSession`:
 - [ ] **Step 5: Run the tests**
 
 Run: `dotnet run --project tests/XrplFile.Core.Tests -- -class XrplFile.Tests.SpendingApprovalTests`
-Run: `dotnet run --project tests/XrplFile.App.Core.Tests -- -class XrplFile.App.Core.Tests.PublishErrorMessagesTests`
+Run: `dotnet run --project tests/XrplFile.App.Core.Tests -- -class XrplFile.App.Core.Tests.PublishErrorMessagesTests -class XrplFile.App.Core.Tests.ReadErrorMessagesTests`
 Run: both unit suites with `-trait- "Category=Integration"`.
 Expected: PASS.
 
@@ -6158,8 +6385,10 @@ git commit -m "feat(core): sessions spend only what was approved
 SpendingApproval names the writer, the payer, the fee-unit ceiling and each
 account's worst-case ceiling. A fresh run takes it from its caller and a
 resume asks for one after reconciliation with a quote of the remaining work;
-any estimate inside the run above it stops with ApprovalExceeded before
-anything is sent, and a Batch strategy's budget is the approval's."
+a Batch run refuses only a fee unit above the approved ceiling or a worst
+case, taken at that ceiling, above an account's approved figure, so a unit
+that rises under the ceiling still runs. Refusals stop with ApprovalExceeded
+before anything is sent, and a Batch strategy's budget is the approval's."
 ```
 
 ---
@@ -6171,14 +6400,14 @@ anything is sent, and a Batch strategy's budget is the approval's."
 - Modify: `app/XrplFile.App/Components/Estimate.razor` (size, hand-off, `IAsyncDisposable`)
 - Create: `tests/XrplFile.App.Core.Tests/FakeFiles.cs`, `tests/XrplFile.App.Core.Tests/Requests.cs`
 - Modify (tests): every `new PublishRequest(bytes, ...)` the compiler names — `PublicationRunTests`, `PublicationRunBatchTests`, `EstimateModelTests`, `PublishPolicyTests`, `PublishModelTests`, `PublishModelPayerTests`, `UnfinishedModelTests`, `UnfinishedModelBatchTests`, `PublicationRunStandaloneTests`, `PublishedFileFixture`, `RunModelTests`, `RunModelEtaTests`
-- Test: `tests/XrplFile.App.Core.Tests/HeldSourceTests.cs`
+- Test: `tests/XrplFile.App.Core.Tests/HeldSourceTests.cs`, `tests/XrplFile.App.Core.Tests/FailingSecondReadSource.cs`
 
 **Interfaces:**
-- Consumes: Task 1 (`IPublicationSource`, `FilePublicationSource.Open`, `MemoryPublicationSource`), Task 3 (session source overloads with `preparation`), Task 11 (`SpendingApproval`, `SessionOptions.Approval`).
+- Consumes: Task 1 (`IPublicationSource`, `FilePublicationSource.Open`, `MemoryPublicationSource`), Task 3 (session source overloads with `preparation`; `XrplFileException.SourceChanged`, set only on a resume's size or root refusal), Task 11 (`SpendingApproval`, `SessionOptions.Approval`, `SpendingApproval.AtCeiling`).
 - Produces:
   - `public sealed record PublishRequest(long Size, string Type, string Name, string KeyReference, string Account, string Network, string? PayerReference = null, string? PayerAccount = null, string? SourcePath = null)` with init members `WriterLabel`, `PayerLabel` (as today), `IPublicationSource? Source`, `SpendingApproval? Approval`, `bool SourceRecorded`.
   - `EstimateModel(IConnectionFactory connections, RunPaths paths, Func<string, IPublicationSource>? open = null)`; `SpendingApproval? Approval`; `PublishRequest? HandOff()`; `Task DiscardAsync()`.
-  - `PublicationRun` gains `Func<string, IPublicationSource>? openSource = null` as its last constructor parameter (Task 15 appends `IKeepAwake? keepAwake = null` after it; Task 16 builds the activity lease from the `VaultAutoLock` it already takes). `Start(request)` requires `request.Source` and `request.Approval` (`ArgumentException` otherwise) and, when it returns true, owns the source; `Resume(statePath, request)` opens `request.SourcePath` itself. `bool HasRejectedSource(string statePath)`.
+  - `PublicationRun` gains `Func<string, IPublicationSource>? openSource = null` as its last constructor parameter (Task 16 appends `IKeepAwake? keepAwake = null` after it; Task 17 builds the activity lease from the `VaultAutoLock` it already takes). `Start(request)` requires `request.Source` and `request.Approval` (`ArgumentException` otherwise) and, when it returns true, owns the source; `Resume(statePath, request)` opens `request.SourcePath` itself. `bool HasRejectedSource(string statePath)`.
   - Tests: `FakeFiles` (path → bytes; `Open(path)` returns a `CountingPublicationSource` and remembers it in `Opened`), `Requests.Fresh(byte[] bytes, string type, string name, string keyReference, string account, string network, string? payerReference = null, string? payerAccount = null, string? sourcePath = null)` (a request with a `MemoryPublicationSource` and an unbounded approval).
 
 **What owns the source when (spec S24):** `EstimateModel` opens it when it estimates and holds it; a new estimate, `DiscardAsync` (Back, leaving the screen) or an estimate that finishes after it was discarded dispose it. `HandOff()` gives it to the request; `PublicationRun.Start` returning true takes it, and the run disposes it when it ends by any path. `Start` returning false leaves it with the caller (Estimate.razor disposes it). A resume's source is opened by the run and disposed by it.
@@ -6234,8 +6463,47 @@ public static class Requests
         new(bytes.Length, type, name, keyReference, account, network, payerReference, payerAccount, sourcePath)
         {
             Source = new MemoryPublicationSource(bytes),
-            Approval = new SpendingApproval(account, payerAccount, long.MaxValue, long.MaxValue, payerAccount is null ? 0 : long.MaxValue),
+            Approval = new SpendingApproval(account, payerAccount, UnboundedFeeDrops, long.MaxValue, payerAccount is null ? 0 : long.MaxValue),
         };
+
+    /// <summary>
+    /// A fee-unit ceiling no test node reaches. Not <see cref="long.MaxValue"/>: the session prices the
+    /// worst cases at the approved ceiling (Task 11), and that product must stay a number of drops.
+    /// </summary>
+    public const long UnboundedFeeDrops = 1_000;
+}
+```
+
+`tests/XrplFile.App.Core.Tests/FailingSecondReadSource.cs`:
+
+```csharp
+namespace XrplFile.App.Core.Tests;
+
+/// <summary>A held file that fails the second time one chunk is read: hashing reads it once, sending reads it again.</summary>
+public sealed class FailingSecondReadSource(IPublicationSource inner, long failingChunk) : IPublicationSource
+{
+    private int _reads;
+
+    public long Length => inner.Length;
+
+    public int ReadChunk(long index, Span<byte> destination)
+    {
+        Check(index);
+        return inner.ReadChunk(index, destination);
+    }
+
+    public ValueTask<int> ReadChunkAsync(long index, Memory<byte> destination, CancellationToken cancellationToken)
+    {
+        Check(index);
+        return inner.ReadChunkAsync(index, destination, cancellationToken);
+    }
+
+    public ValueTask DisposeAsync() => inner.DisposeAsync();
+
+    private void Check(long index)
+    {
+        if (index == failingChunk && Interlocked.Increment(ref _reads) >= 2) throw new IOException("fake: the drive the file was on went away");
+    }
 }
 ```
 
@@ -6358,6 +6626,41 @@ public sealed class HeldSourceTests : VaultHarness
 
         Assert.Equal(PublicationRunState.Cancelled, run.Snapshot.State);
         Assert.True(held.Disposed);
+    }
+
+    [Fact]
+    public async Task A_file_that_cannot_be_read_mid_run_says_so_and_stays_resumable()
+    {
+        (PublicationRun run, PublishRequest request) = await RunReadyAsync(size: 30_000);
+
+        Assert.True(run.Start(request with { Source = new FailingSecondReadSource(request.Source!, failingChunk: 10) }));
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
+        Assert.Equal($"The file at {request.SourcePath} could not be read while it was being published. Make it available again and resume the run.", run.Snapshot.Failure);
+        Assert.True(File.Exists(run.Snapshot.StatePath));
+        Assert.True(RunModel.IsResumable(run.Snapshot));
+    }
+
+    [Fact]
+    public async Task A_resume_refused_for_another_reason_than_a_changed_file_does_not_mark_the_file()
+    {
+        (PublicationRun run, PublishRequest request) = await RunReadyAsync(size: 30_000);
+        _connections.Sink.Throws[5] = new XrplFileException(XrplFileError.NodeUnreachable, "fake: the node went away");
+        Assert.True(run.Start(request));
+        await run.Completion;
+        string statePath = run.Snapshot.StatePath!;
+
+        // A state recorded for another chunk size is refused with ResumeMismatch, and the file is not to blame.
+        PublicationState recorded = PublicationState.Load(statePath);
+        (recorded with { Phase = "chunks", Chunk = 999 }).Save(statePath);
+        run.Reset();
+
+        Assert.True(run.Resume(statePath, request with { Source = null, SourceRecorded = true }));
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
+        Assert.False(run.HasRejectedSource(statePath));
     }
 
     [Fact]
@@ -6710,8 +7013,20 @@ In `app/XrplFile.App.Core/PublicationRun.cs`:
             failure = $"The file at {ex.Path} could not be read. Choose it again.";
             finalState = PublicationRunState.Failed;
         }
-        catch (XrplFileException ex) when (ex.Error == XrplFileError.ResumeMismatch && attempt.Point == RunFailurePoint.BeforeResuming && statePath is not null)
+        catch (SourceReadFailedException ex)
         {
+            // Not the state file: the generic IOException clause below says the state could not be
+            // written, which would send the person after the wrong thing. The state is intact, so the
+            // run stays resumable once the file is back.
+            failure = ex.Path is null
+                ? "The file could not be read while it was being published. Make it available again and resume the run."
+                : $"The file at {ex.Path} could not be read while it was being published. Make it available again and resume the run.";
+            finalState = PublicationRunState.Failed;
+        }
+        catch (XrplFileException ex) when (ex is { Error: XrplFileError.ResumeMismatch, SourceChanged: true } && statePath is not null)
+        {
+            // Only a size or root refusal blames the file; a finished run, another chunk size or
+            // another writer is refused with ResumeMismatch too, and would open the picker for nothing.
             lock (_gate) _rejectedSources.Add(Path.GetFullPath(statePath));
             failure = request.SourceRecorded
                 ? $"The file at {request.SourcePath} has changed since the run started. Choose the original file."
@@ -6720,7 +7035,49 @@ In `app/XrplFile.App.Core/PublicationRun.cs`:
         }
 ```
 
-   and in a `finally` around the whole try (before `WriteTraceAsync`): `if (source is not null) await DisposeQuietlyAsync(source).ConfigureAwait(false);`.
+   and in a `finally` around the whole try (before `WriteTraceAsync`): `if (source is not null) await DisposeQuietlyAsync(source).ConfigureAwait(false);`. Both new clauses go before today's `catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)`.
+
+   The source is passed on wrapped, so a failed read of the file is told apart from a failed write of the state: right after `source ??= OpenRecorded(...)`, `IPublicationSource reading = new ReadReportingSource(source, request.SourcePath);`, and `reading` is what the session gets. The run still disposes `source` itself; the wrapper owns nothing.
+
+```csharp
+    /// <summary>Turns a failed read of the held file into <see cref="SourceReadFailedException"/>, so the run names the file and not the state.</summary>
+    private sealed class ReadReportingSource(IPublicationSource inner, string? path) : IPublicationSource
+    {
+        public long Length => inner.Length;
+
+        public int ReadChunk(long index, Span<byte> destination)
+        {
+            try
+            {
+                return inner.ReadChunk(index, destination);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new SourceReadFailedException(path, ex);
+            }
+        }
+
+        public async ValueTask<int> ReadChunkAsync(long index, Memory<byte> destination, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return await inner.ReadChunkAsync(index, destination, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new SourceReadFailedException(path, ex);
+            }
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>Local control flow: the held file failed a read during the run (a drive removed, a share gone, the file cut short).</summary>
+    private sealed class SourceReadFailedException(string? path, Exception inner) : Exception(path, inner)
+    {
+        public string? Path { get; } = path;
+    }
+```
 
 ```csharp
     /// <summary>A resume reads the file the run recorded, held the same way an estimate holds it (spec S7, S24).</summary>
@@ -6904,23 +7261,22 @@ file asks for it next time. No ReadAllBytes is left on the publication path."
 
 ---
 
-### Task 13: App — duration, the summary and its checkbox, and the resume confirmation (S11, S12, S25)
+### Task 13: App — the duration range, the cost summary and its checkbox (S11, S12, S25 fresh)
 
 **Files:**
 - Create: `app/XrplFile.App.Core/PublicationDuration.cs`, `app/XrplFile.App.Core/DurationText.cs`, `app/XrplFile.App.Core/CostSummary.cs`
-- Modify: `app/XrplFile.App.Core/EstimateModel.cs` (summary, confirmation, approval gated), `app/XrplFile.App.Core/PublicationRun.cs` (resume approval, `RunSnapshot.Confirmation`, `AnswerConfirmation`), `app/XrplFile.App.Core/RunModel.cs` (Batch settles per round, the read-back's time left, the confirmation, `Duration` moved), `app/XrplFile.App.Core/UnfinishedModel.cs` (labels on the request)
-- Modify: `app/XrplFile.App/Components/Estimate.razor`, `app/XrplFile.App/Components/Run.razor`
-- Test: `tests/XrplFile.App.Core.Tests/PublicationDurationTests.cs`, `tests/XrplFile.App.Core.Tests/CostSummaryTests.cs`, `tests/XrplFile.App.Core.Tests/EstimateModelConfirmationTests.cs`, `tests/XrplFile.App.Core.Tests/ResumeConfirmationTests.cs`, `tests/XrplFile.App.Core.Tests/RunModelEtaTests.cs` (two tests)
+- Modify: `app/XrplFile.App.Core/EstimateModel.cs` (summary, confirmation, approval gated), `app/XrplFile.App.Core/RunModel.cs` (its private `Duration` moves to `DurationText`)
+- Modify: `app/XrplFile.App/Components/Estimate.razor`
+- Test: `tests/XrplFile.App.Core.Tests/PublicationDurationTests.cs`, `tests/XrplFile.App.Core.Tests/CostSummaryTests.cs`, `tests/XrplFile.App.Core.Tests/EstimateModelConfirmationTests.cs`, `tests/XrplFile.App.Core.Tests/PublicationRunBatchTests.cs` (one test)
 
 **Interfaces:**
-- Consumes: Task 10 (`BatchPublicationEstimate.Rounds`), Task 11 (`SpendingApproval`, `ResumeQuote`, `ResumeApproval`, `SessionOptions.ApproveResume`), Task 12 (`EstimateModel` holding, `HandOff`, `PublishRequest.Size`), Task 7 (`PublicationCheck.SampleBlocks`' sizes: one block → 1, up to four → all, else 4).
+- Consumes: Task 7 (`PublicationCheck.SampleBlocks`' sizes: one block → 1, up to four → all, else 4), Task 10 (`BatchPublicationEstimate.Rounds`), Task 11 (`SpendingApproval`, `ApprovalExceeded`), Task 12 (`EstimateModel` holding, `HandOff`, `PublishRequest.Size`, `FakeFiles`, `Requests.Fresh`, and `PublicationRunBatchTests.ReadyAsync` as Task 12 migrated it).
 - Produces:
   - `public readonly record struct DurationRange(TimeSpan Shortest, TimeSpan Longest)`.
   - `public static class PublicationDuration` — `const double BatchFastMemosPerSecond = 85`, `BatchSlowMemosPerSecond = 70`, `TicketFastMemosPerSecond = 2`, `TicketSlowMemosPerSecond = 1`, `ReaderSecondsPer400Records = 0.7`, `const int RecordsPerSampledBlock = 1_024`; `static TimeSpan SettlePerRound` (= `LedgerTiming.ApproximateLedgerInterval * 3`); `static int SampledBlocks(int blocks)`; `static TimeSpan Reading(long records)`; `static DurationRange ForBatch(BatchPublicationEstimate estimate)`; `static DurationRange ForOneAccount(PublicationEstimate estimate)`; `static TimeSpan ForRead(Manifest manifest)`.
   - `public static class DurationText` — `static string Of(TimeSpan span)` (RunModel's rule, moved), `static string Of(DurationRange range)` ("{shortest} to {longest}", or one figure when they read the same).
   - `public sealed record AccountCost(string Role, string Name, long RequiredDrops, long WorstCaseFeeDrops)`; `public sealed record CostSummary(DurationRange Duration, long Transactions, IReadOnlyList<AccountCost> Accounts)` — `static readonly TimeSpan ConfirmationDuration` (1 h), `const long ConfirmationDrops = 1_000_000`, `bool NeedsConfirmation`, `static CostSummary Of(PublicationEstimate, PublishRequest)`, `static CostSummary Of(BatchPublicationEstimate, PublishRequest)`.
   - `EstimateModel.Summary : CostSummary?`, `NeedsConfirmation`, `Confirmed`, `void Confirm(bool understood)`, `const string ConfirmationLabel = "I understand the cost and the time"`. `CanPublish` and `Approval` require the confirmation when it is needed.
-  - `RunSnapshot.Confirmation : CostSummary?` (a resume waiting for the person); `PublicationRun.AnswerConfirmation(bool approved) : bool`; `RunView.Confirmation`; `RunModel.ConfirmResume()`, `RunModel.DeclineResume()`.
 
 **Durations (spec S11), as implemented:**
 - **Batch:** writing `Memos / 85` to `Memos / 70` seconds; plus `Rounds × 3 × LedgerTiming.ApproximateLedgerInterval` (12 s a round); plus the sample's read: `SampledBlocks(Blocks) × 1,024` records (capped at `Chunks`), at 0.7 s per 400 records. The same addends go into both ends.
@@ -7075,7 +7431,8 @@ public sealed class EstimateModelConfirmationTests : IDisposable
     {
         EstimateModel model = NewModel();
 
-        // 5,001 memos at a 30-drop ceiling: the payer's worst case is 37,508 x 30 = 1,125,240 drops.
+        // 5,000 chunks, one list and the manifest: 5,002 memos. At a 30-drop ceiling the payer's worst
+        // case is ceil(5,002 x 7.5) = 37,515 units x 30 = 1,125,450 drops.
         await model.EstimateAsync(Batch("large.bin", 5_000_000), Token);
 
         Assert.True(model.NeedsConfirmation);
@@ -7122,143 +7479,33 @@ public sealed class EstimateModelConfirmationTests : IDisposable
 }
 ```
 
-`tests/XrplFile.App.Core.Tests/ResumeConfirmationTests.cs` — in the style of `PublicationRunBatchTests` (copy its `ReadyAsync`, `Fast` options and fields), with:
-
-```csharp
-    /// <summary>A Batch run of 250 chunks at an open-ledger fee of 190: the payer's worst case is 1,883 x 570 = 1,073,310 drops, past the line.</summary>
-    private async Task<(PublicationRun Run, PublishRequest Request, string StatePath, KeyVault Vault)> InterruptedExpensiveAsync()
-    {
-        (PublicationRun run, PublishRequest request, _, KeyVault vault) = await ReadyAsync(250_000);
-        _connections.Ledger.OpenLedgerFee = new OpenLedgerFee(190, 10);
-        _connections.BatchSink!.Transmitting = transmission =>
-        {
-            if (transmission.Ordinal == 1) run.Cancel();
-        };
-
-        Assert.True(run.Start(request));
-        await run.Completion;
-        _connections.BatchSink.Transmitting = null;
-        Assert.Equal(PublicationRunState.Cancelled, run.Snapshot.State);
-
-        return (run, request, run.Snapshot.StatePath!, vault);
-    }
-
-    private static PublishRequest Resuming(PublishRequest started, string path) =>
-        new(started.Size, started.Type, started.Name, started.KeyReference, started.Account, started.Network,
-            started.PayerReference, started.PayerAccount, path) { SourceRecorded = true };
-
-    [Fact]
-    public async Task A_resume_above_the_threshold_waits_for_the_person_and_goes_on_when_confirmed()
-    {
-        (PublicationRun run, PublishRequest request, string statePath, _) = await InterruptedExpensiveAsync();
-        await File.WriteAllBytesAsync(request.SourcePath!, VectorStream.Bytes("app-batch", 250_000), Token);
-
-        Assert.True(run.Resume(statePath, Resuming(request, request.SourcePath!)));
-        await BatchTestWait.UntilAsync(() => run.Snapshot.Confirmation is not null);
-
-        CostSummary asked = run.Snapshot.Confirmation!;
-        Assert.True(asked.NeedsConfirmation);
-        Assert.True(run.AnswerConfirmation(true));
-        await run.Completion;
-
-        Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
-        Assert.Null(run.Snapshot.Confirmation);
-    }
-
-    [Fact]
-    public async Task A_declined_resume_sends_nothing_and_stays_resumable()
-    {
-        (PublicationRun run, PublishRequest request, string statePath, _) = await InterruptedExpensiveAsync();
-        await File.WriteAllBytesAsync(request.SourcePath!, VectorStream.Bytes("app-batch", 250_000), Token);
-        byte[] before = await File.ReadAllBytesAsync(statePath, Token);
-        int sent = _connections.BatchSink!.Transmissions.Count;
-
-        Assert.True(run.Resume(statePath, Resuming(request, request.SourcePath!)));
-        await BatchTestWait.UntilAsync(() => run.Snapshot.Confirmation is not null);
-        Assert.True(run.AnswerConfirmation(false));
-        await run.Completion;
-
-        Assert.Equal(PublicationRunState.Cancelled, run.Snapshot.State);
-        Assert.Equal(sent, _connections.BatchSink.Transmissions.Count);
-        Assert.Equal(before, await File.ReadAllBytesAsync(statePath, Token));
-    }
-
-    [Fact]
-    public async Task A_resume_below_the_threshold_asks_nobody()
-    {
-        (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync(20_000);
-        _connections.BatchSink!.Transmitting = transmission =>
-        {
-            if (transmission.Ordinal == 1) run.Cancel();
-        };
-        Assert.True(run.Start(request));
-        await run.Completion;
-        _connections.BatchSink.Transmitting = null;
-        string statePath = run.Snapshot.StatePath!;
-        await File.WriteAllBytesAsync(request.SourcePath!, VectorStream.Bytes("app-batch", 20_000), Token);
-        bool asked = false;
-
-        Assert.True(run.Resume(statePath, Resuming(request, request.SourcePath!)));
-        while (!run.Completion.IsCompleted)
-        {
-            asked |= run.Snapshot.Confirmation is not null;
-            await Task.Delay(5, Token);
-        }
-
-        Assert.False(asked);
-        Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
-    }
-```
-
-`BatchTestWait.UntilAsync` is a 20-second polling helper; add it to the test project if none exists (the Core suite's `BatchTestNode.EventuallyAsync` is the same thing):
-
-```csharp
-namespace XrplFile.App.Core.Tests;
-
-internal static class BatchTestWait
-{
-    public static async Task UntilAsync(Func<bool> condition)
-    {
-        DateTimeOffset until = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(20);
-
-        while (!condition())
-        {
-            if (DateTimeOffset.UtcNow > until) throw new TimeoutException("the condition did not become true in 20 s");
-            await Task.Delay(5);
-        }
-    }
-}
-```
-
-`ReadyAsync` after Task 12 builds its request with `Requests.Fresh(VectorStream.Bytes("app-batch", size), …, sourcePath: Path.Combine(_directory, "file.bin"))`.
-
-In `tests/XrplFile.App.Core.Tests/RunModelEtaTests.cs`, add:
+In `tests/XrplFile.App.Core.Tests/PublicationRunBatchTests.cs`, add (spec 6.4: a ceiling exceeded by a re-estimate):
 
 ```csharp
     [Fact]
-    public void A_Batch_pass_with_rounds_still_to_come_adds_a_settle_for_each()
+    public async Task A_run_whose_fee_unit_rose_past_the_approved_ceiling_is_refused_before_anything_is_sent()
     {
-        const long fileBytes = 40_000_000;
-        string text = RunModel.StageTextOf(Running("chunks", 0, 40_000, batch: true, TimeSpan.FromSeconds(6), fileBytes), Now, rate: 70);
+        (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync();
+        BatchPublicationEstimate estimate = await PublicationSession.EstimateAsync(
+            _connections.Ledger, request.Account, request.PayerAccount!, request.Size, new SessionOptions(), Token);
+        PublishRequest approved = request with { Approval = SpendingApproval.For(estimate, request.Account, request.PayerAccount!) };
 
-        // 40,000 at 70/s is 571 s; two more rounds of this pass, the list pass and the manifest: 4 x 12 s.
-        Assert.Equal($"Writing the file — 0 of {40_000:N0} · 70 chunks/s · about 10 min left · 0:06 elapsed", text);
-    }
+        // The Estimate screen approved a unit of 15 and a ceiling of 30; the node now asks 45.
+        _connections.Ledger.OpenLedgerFee = new OpenLedgerFee(30, 10);
 
-    [Fact]
-    public void The_read_back_says_how_long_its_remaining_blocks_take()
-    {
-        string text = RunModel.StageTextOf(Running("read-back", 1, 4, batch: true, TimeSpan.FromSeconds(10)), Now, rate: null);
+        Assert.True(run.Start(approved));
+        await run.Completion;
 
-        // Three blocks of 1,024 records at 0.7 s per 400: 5.4 s.
-        Assert.Equal("Reading it back from the ledger — 1 of 4 · about 6 s left · 0:10 elapsed", text);
+        Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
+        Assert.Contains("Estimate it again.", run.Snapshot.Failure, StringComparison.Ordinal);
+        Assert.Empty(_connections.BatchSink!.Transmissions);
     }
 ```
 
 - [ ] **Step 2: Run them to see them fail**
 
-Run: `dotnet run --project tests/XrplFile.App.Core.Tests -- -class XrplFile.App.Core.Tests.PublicationDurationTests -class XrplFile.App.Core.Tests.CostSummaryTests -class XrplFile.App.Core.Tests.EstimateModelConfirmationTests -class XrplFile.App.Core.Tests.ResumeConfirmationTests -class XrplFile.App.Core.Tests.RunModelEtaTests`
-Expected: build errors.
+Run: `dotnet run --project tests/XrplFile.App.Core.Tests -- -class XrplFile.App.Core.Tests.PublicationDurationTests -class XrplFile.App.Core.Tests.CostSummaryTests -class XrplFile.App.Core.Tests.EstimateModelConfirmationTests -class XrplFile.App.Core.Tests.PublicationRunBatchTests`
+Expected: build errors; once the types exist, `A_run_whose_fee_unit_rose…` already passes (Task 11 does the refusal; this pins it at the application's edge).
 
 - [ ] **Step 3: Durations, their text and the summary**
 
@@ -7488,7 +7735,245 @@ and below the card:
     }
 ```
 
-- [ ] **Step 5: The resume confirmation on the run screen**
+- [ ] **Step 5: Run the tests**
+
+Run: the command of Step 2, then `dotnet run --project tests/XrplFile.App.Core.Tests -- -trait- "Category=Integration"`.
+Expected: PASS; `RunModelEtaTests` are unchanged, because `DurationText.Of` is `RunModel`'s rule moved, not changed.
+Run: `dotnet build app/XrplFile.App/XrplFile.App.csproj` — expect no warnings.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add app tests
+git commit -m "feat(app): price the time of a publication and confirm large ones
+
+The estimate shows a duration range per strategy: Batch at 85 to 70 memos/s
+plus 12 s a round and its sampled read, tickets at 2 to 1 memos/s, sequence a
+memo per ledger, both with a full read-back. Above an hour or 1 XRP of either
+account's worst case, a summary and a checkbox gate Publish, and the checkbox
+resets with every estimate."
+```
+
+---
+
+### Task 14: App — the resume confirmation and the run screen's time left (S25 resume, S11 run screen)
+
+**Files:**
+- Create: `tests/XrplFile.App.Core.Tests/BatchTestWait.cs`, `tests/XrplFile.App.Core.Tests/ResumeConfirmationTests.cs`
+- Modify: `app/XrplFile.App.Core/PublicationRun.cs` (resume approval, `RunSnapshot.Confirmation`, `AnswerConfirmation`), `app/XrplFile.App.Core/RunModel.cs` (Batch settles per round, the read-back's time left, the confirmation), `app/XrplFile.App.Core/UnfinishedModel.cs` (labels on the request)
+- Modify: `app/XrplFile.App/Components/Run.razor`
+- Test: `tests/XrplFile.App.Core.Tests/ResumeConfirmationTests.cs`, `tests/XrplFile.App.Core.Tests/RunModelEtaTests.cs` (two tests)
+
+**Interfaces:**
+- Consumes: Task 11 (`ResumeQuote`, `ResumeApproval`, `SessionOptions.ApproveResume`), Task 12 (`Requests.Fresh`, `PublicationRun`'s resume opening the recorded path), Task 13 (`CostSummary`, `AccountCost`, `PublicationDuration.SettlePerRound`, `PublicationDuration.Reading`, `PublicationDuration.RecordsPerSampledBlock`, `DurationText`, `EstimateModel.ConfirmationLabel`).
+- Produces:
+  - `RunSnapshot.Confirmation : CostSummary?` (a resume waiting for the person); `PublicationRun.AnswerConfirmation(bool approved) : bool`; `RunView.Confirmation`; `RunModel.ConfirmResume()`, `RunModel.DeclineResume()`.
+  - Test helpers used by later tasks: `internal static class BatchTestWait` with `static Task UntilAsync(Func<bool> condition)` (Task 17); `ResumeConfirmationTests` with `ReadyAsync(int size = 20_000) : Task<(PublicationRun Run, PublishRequest Request, PublicationHistory History, KeyVault Vault)>`, `InterruptedExpensiveAsync() : Task<(PublicationRun Run, PublishRequest Request, string StatePath, KeyVault Vault)>`, `static PublishRequest Resuming(PublishRequest started, string path)`, `_connections` and `Token` (Task 17 adds two tests to this class).
+
+**The run screen's time left (Spec question 8):** on the Batch path one settle per round still to come — the rounds of the current pass after the one in progress, plus later passes — and the read-back stage's own time: blocks still to read at the measured rate, or 1,024 records per block at 0.7 s per 400 before a rate exists. The ticket path keeps one settle per pass (B21).
+
+- [ ] **Step 1: Write the failing tests**
+
+`tests/XrplFile.App.Core.Tests/BatchTestWait.cs` (the Core suite's `BatchTestNode.EventuallyAsync` is the same thing, and the App suite has none):
+
+```csharp
+namespace XrplFile.App.Core.Tests;
+
+internal static class BatchTestWait
+{
+    public static async Task UntilAsync(Func<bool> condition)
+    {
+        DateTimeOffset until = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(20);
+
+        while (!condition())
+        {
+            if (DateTimeOffset.UtcNow > until) throw new TimeoutException("the condition did not become true in 20 s");
+            await Task.Delay(5);
+        }
+    }
+}
+```
+
+`tests/XrplFile.App.Core.Tests/ResumeConfirmationTests.cs`:
+
+```csharp
+using Xrpl.Wallet;
+using XrplFile.Keys;
+using XrplFile.Tests;
+using Xunit;
+
+namespace XrplFile.App.Core.Tests;
+
+/// <summary>Spec S25: a resume asks for its approval after reconciliation, and above the threshold it asks the person.</summary>
+public sealed class ResumeConfirmationTests : VaultHarness
+{
+    private static readonly BatchStrategyOptions Fast = new()
+    {
+        ChainCheck = TimeSpan.FromMilliseconds(5),
+        ProgressSweep = TimeSpan.FromMilliseconds(5),
+        HistoryLagLimit = TimeSpan.FromSeconds(2),
+        FeeWait = TimeSpan.FromMilliseconds(20),
+
+        // The fake closes a ledger on every read, so its deadlines pass in milliseconds.
+        TransportRetryStep = TimeSpan.FromMilliseconds(1),
+    };
+
+    private readonly string _directory = Directory.CreateTempSubdirectory("xrpl-file-resume-confirm-").FullName;
+    private readonly FakeConnectionFactory _connections = new();
+
+    private RunPaths Paths => new(_directory);
+
+    public override async ValueTask DisposeAsync()
+    {
+        await base.DisposeAsync();
+        if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
+    }
+
+    private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    /// <summary>A writer and a payer of 100 XRP each in a vault, and a Batch request for <paramref name="size"/> bytes recorded at <c>file.bin</c>.</summary>
+    private async Task<(PublicationRun Run, PublishRequest Request, PublicationHistory History, KeyVault Vault)> ReadyAsync(int size = 20_000)
+    {
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("a master password"), Token);
+
+        XrplWallet writer = XrplWallet.Generate();
+        XrplWallet payer = XrplWallet.Generate();
+        string writerRef = await vault.StoreAsync(new NewVaultEntry(VaultEntryKind.Generated, "writer", "testnet", writer.ClassicAddress, writer.Seed), Token);
+        string payerRef = await vault.StoreAsync(new NewVaultEntry(VaultEntryKind.Generated, "payer", "testnet", payer.ClassicAddress, payer.Seed), Token);
+
+        FakeBatchLedgerSink sink = _connections.EnableBatch();
+        sink.SetSequence(writer.ClassicAddress, 100);
+        sink.SetSequence(payer.ClassicAddress, 500);
+        _connections.Ledger.Balances[writer.ClassicAddress] = 100_000_000;
+        _connections.Ledger.Balances[payer.ClassicAddress] = 100_000_000;
+
+        PublicationHistory history = new(Paths.HistoryPath);
+        PublicationRun run = new(_connections, vault, Paths, history, batchOptions: Fast);
+        PublishRequest request = Requests.Fresh(
+            VectorStream.Bytes("app-batch", size), "application/octet-stream", "file.bin", writerRef, writer.ClassicAddress, "testnet",
+            payerRef, payer.ClassicAddress, sourcePath: Path.Combine(_directory, "file.bin"));
+
+        return (run, request, history, vault);
+    }
+
+    /// <summary>A Batch run of 250 chunks at an open-ledger fee of 190: the payer's worst case is 1,883 x 570 = 1,073,310 drops, past the line.</summary>
+    private async Task<(PublicationRun Run, PublishRequest Request, string StatePath, KeyVault Vault)> InterruptedExpensiveAsync()
+    {
+        (PublicationRun run, PublishRequest request, _, KeyVault vault) = await ReadyAsync(250_000);
+        _connections.Ledger.OpenLedgerFee = new OpenLedgerFee(190, 10);
+        _connections.BatchSink!.Transmitting = transmission =>
+        {
+            if (transmission.Ordinal == 1) run.Cancel();
+        };
+
+        Assert.True(run.Start(request));
+        await run.Completion;
+        _connections.BatchSink.Transmitting = null;
+        Assert.Equal(PublicationRunState.Cancelled, run.Snapshot.State);
+
+        return (run, request, run.Snapshot.StatePath!, vault);
+    }
+
+    private static PublishRequest Resuming(PublishRequest started, string path) =>
+        new(started.Size, started.Type, started.Name, started.KeyReference, started.Account, started.Network,
+            started.PayerReference, started.PayerAccount, path) { SourceRecorded = true };
+
+    [Fact]
+    public async Task A_resume_above_the_threshold_waits_for_the_person_and_goes_on_when_confirmed()
+    {
+        (PublicationRun run, PublishRequest request, string statePath, _) = await InterruptedExpensiveAsync();
+        await File.WriteAllBytesAsync(request.SourcePath!, VectorStream.Bytes("app-batch", 250_000), Token);
+
+        Assert.True(run.Resume(statePath, Resuming(request, request.SourcePath!)));
+        await BatchTestWait.UntilAsync(() => run.Snapshot.Confirmation is not null);
+
+        CostSummary asked = run.Snapshot.Confirmation!;
+        Assert.True(asked.NeedsConfirmation);
+        Assert.True(run.AnswerConfirmation(true));
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
+        Assert.Null(run.Snapshot.Confirmation);
+    }
+
+    [Fact]
+    public async Task A_declined_resume_sends_nothing_and_stays_resumable()
+    {
+        (PublicationRun run, PublishRequest request, string statePath, _) = await InterruptedExpensiveAsync();
+        await File.WriteAllBytesAsync(request.SourcePath!, VectorStream.Bytes("app-batch", 250_000), Token);
+        byte[] before = await File.ReadAllBytesAsync(statePath, Token);
+        int sent = _connections.BatchSink!.Transmissions.Count;
+
+        Assert.True(run.Resume(statePath, Resuming(request, request.SourcePath!)));
+        await BatchTestWait.UntilAsync(() => run.Snapshot.Confirmation is not null);
+        Assert.True(run.AnswerConfirmation(false));
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Cancelled, run.Snapshot.State);
+        Assert.Equal(sent, _connections.BatchSink.Transmissions.Count);
+        Assert.Equal(before, await File.ReadAllBytesAsync(statePath, Token));
+    }
+
+    [Fact]
+    public async Task A_resume_below_the_threshold_asks_nobody()
+    {
+        (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync(20_000);
+        _connections.BatchSink!.Transmitting = transmission =>
+        {
+            if (transmission.Ordinal == 1) run.Cancel();
+        };
+        Assert.True(run.Start(request));
+        await run.Completion;
+        _connections.BatchSink.Transmitting = null;
+        string statePath = run.Snapshot.StatePath!;
+        await File.WriteAllBytesAsync(request.SourcePath!, VectorStream.Bytes("app-batch", 20_000), Token);
+        bool asked = false;
+
+        Assert.True(run.Resume(statePath, Resuming(request, request.SourcePath!)));
+        while (!run.Completion.IsCompleted)
+        {
+            asked |= run.Snapshot.Confirmation is not null;
+            await Task.Delay(5, Token);
+        }
+
+        Assert.False(asked);
+        Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
+    }
+}
+```
+
+The resume opens the recorded path through the run's default `FilePublicationSource.Open`, so each test writes the file to `request.SourcePath` before it resumes.
+
+In `tests/XrplFile.App.Core.Tests/RunModelEtaTests.cs`, add:
+
+```csharp
+    [Fact]
+    public void A_Batch_pass_with_rounds_still_to_come_adds_a_settle_for_each()
+    {
+        const long fileBytes = 40_000_000;
+        string text = RunModel.StageTextOf(Running("chunks", 0, 40_000, batch: true, TimeSpan.FromSeconds(6), fileBytes), Now, rate: 70);
+
+        // 40,000 at 70/s is 571 s; two more rounds of this pass, the list pass and the manifest: 4 x 12 s.
+        Assert.Equal($"Writing the file — 0 of {40_000:N0} · 70 chunks/s · about 10 min left · 0:06 elapsed", text);
+    }
+
+    [Fact]
+    public void The_read_back_says_how_long_its_remaining_blocks_take()
+    {
+        string text = RunModel.StageTextOf(Running("read-back", 1, 4, batch: true, TimeSpan.FromSeconds(10)), Now, rate: null);
+
+        // Three blocks of 1,024 records at 0.7 s per 400: 5.4 s.
+        Assert.Equal("Reading it back from the ledger — 1 of 4 · about 6 s left · 0:10 elapsed", text);
+    }
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `dotnet run --project tests/XrplFile.App.Core.Tests -- -class XrplFile.App.Core.Tests.ResumeConfirmationTests -class XrplFile.App.Core.Tests.RunModelEtaTests`
+Expected: build errors (`Confirmation`, `AnswerConfirmation`); then the two ETA tests fail (one settle per pass, no read-back time).
+
+- [ ] **Step 3: The resume confirmation and the run screen**
 
 In `PublicationRun`:
 
@@ -7623,31 +8108,42 @@ In `RunModel`:
             }
 ```
 
-with `private bool _understood;` in `@code`, reset to false whenever `view.Confirmation` is null.
+with, in `@code`, the field and its reset in the poll that refreshes `view` (the existing timer callback that captures `Model.View` and calls `StateHasChanged`):
 
-- [ ] **Step 6: Run the tests**
+```csharp
+    /// <summary>The resume's checkbox; cleared whenever no confirmation is shown, so the next one starts unticked.</summary>
+    private bool _understood;
+```
+
+```csharp
+            view = Model.View;
+            if (view.Confirmation is null) _understood = false;
+```
+
+(`view` is the field the page already renders from; if the callback names it differently, reset `_understood` right after that assignment.)
+
+- [ ] **Step 4: Run the tests**
 
 Run: the command of Step 2, then `dotnet run --project tests/XrplFile.App.Core.Tests -- -trait- "Category=Integration"`.
 Expected: PASS. Existing `RunModelEtaTests` for small Batch files are unchanged (no further round in their pass).
 Run: `dotnet build app/XrplFile.App/XrplFile.App.csproj` — expect no warnings.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add app tests
-git commit -m "feat(app): price time, confirm large runs, and approve every resume
+git commit -m "feat(app): approve every resume, and count rounds in the time left
 
-The estimate shows a duration range per strategy: Batch at 85 to 70 memos/s
-plus 12 s a round and its sampled read, tickets at 2 to 1 memos/s, sequence a
-memo per ledger, both with a full read-back. Above an hour or 1 XRP of either
-account's worst case, a summary and a checkbox gate Publish, and the checkbox
-resets with every estimate. A resume asks for its approval after
-reconciliation: at once below the line, on the run screen above it."
+A resume asks for its approval after reconciliation: at once below the line,
+on the run screen above it, with the same summary and checkbox as the
+estimate; declining stops it before anything is sent. The run screen adds a
+settle for every Batch round still to come and says how long the read-back
+has left."
 ```
 
 ---
 
-### Task 14: App — the Publish screen's size policy (S1, S16)
+### Task 15: App — the Publish screen's size policy (S1, S16)
 
 **Files:**
 - Modify: `app/XrplFile.App.Core/PublishModel.cs` (limits, sentences, `Describe` order, `Warning` removed), `app/XrplFile.App.Core/PublishErrorMessages.cs` (`TooLarge`), `app/XrplFile.App.Core/PublishRequest.cs` (a cref, if Task 12 left it), `app/XrplFile.App/Components/Publish.razor` (the warning alert removed)
@@ -7852,7 +8348,7 @@ default limit is gone."
 
 ---
 
-### Task 15: Keep the computer awake on a thread of its own (S13)
+### Task 16: Keep the computer awake on a thread of its own (S13)
 
 **Files:**
 - Create: `app/XrplFile.App.Core/KeepAwake.cs` (`IKeepAwake`, `IExecutionState`, `ThreadKeepAwake`), `app/XrplFile.App/Platform/WindowsExecutionState.cs`
@@ -8180,7 +8676,7 @@ refused call is logged and does not fail the run."
 
 ---
 
-### Task 16: The activity lease, and Lock stops the run (S14)
+### Task 17: The activity lease, and Lock stops the run (S14)
 
 **Files:**
 - Create: `app/XrplFile.App.Core/ActivityLease.cs`
@@ -8188,12 +8684,12 @@ refused call is logged and does not fail the run."
 - Test: `tests/XrplFile.App.Core.Tests/ActivityLeaseTests.cs`, `tests/XrplFile.App.Core.Tests/PublicationRunTests.cs` (one test), `tests/XrplFile.App.Core.Tests/ResumeConfirmationTests.cs` (two tests)
 
 **Interfaces:**
-- Consumes: `VaultAutoLock.Touch` (a no-op once disposed), `PublicationRun.StopAsync(TimeSpan)` (cancels at once, then waits), Task 13 (`InterruptedExpensiveAsync`, `Resuming`, `BatchTestWait`), Task 15 (`RunAsync`'s outer `finally`).
+- Consumes: `VaultAutoLock.Touch` (a no-op once disposed), `PublicationRun.StopAsync(TimeSpan)` (cancels at once, then waits), Task 14 (`InterruptedExpensiveAsync`, `Resuming`, `ReadyAsync`, `BatchTestWait` in `ResumeConfirmationTests`), Task 16 (`RunAsync`'s outer `finally`).
 - Produces:
   - `public sealed class ActivityLease : IDisposable` — `static readonly TimeSpan Interval` (1 min), `static ActivityLease Start(Action touch, TimeProvider time)`.
   - `UnlockModel(IKeyVault vault, bool vaultPathIsDefault = true, PublicationRun? run = null)`; `static readonly TimeSpan RunStopTimeout` (10 s).
 
-**The rule (spec S14):** the lease touches the idle lock at once, then every minute, from the first preparation step of a run or resume to its end by any path. Progress reports keep touching as they do today; the lease covers the long awaits that report nothing (hashing a large file before Task 18's reports, a connection that hangs, a history page that takes a minute). Lock cancels an active run at once, waits at most `RunStopTimeout` for it to stop, and then locks whether or not it stopped.
+**The rule (spec S14):** the lease touches the idle lock at once, then every minute, from the first preparation step of a run or resume to its end by any path. Progress reports keep touching as they do today; the lease covers the long awaits that report nothing (hashing a large file before Task 19's reports, a connection that hangs, a history page that takes a minute). Lock cancels an active run at once, waits at most `RunStopTimeout` for it to stop, and then locks whether or not it stopped.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -8417,7 +8913,7 @@ a lock followed by an unlock no longer lets the signer continue."
 
 ---
 
-### Task 17: App — the Read screen reads any size (S15)
+### Task 18: App — the Read screen reads any size (S15)
 
 **Files:**
 - Modify: `app/XrplFile.App.Core/ReadModel.cs` (ceiling removed, `ReadDuration`), `app/XrplFile.App.Core/ReadRun.cs` (ceiling check removed), `app/XrplFile.App/Components/Read.razor` (the duration)
@@ -8492,7 +8988,7 @@ In `ReadModel`:
     public TimeSpan? ReadDuration => Manifest is { } record ? PublicationDuration.ForRead(record.Manifest) : null;
 ```
 
-In `ReadRun.RunAsync`, delete `ReaderOptions options = new();`, the comment above the check and the `if (manifest.Manifest.Size > options.MaxBytes) { throw … }` block. The run streams blocks to a temporary file already, so the size costs disk, not memory.
+In `ReadRun.RunAsync`, delete `ReaderOptions options = new();`, the comment above the check and the `if (manifest.Manifest.Size > options.MaxBytes) { throw … }` block, and construct the reader further down (`XrplFileReader reader = new(connection.Source, options);`, about line 345) as `XrplFileReader reader = new(connection.Source);`. The run streams blocks to a temporary file already, so the size costs disk, not memory.
 
 In `app/XrplFile.App/Components/Read.razor`, after `<p class="mb-1">@manifest.Manifest.Size.ToString("N0") bytes</p>`:
 
@@ -8519,7 +9015,7 @@ measured pace before the person starts. The library's default stays."
 
 ---
 
-### Task 18: App — the preparation stages in words (spec 5.3)
+### Task 19: App — the preparation stages in words (spec 5.3)
 
 **Files:**
 - Modify: `app/XrplFile.App.Core/RunModel.cs` (`StageNameOf`, a shared head, the stopped line)
@@ -8623,7 +9119,7 @@ says where it stopped."
 
 ---
 
-### Task 19: The memory test in a child process (S27)
+### Task 20: The memory test in a child process (S27)
 
 **Files:**
 - Create: `tests/XrplFile.MemoryProbe/XrplFile.MemoryProbe.csproj`, `tests/XrplFile.MemoryProbe/Program.cs`, `tests/XrplFile.MemoryProbe/Probe.cs`, `tests/XrplFile.MemoryProbe/CompactLedger.cs`
@@ -8637,7 +9133,7 @@ says where it stopped."
   - `internal sealed class CompactLedger : ILedgerSink, ILedgerSource` (probe only).
   - Test `XrplFile.Tests.PublicationMemoryTests` with `[Trait("Category", "Slow")]`.
 
-**What is measured (spec S27):** peak private bytes of the child process — `Process.PeakPagedMemorySize64` on Windows (the peak of the private commit charge); on Linux, which keeps no such peak, `VmHWM` from `/proc/self/status`. The fake ledger preallocates its record arrays and reports their exact size as `FakeBytes`; the assertions are on `PeakPrivateBytes − FakeBytes`, the run's own memory (Spec question 15). Both figures are printed.
+**What is measured (spec S27):** peak private bytes of the child process — `Process.PeakPagedMemorySize64` on Windows (the peak of the private commit charge); on Linux, which keeps no such peak, `VmHWM` from `/proc/self/status`. The absolute bound is on the raw peak, fake included: `PeakPrivateBytes` of the 800 MB run below 300 MB, as the spec says. The fake ledger preallocates its record arrays and reports their exact size as `FakeBytes`, and only the slope is taken net of it: (`PeakPrivateBytes − FakeBytes`) of the 800 MB run minus the same of the 50 MB run, below 40 MB (Spec question 15). Both figures are printed.
 
 **The fake (spec S27):** `FakeBatchLedgerSink`'s Batch rules — an outer takes the payer's sequence in the open ledger, its inners apply at the close against the writer's validated sequence, an early outer answers `terPRE_SEQ` and is held, a late one `tefPAST_SEQ`, a lapsed one `tefMAX_LEDGER` — with each landed record kept as a 16-byte row and each signed transaction's hash and fee in flat arrays. A chunk memo is checked against the source when it lands and regenerated from the source when history is read; any other memo (block lists, the manifest) is kept as text. Every 10,007th chunk's first landing ends in `tecINSUFFICIENT_RESERVE` (a retry), and history trails the validated ledger by two ledgers (lagging history). Every ledger read closes a ledger, as the general fake does.
 
@@ -8679,7 +9175,9 @@ if (args.Length != 1 || !long.TryParse(args[0], NumberStyles.None, CultureInfo.I
     return 2;
 }
 
-using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(90));
+// The 800 MB probe signs and decodes about 130,000 outers twice over; on a slow host that takes most
+// of an hour, so the probe's own limit is the test's.
+using CancellationTokenSource timeout = new(TimeSpan.FromHours(3));
 ProbeResult result = await Probe.RunAsync(bytes, timeout.Token);
 Console.WriteLine(JsonSerializer.Serialize(result));
 return 0;
@@ -9299,7 +9797,8 @@ In `tests/XrplFile.Core.Tests/XrplFile.Core.Tests.csproj`, add:
   <ItemGroup>
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>MemoryProbePath</_Parameter1>
-      <_Parameter2>$(MSBuildThisFileDirectory)..\XrplFile.MemoryProbe\bin\$(Configuration)\$(TargetFramework)\XrplFile.MemoryProbe.dll</_Parameter2>
+      <!-- Path.Combine, not backslashes: the path must resolve on Linux too (VmHWM there). -->
+      <_Parameter2>$([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', '..', 'XrplFile.MemoryProbe', 'bin', '$(Configuration)', '$(TargetFramework)', 'XrplFile.MemoryProbe.dll'))</_Parameter2>
     </AssemblyAttribute>
   </ItemGroup>
 ```
@@ -9381,7 +9880,10 @@ public sealed class PublicationMemoryTests
                 $"{peak.Bytes:N0} bytes: peak private {peak.PeakPrivateBytes:N0}, the fake's records {peak.FakeBytes:N0}, the run {peak.RunBytes:N0}; {peak.Seconds:F0} s");
         }
 
-        Assert.True(large.RunBytes < 300_000_000, $"the 800 MB run peaked at {large.RunBytes:N0} bytes");
+        // Absolute: the raw peak, the fake's records included, as the spec states it.
+        Assert.True(large.PeakPrivateBytes < 300_000_000, $"the 800 MB run peaked at {large.PeakPrivateBytes:N0} bytes");
+
+        // Slope: net of the fake's preallocated records, which grow with the file by design.
         Assert.True(large.RunBytes - small.RunBytes < 40_000_000, $"from 50 MB to 800 MB the peak grew by {large.RunBytes - small.RunBytes:N0} bytes");
     }
 }
@@ -9396,7 +9898,7 @@ In `.github/workflows/test.yml`, the three unit runs end with `-- -trait- "Categ
 
 ```yaml
       # Category=Slow is excluded everywhere: the memory test (spec S27) runs for tens of minutes and
-      # the 50 MB stand runs (Task 20) for longer. They are run by hand before a release.
+      # the 50 MB stand runs (Task 21) for longer. They are run by hand before a release.
 ```
 
 - [ ] **Step 5: Run it**
@@ -9422,13 +9924,13 @@ The measured figures go into the pull request description of the branch, with th
 
 ---
 
-### Task 20: Fifty megabytes on the stand (spec 6.3)
+### Task 21: Fifty megabytes on the stand (spec 6.3)
 
 **Files:**
 - Modify: `tests/XrplFile.Core.Tests/BatchPublicationStandaloneTests.cs` (two tests, two helpers)
 
 **Interfaces:**
-- Consumes: Task 1 (`FilePublicationSource.Open`), Task 3 (session source overloads), Task 2 (`PublicationReport.ChunkCount`), Task 19 (CI excludes `Category=Slow`); the class's `KeysAsync`, `Factory`, `Session`, `StoppingSink`, `ChunkRecordsAsync`, `Endpoint`.
+- Consumes: Task 1 (`FilePublicationSource.Open`), Task 3 (session source overloads), Task 2 (`PublicationReport.ChunkCount`), Task 20 (CI excludes `Category=Slow`); the class's `KeysAsync`, `Factory`, `Session`, `StoppingSink`, `ChunkRecordsAsync`, `Endpoint`.
 - Produces: `Fifty_megabytes_go_through_Batch_from_a_held_file_and_read_back` and `A_stopped_fifty_megabyte_run_resumes_from_its_path`, both `[Trait("Category", "Slow")]` on top of the class's `Integration` trait.
 
 - [ ] **Step 1: Write the tests**
@@ -9572,7 +10074,7 @@ new source, and lands every chunk. Both are Integration and Slow."
 
 ---
 
-### Task 21: Acceptance in the MauiLab VM against testnet, with a 300 MB video (by hand)
+### Task 22: Acceptance in the MauiLab VM against testnet, with a 300 MB video (by hand)
 
 Spec 6.5. Nothing here is automated; the deliverable is a report with screenshots and figures. A full 1.7 GB run is not part of acceptance (about 35 XRP of testnet funds); the 300 MB run exercises every path.
 
@@ -9581,7 +10083,7 @@ Spec 6.5. Nothing here is automated; the deliverable is a report with screenshot
 - Scratch only (never committed): `vm-cdp.ps1` (the CDP helper of `docs/superpowers/plans/2026-10-13-dark-theme.md` Task 8 Step 2, copied verbatim into your scratchpad), `sample-private-bytes.ps1`
 
 **Interfaces:**
-- Consumes: the finished application (Tasks 1–20); the `maui-vm-lab` skill and lab at `D:\Lab\maui-vm-lab`; testnet `wss://s.altnet.rippletest.net:51233`.
+- Consumes: the finished application (Tasks 1–21); the `maui-vm-lab` skill and lab at `D:\Lab\maui-vm-lab`; testnet `wss://s.altnet.rippletest.net:51233`.
 
 - [ ] **Step 1: Deploy and launch non-elevated with DevTools**
 
@@ -9673,23 +10175,25 @@ git commit -m "docs(reports): streaming publication acceptance on testnet"
 
 Defects or gaps found while planning, each with the ruling this plan follows. The spec is not changed by this plan.
 
-1. **S22 names no error and no sentence for a landed manifest the reader rejects.** *Ruling:* a new `XrplFileError.ManifestRejected` carrying the written link on a new `XrplFileException.Link`, with the sentence "The manifest landed, but reading it back did not give this file's description, so its link must not be shared. Publish the file again from a fresh writer key." followed by " The link that was written: {link}." A manifest the node does not return yet (`ManifestNotFound`) is not a rejection: it is read again a bounded number of times and then ends as `ValidationTimeout`, which stays resumable (Task 7).
-2. **S12 and S25 do not say which figures "worst case" and "each account's ceiling" are.** *Ruling:* both are the estimate's worst-case fees per account (`FeeDropsWorstCase` one-account; `WriterFeeDropsWorstCase` and `PayerFeeDropsWorstCase` Batch). The fee-unit ceiling is B15's ceiling on the Batch path and the per-transaction fee on the one-account path; a later estimate above any of them is refused with `ApprovalExceeded` (Tasks 11, 13).
+1. **S22 names no error and no sentence for a landed manifest the reader rejects.** *Ruling:* a new `XrplFileError.ManifestRejected` carrying the written link on a new `XrplFileException.Link`, with the sentence "The manifest landed, but reading it back did not give this file's description, so its link must not be shared. Publish the file again from a fresh writer key." followed by " The link that was written: {link}." A manifest the node does not return yet is not a rejection: `ManifestNotFound`, and `NodeLacksHistory` (what the reader throws when `tx` misses on a node whose history starts late, as many public testnet nodes and load-balanced clusters do), are read again a bounded number of times and then end as `ValidationTimeout`, which stays resumable (Task 7).
+2. **S12 and S25 do not say which figures "worst case" and "each account's ceiling" are, nor how a re-estimate is compared with them.** *Ruling:* both are the estimate's worst-case fees per account (`FeeDropsWorstCase` one-account; `WriterFeeDropsWorstCase` and `PayerFeeDropsWorstCase` Batch). The fee-unit ceiling is B15's ceiling on the Batch path and the per-transaction fee on the one-account path. On the Batch path only exceeding a ceiling refuses: the re-estimated fee unit is compared with the approved ceiling, each worst case is computed at the approved ceiling (the most B26 lets the run spend) and compared with its approved figure, and balances are checked against those same figures; a unit that rises from 15 to 18 under a ceiling of 30 runs. The one-account strategy's fee is fixed per transaction, so there a higher fee refuses. A refusal is `ApprovalExceeded` (Tasks 11, 13).
 3. **The spec names the new state facts but not their JSON names.** *Ruling:* `Failure` with the value `"WriterWindowConflict"` (S17) and `ManifestStatus` with the value `"landed, rejected"` (S22), both optional and written only when set, so existing state files read unchanged (Tasks 5, 7).
-4. **S17 does not say whether a one-account run fails on a conflicting copy.** *Ruling:* only Batch runs do — their round sweeps and the reconciliation of a version-3 resume. A one-account run keeps rule I12 (a copy with other bytes is a straggler and is ignored), and its full read-back catches any block such a copy would break (Task 5).
+4. **S17 does not say whether a one-account run fails on a conflicting copy, nor how a round's sweep would see one.** *Ruling:* only Batch runs fail on it, at the reconciliation of a version-3 resume. Within a round no separate check exists: identity (B12) runs first and refuses with `AccountInUse` every writer record that is not an inner of the round's own outers, and those carry the round's own bytes, so a conflicting copy written during a round surfaces as B12 — what the spec's own rationale for S17 relies on. A one-account run keeps rule I12 (a copy with other bytes is a straggler and is ignored), and its full read-back catches any block such a copy would break (Task 5).
 5. **S5 lists the candidate counts among session-wide state carried "across rounds", which suggests `BatchContext`.** In the code the counts were per `SubmitAllAsync` call. *Ruling:* a `byte[]` per pass, owned by the pass's `SubmitAllAsync` call and handed to each of its rounds; budget, fence and ledger floor stay in `BatchContext`. A memo belongs to exactly one pass, so a fourth candidate is still refused across rounds (Task 4).
-6. **S25 asks for a quote of the remaining work on resume; the one-account resume has no coverage figure before it runs.** *Ruling:* the one-account resume quotes the whole file's estimate (conservative), with `MissingChunks` from the landed set; the Batch resume quotes the remaining work (Tasks 11, 13).
+6. **S25 asks for a quote of the remaining work on resume; the one-account resume has no coverage figure before it runs.** *Ruling:* the one-account resume quotes the whole file's estimate (conservative), with `MissingChunks` from the landed set; the Batch resume quotes the remaining work. On a one-account resume the run screen's "Resuming costs" therefore shows the whole file's cost, an overstatement and never an understatement (Tasks 11, 14).
 7. **S20 keeps list records "below this file's list count", but the list count is only known once the plan is packed with real ledgers.** *Ruling:* the bound is `PublicationEstimator.BlockListMemoCount(blocks)`, the packer's count at nine-digit ledgers, which is never below the real count; entries must also carry this file's block hashes (Task 6).
-8. **S11 prices the duration before a run; it does not say what the run screen's "time left" adds for verification and rounds.** *Ruling:* on the Batch path the run screen adds one settle per round still to come (the rounds after the current one in this pass, plus later passes), the ticket path keeps one per pass (B21), and the read-back stage shows its own time left: blocks still to read at the measured rate, or 1,024 records per block at 0.7 s per 400 before a rate exists (Task 13).
+8. **S11 prices the duration before a run; it does not say what the run screen's "time left" adds for rounds, and it asks that the verification ETA use "the real planned traversal once the chunks have landed".** *Ruling:* on the Batch path the run screen adds one settle per round still to come (the rounds after the current one in this pass, plus later passes); the ticket path keeps one per pass (B21). **Deviation from S11, with its reason:** the read-back's time left is blocks still to read at the measured per-block rate, and before the first block is read, 1,024 records per block at 0.7 s per 400. The records a sampled walk crosses include every other transaction of the writer in the same ledgers, which the writer cannot know before it reads them; what it does know, the run's own chunk records per sampled block, is at most 1,024, so the prior is the planned traversal to within one short block, and the measured rate replaces it after the first block. Reporting the read-back in records instead would change that stage's unit on both paths, on the run screen and in its tests, for a figure shown for seconds (Task 14).
 9. **S12's "transactions" is ambiguous on the Batch path.** *Ruling:* every transaction submitted: `Memos + Batches` (each inner and solo memo, and each outer) (Task 13).
-10. **S7 and S24 say a resume opens the recorded path, but not what happens when that file no longer matches.** *Ruling:* the run fails with "The file at {path} has changed since the run started. Choose the original file." (a picked file: "That file is not the one this run was publishing."), and the state path joins an in-memory set of rejected sources, so the next Resume of that row opens the file picker instead of the recorded path (Task 12).
+10. **S7 and S24 say a resume opens the recorded path, but not what happens when that file no longer matches.** *Ruling:* only a refusal for the file's size or root marks it: the session sets `XrplFileException.SourceChanged` on those two refusals and on no other `ResumeMismatch` (a finished run, another chunk size, another writer). The run then fails with "The file at {path} has changed since the run started. Choose the original file." (a picked file: "That file is not the one this run was publishing."), and the state path joins an in-memory set of rejected sources, so the next Resume of that row opens the file picker instead of the recorded path. The set lives on the run singleton: after the application restarts, a changed recorded file is tried once more and refused again, which costs a hash of the file and nothing on the ledger (Tasks 3, 12).
 11. **S18 does not say what the trace header names for a fresh run, whose state file does not exist yet.** *Ruling:* the header says "(no state file)" and the end line names the state file (Task 8).
-12. **`PublishErrorMessages`' `TooLarge` sentence speaks of the reader's limit, which no longer applies to publishing.** *Ruling:* it becomes S1's "This application publishes files up to 16 GiB." (Task 14); `ReadErrorMessages` keeps its own sentence for the library's refusal.
+12. **`PublishErrorMessages`' `TooLarge` sentence speaks of the reader's limit, which no longer applies to publishing.** *Ruling:* it becomes S1's "This application publishes files up to 16 GiB." (Task 15); `ReadErrorMessages` keeps its own sentence for the library's refusal.
 13. **S6 keeps "transaction index in the ledger", which `LedgerTransaction` does not carry.** *Ruling:* `LedgerTransaction.TransactionIndex` (`int?`, from `meta.TransactionIndex`) is added and parsed (Task 4).
-14. **S27 does not say how the child process is built or how "peak private bytes" is read off.** *Ruling:* a separate project `tests/XrplFile.MemoryProbe` (an executable referenced by the Core tests for build order only); `Process.PeakPagedMemorySize64` on Windows, `VmHWM` on Linux, which keeps no peak of private bytes; `Category=Slow`, which CI excludes (Task 19).
-15. **S27's slope bound (40 MB from 50 MB to 800 MB) would count the fake ledger's own records,** about 20 MB at 800 MB even at 16 bytes a record. *Ruling:* the fake preallocates its record arrays and reports their exact size; both assertions are on peak private bytes minus that figure, and both figures are printed (Task 19).
-16. **S1's refusal "Choose a payer …" on a network without Batch, where no payer can be chosen.** *Ruling:* the same sentence; the "Paid by" note already says Batch is unavailable on that network, and the two together say what is possible (Task 14).
-17. **S14 says Lock waits "a bounded time" for the run.** *Ruling:* 10 seconds, `UnlockModel.RunStopTimeout`, the same bound the window-close handler uses with `PublicationRun.StopAsync` (Task 16).
+14. **S27 does not say how the child process is built or how "peak private bytes" is read off.** *Ruling:* a separate project `tests/XrplFile.MemoryProbe` (an executable referenced by the Core tests for build order only, its path composed with `Path.Combine` so it resolves on Windows and Linux); `Process.PeakPagedMemorySize64` (the peak commit charge) on Windows, `VmHWM` on Linux, which keeps no peak of private bytes; `Category=Slow`, which CI excludes (Task 20).
+15. **S27's slope bound (40 MB from 50 MB to 800 MB) would count the fake ledger's own records,** about 20 MB at 800 MB even at 16 bytes a record. *Ruling:* the absolute bound is asserted on the raw peak, as the spec says: peak(800) < 300 MB, the fake included. Only the slope subtracts the fake: it preallocates its record arrays and reports their exact size, and peak(800) − peak(50) is taken net of the two sizes. Both figures are printed (Task 20).
+16. **S1's refusal "Choose a payer …" on a network without Batch, where no payer can be chosen.** *Ruling:* the same sentence; the "Paid by" note already says Batch is unavailable on that network, and the two together say what is possible (Task 15).
+17. **S14 says Lock waits "a bounded time" for the run.** *Ruling:* 10 seconds, `UnlockModel.RunStopTimeout`, the same bound the window-close handler uses with `PublicationRun.StopAsync` (Task 17).
+18. **S9 says "the list equals the plan"; compared with the list the writer built, that compares the plan with itself.** *Ruling:* the plan is compared with the block list as the read-back reads it from the ledger (`BlockListAsync`, rooted to the manifest root), ledgers included, on the Batch and the one-account path. The root covers block hashes and not ledgers, so this is the comparison that can fail (Task 7).
+19. **The spec does not say what a failed read of the held file mid-run tells the person.** Today's `IOException` clause says the state could not be written. *Ruling:* the run wraps the source it hands the session, so a failed read says "The file at {path} could not be read while it was being published. Make it available again and resume the run." and the state, which is intact, stays resumable (Task 12).
 
 ## Self-review
 
@@ -9697,7 +10201,7 @@ Defects or gaps found while planning, each with the ruling this plan follows. Th
 
 | Decision | Task(s) |
 |---|---|
-| S1 | 3 (the session refuses above 16 GiB), 14 |
+| S1 | 3 (the session refuses above 16 GiB), 15 |
 | S2 | 1 |
 | S3 | 1 |
 | S4 | 3 |
@@ -9707,12 +10211,12 @@ Defects or gaps found while planning, each with the ruling this plan follows. Th
 | S8 | 2 |
 | S9 | 7 |
 | S10 | removed in the spec |
-| S11 | 10 (estimate), 13 (durations, run screen) |
+| S11 | 10 (estimate), 13 (durations), 14 (run screen) |
 | S12 | 13 |
-| S13 | 15 |
-| S14 | 16 |
-| S15 | 17 |
-| S16 | 14 |
+| S13 | 16 |
+| S14 | 17 |
+| S15 | 18 |
+| S16 | 15 |
 | S17 | 5 |
 | S18 | 8 |
 | S19 | 2 (types), 4 (Batch tracking) |
@@ -9721,16 +10225,19 @@ Defects or gaps found while planning, each with the ruling this plan follows. Th
 | S22 | 7 |
 | S23 | 2 |
 | S24 | 12 |
-| S25 | 11 (library), 13 (app, resume confirmation) |
+| S25 | 11 (library), 13 (the Estimate screen's approval and a ceiling exceeded at the run), 14 (resume confirmation) |
 | S26 | 9 |
-| S27 | 19 (the reader part in 9) |
-| Spec 5.3 preparation stages | 3 and 6 (reports), 18 (words) |
-| Spec 6.3 stand | 20 |
-| Spec 6.5 acceptance | 21 |
-| Unfinished v2/v3 state files keep resuming | 2 (fixtures captured at `bc37d07`, `LegacyStateTests`) |
+| S27 | 20 (the reader part in 9) |
+| Spec 5.3 preparation stages | 3 and 6 (reports), 19 (words) |
+| Spec 6.1 compact records, ledger floor across rounds | 4 |
+| Spec 6.3 stand | 21 |
+| Spec 6.5 acceptance | 22 |
+| Unfinished v2/v3 state files keep resuming | 2 (fixtures hand-written in the format of `bc37d07`, guarded byte for byte; `LegacyStateTests`) |
 
-**Review Focus.** Each line has its test in the owning task: exact chunk and block multiples (Tasks 1 and 3), `MaxRoundMemos` + 1 as a solo (Tasks 4 and 10), rename and delete refused while held (Task 1), leaving Estimate mid-estimate (Task 12), Lock while a resume awaits confirmation (Task 16).
+**Review Focus.** Each line has its test in the owning task: exact chunk and block multiples (Tasks 1 and 3), `MaxRoundMemos` + 1 as a solo (Tasks 4 and 10), rename and delete refused while held (Task 1), leaving Estimate mid-estimate (Task 12), Lock while a resume awaits confirmation (Task 17).
+
+**Every task ends green.** Each new `XrplFileError` gets its sentence in both message classes in the task that adds it (Tasks 5, 7, 11); every existing test a signature change breaks is migrated in that task (Task 2's list, Task 4's `BatchRegistryTests` and `BatchIdentityTests`, Task 12's request migration).
 
 **Placeholders.** None: every step names its files, shows the code it adds or the exact lines it replaces, and gives the command and the expected outcome. Where a task edits a long existing method, it names the statement to replace and shows the replacement; the rest of the method is unchanged.
 
-**Type consistency.** Names used across tasks, checked against their producing task: `IPublicationSource`, `FilePublicationSource.Open`, `VectorPublicationSource`, `CountingPublicationSource` (1); `SubmittedMemos`, `LandedSet`, `ChunkLanding`, `PublicationReport.ChunkCount` (2); the session's source overloads with `IProgress<PublishProgress>? preparation` before the token (3); `BatchStrategyOptions.DefaultMaxRoundMemos`, `LedgerTransaction.TransactionIndex` (4); `XrplFileError.WriterWindowConflict`, `PublicationState.Failure` (5); stage `"history"` with total 0 (6); `XrplFileError.ManifestRejected`, `XrplFileException.Link`, `PublicationState.ManifestStatus` (7); `BatchPublicationEstimate.Rounds` (10); `SpendingApproval`, `ResumeQuote`, `ResumeApproval`, `SessionOptions.Approval`, `SessionOptions.ApproveResume` (11); `PublishRequest.Size`, `.Source`, `.Approval`, `.SourceRecorded`, `EstimateModel.HandOff`, `DiscardAsync`, `Requests.Fresh`, `FakeFiles` (12); `CostSummary`, `PublicationDuration`, `DurationText`, `RunSnapshot.Confirmation`, `PublicationRun.AnswerConfirmation`, `BatchTestWait` (13); `PublicationRun(..., openSource, keepAwake)` in that order (12, 15); `ActivityLease`, `UnlockModel(vault, isDefault, run)` (16).
+**Type consistency.** Names used across tasks, checked against their producing task: `IPublicationSource`, `FilePublicationSource.Open`, `VectorPublicationSource`, `CountingPublicationSource` (1); `SubmittedMemos`, `LandedSet`, `ChunkLanding`, `PublicationReport.ChunkCount` (2); the session's source overloads with `IProgress<PublishProgress>? preparation` before the token, `XrplFileException.SourceChanged` (3); `BatchStrategyOptions.DefaultMaxRoundMemos`, `LedgerTransaction.TransactionIndex`, `BatchStrategy.RoundFences` (4); `XrplFileError.WriterWindowConflict`, `PublicationState.Failure`, `ReadErrorMessagesTests.The_streaming_publication_errors_share_the_publishing_only_sentence` (5); stage `"history"` with total 0, `FileTree.TryDecodeFragment` (6); `XrplFileError.ManifestRejected`, `XrplFileException.Link`, `PublicationState.ManifestStatus`, `PublicationCheck.RequireListed` (7); `BatchPublicationEstimate.Rounds` (10); `SpendingApproval`, `SpendingApproval.AtCeiling`, `ResumeQuote`, `ResumeApproval`, `SessionOptions.Approval`, `SessionOptions.ApproveResume` (11); `PublishRequest.Size`, `.Source`, `.Approval`, `.SourceRecorded`, `EstimateModel.HandOff`, `DiscardAsync`, `Requests.Fresh`, `Requests.UnboundedFeeDrops`, `FakeFiles`, `FailingSecondReadSource` (12); `CostSummary`, `PublicationDuration`, `DurationText`, `EstimateModel.ConfirmationLabel` (13); `RunSnapshot.Confirmation`, `PublicationRun.AnswerConfirmation`, `BatchTestWait`, `ResumeConfirmationTests.ReadyAsync` / `InterruptedExpensiveAsync` / `Resuming` (14); `PublicationRun(..., openSource, keepAwake)` in that order (12, 16); `ActivityLease`, `UnlockModel(vault, isDefault, run)` (17).
