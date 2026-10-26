@@ -3,7 +3,7 @@ import { MAINNET_FIRST_LEDGER } from './ledger.mjs';
 import { BLOCK_CHUNKS, isManifest, chunkIndexOf, listIndexOf, decodeEntries, rootHex, blockHash, chunkCount } from './tree.mjs';
 import { decodeManifest, inconsistency } from './manifest.mjs';
 import { hex, unhex, hexUtf8 } from './hex.mjs';
-import { ForwardHistory } from './history.mjs';
+import { ForwardHistory, DEFAULT_MAX_RECORDS } from './history.mjs';
 
 /**
  * Reads a file out of the ledger and verifies every byte against the manifest's root — the
@@ -14,12 +14,12 @@ import { ForwardHistory } from './history.mjs';
  */
 export class XrplFileReader {
   /** @param source anything with transaction(hash), accountTransactions(account, from, to, forward), earliestLedger() */
-  constructor(source, { maxBytes = 20_000_000 } = {}) {
+  constructor(source, { maxBytes = 20_000_000, historyCacheRecords = DEFAULT_MAX_RECORDS } = {}) {
     this.source = source;
     this.maxBytes = maxBytes;
     // Shared by the blocks of one read: a block starts in the ledger the block before it ended
     // in, and walking each block afresh read that ledger twice.
-    this.history = new ForwardHistory(source);
+    this.history = new ForwardHistory(source, historyCacheRecords);
   }
 
   async read(link, onProgress = () => {}) {

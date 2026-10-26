@@ -112,4 +112,72 @@ public class ForwardHistoryTests
 
         Assert.Equal(ledger.Where(tx => tx.LedgerIndex >= Vector.Ledger.First + 5 && tx.LedgerIndex <= Vector.Ledger.Last), after);
     }
+
+    /// <summary>The 2,500,500-byte vector with every chunk moved into one ledger behind 17,499 records without memos: 20,000 records in one ledger.</summary>
+    private static (FakeLedgerSource Source, ManifestRecord Record, List<BlockEntry> Blocks) OneCrowdedLedger()
+    {
+        long ledger = Vector.Ledger.First;
+        FakeLedgerSource source = new();
+
+        for (int i = 0; i < 17_499; i++)
+        {
+            source.Add(new LedgerTransaction(Vectors.Hash($"filler:{i}"), ledger, Vectors.Writer, true, true, "tesSUCCESS", null, null, null));
+        }
+
+        foreach (LedgerTransaction tx in Vectors.Ledger(Vector).Where(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) is not null))
+        {
+            source.Add(tx with { LedgerIndex = ledger });
+        }
+
+        Manifest manifest = Manifest.Decode(Vector.Manifest) with { FirstLedger = ledger, LastLedger = ledger };
+        List<BlockEntry> blocks = [.. Vector.BlockHashes.Select((hash, index) => new BlockEntry(index, hash, ledger))];
+
+        return (source, new ManifestRecord(manifest, Vectors.Writer, ledger + 1, Vectors.ManifestHash), blocks);
+    }
+
+    [Fact]
+    public async Task A_ledger_larger_than_the_cap_and_a_revisited_block_read_the_same_with_and_without_the_cache()
+    {
+        (FakeLedgerSource source, ManifestRecord record, List<BlockEntry> blocks) = OneCrowdedLedger();
+        XrplFileReader cached = new(source);
+        int[] order = [2, 0, 1, 0, 2];
+
+        foreach (int block in order)
+        {
+            byte[] withCache = await cached.BlockAsync(record, blocks[block], TestContext.Current.CancellationToken);
+
+            // The baseline shares nothing: a fresh reader per block, with no cache, walks the node
+            // from the block's first ledger, so no cursor or cache of an earlier walk can stand
+            // behind its answer.
+            XrplFileReader baseline = new(source, new ReaderOptions { HistoryCacheRecords = 0 });
+            byte[] withoutCache = await baseline.BlockAsync(record, blocks[block], TestContext.Current.CancellationToken);
+
+            Assert.Equal(withoutCache, withCache);
+            Assert.Equal(0, baseline.HistoryPeakHeld);
+        }
+
+        Assert.InRange(cached.HistoryPeakHeld, 0, ForwardHistory.DefaultMaxRecords);
+    }
+
+    [Fact]
+    public async Task A_ledger_larger_than_the_cap_is_streamed_through_and_the_cache_starts_again_after_it()
+    {
+        FakeLedgerSource source = new();
+        for (int i = 0; i < 300; i++) source.Add(new LedgerTransaction(Vectors.Hash($"big:{i}"), 10, Vectors.Writer, true, true, "tesSUCCESS", null, null, null));
+        for (int i = 0; i < 50; i++) source.Add(new LedgerTransaction(Vectors.Hash($"next:{i}"), 11, Vectors.Writer, true, true, "tesSUCCESS", null, null, null));
+        ForwardHistory history = new(source, maxRecords: 100);
+
+        List<LedgerTransaction> whole = [];
+        await foreach (LedgerTransaction tx in history.WalkAsync(Vectors.Writer, 10, 11, TestContext.Current.CancellationToken)) whole.Add(tx);
+        List<LedgerTransaction> tail = [];
+        await foreach (LedgerTransaction tx in history.WalkAsync(Vectors.Writer, 11, 11, TestContext.Current.CancellationToken)) tail.Add(tx);
+        List<LedgerTransaction> again = [];
+        await foreach (LedgerTransaction tx in history.WalkAsync(Vectors.Writer, 10, 11, TestContext.Current.CancellationToken)) again.Add(tx);
+
+        Assert.Equal(350, whole.Count);
+        Assert.Equal(whole.Skip(300), tail);
+        Assert.Equal(whole, again);
+        Assert.InRange(history.PeakHeld, 0, 100);
+        Assert.Equal(2, source.AccountTransactionsCalls);
+    }
 }

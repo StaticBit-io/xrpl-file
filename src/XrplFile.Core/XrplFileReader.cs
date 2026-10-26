@@ -4,6 +4,9 @@ public sealed class ReaderOptions
 {
     /// <summary>The largest file the reader assembles. Checked against the manifest before any chunk is read.</summary>
     public long MaxBytes { get; init; } = 20_000_000;
+
+    /// <summary>The records the block walks may share (spec S26). Zero shares none: what a test compares the cache against.</summary>
+    internal int HistoryCacheRecords { get; init; } = ForwardHistory.DefaultMaxRecords;
 }
 
 /// <summary>A manifest together with where it was found.</summary>
@@ -26,7 +29,10 @@ public sealed class XrplFileReader(ILedgerSource source, ReaderOptions? options 
 
     // Shared by the blocks of one read: a block starts in the ledger the block before it ended in,
     // and walking each block afresh read that ledger twice.
-    private readonly ForwardHistory _history = new(source);
+    private readonly ForwardHistory _history = new(source, (options ?? new ReaderOptions()).HistoryCacheRecords);
+
+    /// <summary>The most records this read's block walks held at once.</summary>
+    internal int HistoryPeakHeld => _history.PeakHeld;
 
     public async Task<ReadResult> ReadAsync(XrplFileLink link, CancellationToken cancellationToken)
     {

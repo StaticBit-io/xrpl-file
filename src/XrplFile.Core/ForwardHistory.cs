@@ -17,8 +17,10 @@ namespace XrplFile;
 ///
 /// Memory is bounded by <c>maxRecords</c>: a walk starting further on drops everything before its
 /// first ledger, and once more than that many records are held the oldest ledgers are let go
-/// whole. A walk from a ledger that was let go, from another writer, to another last ledger or
-/// under another token starts over with a fresh walk. A walk that fails forgets everything.
+/// whole, and a ledger that alone is larger than the cap is streamed through without being held
+/// (spec S26). A walk from a ledger that was let go or not held, from another writer, to another
+/// last ledger or under another token starts over with a fresh walk. A walk that fails forgets
+/// everything.
 ///
 /// One walk at a time takes part. A walk started while another is in progress goes to the node
 /// directly, so callers that read blocks concurrently still get correct, if unshared, walks.
@@ -41,6 +43,9 @@ internal sealed class ForwardHistory(ILedgerSource source, int maxRecords = Forw
     private long _toLedger;
     private long _from;
 
+    // A ledger that alone held more than the cap: its records are streamed through and not held.
+    private long _uncached = long.MinValue;
+
     // The ledger of the last record the cursor gave; the rest of that ledger may still be ahead.
     private long _position;
     private IAsyncEnumerator<LedgerTransaction>? _cursor;
@@ -49,6 +54,9 @@ internal sealed class ForwardHistory(ILedgerSource source, int maxRecords = Forw
 
     /// <summary>How many records it holds now.</summary>
     public int Held => _held.Count;
+
+    /// <summary>The most records held after any record was taken in.</summary>
+    public int PeakHeld { get; private set; }
 
     /// <summary>
     /// The account's transactions in [<paramref name="fromLedger"/>, <paramref name="toLedger"/>],
@@ -97,8 +105,7 @@ internal sealed class ForwardHistory(ILedgerSource source, int maxRecords = Forw
                 // stopped walk's last ledger is behind this one's first.
                 if (tx.LedgerIndex < fromLedger) continue;
 
-                _held.Add(tx);
-                LetGo();
+                Hold(tx);
                 yield return tx;
             }
         }
@@ -125,6 +132,7 @@ internal sealed class ForwardHistory(ILedgerSource source, int maxRecords = Forw
         IAsyncEnumerator<LedgerTransaction>? stale = _cursor;
         _cursor = null;
         _account = null;
+        _uncached = long.MinValue;
         _held.Clear();
 
         if (stale is not null)
@@ -171,9 +179,22 @@ internal sealed class ForwardHistory(ILedgerSource source, int maxRecords = Forw
         return null;
     }
 
+    private void Hold(LedgerTransaction tx)
+    {
+        if (tx.LedgerIndex != _uncached)
+        {
+            _held.Add(tx);
+            LetGo();
+        }
+
+        PeakHeld = Math.Max(PeakHeld, _held.Count);
+    }
+
     /// <summary>
-    /// Drops the oldest ledgers whole while more than the cap is held, never the ledger the walk
-    /// is in, so what is left is still every record from <see cref="_from"/> on.
+    /// Keeps what is held within the cap (spec S26). The oldest ledgers go first, whole, and what is
+    /// held stays every record from <see cref="_from"/> on. When the ledger being walked alone is
+    /// larger than the cap, it is not held at all: <see cref="_from"/> moves past it, so a later walk
+    /// from it asks the node again instead of getting a ledger with records missing.
     /// </summary>
     private void LetGo()
     {
@@ -183,6 +204,13 @@ internal sealed class ForwardHistory(ILedgerSource source, int maxRecords = Forw
             int end = _held.FindIndex(tx => tx.LedgerIndex != oldest);
             _held.RemoveRange(0, end);
             _from = oldest + 1;
+        }
+
+        if (_held.Count > _maxRecords)
+        {
+            _uncached = _position;
+            _held.Clear();
+            _from = _position + 1;
         }
     }
 }

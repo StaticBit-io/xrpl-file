@@ -21,9 +21,10 @@ export const DEFAULT_MAX_RECORDS = 4 * BLOCK_CHUNKS;
  * rests on validated history not changing between two walks of one read.
  *
  * Memory is bounded by maxRecords: a walk starting further on drops everything before its first
- * ledger, and once more than that many records are held the oldest ledgers are let go whole. A
- * walk from a ledger that was let go, from another writer or to another last ledger starts over
- * with a fresh walk. A walk that fails forgets everything.
+ * ledger, and once more than that many records are held the oldest ledgers are let go whole, and
+ * a ledger that alone is larger than the cap is streamed through without being held (spec S26). A
+ * walk from a ledger that was let go or not held, from another writer or to another last ledger
+ * starts over with a fresh walk. A walk that fails forgets everything.
  *
  * One walk at a time takes part. A walk started while another is in progress goes to the node
  * directly, so callers that read blocks concurrently still get correct, if unshared, walks.
@@ -38,6 +39,10 @@ export class ForwardHistory {
     this.account = null;
     this.toLedger = 0;
     this.from = 0;
+    // A ledger that alone held more than the cap: its records are streamed through and not held.
+    this.uncached = -Infinity;
+    // The most records held after any record was taken in.
+    this.peakHeld = 0;
     // The ledger of the last record the cursor gave; the rest of that ledger may still be ahead.
     this.position = 0;
     this.cursor = null;
@@ -78,8 +83,7 @@ export class ForwardHistory {
         // walk's last ledger is behind this one's first.
         if (tx.ledgerIndex < fromLedger) continue;
 
-        this.held.push(tx);
-        this.letGo();
+        this.hold(tx);
         yield tx;
       }
     } finally {
@@ -96,6 +100,7 @@ export class ForwardHistory {
     const stale = this.cursor;
     this.cursor = null;
     this.account = null;
+    this.uncached = -Infinity;
     this.held = [];
     if (stale !== null) await stale.return?.();
 
@@ -129,9 +134,18 @@ export class ForwardHistory {
     return null;
   }
 
+  hold(tx) {
+    if (tx.ledgerIndex !== this.uncached) {
+      this.held.push(tx);
+      this.letGo();
+    }
+    this.peakHeld = Math.max(this.peakHeld, this.held.length);
+  }
+
   /**
-   * Drops the oldest ledgers whole while more than the cap is held, never the ledger the walk is
-   * in, so what is left is still every record from `from` on.
+   * Keeps what is held within the cap (spec S26), as the .NET ForwardHistory does: the oldest ledgers
+   * go first, whole; a ledger that alone is larger than the cap is not held at all, and `from` moves
+   * past it, so a later walk from it asks the node again instead of getting a ledger with records missing.
    */
   letGo() {
     while (this.held.length > this.maxRecords && this.held[0].ledgerIndex < this.position) {
@@ -139,6 +153,12 @@ export class ForwardHistory {
       const end = this.held.findIndex((tx) => tx.ledgerIndex !== oldest);
       this.held.splice(0, end);
       this.from = oldest + 1;
+    }
+
+    if (this.held.length > this.maxRecords) {
+      this.uncached = this.position;
+      this.held = [];
+      this.from = this.position + 1;
     }
   }
 }
