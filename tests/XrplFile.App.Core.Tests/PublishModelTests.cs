@@ -89,17 +89,6 @@ public sealed class PublishModelTests : VaultHarness
     }
 
     [Fact]
-    public void ReaderDefaultMaxBytes_is_the_readers_own_default_not_a_copy_of_it()
-    {
-        // Round 2's N1/M1 finding: this constant was still a bare 20_000_000 after
-        // ReadModel.MaxBytes was fixed the same way (ReadModelTests' own
-        // MaxBytes_is_the_readers_own_default_not_a_copy_of_it), and the only other test touching
-        // it (A_file_past_the_readers_default_limit_is_warned_about_and_still_allowed) compares it
-        // to itself, not to the library, so a drift here would have left the suite green.
-        Assert.Equal(new ReaderOptions().MaxBytes, PublishModel.ReaderDefaultMaxBytes);
-    }
-
-    [Fact]
     public async Task With_nothing_chosen_it_refuses_and_says_what_is_missing()
     {
         (PublishModel model, _, _) = await OpenAsync(TestContext.Current.CancellationToken);
@@ -238,32 +227,6 @@ public sealed class PublishModelTests : VaultHarness
 
         Assert.Equal(Endpoints.For("testnet")[0], model.NodeUrl);
         Assert.Null(model.Message);
-    }
-
-    [Fact]
-    public async Task A_file_past_the_readers_default_limit_is_warned_about_and_still_allowed()
-    {
-        (PublishModel model, _, string reference) =
-            await OpenAsync(TestContext.Current.CancellationToken, network: "testnet");
-
-        // Nothing this size is written to disk: the warning is a function of the recorded size.
-        model.SelectKey(reference);
-        model.DescribeFileForTests("huge.bin", PublishModel.ReaderDefaultMaxBytes + 1);
-
-        Assert.NotNull(model.Warning);
-        Assert.True(model.CanEstimate);
-    }
-
-    [Fact]
-    public async Task A_file_past_the_memory_ceiling_is_refused()
-    {
-        (PublishModel model, _, string reference) = await OpenAsync(TestContext.Current.CancellationToken);
-
-        model.SelectKey(reference);
-        model.DescribeFileForTests("enormous.bin", PublishModel.MaxFileBytes + 1);
-
-        Assert.False(model.CanEstimate);
-        Assert.NotNull(model.Message);
     }
 
     [Fact]

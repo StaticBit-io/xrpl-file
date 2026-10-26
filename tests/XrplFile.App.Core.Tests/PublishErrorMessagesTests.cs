@@ -25,6 +25,12 @@ public sealed class PublishErrorMessagesTests
     }
 
     [Fact]
+    public void TooLarge_says_the_applications_limit()
+    {
+        Assert.Equal(PublishModel.TooLargeMessage, PublishErrorMessages.For(XrplFileError.TooLarge));
+    }
+
+    [Fact]
     public void The_three_that_must_never_be_conflated_are_not()
     {
         string unreachable = PublishErrorMessages.For(XrplFileError.NodeUnreachable);

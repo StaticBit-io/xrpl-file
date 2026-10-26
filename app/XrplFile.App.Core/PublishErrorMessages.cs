@@ -96,8 +96,7 @@ public static class PublishErrorMessages
             "This is not the file, or not the key, that the interrupted run started with.",
         XrplFileError.SessionAlreadyRun =>
             "A publication session was run twice. That is a defect in this application, not something you did.",
-        XrplFileError.TooLarge =>
-            "The file is larger than the reader's own limit, so the link it produced cannot be read back at that limit.",
+        XrplFileError.TooLarge => PublishModel.TooLargeMessage,
         XrplFileError.InvalidLink =>
             "The link is not a valid xrpl-file link.",
         XrplFileError.ManifestNotFound =>

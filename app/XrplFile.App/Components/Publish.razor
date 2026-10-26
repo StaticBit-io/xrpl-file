@@ -77,11 +77,6 @@ else
             <div class="alert alert-warning">@Model.Message</div>
         }
 
-        @if (Model.Warning is not null)
-        {
-            <div class="alert alert-secondary">@Model.Warning</div>
-        }
-
         <button type="button" class="btn btn-primary" disabled="@(!Model.CanEstimate)" @onclick="EstimateAsync">
             Estimate
         </button>

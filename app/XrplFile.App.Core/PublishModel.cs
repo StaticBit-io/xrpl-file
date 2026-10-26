@@ -3,29 +3,30 @@ using XrplFile.Keys;
 namespace XrplFile.App.Core;
 
 /// <summary>
-/// The first publish screen (design 4.1): which file, which key, and every reason those two are not
-/// yet enough to ask a node anything.
+/// The first publish screen (design 4.1): which file, which key, which payer, and every reason those
+/// are not yet enough to ask a node anything. The file is measured here, never read: the estimate
+/// opens it and holds it for the run (spec S24). The size it may have depends on the payer (spec S1,
+/// S16), so choosing one describes the file again.
 /// </summary>
 public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INodeSettingsStore nodes, BatchAvailability? batch = null, IPayerSettingsStore? payers = null)
 {
     /// <summary>
-    /// Read from <see cref="ReaderOptions.MaxBytes"/>'s own default rather than copied as a literal
-    /// — round 2's N1/M1 finding: this was still a bare <c>20_000_000</c> after <see cref="ReadModel.MaxBytes"/>
-    /// was fixed the same way, and the one test touching it compared it to itself rather than to the
-    /// library, so a drift here would have left the suite green. A larger file publishes correctly
-    /// and then produces a link the library's reader refuses unless its caller raises the ceiling, so
-    /// this is a warning rather than a refusal (design 4.1) — the limit is the reader's default, not
-    /// the format's, and the writer's read-back lifts it for itself.
+    /// The largest file published without a payer (spec S16): tickets or sequence numbers. A ticket
+    /// run of a gigabyte would hold about 50 XRP of reserve for hours.
     /// </summary>
-    public static readonly long ReaderDefaultMaxBytes = new ReaderOptions().MaxBytes;
+    public const long TicketPathMaxBytes = 64L * 1024 * 1024;
 
-    /// <summary>
-    /// The largest file this application will load. The whole file is held in memory as
-    /// <see cref="ReadOnlyMemory{T}"/> and encoded into memos on top of that, and at roughly a
-    /// kilobyte of file per memo this is already tens of thousands of transactions — a run whose
-    /// cost stops it long before its size does.
-    /// </summary>
-    public const long MaxFileBytes = 64L * 1024 * 1024;
+    /// <summary>The largest file this application publishes, through Batch (spec S1).</summary>
+    public const long MaxPublicationBytes = PublicationSession.MaxPublicationBytes;
+
+    /// <summary>Above <see cref="TicketPathMaxBytes"/> with nobody paying (spec S1).</summary>
+    public const string PayerRequiredMessage = "Choose a payer — files larger than 64 MiB publish through Batch.";
+
+    /// <summary>Above <see cref="MaxPublicationBytes"/> (spec S1).</summary>
+    public const string TooLargeMessage = "This application publishes files up to 16 GiB.";
+
+    /// <summary>The size limit of the publication as chosen: a payer lifts it from 64 MiB to 16 GiB.</summary>
+    public long SizeLimit => SelectedPayer is null ? TicketPathMaxBytes : MaxPublicationBytes;
 
     /// <summary>The last entry of "Paid by" (spec 6.1).</summary>
     public const string NobodyLabel = "Nobody — publish with tickets";
@@ -91,6 +92,7 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             BatchEnabled = null;
             _payerChosenFor = null;
             _payerChosenByPerson = false;
+            Describe();
             return;
         }
 
@@ -100,6 +102,7 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             && string.Equals(_payerChosenFor, writer.Reference, StringComparison.Ordinal)
             && (SelectedPayerReference is null || PayerChoices.Any(key => string.Equals(key.Reference, SelectedPayerReference, StringComparison.Ordinal))))
         {
+            Describe();
             return;
         }
 
@@ -112,6 +115,7 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             : null;
         _payerChosenFor = writer.Reference;
         _payerChosenByPerson = false;
+        Describe();
     }
 
     /// <summary>The person's choice in "Paid by"; null or empty is Nobody.</summary>
@@ -120,6 +124,7 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
         SelectedPayerReference = string.IsNullOrEmpty(reference) ? null : reference;
         _payerChosenFor = SelectedReference;
         _payerChosenByPerson = true;
+        Describe();
     }
 
     /// <summary>
@@ -137,7 +142,6 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
         FileName = null;
         FileSize = 0;
         Message = null;
-        Warning = null;
     }
 
     private static readonly Dictionary<string, string> TypesByExtension = new(StringComparer.OrdinalIgnoreCase)
@@ -208,11 +212,8 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
     /// <summary>Why the screen cannot go on, or <see langword="null"/> when it can.</summary>
     public string? Message { get; private set; }
 
-    /// <summary>Something true and worth knowing that does not stop the publication.</summary>
-    public string? Warning { get; private set; }
-
     public bool CanEstimate =>
-        FilePath is not null && FileSize > 0 && FileSize <= MaxFileBytes && SelectedKey is not null
+        FilePath is not null && FileSize > 0 && FileSize <= SizeLimit && SelectedKey is not null
         && XrplFileLink.TryNormalizeNetwork(SelectedKey.Network, out _) && NodeUrl is not null;
 
     public async Task RefreshKeysAsync(CancellationToken cancellationToken)
@@ -403,8 +404,6 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
 
     private void Describe()
     {
-        Warning = null;
-
         if (FilePath is null)
         {
             Message = "Choose a file to publish.";
@@ -417,9 +416,9 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             return;
         }
 
-        if (FileSize > MaxFileBytes)
+        if (FileSize > MaxPublicationBytes)
         {
-            Message = $"That file is {FileSize:N0} bytes. This application publishes files up to {MaxFileBytes:N0} bytes.";
+            Message = TooLargeMessage;
             return;
         }
 
@@ -437,11 +436,10 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             return;
         }
 
-        if (FileSize > ReaderDefaultMaxBytes)
+        if (FileSize > TicketPathMaxBytes && SelectedPayer is null)
         {
-            Warning =
-                $"This file is larger than the {ReaderDefaultMaxBytes:N0} bytes a reader accepts by default, "
-                + "so the link will only open for a reader whose limit has been raised. Publishing it still works.";
+            Message = PayerRequiredMessage;
+            return;
         }
 
         // Named by its canonical form: that is the network the publication will actually use, and

@@ -140,7 +140,6 @@ public sealed class PublishModelPayerTests : VaultHarness
         Assert.Null(model.FileName);
         Assert.Equal(0, model.FileSize);
         Assert.Null(model.Message);
-        Assert.Null(model.Warning);
         Assert.False(model.CanEstimate);
         Assert.Equal(refs["writer"], model.SelectedReference);
         Assert.Equal(refs["payer"], model.SelectedPayerReference);
@@ -172,5 +171,96 @@ public sealed class PublishModelPayerTests : VaultHarness
         Assert.Equal("writer", request.WriterLabel);
         Assert.Equal("payer", request.PayerLabel);
         Assert.Equal(refs["payer"], Payers.LastPayer("testnet"));
+    }
+
+    private async Task<(PublishModel Model, Dictionary<string, string> References)> WriterAndPayerAsync()
+    {
+        (PublishModel model, Dictionary<string, string> refs) = await OpenAsync(("writer", "testnet", null), ("payer", "testnet", null));
+        model.SelectKey(refs["writer"]);
+        await model.RefreshPayerAsync(Token);
+
+        return (model, refs);
+    }
+
+    [Fact]
+    public async Task Without_a_payer_64_MiB_is_the_limit()
+    {
+        (PublishModel model, _) = await WriterAndPayerAsync();
+        model.SelectPayer(null);
+
+        model.DescribeFileForTests("limit.bin", PublishModel.TicketPathMaxBytes);
+        Assert.True(model.CanEstimate);
+        Assert.Null(model.Message);
+
+        model.DescribeFileForTests("over.bin", PublishModel.TicketPathMaxBytes + 1);
+        Assert.False(model.CanEstimate);
+        Assert.Equal("Choose a payer — files larger than 64 MiB publish through Batch.", model.Message);
+    }
+
+    [Fact]
+    public async Task With_a_payer_16_GiB_is_the_limit()
+    {
+        (PublishModel model, _) = await WriterAndPayerAsync();
+        Assert.NotNull(model.SelectedPayer);
+
+        model.DescribeFileForTests("large.bin", PublishModel.TicketPathMaxBytes + 1);
+        Assert.True(model.CanEstimate);
+
+        model.DescribeFileForTests("limit.bin", 16L * 1024 * 1024 * 1024);
+        Assert.True(model.CanEstimate);
+        Assert.Null(model.Message);
+
+        model.DescribeFileForTests("over.bin", 16L * 1024 * 1024 * 1024 + 1);
+        Assert.False(model.CanEstimate);
+        Assert.Equal("This application publishes files up to 16 GiB.", model.Message);
+    }
+
+    [Fact]
+    public async Task Above_16_GiB_the_size_is_the_reason_even_with_nobody_paying()
+    {
+        (PublishModel model, _) = await WriterAndPayerAsync();
+        model.SelectPayer(null);
+
+        model.DescribeFileForTests("over.bin", PublishModel.MaxPublicationBytes + 1);
+
+        Assert.Equal(PublishModel.TooLargeMessage, model.Message);
+    }
+
+    [Fact]
+    public async Task Choosing_the_payer_again_lifts_the_refusal_at_once()
+    {
+        (PublishModel model, Dictionary<string, string> refs) = await WriterAndPayerAsync();
+        model.SelectPayer(null);
+        model.DescribeFileForTests("large.bin", 100_000_000);
+        Assert.Equal(PublishModel.PayerRequiredMessage, model.Message);
+
+        model.SelectPayer(refs["payer"]);
+
+        Assert.Null(model.Message);
+        Assert.True(model.CanEstimate);
+    }
+
+    [Fact]
+    public async Task On_a_network_without_Batch_a_large_file_needs_a_payer_it_cannot_have()
+    {
+        _connections.Ledger.EnabledAmendments.Clear();
+        (PublishModel model, _) = await WriterAndPayerAsync();
+        Assert.True(model.PayerLocked);
+
+        model.DescribeFileForTests("large.bin", 100_000_000);
+
+        Assert.False(model.CanEstimate);
+        Assert.Equal(PublishModel.PayerRequiredMessage, model.Message);
+    }
+
+    [Fact]
+    public async Task A_file_past_the_readers_default_carries_no_warning()
+    {
+        (PublishModel model, _) = await WriterAndPayerAsync();
+
+        model.DescribeFileForTests("big.bin", new ReaderOptions().MaxBytes + 1);
+
+        Assert.True(model.CanEstimate);
+        Assert.Null(model.Message);
     }
 }
