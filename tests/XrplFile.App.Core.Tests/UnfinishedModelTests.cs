@@ -358,7 +358,7 @@ public sealed class UnfinishedModelTests : VaultHarness
     {
         new PublicationState(
             PublicationState.CurrentVersion, "1", "rWriter", "ref", "application/octet-stream", fileName, size,
-            Chunk: chunk, Root: "AB", StartedInLedger: 1, Phase: phase, ChunkHashes: new Dictionary<int, string>())
+            Chunk: chunk, Root: "AB", StartedInLedger: 1, Phase: phase)
             .Save(Path.Combine(Paths.StateDirectory, fileName));
     }
 

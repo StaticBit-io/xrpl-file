@@ -129,7 +129,7 @@ public sealed class TicketStrategy(
 
     public int TicketMints => Volatile.Read(ref _mints);
 
-    public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
+    public async Task<SubmittedMemos> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
     {
         HashSet<string> markers = new(memos.Count, StringComparer.Ordinal);
@@ -241,8 +241,10 @@ public sealed class TicketStrategy(
             }
         }
 
-        return [.. landed.OrderBy(pair => pair.Key)
-            .Select(pair => new SubmittedMemo(pair.Key, pair.Value.Hash) { LedgerIndex = pair.Value.LedgerIndex })];
+        SubmittedMemosBuilder result = new(memos.Count, keepChunkFacts: true);
+        foreach ((int index, LedgerTransaction tx) in landed.OrderBy(pair => pair.Key)) result.Record(index, memos[index].MemoTypeHex, tx.Hash, tx.LedgerIndex);
+
+        return result.Build();
     }
 
     public Task<TicketRelease> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken)

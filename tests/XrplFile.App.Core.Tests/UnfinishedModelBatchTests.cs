@@ -45,7 +45,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
         string statePath = Path.Combine(Paths.StateDirectory, "1-batch.json");
         new PublicationState(
             PublicationState.BatchVersion, "testnet", writer.ClassicAddress, writerRef, "application/octet-stream", "source.bin",
-            bytes.Length, MemoLayout.ChunkBytes, PublicationSession.RootOf(bytes), 1, "chunks", new Dictionary<int, string>(),
+            bytes.Length, MemoLayout.ChunkBytes, PublicationSession.RootOf(bytes), 1, "chunks",
             Strategy: PublicationState.BatchStrategyName, SourcePath: filePath, Payer: payer.ClassicAddress, PayerKeyReference: payerRef, Fence: 0)
             .Save(statePath);
 

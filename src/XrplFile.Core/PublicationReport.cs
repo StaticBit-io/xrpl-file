@@ -40,11 +40,8 @@ namespace XrplFile;
 /// and cannot be — their clock is on neither the ledger nor the state file.
 /// </param>
 /// <param name="FinishedAt">Session scope: when this session ended.</param>
-/// <param name="ChunkHashes">
-/// Publication scope. Every chunk of the file, in index order, whichever session put it there: on a
-/// resume this names transactions an earlier session submitted alongside this one's.
-/// </param>
-/// <param name="ListHashes">Publication scope, like <see cref="ChunkHashes"/>: every block-list memo of the file, in index order.</param>
+/// <param name="ChunkCount">Publication scope: the file's chunks, whichever session put them there (spec S8).</param>
+/// <param name="ListCount">Publication scope: the file's block-list memos; zero for a file of one block.</param>
 /// <param name="ManifestHash">The manifest, which only the session that finishes the publication writes.</param>
 public sealed record PublicationReport(
     XrplFileLink Link,
@@ -54,8 +51,8 @@ public sealed record PublicationReport(
     long FeeDropsEstimated,
     DateTimeOffset StartedAt,
     DateTimeOffset FinishedAt,
-    IReadOnlyList<string> ChunkHashes,
-    IReadOnlyList<string> ListHashes,
+    long ChunkCount,
+    int ListCount,
     string ManifestHash)
 {
     /// <summary>

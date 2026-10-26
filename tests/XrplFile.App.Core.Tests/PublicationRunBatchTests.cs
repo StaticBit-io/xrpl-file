@@ -144,7 +144,7 @@ public sealed class PublicationRunBatchTests : VaultHarness
         string statePath = Path.Combine(Paths.StateDirectory, "1-run.json");
         new PublicationState(
             PublicationState.CurrentVersion, "testnet", wallet.ClassicAddress, reference, "application/octet-stream", "f.bin",
-            file.Length, MemoLayout.ChunkBytes, PublicationSession.RootOf(file), 1, "chunks", new Dictionary<int, string>(),
+            file.Length, MemoLayout.ChunkBytes, PublicationSession.RootOf(file), 1, "chunks",
             Strategy: PublicationState.TicketStrategyName).Save(statePath);
 
         PublicationRun run = new(_connections, vault, Paths, new PublicationHistory(Paths.HistoryPath));

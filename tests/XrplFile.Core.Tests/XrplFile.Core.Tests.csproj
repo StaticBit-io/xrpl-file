@@ -15,5 +15,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\vectors\v1.json" Link="vectors\v1.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- State files written by the application before streaming publication (spec 4.5): they must keep resuming. -->
+    <None Include="fixtures\state\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

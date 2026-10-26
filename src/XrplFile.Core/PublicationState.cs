@@ -11,6 +11,11 @@ namespace XrplFile;
 /// It holds no seed. The key it names is a reference the caller understands — a row in a key
 /// store, a file name, whatever the application uses — and resolving it back to a signer is
 /// somebody else's job. That keeps the whole secret surface in one place.
+/// <para>
+/// Files written before streaming publication carry a <c>ChunkHashes</c> map; it is read and
+/// ignored (spec S8). Nothing in the library or the application read it, and at "done" it held a
+/// hash per chunk.
+/// </para>
 /// </summary>
 /// <param name="StartedInLedger">
 /// Where reconciliation begins on a resume. Without it a resumed run would sweep the account's
@@ -20,10 +25,6 @@ namespace XrplFile;
 /// The last stage the run was seen in: one of "chunks", "lists", "read-back", "manifest", "done".
 /// It is written when the stage changes, so a run interrupted half-way names the stage it died in
 /// rather than the one it started in.
-/// </param>
-/// <param name="ChunkHashes">
-/// What has landed so far, by index. A resume does not trust this — the ledger decides — but it
-/// carries the run's report through an interruption.
 /// </param>
 /// <param name="Strategy">
 /// How the run submits (spec B16): "sequence" or "tickets" in version 2, absent in a version-2 file
@@ -55,7 +56,6 @@ public sealed record PublicationState(
     string? Root,
     long StartedInLedger,
     string Phase,
-    IReadOnlyDictionary<int, string> ChunkHashes,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Strategy = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SourcePath = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ManifestHash = null,

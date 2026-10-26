@@ -17,7 +17,8 @@ public class WriterLedgerTests
             VectorStream.Bytes("ledgers", 20_000), "text/plain", null, node.Writer.Account, "testnet", null, null,
             TestContext.Current.CancellationToken);
 
-        Assert.Empty(source.LookedUp.Intersect(result.ChunkHashes, StringComparer.OrdinalIgnoreCase));
+        IEnumerable<string> chunkHashes = (await LedgerRecords.ChunksAsync(node.Ledger, node.Writer.Account, 0, TestContext.Current.CancellationToken)).Select(tx => tx.Hash);
+        Assert.Empty(source.LookedUp.Intersect(chunkHashes, StringComparer.OrdinalIgnoreCase));
     }
 
     /// <summary>Forwards every read and remembers which hashes were looked up one by one.</summary>

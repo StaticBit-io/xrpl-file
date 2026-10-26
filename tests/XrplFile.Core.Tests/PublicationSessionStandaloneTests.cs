@@ -150,13 +150,15 @@ public class PublicationSessionStandaloneTests : IDisposable
             PublicationSession resumed = await PublicationSession.ResumeAsync(second, source, file, statePath, options, token);
             PublicationReport report = await resumed.RunAsync(null, token);
 
-            long resent = (await source.TransactionAsync(report.ChunkHashes[4], token))!.LedgerIndex;
-            long highest = (await source.TransactionAsync(report.ChunkHashes[^1], token))!.LedgerIndex;
+            IReadOnlyList<LedgerTransaction> landedChunks = await LedgerRecords.ChunksAsync(
+                source, writer.ClassicAddress, PublicationState.Load(statePath).StartedInLedger, token);
+
+            long resent = landedChunks[4].LedgerIndex;
+            long highest = landedChunks[^1].LedgerIndex;
             Assert.True(resent > highest, "the hole's chunk has to land after the highest index's for this test to mean anything");
 
-            foreach (string hash in report.ChunkHashes)
+            foreach (LedgerTransaction landed in landedChunks)
             {
-                LedgerTransaction landed = (await source.TransactionAsync(hash, token))!;
                 Assert.InRange(landed.LedgerIndex, report.Manifest.FirstLedger, report.Manifest.LastLedger);
             }
 

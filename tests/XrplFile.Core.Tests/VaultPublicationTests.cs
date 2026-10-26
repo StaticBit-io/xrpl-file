@@ -80,7 +80,7 @@ public class VaultPublicationTests : IAsyncDisposable
 
         PublicationReport report = await session.RunAsync(null, token);
 
-        Assert.Equal(3, report.ChunkHashes.Count);
+        Assert.Equal(3, report.ChunkCount);
         Assert.Equal(_wallet.ClassicAddress, report.Writer);
 
         // Every transaction that reached the fake node was signed through the vault: three chunks

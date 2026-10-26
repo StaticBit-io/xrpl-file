@@ -21,7 +21,7 @@ internal sealed class ScriptedStrategy(ISubmissionStrategy inner) : ISubmissionS
 
     public void Resume() => _resume.TrySetResult();
 
-    public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
+    public async Task<SubmittedMemos> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
     {
         int call = Interlocked.Increment(ref _calls);

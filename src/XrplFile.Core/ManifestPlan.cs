@@ -29,22 +29,6 @@ internal static class ManifestPlan
         return entries;
     }
 
-    /// <summary>Each block's earliest chunk ledger, from per-chunk ledgers. Bounded use only: the one-account paths (64 MiB).</summary>
-    public static IReadOnlyList<long> FirstLedgers(int chunkCount, IReadOnlyDictionary<int, long> chunkLedgers)
-    {
-        int blocks = FileTree.BlockCount(chunkCount);
-        long[] firsts = new long[blocks];
-
-        for (int block = 0; block < blocks; block++)
-        {
-            int first = block * FileTree.BlockChunks;
-            int end = Math.Min(first + FileTree.BlockChunks, chunkCount);
-            firsts[block] = Enumerable.Range(first, end - first).Min(index => chunkLedgers[index]);
-        }
-
-        return firsts;
-    }
-
     /// <summary>The block-list memos, only when there is more than one block.</summary>
     public static IReadOnlyList<MemoSubmission> ListMemos(IReadOnlyList<BlockEntry> entries) =>
         entries.Count <= 1

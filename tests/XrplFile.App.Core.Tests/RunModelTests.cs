@@ -406,7 +406,7 @@ public sealed class RunModelTests : VaultHarness
         new(
             new XrplFileLink("testnet", new string('A', 64)),
             new Manifest("application/octet-stream", 4096, 1024, "AB", 1, 2, 1, 0, "file.bin"),
-            "rWriter", 6, 72, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, [], [], new string('B', 64))
+            "rWriter", 6, 72, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 0, 0, new string('B', 64))
         {
             TicketReleaseFeeDrops = 0,
             TicketReleaseFeeDropsInDoubt = 0,

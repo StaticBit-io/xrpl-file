@@ -34,10 +34,10 @@ public class TicketStrategyTests
         FakeLedgerSink sink = new(ledger);
         await using TicketStrategy strategy = Strategy(sink, ledger);
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(5), null, TestContext.Current.CancellationToken);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(Memos(5), null, TestContext.Current.CancellationToken);
 
-        Assert.Equal([0, 1, 2, 3, 4], landed.Select(memo => memo.Index).Order().ToArray());
-        foreach (SubmittedMemo memo in landed)
+        Assert.Equal([0, 1, 2, 3, 4], landed.Each().Select(memo => memo.Index).Order().ToArray());
+        foreach (LandedMemoFacts memo in landed.Each())
         {
             LedgerTransaction? tx = await ledger.TransactionAsync(memo.TxHash, TestContext.Current.CancellationToken);
             Assert.NotNull(tx);
@@ -171,7 +171,7 @@ public class TicketStrategyTests
         sink.FailsAs.Add(2);
         await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 3);
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, landed.Count);
         // A second mint had to happen: the failed transaction ate its ticket without writing.
@@ -187,7 +187,7 @@ public class TicketStrategyTests
         sink.Refusals[1] = "tefBAD_AUTH";
         await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 3);
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, landed.Count);
         // Three tickets covered three memos and a retry: no second mint was needed.
@@ -230,7 +230,7 @@ public class TicketStrategyTests
         sink.UnvalidatedAt.Add(0);
         await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 3);
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, landed.Count);
     }
@@ -243,7 +243,7 @@ public class TicketStrategyTests
         await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 1);
 
         // A first publication that lands cleanly: position 0 is its mint, position 1 its one memo.
-        IReadOnlyList<SubmittedMemo> first = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+        SubmittedMemos first = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
 
         // Position 2 is the second call's mint. The node holds it but has not validated it yet when
         // it is looked up by hash, so EnsureTicketsAsync's firstMintLedger falls back to "the ledger
@@ -256,10 +256,10 @@ public class TicketStrategyTests
         // marker, which is the collision this floor exists to prevent. No ledger is closed between
         // the two calls on purpose: that is what leaves the first memo sitting at the exact ledger
         // this fallback would anchor at without the +1.
-        IReadOnlyList<SubmittedMemo> second = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+        SubmittedMemos second = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
 
-        Assert.Single(second);
-        Assert.NotEqual(first[0].TxHash, second[0].TxHash);
+        Assert.Single(second.Each());
+        Assert.NotEqual(first.Each()[0].TxHash, second.Each()[0].TxHash);
     }
 
     [Fact]
@@ -285,11 +285,11 @@ public class TicketStrategyTests
         long ledgerAlreadyOpenWhenTheCallStarted = ledger.CurrentLedger;
         sink.CloseLedger();
 
-        IReadOnlyList<SubmittedMemo> second = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+        SubmittedMemos second = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
 
-        Assert.Single(second);
+        Assert.Single(second.Each());
 
-        LedgerTransaction? landedTx = await ledger.TransactionAsync(second[0].TxHash, TestContext.Current.CancellationToken);
+        LedgerTransaction? landedTx = await ledger.TransactionAsync(second.Each()[0].TxHash, TestContext.Current.CancellationToken);
         Assert.NotNull(landedTx);
         // The floor is one past the ledger that was already open when this no-mint call started:
         // nothing it submits can itself land at or before that ledger. Anchoring at that ledger
@@ -313,7 +313,7 @@ public class TicketStrategyTests
         sink.Refusals[1] = refusal;
         await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 3);
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, landed.Count);
         // Three tickets covered three memos and a retry: no second mint was needed.
@@ -354,18 +354,18 @@ public class TicketStrategyTests
         FakeLedgerSink sink = new(ledger);
         await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 4);
 
-        IReadOnlyList<SubmittedMemo> first = await strategy.SubmitAllAsync(Memos(2), null, TestContext.Current.CancellationToken);
+        SubmittedMemos first = await strategy.SubmitAllAsync(Memos(2), null, TestContext.Current.CancellationToken);
 
         // A ledger closes between two publications, as one always does.
         sink.CloseLedger();
 
-        IReadOnlyList<SubmittedMemo> second = await strategy.SubmitAllAsync(Memos(2), null, TestContext.Current.CancellationToken);
+        SubmittedMemos second = await strategy.SubmitAllAsync(Memos(2), null, TestContext.Current.CancellationToken);
 
         // Chunk markers carry no publication scope — xf/c/0 is xf/c/0 for every file this account
         // ever published — so a sweep anchored before the first publication matches the first
         // publication's transactions and reports their hashes for memos this call never landed.
         Assert.Equal(2, second.Count);
-        Assert.Empty(second.Select(memo => memo.TxHash).Intersect(first.Select(memo => memo.TxHash), StringComparer.Ordinal));
+        Assert.Empty(second.Each().Select(memo => memo.TxHash).Intersect(first.Each().Select(memo => memo.TxHash), StringComparer.Ordinal));
     }
 
     [Fact]
@@ -377,7 +377,7 @@ public class TicketStrategyTests
         sink.QueuedUntilSweep[1] = 1;
         await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 3);
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, landed.Count);
         // Three memos, three transactions (the mint carries a mark of its own, so it is not counted).
@@ -467,10 +467,10 @@ public class TicketStrategyTests
 
         await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 100);
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(100), null, TestContext.Current.CancellationToken);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(Memos(100), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(100, landed.Count);
-        Assert.Equal([.. Enumerable.Range(0, 100)], landed.Select(memo => memo.Index).Order().ToArray());
+        Assert.Equal([.. Enumerable.Range(0, 100)], landed.Each().Select(memo => memo.Index).Order().ToArray());
 
         // Every mint asked for what the account had room for and no more, so none of them failed.
         uint[] minted =
@@ -554,7 +554,7 @@ public class TicketStrategyTests
         IReadOnlyList<uint> leftovers = sink.LeaveTickets(Wallet.ClassicAddress, 3, marked: true);
         await using TicketStrategy strategy = Strategy(sink, ledger);
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(5), null, TestContext.Current.CancellationToken);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(Memos(5), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(5, landed.Count);
         Assert.All(leftovers, ticket => Assert.Contains(ticket, Ridden(sink)));
@@ -625,8 +625,8 @@ public class TicketStrategyTests
             ValidationPoll = TimeSpan.FromMilliseconds(1),
         });
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
-        Assert.Single(landed);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+        Assert.Single(landed.Each());
 
         // The gone ticket is still listed, so the next call's look finds it again — and must not ride it.
         sink.CloseLedger();
@@ -652,9 +652,9 @@ public class TicketStrategyTests
             ValidationPoll = TimeSpan.FromMilliseconds(1),
         });
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
 
-        Assert.Single(landed);
+        Assert.Single(landed.Each());
         Assert.Equal([.. leftovers], Ridden(sink));
         Assert.Empty(Minted(sink));
     }
@@ -673,9 +673,9 @@ public class TicketStrategyTests
         sink.ValidatesAfterReads[0] = 1;
         await using TicketStrategy strategy = Strategy(sink, ledger);
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(Memos(1), null, TestContext.Current.CancellationToken);
 
-        Assert.Single(landed);
+        Assert.Single(landed.Each());
         Assert.Empty(Minted(sink));
         Assert.All(ledger.Calls, call => Assert.True(call.FromLedger <= call.ToLedger, $"swept {call.FromLedger}..{call.ToLedger}"));
     }
@@ -729,9 +729,9 @@ public class TicketStrategyTests
         });
 
         IReadOnlyList<MemoSubmission> memos = Memos(1);
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(memos, null, TestContext.Current.CancellationToken);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(memos, null, TestContext.Current.CancellationToken);
 
-        LedgerTransaction? reported = await ledger.TransactionAsync(Assert.Single(landed).TxHash, TestContext.Current.CancellationToken);
+        LedgerTransaction? reported = await ledger.TransactionAsync(Assert.Single(landed.Each()).TxHash, TestContext.Current.CancellationToken);
         Assert.Equal(memos[0].MemoDataHex, reported!.MemoDataHex);
 
         // The copy carrying other data was neither recorded nor counted as seen, so the memo went out again.
@@ -789,9 +789,9 @@ public class TicketStrategyTests
         });
 
         MemoSubmission memo = new(MemoLayout.ChunkMarkerHex(0), "ABCDEF", null);
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync([memo], null, TestContext.Current.CancellationToken);
+        SubmittedMemos landed = await strategy.SubmitAllAsync([memo], null, TestContext.Current.CancellationToken);
 
-        Assert.Single(landed);
+        Assert.Single(landed.Each());
         Assert.Single(Ridden(sink));
     }
 
@@ -842,7 +842,7 @@ public class TicketStrategyTests
         FakeLedgerSink sink = new(ledger);
         await using TicketStrategy strategy = Strategy(sink, ledger);
 
-        foreach (SubmittedMemo memo in await strategy.SubmitAllAsync(Memos(5), null, TestContext.Current.CancellationToken))
+        foreach (LandedMemoFacts memo in (await strategy.SubmitAllAsync(Memos(5), null, TestContext.Current.CancellationToken)).Each())
         {
             Assert.Equal((await ledger.TransactionAsync(memo.TxHash, TestContext.Current.CancellationToken))!.LedgerIndex, memo.LedgerIndex);
         }

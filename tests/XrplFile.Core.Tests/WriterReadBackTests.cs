@@ -50,10 +50,10 @@ public class WriterReadBackTests
 
         public int TicketMints => inner.TicketMints;
 
-        public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
+        public async Task<SubmittedMemos> SubmitAllAsync(
             IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
         {
-            IReadOnlyList<SubmittedMemo> landed = await inner.SubmitAllAsync(memos, submitted, cancellationToken);
+            SubmittedMemos landed = await inner.SubmitAllAsync(memos, submitted, cancellationToken);
             source.Armed = !source.Armed && memos.Count > 1;
             return landed;
         }

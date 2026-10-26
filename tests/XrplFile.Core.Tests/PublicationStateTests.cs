@@ -19,11 +19,11 @@ public class PublicationStateTests : IDisposable
 
     private static PublicationState Version2(string? strategy) => new(
         PublicationState.CurrentVersion, "testnet", "rWriter", "key-1", "text/plain", "a.txt", 2500, 1000, "AB",
-        42, "chunks", new Dictionary<int, string>(), Strategy: strategy);
+        42, "chunks", Strategy: strategy);
 
     private static PublicationState Version3() => new(
         PublicationState.BatchVersion, "testnet", "rWriter", "key-1", "text/plain", "a.txt", 2500, 1000, "AB",
-        42, "chunks", new Dictionary<int, string>(),
+        42, "chunks",
         Strategy: PublicationState.BatchStrategyName, SourcePath: @"C:\files\a.txt", Payer: PayerAddress, PayerKeyReference: "key-2", Fence: 0);
 
     private void WriteJson(string name, string json) => File.WriteAllText(PathOf(name), json);

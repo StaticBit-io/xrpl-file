@@ -21,7 +21,7 @@ public class BatchRoundStartTests
         await using BatchStrategy running = strategy = new BatchStrategy(
             node.Sink, source, node.Writer, node.Payer, BatchTestNode.Budget, node.Fence, BatchTestNode.FastOptions);
 
-        IReadOnlyList<SubmittedMemo> landed = await running.SubmitAllAsync(BatchTestNode.Memos(16), null, Token);
+        SubmittedMemos landed = await running.SubmitAllAsync(BatchTestNode.Memos(16), null, Token);
 
         Assert.Equal(16, landed.Count);
         Assert.Equal(2, source.StaleServed);

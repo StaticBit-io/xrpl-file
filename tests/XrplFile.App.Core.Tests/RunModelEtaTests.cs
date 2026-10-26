@@ -351,7 +351,7 @@ public sealed class RunModelEtaTests : IDisposable
         string path = Path.Combine(_directory, "run.json");
         new PublicationState(
             PublicationState.CurrentVersion, "testnet", "rWriter", "key-1", "text/plain", "f.bin", 2500, MemoLayout.ChunkBytes, "AB",
-            42, "chunks", new Dictionary<int, string>()).Save(path);
+            42, "chunks").Save(path);
 
         RunSnapshot failed = new(PublicationRunState.Failed, null, null, "it failed", "f.bin", "testnet", null) { StatePath = path };
 

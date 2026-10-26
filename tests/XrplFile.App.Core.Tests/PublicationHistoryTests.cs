@@ -246,7 +246,7 @@ public sealed class PublicationHistoryTests : IDisposable
         string path = Path.Combine(StateDirectory, name);
         new PublicationState(
             PublicationState.CurrentVersion, "testnet", "rWriter", "key-1", "text/plain", "done.txt", 2500, MemoLayout.ChunkBytes, "AB",
-            42, "done", new Dictionary<int, string>(), Strategy: "sequence", ManifestHash: manifestHash).Save(path);
+            42, "done", Strategy: "sequence", ManifestHash: manifestHash).Save(path);
         return path;
     }
 

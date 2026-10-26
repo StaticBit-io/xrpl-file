@@ -35,12 +35,12 @@ public class TicketStrategyStandaloneTests
 
             await using TicketStrategy strategy = new(sink, source, new WalletSigner(writer), new TicketStrategyOptions { TicketsPerBatch = 100 });
 
-            IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(memos, null, token);
+            SubmittedMemos landed = await strategy.SubmitAllAsync(memos, null, token);
 
             Assert.Equal(200, landed.Count);
-            Assert.Equal([.. Enumerable.Range(0, 200)], landed.Select(memo => memo.Index).Order().ToArray());
+            Assert.Equal([.. Enumerable.Range(0, 200)], landed.Each().Select(memo => memo.Index).Order().ToArray());
 
-            foreach (SubmittedMemo memo in landed.Take(5))
+            foreach (LandedMemoFacts memo in landed.Each().Take(5))
             {
                 LedgerTransaction? tx = await source.TransactionAsync(memo.TxHash, token);
                 Assert.NotNull(tx);
@@ -97,7 +97,7 @@ public class TicketStrategyStandaloneTests
 
             // 200 live and a batch of a hundred: asking for a hundred would be tecDIR_FULL. The
             // run has 50 tickets of headroom and has to make do with them.
-            IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(memos, null, token);
+            SubmittedMemos landed = await strategy.SubmitAllAsync(memos, null, token);
 
             Assert.Equal(60, landed.Count);
 

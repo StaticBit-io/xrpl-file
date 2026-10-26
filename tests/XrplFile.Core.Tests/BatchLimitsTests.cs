@@ -163,7 +163,7 @@ public class BatchLimitsTests
         BatchTestNode node = new();
         await using BatchStrategy strategy = node.Strategy(budget: new BatchBudget(15, 30, PayerBudgetDrops: 10_000, WriterBudgetDrops: 29));
 
-        Assert.Single(await strategy.SubmitAllAsync(BatchTestNode.Memos(1), null, Token));
+        Assert.Equal(1, (await strategy.SubmitAllAsync(BatchTestNode.Memos(1), null, Token)).Count);
 
         XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => strategy.SubmitAllAsync(BatchTestNode.Memos(1), null, Token));
 
@@ -177,8 +177,8 @@ public class BatchLimitsTests
         BatchTestNode node = new();
         await using BatchStrategy strategy = node.Strategy(budget: new BatchBudget(15, 30, PayerBudgetDrops: 10_000, WriterBudgetDrops: 30));
 
-        Assert.Single(await strategy.SubmitAllAsync(BatchTestNode.Memos(1), null, Token));
-        Assert.Single(await strategy.SubmitAllAsync(BatchTestNode.Memos(1), null, Token));
+        Assert.Equal(1, (await strategy.SubmitAllAsync(BatchTestNode.Memos(1), null, Token)).Count);
+        Assert.Equal(1, (await strategy.SubmitAllAsync(BatchTestNode.Memos(1), null, Token)).Count);
         Assert.Equal(2, node.Sink.Transmissions.Count(t => t.TransactionType == "AccountSet"));
     }
 

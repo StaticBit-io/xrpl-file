@@ -24,8 +24,8 @@ public class XrplFileWriterTests
             file, "application/octet-stream", "vector.bin", Wallet.ClassicAddress, "testnet",
             null, new Progress<PublishProgress>(progress.Add), TestContext.Current.CancellationToken);
 
-        Assert.Equal(1025, result.ChunkHashes.Count);
-        Assert.Single(result.ListHashes);
+        Assert.Equal(1025, result.ChunkCount);
+        Assert.Equal(1, result.ListCount);
         Assert.Equal("testnet", result.Link.Network);
         Assert.Equal(result.ManifestHash, result.Link.TxHash);
         Assert.Equal(vector.Root, result.Manifest.Root);
@@ -118,16 +118,16 @@ public class XrplFileWriterTests
 
         public int TicketMints => inner.TicketMints;
 
-        public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
+        public async Task<SubmittedMemos> SubmitAllAsync(
             IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
         {
-            IReadOnlyList<SubmittedMemo> landed =
+            SubmittedMemos landed =
                 await inner.SubmitAllAsync(memos, submitted, cancellationToken).ConfigureAwait(false);
 
             if (submitted is not null && HeardDuringReport < 0)
             {
                 int before = heard();
-                submitted.Report(landed.Count);
+                submitted.Report(landed.Landed.Count);
                 HeardDuringReport = heard() - before;
             }
 
@@ -160,7 +160,7 @@ public class XrplFileWriterTests
         PublishResult result = await writer.PublishAsync(
             file, "application/octet-stream", "batch.bin", Wallet.ClassicAddress, "testnet", null, null, TestContext.Current.CancellationToken);
 
-        Assert.Equal(2500, result.ChunkHashes.Count);
+        Assert.Equal(2500, result.ChunkCount);
 
         int lastChunkPosition = sink.Events.LastIndexOf("chunk");
         int queriesBeforeLastChunk = sink.Events.Take(lastChunkPosition).Count(kind => kind == "query");
@@ -231,7 +231,7 @@ public class XrplFileWriterTests
         PublishResult result = await writer.PublishAsync(
             VectorStream.Bytes("s", 1500), "text/plain", "s.txt", Wallet.ClassicAddress, "mainnet", null, null, TestContext.Current.CancellationToken);
 
-        LedgerTransaction chunk1 = (await ledger.TransactionAsync(result.ChunkHashes[1], TestContext.Current.CancellationToken))!;
+        LedgerTransaction chunk1 = (await LedgerRecords.ChunksAsync(ledger, Wallet.ClassicAddress, 0, TestContext.Current.CancellationToken))[1];
         Assert.Equal(1, MemoLayout.ChunkIndexOf(chunk1.MemoTypeHex));
         Assert.Null(chunk1.MemoFormatHex);
         Assert.Equal(500 * 2, chunk1.MemoDataHex!.Length);

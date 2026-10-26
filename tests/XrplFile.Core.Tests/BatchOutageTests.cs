@@ -22,7 +22,7 @@ public class BatchOutageTests
         });
         await using BatchStrategy strategy = node.Strategy(Options with { NodeOutageLimit = TimeSpan.FromSeconds(10) });
 
-        Task<IReadOnlyList<SubmittedMemo>> run = strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
+        Task<SubmittedMemos> run = strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
 
         // All three scripted drops have happened, and every dropped blob has been transmitted again.
         // Counting a particular answer would depend on which copy reaches the fake first.
@@ -34,7 +34,7 @@ public class BatchOutageTests
         });
         node.Sink.AutoClose = true;
 
-        IReadOnlyList<SubmittedMemo> landed = await run;
+        SubmittedMemos landed = await run;
 
         IReadOnlyList<FakeBatchLedgerSink.Transmission> all = node.Sink.Transmissions;
         Assert.All(

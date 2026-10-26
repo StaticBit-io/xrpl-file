@@ -18,9 +18,9 @@ public class SequenceStrategyTests
         FakeLedgerSink sink = new(ledger);
         await using SequenceStrategy strategy = new(sink, Signer);
 
-        IReadOnlyList<SubmittedMemo> submitted = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
+        SubmittedMemos submitted = await strategy.SubmitAllAsync(Memos(3), null, TestContext.Current.CancellationToken);
 
-        Assert.Equal([0, 1, 2], submitted.Select(memo => memo.Index).ToArray());
+        Assert.Equal([0, 1, 2], submitted.Each().Select(memo => memo.Index).ToArray());
         Assert.Equal(new uint[] { 10, 11, 12 }, sink.Submitted.Select(tx => Convert.ToUInt32(tx["Sequence"])).ToArray());
         Assert.All(sink.Submitted, tx => Assert.Equal("AccountSet", tx["TransactionType"]));
     }

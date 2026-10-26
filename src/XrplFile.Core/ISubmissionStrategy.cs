@@ -3,16 +3,6 @@ namespace XrplFile;
 /// <summary>One memo on its way into the ledger: what a transaction will carry.</summary>
 public sealed record MemoSubmission(string MemoTypeHex, string MemoDataHex, string? MemoFormatHex);
 
-/// <summary>Where a memo landed: its position in the batch, and the transaction that carried it.</summary>
-public sealed record SubmittedMemo(int Index, string TxHash)
-{
-    /// <summary>
-    /// The ledger the memo landed in, when the strategy read it off the record it confirmed the memo
-    /// by; null when it did not. The writer then needs no <c>tx</c> lookup per memo (Spec question 23).
-    /// </summary>
-    public long? LedgerIndex { get; init; }
-}
-
 /// <summary>
 /// How a set of memos reaches the ledger.
 ///
@@ -60,7 +50,11 @@ public interface ISubmissionStrategy : IAsyncDisposable
     /// </summary>
     int TicketMints { get; }
 
-    Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
+    /// <summary>
+    /// Puts every memo into a validated ledger. When it returns, every memo of the call has landed
+    /// with tesSUCCESS; what it says about them is <see cref="SubmittedMemos"/>'s business (spec S23).
+    /// </summary>
+    Task<SubmittedMemos> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken);
 
     /// <summary>

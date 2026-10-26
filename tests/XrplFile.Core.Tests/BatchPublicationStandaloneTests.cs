@@ -101,7 +101,7 @@ public class BatchPublicationStandaloneTests : IDisposable
     private static void ForgetTheEnding(string statePath)
     {
         PublicationState state = PublicationState.Load(statePath);
-        (state with { Phase = "manifest", ManifestHash = null, ChunkHashes = new Dictionary<int, string>() }).Save(statePath);
+        (state with { Phase = "manifest", ManifestHash = null }).Save(statePath);
     }
 
     [Fact]

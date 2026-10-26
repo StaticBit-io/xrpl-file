@@ -239,7 +239,7 @@ public class PublicationSessionBatchResumeTests : IDisposable
 
         // A crash between the manifest validating and "done" being written.
         PublicationState state = PublicationState.Load(first.StatePath);
-        (state with { Phase = "manifest", ManifestHash = null, ChunkHashes = new Dictionary<int, string>() }).Save(first.StatePath);
+        (state with { Phase = "manifest", ManifestHash = null }).Save(first.StatePath);
         int transmitted = node.Sink.Transmissions.Count;
 
         node.Ledger.HistoryHides = tx => MemoLayout.IsManifest(tx.MemoTypeHex);

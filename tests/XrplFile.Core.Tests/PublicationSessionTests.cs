@@ -52,8 +52,8 @@ public class PublicationSessionTests : IDisposable
 
         Assert.Equal("testnet", report.Link.Network);
         Assert.Equal(report.ManifestHash, report.Link.TxHash);
-        Assert.Equal(3, report.ChunkHashes.Count);
-        Assert.Empty(report.ListHashes);
+        Assert.Equal(3, report.ChunkCount);
+        Assert.Equal(0, report.ListCount);
 
         // Four memos. A sequence strategy mints nothing, and a fresh run counts what its own
         // strategy minted, not the estimate's two (spec I18).
@@ -321,7 +321,7 @@ public class PublicationSessionTests : IDisposable
         PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
 
         Assert.Equal(report.ManifestHash, report.Link.TxHash);
-        Assert.Equal(3, report.ChunkHashes.Count);
+        Assert.Equal(3, report.ChunkCount);
 
         // The save failed and said so, without taking the report down with it.
         Assert.NotNull(report.StateSaveFailure);
@@ -348,7 +348,7 @@ public class PublicationSessionTests : IDisposable
         Assert.Equal(
             [
                 "Version", "Network", "Writer", "KeyReference", "Type", "Name",
-                "Size", "Chunk", "Root", "StartedInLedger", "Phase", "ChunkHashes", "Strategy",
+                "Size", "Chunk", "Root", "StartedInLedger", "Phase", "Strategy",
             ],
             properties);
     }
@@ -436,7 +436,7 @@ public class PublicationSessionTests : IDisposable
 
         PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
 
-        Assert.Equal(3, report.ChunkHashes.Count);
+        Assert.Equal(3, report.ChunkCount);
         Assert.Equal("testnet", report.Link.Network);
     }
 
@@ -487,7 +487,7 @@ public class PublicationSessionTests : IDisposable
 
         // Three chunks landed in the first run and are not sent again; only the manifest is.
         Assert.Equal(submittedByTheFirstRun + 1, sink.Submitted.Count);
-        Assert.Equal(3, report.ChunkHashes.Count);
+        Assert.Equal(3, report.ChunkCount);
     }
 
     [Fact]
@@ -511,7 +511,6 @@ public class PublicationSessionTests : IDisposable
 
         int alreadyThere = sink.Submitted.Count;
         PublicationState onDisk = PublicationState.Load(first.StatePath);
-        Assert.Empty(onDisk.ChunkHashes);
 
         await using SequenceStrategy resumed = new(sink, Signer, StrategyOptions);
         PublicationSession second = await PublicationSession.ResumeAsync(
@@ -633,13 +632,16 @@ public class PublicationSessionTests : IDisposable
 
         PublicationReport report = await second.RunAsync(null, TestContext.Current.CancellationToken);
 
-        long resent = await LedgerOfAsync(ledger, report.ChunkHashes[1]);
-        long lastIndexed = await LedgerOfAsync(ledger, report.ChunkHashes[^1]);
+        IReadOnlyList<LedgerTransaction> landedChunks = await LedgerRecords.ChunksAsync(
+            ledger, Wallet.ClassicAddress, PublicationState.Load(first.StatePath).StartedInLedger, TestContext.Current.CancellationToken);
+
+        long resent = landedChunks[1].LedgerIndex;
+        long lastIndexed = landedChunks[^1].LedgerIndex;
         Assert.True(resent > lastIndexed, "the re-sent chunk has to land after the last index's for this test to mean anything");
 
-        foreach (string hash in report.ChunkHashes)
+        foreach (LedgerTransaction landed in landedChunks)
         {
-            Assert.InRange(await LedgerOfAsync(ledger, hash), report.Manifest.FirstLedger, report.Manifest.LastLedger);
+            Assert.InRange(landed.LedgerIndex, report.Manifest.FirstLedger, report.Manifest.LastLedger);
         }
 
         ReadResult read = await new XrplFileReader(ledger).ReadAsync(report.Link, TestContext.Current.CancellationToken);
@@ -704,11 +706,11 @@ public class PublicationSessionTests : IDisposable
         // manifest, both of which come after the lists. That a partial run never reaches the lists
         // is only true of a run that died earlier than this one.
         IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
-        IReadOnlyList<SubmittedMemo> sent = await strategy.SubmitAllAsync(
+        SubmittedMemos sent = await strategy.SubmitAllAsync(
             [.. chunks.Select((chunk, i) => new MemoSubmission(MemoLayout.ChunkMarkerHex(i), MemoLayout.Hex(chunk), null))],
             null, TestContext.Current.CancellationToken);
 
-        Dictionary<int, string> byIndex = sent.ToDictionary(memo => memo.Index, memo => memo.TxHash);
+        Dictionary<int, string> byIndex = sent.Each().ToDictionary(memo => memo.Index, memo => memo.TxHash);
         List<BlockEntry> entries = [];
 
         for (int block = 0; block < FileTree.BlockCount(chunks.Count); block++)
@@ -742,7 +744,7 @@ public class PublicationSessionTests : IDisposable
         // per-block ledger included -- which is also what pins a block's first ledger to the
         // earliest of its own chunks rather than to the ledger of its first index.
         Assert.Equal(beforeTheResume + 1, sink.Submitted.Count);
-        Assert.Single(report.ListHashes);
+        Assert.Equal(1, report.ListCount);
 
         ReadResult read = await new XrplFileReader(ledger).ReadAsync(report.Link, TestContext.Current.CancellationToken);
         Assert.Equal(file, read.Bytes);
@@ -875,7 +877,7 @@ public class PublicationSessionTests : IDisposable
 
         public int TicketMints => inner.TicketMints;
 
-        public Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
+        public Task<SubmittedMemos> SubmitAllAsync(
             IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken) =>
             inner.SubmitAllAsync(memos, submitted, cancellationToken);
 
@@ -902,10 +904,10 @@ public class PublicationSessionTests : IDisposable
 
         public int TicketMints => inner.TicketMints;
 
-        public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
+        public async Task<SubmittedMemos> SubmitAllAsync(
             IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
         {
-            IReadOnlyList<SubmittedMemo> landed = await inner.SubmitAllAsync(memos, submitted, cancellationToken);
+            SubmittedMemos landed = await inner.SubmitAllAsync(memos, submitted, cancellationToken);
             sink.CloseLedger();
             return landed;
         }
@@ -1086,7 +1088,7 @@ public class PublicationSessionTests : IDisposable
 
         PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
 
-        long memos = report.ChunkHashes.Count + report.ListHashes.Count + 1;
+        long memos = report.ChunkCount + report.ListCount + 1;
         Assert.Equal(memos + strategy.TicketMints, report.Transactions);
         Assert.True(report.Transactions < memos + estimate.Mints, "the picked-up tickets cost nothing to mint");
         Assert.Equal(report.Transactions * NodeFeeDrops, report.FeeDropsEstimated);
@@ -1114,7 +1116,7 @@ public class PublicationSessionTests : IDisposable
             Wallet.ClassicAddress, "key-1", "testnet", Options(), TestContext.Current.CancellationToken);
         PublicationReport report = await second.RunAsync(null, TestContext.Current.CancellationToken);
 
-        long memos = report.ChunkHashes.Count + report.ListHashes.Count + 1;
+        long memos = report.ChunkCount + report.ListCount + 1;
         Assert.Equal(memos + (strategy.TicketMints - afterFirst), report.Transactions);
     }
 

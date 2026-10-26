@@ -69,7 +69,7 @@ public sealed class BatchStrategy : ISubmissionStrategy
 
     internal int WindowInFlight => _context.Window.InFlight;
 
-    public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
+    public async Task<SubmittedMemos> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(memos);
@@ -96,8 +96,10 @@ public sealed class BatchStrategy : ISubmissionStrategy
             pending = [.. pending.Where(index => !landed.ContainsKey(index))];
         }
 
-        return [.. landed.OrderBy(pair => pair.Key)
-            .Select(pair => new SubmittedMemo(pair.Key, pair.Value.Hash) { LedgerIndex = pair.Value.LedgerIndex })];
+        SubmittedMemosBuilder result = new(memos.Count, keepChunkFacts: false);
+        foreach ((int index, LandedInner inner) in landed.OrderBy(pair => pair.Key)) result.Record(index, memos[index].MemoTypeHex, inner.Hash, inner.LedgerIndex);
+
+        return result.Build();
     }
 
     /// <summary>

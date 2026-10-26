@@ -50,19 +50,21 @@ public sealed class SequenceStrategy(
 
     public int TicketMints => 0;
 
-    public async Task<IReadOnlyList<SubmittedMemo>> SubmitAllAsync(
+    public async Task<SubmittedMemos> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
     {
         string account = _signer.Account;
         uint sequence = await _sink.SequenceAsync(account, validated: false, cancellationToken).ConfigureAwait(false);
 
-        List<SubmittedMemo> landed = new(memos.Count);
+        SubmittedMemosBuilder landed = new(memos.Count, keepChunkFacts: true);
         int sinceValidation = 0;
 
         for (int i = 0; i < memos.Count; i++)
         {
-            landed.Add(new SubmittedMemo(i, await SubmitAsync(memos[i], sequence++, cancellationToken).ConfigureAwait(false)));
-            submitted?.Report(landed.Count);
+            // Read once: a chunk pass builds an element from the file each time it is read.
+            MemoSubmission memo = memos[i];
+            landed.Record(i, memo.MemoTypeHex, await SubmitAsync(memo, sequence++, cancellationToken).ConfigureAwait(false), ledgerIndex: null);
+            submitted?.Report(landed.Landed.Count);
 
             if (++sinceValidation >= _options.BatchSize)
             {
@@ -73,7 +75,7 @@ public sealed class SequenceStrategy(
 
         await WaitForValidationAsync(account, sequence, cancellationToken).ConfigureAwait(false);
 
-        return landed;
+        return landed.Build();
     }
 
     public async Task<TicketRelease> ReleaseLeftoverTicketsAsync(CancellationToken cancellationToken) =>

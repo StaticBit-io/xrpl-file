@@ -1,0 +1,14 @@
+{
+  "Version": 2,
+  "Network": "testnet",
+  "Writer": "rLUEXYuLiQptky37CqLcm9USQpPiz5rkpD",
+  "KeyReference": "key-legacy",
+  "Type": "text/plain",
+  "Name": "legacy.txt",
+  "Size": 2500,
+  "Chunk": 1000,
+  "Root": "6EDDD4789DCA250C1AE69229121C6CB3EE0190E82A9BEF6F797F728EB8D3B7C8",
+  "StartedInLedger": 40,
+  "Phase": "chunks",
+  "ChunkHashes": {}
+}

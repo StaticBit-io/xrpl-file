@@ -88,7 +88,7 @@ public class BatchIdentityTests
         node.Ledger.HistoryHideReads = 2;
         await using BatchStrategy strategy = node.Strategy(BatchTestNode.FastOptions with { ProgressSweep = TimeSpan.FromHours(1) });
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(16), null, Token);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(16), null, Token);
 
         Assert.Equal(16, landed.Count);
         Assert.Single(strategy.Trace, entry => entry.StartsWith("round:", StringComparison.Ordinal));
@@ -101,7 +101,7 @@ public class BatchIdentityTests
         node.Sink.SubmitDelay = TimeSpan.FromMilliseconds(20);
         await using BatchStrategy strategy = node.Strategy(BatchTestNode.ProgressOptions with { InitialWindow = 2, MaxWindow = 2 });
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(64), null, Token);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(64), null, Token);
 
         Assert.Equal(64, landed.Count);
         List<AccountTransactionsCall> calls = [.. node.Ledger.Calls];
@@ -125,7 +125,7 @@ public class BatchIdentityTests
         node.Ledger.HistoryHideReads = int.MaxValue;
         await using BatchStrategy strategy = node.Strategy(BatchTestNode.ProgressOptions with { InitialWindow = 2, MaxWindow = 2 });
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(64), null, Token);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(64), null, Token);
 
         Assert.Equal(64, landed.Count);
         Assert.Single(strategy.Trace, entry => entry.StartsWith("round:", StringComparison.Ordinal));
@@ -177,7 +177,7 @@ public class BatchIdentityTests
         GatedSigner payer = new(node.Payer, gateAt: 3);
         await using BatchStrategy strategy = node.Strategy(payer: payer);
 
-        Task<IReadOnlyList<SubmittedMemo>> run = strategy.SubmitAllAsync(BatchTestNode.Memos(40), null, Token);
+        Task<SubmittedMemos> run = strategy.SubmitAllAsync(BatchTestNode.Memos(40), null, Token);
         await payer.Reached.WaitAsync(TimeSpan.FromSeconds(20), Token);
         node.Sink.Foreign(node.Writer.Account, "TicketCreate", 16);
         await BatchTestNode.EventuallyAsync(() => strategy.Trace.Contains("halt:diverged"));

@@ -230,7 +230,6 @@ public sealed class PublicationSession : IBatchFenceRecorder
         PublicationState state = new(
             PublicationState.BatchVersion, network, writer, keyReference, type, name,
             file.Length, MemoLayout.ChunkBytes, RootOf(chunks), startedIn, Phase: Stages[0],
-            ChunkHashes: new Dictionary<int, string>(),
             Strategy: PublicationState.BatchStrategyName, SourcePath: options.SourcePath,
             Payer: payer, PayerKeyReference: payerKeyReference, Fence: 0, StartSequence: started.SequenceOf(writer));
 
@@ -425,7 +424,6 @@ public sealed class PublicationSession : IBatchFenceRecorder
         PublicationState state = new(
             PublicationState.CurrentVersion, network, writer, keyReference, type, name,
             file.Length, MemoLayout.ChunkBytes, root, startedIn, Phase: Stages[0],
-            ChunkHashes: new Dictionary<int, string>(),
             Strategy: StrategyName(strategy), SourcePath: options.SourcePath);
 
         // One run, one file, and no two runs share one. Two publications from one account inside
@@ -578,7 +576,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
         int blocks = FileTree.BlockCount(chunks.Count);
         int lists = blocks > 1 ? PublicationEstimator.BlockListMemoCount(blocks) : 0;
-        long missingChunks = chunks.Count - session._landed.Chunks.Count;
+        long missingChunks = chunks.Count - session._landed.Chunks.Landed;
 
         // Lists are priced in full: their bytes depend on ledgers only the writer knows by now, and
         // there are few of them.
@@ -668,13 +666,12 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// </summary>
     private PublishResult? FindManifest(IReadOnlyList<byte[]> chunks, LandedMemos landed, IReadOnlyList<LedgerTransaction> history)
     {
-        if (landed.Chunks.Count != chunks.Count) return null;
+        if (!landed.Chunks.IsComplete) return null;
 
-        Dictionary<int, long> chunkLedgers = landed.Chunks.ToDictionary(pair => pair.Key, pair => pair.Value.LedgerIndex);
-        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(FileTree.BlockHashes(chunks), ManifestPlan.FirstLedgers(chunks.Count, chunkLedgers));
+        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(FileTree.BlockHashes(chunks), landed.Chunks.BlockFirstLedgers());
         IReadOnlyList<MemoSubmission> listMemos = ManifestPlan.ListMemos(entries);
-        List<string> listHashes = [];
-        List<long> listLedgers = [];
+        LedgerRange window = landed.Chunks.Window();
+        long lastLedger = window.Last;
 
         for (int j = 0; j < listMemos.Count; j++)
         {
@@ -684,14 +681,11 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 return null;
             }
 
-            listHashes.Add(list.TxHash);
-            listLedgers.Add(list.LedgerIndex);
+            lastLedger = Math.Max(lastLedger, list.LedgerIndex);
         }
 
-        long firstLedger = chunkLedgers.Values.Min();
-        long lastLedger = listLedgers.Count == 0 ? chunkLedgers.Values.Max() : Math.Max(chunkLedgers.Values.Max(), listLedgers.Max());
         PublicationState state = State;
-        Manifest manifest = ManifestPlan.Build(state.Type, state.Name, state.Size, entries, firstLedger, lastLedger, listMemos.Count);
+        Manifest manifest = ManifestPlan.Build(state.Type, state.Name, state.Size, entries, window.First, lastLedger, listMemos.Count);
         string data = ManifestPlan.Memo(manifest).MemoDataHex;
 
         foreach (LedgerTransaction tx in history)
@@ -699,9 +693,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
             if (!tx.Validated || !tx.Succeeded || !string.Equals(tx.Account, state.Writer, StringComparison.Ordinal)) continue;
             if (!MemoLayout.IsManifest(tx.MemoTypeHex) || !string.Equals(tx.MemoDataHex, data, StringComparison.OrdinalIgnoreCase)) continue;
 
-            List<string> chunkHashes = [.. Enumerable.Range(0, chunks.Count).Select(i => landed.Chunks[i].TxHash)];
-
-            return new PublishResult(new XrplFileLink(state.Network, tx.Hash), manifest, state.Writer, chunkHashes, listHashes, tx.Hash);
+            return new PublishResult(new XrplFileLink(state.Network, tx.Hash), manifest, state.Writer, chunks.Count, listMemos.Count, tx.Hash);
         }
 
         return null;
@@ -784,7 +776,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// </summary>
     private LandedMemos Reconcile(IReadOnlyList<byte[]> chunks, IReadOnlyList<LedgerTransaction> history)
     {
-        Dictionary<int, LandedMemo> landedChunks = [];
+        ChunkLanding landing = new(chunks.Count);
         Dictionary<int, LandedMemo> landedLists = [];
 
         foreach (LedgerTransaction tx in history)
@@ -798,7 +790,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 if (!string.Equals(data, MemoLayout.Hex(chunks[(int)chunkIndex]), StringComparison.OrdinalIgnoreCase)) continue;
 
                 // First in canonical order, exactly as a reader will resolve it.
-                landedChunks.TryAdd((int)chunkIndex, new LandedMemo(tx.Hash, tx.LedgerIndex, data));
+                landing.Land(chunkIndex, tx.LedgerIndex);
                 continue;
             }
 
@@ -812,7 +804,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
             }
         }
 
-        return new LandedMemos(landedChunks, landedLists);
+        return new LandedMemos(landing, landedLists);
     }
 
     /// <summary>The writer's history from <see cref="PublicationState.StartedInLedger"/> to <paramref name="to"/>, in canonical order.</summary>
@@ -887,12 +879,12 @@ public sealed class PublicationSession : IBatchFenceRecorder
             {
                 // The dead run's manifest is in the ledger: record "done" and send nothing, the
                 // tidy-up included (spec B27). The fees were spent by the sessions before this one.
-                Advance("done", done.Manifest.Root, done.ChunkHashes, done.ManifestHash);
+                Advance("done", done.Manifest.Root, done.ManifestHash);
 
                 return new PublicationReport(
                     done.Link, done.Manifest, done.Writer,
-                    done.ChunkHashes.Count + done.ListHashes.Count + 1, 0,
-                    _startedAt, DateTimeOffset.UtcNow, done.ChunkHashes, done.ListHashes, done.ManifestHash)
+                    done.ChunkCount + done.ListCount + 1, 0,
+                    _startedAt, DateTimeOffset.UtcNow, done.ChunkCount, done.ListCount, done.ManifestHash)
                 {
                     StateSaveFailure = StateSaveFailure,
                     Payer = State.Payer,
@@ -907,7 +899,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 _file, started.Type, started.Name, started.Writer, started.Network, _landed,
                 new PhaseRecordingProgress(this, progress), cancellationToken).ConfigureAwait(false);
 
-            Advance("done", result.Manifest.Root, result.ChunkHashes, result.ManifestHash);
+            Advance("done", result.Manifest.Root, result.ManifestHash);
 
             // After "done" and never before: the manifest is in the ledger, so nothing the tidy-up
             // does — or fails to do — can cost the person their link (spec I8).
@@ -917,7 +909,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
             // A fresh run's session is its whole publication, so its strategy's own count is the
             // publication's; a resume's earlier sessions minted too, unrecorded (spec I18).
             int mints = _mintsAtStart is { } before ? Strategy.TicketMints - before : _mints;
-            long transactions = result.ChunkHashes.Count + result.ListHashes.Count + 1 + mints;
+            long transactions = result.ChunkCount + result.ListCount + 1 + mints;
 
             // The writer's fees, counted as today (spec 4.6): on the Batch path its solo transactions at
             // the approved unit, nothing retried; the payer's measured spend is PayerFeeDrops (Spec question 9).
@@ -932,7 +924,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 result.Link, result.Manifest, result.Writer,
                 transactions, feeEstimated,
                 _startedAt, DateTimeOffset.UtcNow,
-                result.ChunkHashes, result.ListHashes, result.ManifestHash)
+                result.ChunkCount, result.ListCount, result.ManifestHash)
             {
                 StateSaveFailure = StateSaveFailure,
                 TicketsReleased = counts.Released,
@@ -1051,11 +1043,10 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// recorded: a late progress report from the thread pool must not tell a resumed run that a
     /// stage it has finished is where it stopped.
     ///
-    /// Per-chunk hashes are not written here, because they are not reachable —
     /// <see cref="PublishProgress"/> carries a count and a stage, not a transaction hash. The
     /// stage is what a person interrupted half-way actually needs, and it is what this records.
     /// </summary>
-    private void Advance(string phase, string? root, IReadOnlyList<string>? chunkHashes, string? manifestHash = null)
+    private void Advance(string phase, string? root, string? manifestHash = null)
     {
         lock (_stateLock)
         {
@@ -1066,9 +1057,6 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 Phase = phase,
                 Root = root ?? _state.Root,
                 ManifestHash = manifestHash ?? _state.ManifestHash,
-                ChunkHashes = chunkHashes is null
-                    ? _state.ChunkHashes
-                    : chunkHashes.Select((hash, index) => (hash, index)).ToDictionary(pair => pair.index, pair => pair.hash),
             };
 
             try
@@ -1099,7 +1087,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
     {
         public void Report(PublishProgress value)
         {
-            session.Advance(value.Stage, root: null, chunkHashes: null);
+            session.Advance(value.Stage, root: null);
             inner?.Report(value);
         }
     }

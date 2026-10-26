@@ -8,18 +8,20 @@ public class BatchStrategyTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task Every_memo_lands_and_reports_the_inner_that_carried_it()
+    public async Task Every_memo_lands_as_an_inner_of_the_writer_and_none_keeps_a_hash()
     {
         BatchTestNode node = new();
         await using BatchStrategy strategy = node.Strategy();
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(20), null, Token);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(20), null, Token);
 
-        Assert.Equal(Enumerable.Range(0, 20).ToArray(), landed.Select(memo => memo.Index).ToArray());
-        foreach (SubmittedMemo memo in landed)
+        Assert.Equal(Enumerable.Range(0, 20).ToArray(), Enumerable.Range(0, landed.Count).Where(landed.Landed.Contains).ToArray());
+        Assert.False(landed.TryHashOf(0, out _));
+
+        IReadOnlyDictionary<string, List<LedgerTransaction>> records = await node.LandedByMarkerAsync();
+        for (int index = 0; index < 20; index++)
         {
-            LedgerTransaction tx = (await node.Ledger.TransactionAsync(memo.TxHash, Token))!;
-            Assert.Equal(MemoLayout.ChunkMarkerHex(memo.Index), tx.MemoTypeHex);
+            LedgerTransaction tx = Assert.Single(records[MemoLayout.ChunkMarkerHex(index)]);
             Assert.Equal(node.Writer.Account, tx.Account);
             Assert.NotNull(tx.ParentBatchID);
         }
@@ -111,7 +113,7 @@ public class BatchStrategyTests
         BatchTestNode node = new(sink => sink.LoseOuter.Add(BatchTestNode.PayerStart));
         await using BatchStrategy strategy = node.Strategy(BatchTestNode.FastOptions with { MaxAhead = 1 });
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
 
         Assert.Equal(24, landed.Count);
         Assert.Contains("halt:stalled", strategy.Trace);
@@ -139,7 +141,7 @@ public class BatchStrategyTests
         // One candidate per memo: a round that stalled could not send them again.
         await using BatchStrategy strategy = node.Strategy(BatchTestNode.FastOptions with { MaxAttemptsPerMemo = 1 });
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
 
         Assert.Equal(24, landed.Count);
         Assert.DoesNotContain("halt:stalled", strategy.Trace);
@@ -157,7 +159,7 @@ public class BatchStrategyTests
         });
         await using BatchStrategy strategy = node.Strategy();
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
 
         Assert.Equal(24, landed.Count);
 
@@ -176,7 +178,7 @@ public class BatchStrategyTests
         BatchTestNode node = new(sink => sink.OuterResult[BatchTestNode.PayerStart] = "tecFAKE");
         await using BatchStrategy strategy = node.Strategy(BatchTestNode.FastOptions with { MaxAhead = 1 });
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
 
         Assert.Equal(24, landed.Count);
         Assert.Contains("halt:diverged", strategy.Trace);
@@ -190,7 +192,7 @@ public class BatchStrategyTests
         BatchTestNode node = new(sink => sink.InnerResult[MemoLayout.ChunkMarkerHex(3)] = "tecFAKE");
         await using BatchStrategy strategy = node.Strategy();
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(16), null, Token);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(16), null, Token);
 
         Assert.Equal(16, landed.Count);
         Assert.DoesNotContain(strategy.Trace, entry => entry.StartsWith("halt:", StringComparison.Ordinal));
@@ -204,7 +206,7 @@ public class BatchStrategyTests
         BatchTestNode node = new(sink => sink.InnerVanishes.Add(MemoLayout.ChunkMarkerHex(2)));
         await using BatchStrategy strategy = node.Strategy(BatchTestNode.FastOptions with { MaxAhead = 1 });
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
 
         Assert.Equal(24, landed.Count);
         Assert.Contains("halt:diverged", strategy.Trace);
@@ -218,7 +220,7 @@ public class BatchStrategyTests
         OvertakingSink overtaking = new(node.Sink);
         await using BatchStrategy strategy = node.Strategy(sink: overtaking);
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
 
         Assert.Equal(24, landed.Count);
         Assert.Contains(node.Sink.Transmissions, transmission => transmission.Answer == "terPRE_SEQ");
@@ -236,7 +238,7 @@ public class BatchStrategyTests
         });
         await using BatchStrategy strategy = node.Strategy();
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(8), null, Token);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(8), null, Token);
 
         Assert.Equal(8, landed.Count);
         Assert.Single(node.Sink.Transmissions.Select(transmission => transmission.Hash).Distinct());
@@ -250,7 +252,7 @@ public class BatchStrategyTests
         BatchTestNode node = new(sink => sink.AnswerAt[(BatchTestNode.PayerStart, 1)] = "telINSUF_FEE_P");
         await using BatchStrategy strategy = node.Strategy();
 
-        IReadOnlyList<SubmittedMemo> landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(8), null, Token);
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(8), null, Token);
 
         Assert.Equal(8, landed.Count);
         Assert.Single(node.Sink.Transmissions, transmission => transmission.Answer == "telINSUF_FEE_P");
@@ -275,12 +277,14 @@ public class BatchStrategyTests
         BatchTestNode node = new();
         await using BatchStrategy strategy = node.Strategy();
 
-        SubmittedMemo landed = Assert.Single(await strategy.SubmitAllAsync(BatchTestNode.Memos(1), null, Token));
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(1), null, Token);
+
+        Assert.Equal(1, landed.Count);
 
         FakeBatchLedgerSink.Transmission solo = Assert.Single(node.Sink.Transmissions);
         Assert.Equal("AccountSet", solo.TransactionType);
         Assert.Equal(node.Writer.Account, solo.Account);
-        Assert.Null((await node.Ledger.TransactionAsync(landed.TxHash, Token))!.ParentBatchID);
+        Assert.Null(Assert.Single((await node.LandedByMarkerAsync())[MemoLayout.ChunkMarkerHex(0)]).ParentBatchID);
     }
 
     [Fact]
@@ -319,7 +323,7 @@ public class BatchStrategyTests
         GatedSigner payer = new(node.Payer, gateAt: 3);
         await using BatchStrategy strategy = node.Strategy(payer: payer);
 
-        Task<IReadOnlyList<SubmittedMemo>> run = strategy.SubmitAllAsync(BatchTestNode.Memos(40), null, Token);
+        Task<SubmittedMemos> run = strategy.SubmitAllAsync(BatchTestNode.Memos(40), null, Token);
         await payer.Reached.WaitAsync(TimeSpan.FromSeconds(20), Token);
         node.Sink.Foreign(node.Writer.Account, "TicketCreate", 16);
         await BatchTestNode.EventuallyAsync(() => strategy.Trace.Contains("halt:diverged"));
@@ -340,12 +344,12 @@ public class BatchStrategyTests
         GatedBlobSink gate = new(node.Sink, gateAt: 2);
         await using BatchStrategy strategy = node.Strategy(BatchTestNode.FastOptions with { MaxAhead = 2 }, sink: gate);
 
-        Task<IReadOnlyList<SubmittedMemo>> run = strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
+        Task<SubmittedMemos> run = strategy.SubmitAllAsync(BatchTestNode.Memos(24), null, Token);
         await gate.Reached.WaitAsync(TimeSpan.FromSeconds(20), Token);
         await BatchTestNode.EventuallyAsync(() => strategy.Trace.Contains("halt:stalled"));
         gate.Release();
 
-        IReadOnlyList<SubmittedMemo> landed = await run;
+        SubmittedMemos landed = await run;
 
         // Registered, so not discarded: it reached the node after the halt, and the round settled
         // only past its deadline, when it could no longer apply (spec B9).
@@ -391,15 +395,16 @@ public class BatchStrategyTests
     }
 
     [Fact]
-    public async Task Every_landed_memo_says_which_ledger_it_is_in()
+    public async Task A_chunk_pass_carries_the_ledgers_it_landed_in_as_its_blocks_range()
     {
         BatchTestNode node = new();
         await using BatchStrategy strategy = node.Strategy();
 
-        foreach (SubmittedMemo memo in await strategy.SubmitAllAsync(BatchTestNode.Memos(10), null, Token))
-        {
-            Assert.Equal((await node.Ledger.TransactionAsync(memo.TxHash, Token))!.LedgerIndex, memo.LedgerIndex);
-        }
+        SubmittedMemos landed = await strategy.SubmitAllAsync(BatchTestNode.Memos(10), null, Token);
+
+        long[] ledgers = [.. (await node.LandedByMarkerAsync()).Values.SelectMany(copies => copies).Select(tx => tx.LedgerIndex)];
+        Assert.Equal(new LedgerRange(ledgers.Min(), ledgers.Max()), landed.BlockLedgers[0]);
+        Assert.False(landed.TryLedgerOf(0, out _));
     }
 
     [Fact]
@@ -410,7 +415,7 @@ public class BatchStrategyTests
         CountingSigner payer = new(node.Payer);
         await using BatchStrategy strategy = node.Strategy(BatchTestNode.FastOptions with { InitialWindow = 1 }, payer: payer, sink: gate);
 
-        Task<IReadOnlyList<SubmittedMemo>> run = strategy.SubmitAllAsync(BatchTestNode.Memos(40), null, Token);
+        Task<SubmittedMemos> run = strategy.SubmitAllAsync(BatchTestNode.Memos(40), null, Token);
         await gate.Reached.WaitAsync(TimeSpan.FromSeconds(20), Token);
         await Task.Delay(200, Token);
 
@@ -433,7 +438,7 @@ public class BatchStrategyTests
         SynchronousProgress<int> progress = new(done => { lock (reportsGate) reports.Add(done); });
         await using BatchStrategy strategy = node.Strategy(BatchTestNode.FastOptions with { InitialWindow = 1 }, sink: gate);
 
-        Task<IReadOnlyList<SubmittedMemo>> run = strategy.SubmitAllAsync(BatchTestNode.Memos(40), progress, Token);
+        Task<SubmittedMemos> run = strategy.SubmitAllAsync(BatchTestNode.Memos(40), progress, Token);
         await gate.Reached.WaitAsync(TimeSpan.FromSeconds(20), Token);
         await Task.Delay(200, Token);
         int beforeAnswer;
