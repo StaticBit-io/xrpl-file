@@ -56,6 +56,52 @@ public class BatchPublicationEstimateTests
     }
 
     [Fact]
+    public async Task The_spec_example_of_a_1_7_GB_file_runs_104_chunk_rounds()
+    {
+        FakeLedgerSource source = new();
+
+        BatchPublicationEstimate estimate = await PublicationEstimator.EstimateBatchAsync(
+            source, "rWriter", "rPayer", 1_689_809_534, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1_689_810, estimate.Chunks);
+        Assert.Equal(1_651, estimate.Blocks);
+        Assert.Equal(166, estimate.Lists);
+        Assert.Equal(104 + 1 + 1, estimate.Rounds);
+        Assert.Equal(103 * 2_048 + 283 + 21, estimate.Batches);
+        Assert.Equal(1, estimate.SoloTransactions);
+    }
+
+    [Fact]
+    public async Task One_memo_past_a_full_round_is_a_solo_as_the_strategy_sends_it()
+    {
+        FakeLedgerSource source = new();
+
+        BatchPublicationEstimate estimate = await PublicationEstimator.EstimateBatchAsync(
+            source, "rWriter", "rPayer", 16_385_000, TestContext.Current.CancellationToken);
+
+        Assert.Equal(16_385, estimate.Chunks);
+        Assert.Equal(2, estimate.Lists);
+        Assert.Equal(2 + 1 + 1, estimate.Rounds);
+        Assert.Equal(2_048 + 1, estimate.Batches);
+        Assert.Equal(2, estimate.SoloTransactions);
+        Assert.Equal((16_384 + 2 + 3 * 2_049) * estimate.FeeUnitDrops, estimate.PayerFeeDrops);
+        Assert.Equal(2 * estimate.FeeUnitDrops, estimate.WriterFeeDrops);
+    }
+
+    [Fact]
+    public async Task A_small_file_is_one_round_per_pass()
+    {
+        FakeLedgerSource source = new();
+
+        BatchPublicationEstimate estimate = await PublicationEstimator.EstimateBatchAsync(
+            source, "rWriter", "rPayer", 9_000, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, estimate.Rounds);
+        Assert.Equal(2, estimate.Batches);
+        Assert.Equal(1, estimate.SoloTransactions);
+    }
+
+    [Fact]
     public async Task Owned_objects_lock_reserve_out_of_each_accounts_spendable_balance()
     {
         FakeLedgerSource node = Node(writerBalance: 2_000_000, payerBalance: 3_000_000);

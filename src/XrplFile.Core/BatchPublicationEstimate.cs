@@ -8,8 +8,8 @@ namespace XrplFile;
 /// <param name="Blocks">Merkle blocks the chunks group into.</param>
 /// <param name="Lists">Memos carrying the block list; zero when there is one block.</param>
 /// <param name="Memos">Every memo of the run: the chunks, the lists and the manifest.</param>
-/// <param name="Batches">Batch transactions over the three passes, each grouped by spec B11.</param>
-/// <param name="SoloTransactions">Memos sent on their own: a pass of exactly one memo.</param>
+/// <param name="Batches">Batch transactions over the three passes, grouped per round as the strategy groups them (spec S11).</param>
+/// <param name="SoloTransactions">Memos sent on their own: a round of exactly one memo.</param>
 /// <param name="OpenLedgerFeeDrops">The node's open-ledger fee at the moment of the estimate.</param>
 /// <param name="FeeUnitDrops">The fee unit the estimate approved (<see cref="BatchFees.Unit"/>).</param>
 /// <param name="FeeCeilingDrops">The most a round may pay per unit (<see cref="BatchFees.Ceiling"/>).</param>
@@ -35,6 +35,13 @@ public sealed record BatchPublicationEstimate(
     long WriterBalanceDrops, int WriterOwnerCount,
     long PayerBalanceDrops, int PayerOwnerCount)
 {
+    /// <summary>
+    /// Rounds over the three passes (spec S11), as <see cref="BatchStrategy"/> runs them: rounds of
+    /// <see cref="BatchStrategyOptions.DefaultMaxRoundMemos"/> memos. Each costs about three ledgers to
+    /// settle, which is what the estimate's duration adds per round.
+    /// </summary>
+    public int Rounds { get; init; }
+
     /// <summary>What the writer must hold to carry the run: its base reserve and its worst-case fees.</summary>
     public long WriterRequiredDrops => BaseReserveDrops + WriterFeeDropsWorstCase;
 

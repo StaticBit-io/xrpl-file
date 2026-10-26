@@ -167,11 +167,13 @@ public static class PublicationEstimator
 
     /// <summary>
     /// Prices <paramref name="chunks"/> chunk memos, <paramref name="lists"/> list memos and the
-    /// manifest, over the three passes the writer makes, each grouped by spec B11 (spec 4.5).
+    /// manifest, over the three passes the writer makes, each cut into rounds and grouped as the
+    /// strategy groups them (spec 4.5 and S11).
     /// </summary>
     internal static async Task<BatchPublicationEstimate> EstimateBatchAsync(
         ILedgerSource source, string writer, string payer, long chunks, int blocks, int lists, CancellationToken cancellationToken)
     {
+        int rounds = 0;
         int batches = 0;
         int solos = 0;
         long batchedMemos = 0;
@@ -180,14 +182,24 @@ public static class PublicationEstimator
         {
             if (pass == 0) continue;
 
-            if (pass == 1)
+            long full = pass / BatchStrategyOptions.DefaultMaxRoundMemos;
+            long rest = pass % BatchStrategyOptions.DefaultMaxRoundMemos;
+
+            rounds = checked(rounds + (int)full + (rest > 0 ? 1 : 0));
+            batches = checked(batches + (int)(full * BatchesOf(BatchStrategyOptions.DefaultMaxRoundMemos)));
+            batchedMemos += full * BatchStrategyOptions.DefaultMaxRoundMemos;
+
+            // A round of exactly one memo is a solo of the writer (spec B11); the borrowing of 8 + 1
+            // into 7 + 2 changes sizes, not the number of batches.
+            if (rest == 1)
             {
                 solos++;
-                continue;
             }
-
-            batches += BatchGrouping.Sizes(checked((int)pass)).Count;
-            batchedMemos += pass;
+            else if (rest > 1)
+            {
+                batches = checked(batches + BatchesOf(rest));
+                batchedMemos += rest;
+            }
         }
 
         long memos = chunks + lists + 1;
@@ -213,8 +225,13 @@ public static class PublicationEstimator
             payerFee, writerFee, payerWorst, writerWorst,
             fees.BaseReserveDrops, fees.OwnerReserveDrops,
             writerState.BalanceDrops, writerState.OwnerCount,
-            payerState.BalanceDrops, payerState.OwnerCount);
+            payerState.BalanceDrops, payerState.OwnerCount)
+        {
+            Rounds = rounds,
+        };
     }
+
+    private static int BatchesOf(long memos) => (int)((memos + BatchGrouping.MaxInners - 1) / BatchGrouping.MaxInners);
 
     /// <summary>Spec 4.5's refusals 3–5: the writer's balance, the payer's, then the caller's budget against both requirements.</summary>
     internal static void RequireBatch(BatchPublicationEstimate estimate, long? budgetDrops)
