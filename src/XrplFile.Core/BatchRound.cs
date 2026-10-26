@@ -319,7 +319,7 @@ internal sealed class BatchRound(
 
                 try
                 {
-                    answer = await context.Sink.SubmitBlobAsync(candidate.Signed.TxBlob, cancellationToken).ConfigureAwait(false);
+                    answer = await context.Sink.SubmitBlobAsync(candidate.TxBlob, cancellationToken).ConfigureAwait(false);
                 }
                 catch (XrplFileException e) when (e.Error == XrplFileError.NodeUnreachable)
                 {

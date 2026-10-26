@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace XrplFile;
 
 /// <summary>
@@ -10,6 +12,8 @@ internal sealed class BatchCandidate(
 {
     /// <summary>The ordinal of a round's solo memo; batches count from zero.</summary>
     public const int SoloOrdinal = -1;
+
+    private static readonly SearchValues<char> UpperHex = SearchValues.Create("0123456789ABCDEF");
 
     private volatile bool _resolved;
     private int _exhausted;
@@ -30,9 +34,18 @@ internal sealed class BatchCandidate(
     /// <summary>The call's memo indices it carries.</summary>
     public IReadOnlyList<int> Memos { get; } = memos;
 
-    public SignedTransaction Signed { get; } = signed;
+    /// <summary>
+    /// The signed blob as bytes: a round holds every blob it signed until it settles, and as UTF-16
+    /// hex an eight-memo blob takes 34 KB, four times its bytes; two thousand of them were most of a
+    /// round's memory (spec S27). A blob that would not come back as the same text
+    /// stays text, so what is sent is exactly what the signer returned.
+    /// </summary>
+    private readonly object _blob = Compact(signed.TxBlob);
 
-    public string Hash => Signed.Hash;
+    public string Hash { get; } = signed.Hash;
+
+    /// <summary>The blob to send, as the signer returned it.</summary>
+    public string TxBlob => _blob as string ?? Convert.ToHexString((byte[])_blob);
 
     /// <summary>Set by settlement: nothing this candidate is can apply any more, so it is not sent again.</summary>
     public bool IsResolved => _resolved;
@@ -57,4 +70,8 @@ internal sealed class BatchCandidate(
     /// </summary>
     public bool IsResolvedBy(LedgerSnapshot snapshot) =>
         snapshot.LedgerIndex > LastLedger || snapshot.SequenceOf(Account) > Sequence;
+
+    /// <summary>Upper-case hex, the only text <see cref="Convert.ToHexString(byte[])"/> gives back, as bytes; anything else as it is.</summary>
+    private static object Compact(string blob) =>
+        blob.Length % 2 != 0 || blob.AsSpan().ContainsAnyExcept(UpperHex) ? blob : Convert.FromHexString(blob);
 }
