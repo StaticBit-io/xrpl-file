@@ -202,7 +202,8 @@ public static class MauiProgram
 
         services.AddSingleton(provider => new UnlockModel(
             provider.GetRequiredService<IKeyVault>(),
-            VaultLocation.IsDefaultPath(vaultPath)));
+            VaultLocation.IsDefaultPath(vaultPath),
+            provider.GetRequiredService<PublicationRun>()));
         services.AddSingleton<VaultListModel>();
         services.AddSingleton<AddKeyModel>();
         services.AddSingleton<ExportModel>();

@@ -123,6 +123,38 @@ public sealed class ResumeConfirmationTests : VaultHarness
     }
 
     [Fact]
+    public async Task Lock_while_a_resume_waits_for_the_person_stops_it_and_keeps_it_resumable()
+    {
+        (PublicationRun run, PublishRequest request, string statePath, KeyVault vault) = await InterruptedExpensiveAsync();
+        await File.WriteAllBytesAsync(request.SourcePath!, VectorStream.Bytes("app-batch", 400_000), Token);
+        byte[] before = await File.ReadAllBytesAsync(statePath, Token);
+
+        Assert.True(run.Resume(statePath, Resuming(request, request.SourcePath!)));
+        await BatchTestWait.UntilAsync(() => run.Snapshot.Confirmation is not null);
+
+        UnlockModel unlock = new(vault, vaultPathIsDefault: true, run);
+        await unlock.LockAsync();
+
+        Assert.True(run.Completion.IsCompleted);
+        Assert.Equal(PublicationRunState.Cancelled, run.Snapshot.State);
+        Assert.Null(run.Snapshot.Confirmation);
+        Assert.False(vault.IsUnlocked);
+        Assert.Equal(before, await File.ReadAllBytesAsync(statePath, Token));
+    }
+
+    [Fact]
+    public async Task Lock_with_no_run_going_just_locks()
+    {
+        (PublicationRun run, _, _, KeyVault vault) = await ReadyAsync();
+        UnlockModel unlock = new(vault, vaultPathIsDefault: true, run);
+
+        await unlock.LockAsync();
+
+        Assert.False(vault.IsUnlocked);
+        Assert.Equal(PublicationRunState.Idle, run.Snapshot.State);
+    }
+
+    [Fact]
     public async Task A_resume_below_the_threshold_asks_nobody()
     {
         (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync(20_000);

@@ -353,6 +353,9 @@ public sealed class PublicationRun(
         {
             // First, so that a resume's hashing and reconciliation are covered too (spec S13).
             keepAwake?.Acquire();
+
+            // Ends with this try block, on every path out of the work; what follows the block never waits on a signer.
+            using ActivityLease? lease = autoLock is null ? null : ActivityLease.Start(autoLock.Touch, _time);
             paths.EnsureCreated();
 
             // Before any node is contacted: a recorded file that cannot be opened needs no connection to say so.

@@ -46,8 +46,15 @@ public enum UnlockStage
 /// choice. See <see cref="UnlockStage.VaultUnreachable"/> and <see cref="RefreshAsync"/> for what
 /// this one bit changes.
 /// </param>
-public sealed class UnlockModel(IKeyVault vault, bool vaultPathIsDefault = true)
+/// <param name="run">
+/// The publication run <see cref="LockAsync"/> stops before it locks (spec S14), or
+/// <see langword="null"/> where no run exists, as in the unlock screen's own tests.
+/// </param>
+public sealed class UnlockModel(IKeyVault vault, bool vaultPathIsDefault = true, PublicationRun? run = null)
 {
+    /// <summary>How long Lock waits for an active run to stop before locking anyway (spec S14).</summary>
+    public static readonly TimeSpan RunStopTimeout = TimeSpan.FromSeconds(10);
+
     /// <summary>Where the screen stands right now. Meaningful only after <see cref="RefreshAsync"/> has run at least once.</summary>
     public UnlockStage Stage { get; private set; } = UnlockStage.NoVault;
 
@@ -229,9 +236,15 @@ public sealed class UnlockModel(IKeyVault vault, bool vaultPathIsDefault = true)
     /// <summary>
     /// Locks the vault and returns the screen to <see cref="UnlockStage.Locked"/>, with no
     /// <see cref="LastMessage"/>: the attempt it described belongs to the session that just ended.
+    /// An active run is cancelled first, at once, and given <see cref="RunStopTimeout"/> to stop
+    /// (spec S14): the person asked for the vault to be shut, and a signer that kept going after a
+    /// lock and an unlock would go on spending without being asked. The cancellation does not
+    /// depend on the wait finishing.
     /// </summary>
     public async Task LockAsync()
     {
+        if (run is not null) await run.StopAsync(RunStopTimeout).ConfigureAwait(false);
+
         await vault.LockAsync().ConfigureAwait(false);
         Stage = UnlockStage.Locked;
         LastMessage = null;

@@ -925,6 +925,38 @@ public sealed class PublicationRunTests : VaultHarness
     }
 
     [Fact]
+    public async Task The_lease_keeps_the_vault_open_through_a_long_await_that_reports_nothing()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("a master password"), token);
+        XrplWallet wallet = XrplWallet.Generate();
+        string reference = await vault.StoreAsync(
+            new NewVaultEntry(VaultEntryKind.Generated, "run key", "standalone", wallet.ClassicAddress, wallet.Seed), token);
+        _connections.Ledger.Balances[wallet.ClassicAddress] = 100_000_000;
+
+        ManualTimeProvider time = new();
+        await using VaultAutoLock autoLock = new(vault, TimeSpan.FromMinutes(5), time);
+        GatedConnectFactory gated = new(_connections, gateAt: 1);
+        PublicationRun run = new(gated, vault, Paths, History, autoLock, time);
+
+        Assert.True(run.Start(Requests.Fresh(new byte[4096], "application/octet-stream", "file.bin", reference, wallet.ClassicAddress, "1")));
+        await gated.Reached;
+
+        // Ten minutes inside one await, twice the idle window, with no progress report at all.
+        for (int minute = 0; minute < 10; minute++) time.Advance(TimeSpan.FromMinutes(1));
+        Assert.True(vault.IsUnlocked);
+
+        gated.Release();
+        await run.Completion;
+        Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
+
+        // The lease ended with the run: the idle window applies again.
+        time.Advance(TimeSpan.FromMinutes(6));
+        await BatchTestWait.UntilAsync(() => !vault.IsUnlocked);
+    }
+
+    [Fact]
     public async Task A_running_ticketed_publication_says_so_on_its_snapshot()
     {
         GatedSubmitSink gate = new(_connections.Sink, gateAt: 1);
