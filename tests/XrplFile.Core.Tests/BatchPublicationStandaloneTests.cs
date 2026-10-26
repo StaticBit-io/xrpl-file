@@ -374,6 +374,113 @@ public class BatchPublicationStandaloneTests : IDisposable
         }
     }
 
+    /// <summary>The reader's own default stops at 20 MB; these files are larger, and the library's default is not what is tested.</summary>
+    private static ReaderOptions FiftyMegabytes { get; } = new() { MaxBytes = 64L * 1024 * 1024 };
+
+    private string WriteFile(string name, int size)
+    {
+        string path = Path.Combine(_directory, name);
+        File.WriteAllBytes(path, VectorStream.Bytes(name, size));
+        return path;
+    }
+
+    private static async Task AssertReadsBackAsync(ILedgerSource source, XrplFileLink link, string path, CancellationToken token)
+    {
+        ReadResult read = await new XrplFileReader(source, FiftyMegabytes).ReadAsync(link, token);
+        byte[] expected = await File.ReadAllBytesAsync(path, token);
+        Assert.True(read.Bytes.AsSpan().SequenceEqual(expected), "the bytes read back differ from the file");
+    }
+
+    [Fact]
+    [Trait("Category", "Slow")]
+    public async Task Fifty_megabytes_go_through_Batch_from_a_held_file_and_read_back()
+    {
+        using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(90));
+        CancellationToken token = timeout.Token;
+        await using LedgerPump pump = new(Endpoint);
+        IXrplClient client = new XrplClient(Endpoint);
+        await client.Connect(token);
+
+        try
+        {
+            XrplClientLedgerSink sink = new(client);
+            XrplClientLedgerSource source = new(client);
+            await using Keys keys = await KeysAsync(client, sink, token);
+            string path = WriteFile("stand-50mb.bin", 50_000_000);
+            PublicationReport report;
+
+            await using (FilePublicationSource file = FilePublicationSource.Open(path))
+            {
+                PublicationSession session = await PublicationSession.StartAsync(
+                    Factory(sink, source, keys, keys.Payer), source, file, "application/octet-stream", "stand-50mb.bin",
+                    keys.Writer.Account, "writer", keys.Payer.Account, "payer", "1", Session, null, token);
+                report = await session.RunAsync(null, token);
+            }
+
+            Assert.Equal(50_000, report.ChunkCount);
+            await AssertReadsBackAsync(source, report.Link, path, token);
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"50 MB: {report.Took.TotalMinutes:F1} min, payer paid {report.PayerFeeDrops:N0} drops");
+        }
+        finally
+        {
+            await client.Disconnect();
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Slow")]
+    public async Task A_stopped_fifty_megabyte_run_resumes_from_its_path()
+    {
+        using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(90));
+        CancellationToken token = timeout.Token;
+        await using LedgerPump pump = new(Endpoint);
+        IXrplClient client = new XrplClient(Endpoint);
+        await client.Connect(token);
+
+        try
+        {
+            XrplClientLedgerSink inner = new(client);
+            XrplClientLedgerSource source = new(client);
+            await using Keys keys = await KeysAsync(client, inner, token);
+            string path = WriteFile("stand-50mb-resume.bin", 50_000_000);
+            string statePath;
+            long startedIn;
+
+            using (CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                await using FilePublicationSource file = FilePublicationSource.Open(path);
+                StoppingSink stopping = new(inner, stop, stopAfter: 1_000);
+                PublicationSession first = await PublicationSession.StartAsync(
+                    Factory(stopping, source, keys, keys.Payer), source, file, "application/octet-stream", "stand-50mb-resume.bin",
+                    keys.Writer.Account, "writer", keys.Payer.Account, "payer", "1", Session, null, stop.Token);
+                statePath = first.StatePath;
+                startedIn = first.State.StartedInLedger;
+
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first.RunAsync(null, stop.Token));
+            }
+
+            // Opened again by its path, as the application's resume opens the file it recorded (spec S7).
+            PublicationReport report;
+
+            await using (FilePublicationSource reopened = FilePublicationSource.Open(path))
+            {
+                PublicationSession resumed = await PublicationSession.ResumeAsync(
+                    Factory(inner, source, keys, keys.Payer), source, reopened, statePath, keys.Payer.Account, "payer", Session, null, token);
+                report = await resumed.RunAsync(null, token);
+            }
+
+            await AssertReadsBackAsync(source, report.Link, path, token);
+
+            List<(long Index, string? Parent)> chunks = await ChunkRecordsAsync(source, keys.Writer.Account, startedIn, token);
+            Assert.Equal(50_000, chunks.Select(chunk => chunk.Index).Distinct().Count());
+        }
+        finally
+        {
+            await client.Disconnect();
+        }
+    }
+
     /// <summary>Forwards everything, and has the proxy drop every connection at its <paramref name="dropAt"/>-th blob.</summary>
     private sealed class DroppingSink(ILedgerSink inner, DroppingProxy proxy, int dropAt) : ILedgerSink
     {
