@@ -143,6 +143,48 @@ public sealed class ResumeConfirmationTests : VaultHarness
     }
 
     [Fact]
+    public async Task An_unanswered_confirmation_past_the_vault_idle_window_is_a_decline_and_the_vault_is_left_to_lock()
+    {
+        (_, PublishRequest request, string statePath, KeyVault vault) = await InterruptedExpensiveAsync();
+        await File.WriteAllBytesAsync(request.SourcePath!, VectorStream.Bytes("app-batch", 400_000), Token);
+        byte[] before = await File.ReadAllBytesAsync(statePath, Token);
+        int sent = _connections.BatchSink!.Transmissions.Count;
+
+        ManualTimeProvider time = new();
+        TimeSpan idle = TimeSpan.FromMinutes(15);
+        await using VaultAutoLock autoLock = new(vault, idle, time);
+        PublicationRun run = new(_connections, vault, Paths, new PublicationHistory(Paths.HistoryPath), autoLock, time, Fast);
+
+        Assert.True(run.Resume(statePath, Resuming(request, request.SourcePath!)));
+        await BatchTestWait.UntilAsync(() => run.Snapshot.Confirmation is not null);
+
+        // The lease touches every minute, so without the bound the question would hold the vault open for good.
+        int minutes = 0;
+
+        while (!run.Completion.IsCompleted && minutes < 20)
+        {
+            Assert.True(vault.IsUnlocked);
+            time.Advance(TimeSpan.FromMinutes(1));
+            minutes++;
+            await Task.Delay(5, Token);
+        }
+
+        await run.Completion.WaitAsync(TimeSpan.FromSeconds(20), Token);
+
+        Assert.InRange(minutes, 15, 17);
+        Assert.Equal(PublicationRunState.Cancelled, run.Snapshot.State);
+        Assert.Null(run.Snapshot.Confirmation);
+        Assert.False(run.AnswerConfirmation(true));
+        Assert.Equal(sent, _connections.BatchSink.Transmissions.Count);
+        Assert.Equal(before, await File.ReadAllBytesAsync(statePath, Token));
+
+        // Nothing touches the vault after the window: one more idle window locks it.
+        Assert.True(vault.IsUnlocked);
+        time.Advance(idle);
+        await BatchTestWait.UntilAsync(() => !vault.IsUnlocked);
+    }
+
+    [Fact]
     public async Task Lock_with_no_run_going_just_locks()
     {
         (PublicationRun run, _, _, KeyVault vault) = await ReadyAsync();

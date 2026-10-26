@@ -14,6 +14,14 @@ public class VaultAutoLockTests
     private static readonly TimeSpan Idle = TimeSpan.FromMinutes(15);
 
     [Fact]
+    public async Task It_exposes_the_idle_window_it_was_built_with()
+    {
+        await using VaultAutoLock autoLock = new(new RecordingVault(), Idle, new ManualTimeProvider());
+
+        Assert.Equal(Idle, autoLock.Idle);
+    }
+
+    [Fact]
     public async Task The_vault_locks_once_the_idle_window_passes_with_no_touch()
     {
         ManualTimeProvider time = new();

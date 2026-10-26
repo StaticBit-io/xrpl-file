@@ -79,6 +79,12 @@ public sealed class VaultAutoLock(IKeyVault vault, TimeSpan idle, TimeProvider t
     }
 
     /// <summary>
+    /// How long the vault may sit untouched before it locks. A caller that keeps the vault open on
+    /// a person's behalf (a run waiting for an answer) bounds that wait by this window.
+    /// </summary>
+    public TimeSpan Idle => _idle;
+
+    /// <summary>
     /// 0 while active, 1 once <see cref="DisposeAsync"/> has run. Read and written only through
     /// <see cref="Interlocked"/>, never under a lock — see the type's remarks on why disposal must
     /// never block.

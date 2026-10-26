@@ -857,7 +857,8 @@ public sealed class PublicationRun(
 
     /// <summary>
     /// A resume's approval (spec S25), made from the quote of what remains: given at once below the
-    /// threshold, asked of the person on the run screen above it. Declining is a cancellation.
+    /// threshold, asked of the person on the run screen above it. Declining is a cancellation, and so is
+    /// leaving the question unanswered for the vault's whole idle window.
     /// </summary>
     private ResumeApproval ApproveResume(PublishRequest request, int generation) => async (quote, cancellationToken) =>
     {
@@ -881,7 +882,23 @@ public sealed class PublicationRun(
         {
             using CancellationTokenRegistration cancelled = cancellationToken.Register(() => answer.TrySetCanceled(cancellationToken));
 
-            if (!await answer.Task.ConfigureAwait(false)) throw new OperationCanceledException("the person declined the resume's cost", cancellationToken);
+            // The lease keeps the vault open while the run works, and a person who walked away is not work:
+            // past the vault's own idle window an unanswered question is a decline, so the run ends
+            // resumable and the lease stops touching (spec S14).
+            bool approved;
+
+            try
+            {
+                approved = autoLock is null
+                    ? await answer.Task.ConfigureAwait(false)
+                    : await answer.Task.WaitAsync(autoLock.Idle, _time).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                throw new OperationCanceledException("the resume's cost was not answered within the vault's idle window", cancellationToken);
+            }
+
+            if (!approved) throw new OperationCanceledException("the person declined the resume's cost", cancellationToken);
 
             return approval;
         }
