@@ -36,7 +36,7 @@ public sealed class BatchStrategy : ISubmissionStrategy
 
         _options = options ?? new BatchStrategyOptions();
         _context = new BatchContext(
-            sink, source, writer, payer, budget, _options, new BatchFence(fence), new BatchWindow(_options.InitialWindow, _options.MaxWindow), new BatchTrace(), new BatchSpending(budget), new BatchLedgerFloor());
+            sink, source, writer, payer, budget, _options, new BatchFence(fence), new BatchWindow(_options.InitialWindow, _options.MaxWindow), new BatchTrace(_options.TraceListener), new BatchSpending(budget), new BatchLedgerFloor());
     }
 
     /// <summary>The estimate's approved unit, which the session checks the estimate against (spec 4.1).</summary>
@@ -61,9 +61,10 @@ public sealed class BatchStrategy : ISubmissionStrategy
     internal IReadOnlyList<string> Trace => _context.Trace.Events;
 
     /// <summary>
-    /// What this instance did, in order and with times: rounds, registrations, submit answers, resends,
-    /// halts and settlements. Only ordinals, ledger indexes, fee units and engine results; never key
-    /// material. The application writes it to its trace log when a run ends.
+    /// The last 10,000 events of what this instance did, in order and with times: rounds, registrations,
+    /// submit answers, resends, halts and settlements. Only ordinals, ledger indexes, fee units and engine
+    /// results; never key material. The application hears every event as it happens through
+    /// <see cref="BatchStrategyOptions.TraceListener"/>.
     /// </summary>
     public IReadOnlyList<BatchTraceEntry> TraceEntries => _context.Trace.Entries;
 

@@ -60,4 +60,10 @@ public sealed record BatchStrategyOptions
     public TimeSpan NodeOutageLimit { get; init; } = TimeSpan.FromMinutes(2);
 
     public TimeProvider Time { get; init; } = TimeProvider.System;
+
+    /// <summary>
+    /// Hears every trace entry, in order, as it is added (spec S18): how the application writes a run's
+    /// trace as it goes rather than copying it at the end. Called under the trace's lock, so it must not block.
+    /// </summary>
+    public Action<BatchTraceEntry>? TraceListener { get; init; }
 }

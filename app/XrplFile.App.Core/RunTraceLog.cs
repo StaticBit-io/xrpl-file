@@ -67,14 +67,6 @@ public sealed partial class RunTraceLog
     {
         ArgumentNullException.ThrowIfNull(lines);
 
-        StringBuilder block = new();
-        foreach (string line in lines) block.Append(IsSafe(line) ? line : Withheld).Append('\n');
-
-        byte[] bytes = Encoding.UTF8.GetBytes(block.ToString());
-
-        // Only a block larger than a whole file is cut: from its start, since its end says how the run ended.
-        if (bytes.Length > _maxBytes) bytes = bytes[^(int)_maxBytes..];
-
         try
         {
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -86,6 +78,15 @@ public sealed partial class RunTraceLog
 
         try
         {
+            // Built after the gate is taken, so a writer waiting for it holds no buffer (spec S18).
+            StringBuilder block = new();
+            foreach (string line in lines) block.Append(IsSafe(line) ? line : Withheld).Append('\n');
+
+            byte[] bytes = Encoding.UTF8.GetBytes(block.ToString());
+
+            // Only a block larger than a whole file is cut: from its start, since its end says how the run ended.
+            if (bytes.Length > _maxBytes) bytes = bytes[^(int)_maxBytes..];
+
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
 
             if (File.Exists(Path) && new FileInfo(Path).Length + bytes.Length > _maxBytes) Roll();

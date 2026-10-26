@@ -375,7 +375,7 @@ public sealed class PublicationRun(
         // reacts to Succeeded and immediately starts another run can never observe the previous
         // run's connection or strategy still mid-dispose (design F6's "closing stops it" only means
         // something if the stop is visible after it has actually happened).
-        await WriteTraceAsync(request, attempt, finalState, caught).ConfigureAwait(false);
+        await WriteTraceAsync(attempt, finalState, caught).ConfigureAwait(false);
 
         if (finalState == PublicationRunState.Succeeded)
         {
@@ -496,10 +496,8 @@ public sealed class PublicationRun(
 
         public long OwnerReserveDrops { get; set; }
 
-        /// <summary>The Batch strategy the session built, whose trace the run writes to the trace log when it ends.</summary>
-        public BatchStrategy? Batch { get; set; }
-
-        public DateTimeOffset BatchBuiltAt { get; set; }
+        /// <summary>The channel a Batch run's trace entries go through to the trace log as they happen; null for a run that built no Batch strategy.</summary>
+        public RunTraceChannel? Trace { get; set; }
 
         public string? StatePath { get; set; }
     }
@@ -619,9 +617,19 @@ public sealed class PublicationRun(
 
             BatchStrategy Build(BatchBudget budget, IBatchFenceRecorder fence)
             {
-                built = PublishPolicy.CreateBatch(budget, fence, connection, writer, payerKey, batchOptions);
-                attempt.Batch = built;
-                attempt.BatchBuiltAt = _time.GetUtcNow();
+                RunTraceChannel trace = new(lines => _traceLog.AppendAsync(lines, CancellationToken.None));
+
+                // Handed over before the strategy is built, so a build that throws still has its channel completed with the run.
+                attempt.Trace = trace;
+                trace.Post(string.Create(CultureInfo.InvariantCulture,
+                    $"{_time.GetUtcNow():O} batch run {StateFileOf(attempt)} network={request.Network} writer={request.Account} payer={request.PayerAccount} bytes={request.File.Length}"));
+
+                BatchStrategyOptions options = (batchOptions ?? new BatchStrategyOptions()) with
+                {
+                    TraceListener = entry => trace.Post(string.Create(CultureInfo.InvariantCulture, $"+{entry.Elapsed.TotalSeconds:F3} {entry.Event}")),
+                };
+
+                built = PublishPolicy.CreateBatch(budget, fence, connection, writer, payerKey, options);
                 return built;
             }
 
@@ -678,15 +686,15 @@ public sealed class PublicationRun(
     internal Action<VaultSigner>? BatchSignerCreated { get; set; }
 
     /// <summary>
-    /// Writes a Batch run's round trace to the trace log when the run ends, however it ended: its state
-    /// file's name, so a report can be matched to a run, every event with its time from the strategy's
-    /// start, and how the run ended. A run that never built a strategy has no trace and writes nothing.
+    /// Ends a Batch run's trace, however the run ended: the end line names the state file, so a report can
+    /// be matched to a run even when a fresh run's header could not, and says how the run ended. The
+    /// entries went to the log as they happened (<see cref="RunTraceChannel"/>); this waits until they are
+    /// written. A run that never built a strategy has no trace and writes nothing.
     /// </summary>
-    private async Task WriteTraceAsync(PublishRequest request, RunAttempt attempt, PublicationRunState finalState, Exception? caught)
+    private async Task WriteTraceAsync(RunAttempt attempt, PublicationRunState finalState, Exception? caught)
     {
-        if (attempt.Batch is not { } strategy) return;
+        if (attempt.Trace is not { } trace) return;
 
-        string stateFile = attempt.StatePath is null ? "(no state file)" : Path.GetFileName(attempt.StatePath);
         string ending = finalState == PublicationRunState.Failed
             ? caught switch
             {
@@ -697,16 +705,13 @@ public sealed class PublicationRun(
             }
             : string.Empty;
 
-        List<string> lines =
-        [
-            string.Create(CultureInfo.InvariantCulture,
-                $"{attempt.BatchBuiltAt:O} batch run {stateFile} network={request.Network} writer={request.Account} payer={request.PayerAccount} bytes={request.File.Length}"),
-            .. strategy.TraceEntries.Select(entry => string.Create(CultureInfo.InvariantCulture, $"+{entry.Elapsed.TotalSeconds:F3} {entry.Event}")),
-            string.Create(CultureInfo.InvariantCulture, $"{_time.GetUtcNow():O} end {finalState}{ending}"),
-        ];
-
-        await _traceLog.AppendAsync(lines, CancellationToken.None).ConfigureAwait(false);
+        trace.Post(string.Create(CultureInfo.InvariantCulture, $"{_time.GetUtcNow():O} end {finalState}{ending} {StateFileOf(attempt)}"));
+        await trace.CompleteAsync().ConfigureAwait(false);
     }
+
+    /// <summary>A fresh run's file is named by the session after the strategy is built, so its header cannot name it.</summary>
+    private static string StateFileOf(RunAttempt attempt) =>
+        attempt.StatePath is null ? "(no state file)" : Path.GetFileName(attempt.StatePath);
 
     /// <summary>Pins the state file onto this run's snapshot, as every other write after Begin is pinned.</summary>
     private void RecordStatePath(int generation, string statePath)
