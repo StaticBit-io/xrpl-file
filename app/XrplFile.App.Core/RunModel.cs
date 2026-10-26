@@ -264,7 +264,8 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     {
         if (!batch) return SettlePerPass * PassesAfter(stage, fileBytes);
 
-        // A list pass of more than 16,384 memos would need 1.7 TB; one round per later pass is exact.
+        // A list pass of more than 16,384 memos would need about 170 GB of file (some ten entries to a list memo,
+        // a block of 1,024,000 bytes to each); within 16 GiB, one round per later pass is exact.
         long thisPass = Math.Max(0, (remaining + BatchStrategyOptions.DefaultMaxRoundMemos - 1) / BatchStrategyOptions.DefaultMaxRoundMemos - 1);
         return PublicationDuration.SettlePerRound * (thisPass + PassesAfter(stage, fileBytes));
     }

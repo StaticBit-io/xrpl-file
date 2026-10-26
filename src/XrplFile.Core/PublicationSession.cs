@@ -29,7 +29,12 @@ public sealed class SessionOptions
     /// <summary>Where state files live. One file per run, named after the run.</summary>
     public required string StateDirectory { get; init; }
 
-    /// <summary>The most the run may cost, or null for no ceiling of the caller's own.</summary>
+    /// <summary>
+    /// The most the run may cost, or null for no ceiling of the caller's own. A Batch start (and a Batch
+    /// resume) compares it with the figures at the approved fee ceiling, not with those at the current
+    /// fee unit: the run may spend up to the ceiling, so that is what has to fit. A caller that sets it
+    /// next to an approval whose ceiling is above the current unit gets the approved ceiling's figures.
+    /// </summary>
     public long? BudgetDrops { get; init; }
 
     /// <summary>

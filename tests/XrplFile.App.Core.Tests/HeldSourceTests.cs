@@ -130,6 +130,33 @@ public sealed class HeldSourceTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_fresh_run_whose_file_cannot_be_read_while_it_is_hashed_does_not_offer_a_resume()
+    {
+        (PublicationRun run, PublishRequest request) = await RunReadyAsync(size: 30_000);
+
+        Assert.True(run.Start(request with { Source = new UnreadableSource(request.Source!.Length) }));
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
+        Assert.Equal($"The file at {request.SourcePath} could not be read. Make it available and publish it again.", run.Snapshot.Failure);
+        Assert.Null(run.Snapshot.StatePath);
+        Assert.False(RunModel.IsResumable(run.Snapshot));
+    }
+
+    /// <summary>A held file whose drive is gone from the first read on.</summary>
+    private sealed class UnreadableSource(long length) : IPublicationSource
+    {
+        public long Length => length;
+
+        public int ReadChunk(long index, Span<byte> destination) => throw new IOException("fake: the drive the file was on went away");
+
+        public ValueTask<int> ReadChunkAsync(long index, Memory<byte> destination, CancellationToken cancellationToken) =>
+            throw new IOException("fake: the drive the file was on went away");
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    [Fact]
     public async Task A_resume_refused_for_another_reason_than_a_changed_file_does_not_mark_the_file()
     {
         (PublicationRun run, PublishRequest request) = await RunReadyAsync(size: 30_000);

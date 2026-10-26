@@ -414,11 +414,16 @@ public sealed class PublicationRun(
         catch (SourceReadFailedException ex)
         {
             // Not the state file: the generic IOException clause below says the state could not be
-            // written, which would send the person after the wrong thing. The state is intact, so the
-            // run stays resumable once the file is back.
-            failure = ex.Path is null
-                ? "The file could not be read while it was being published. Make it available again and resume the run."
-                : $"The file at {ex.Path} could not be read while it was being published. Make it available again and resume the run.";
+            // written, which would send the person after the wrong thing. With a state file the run
+            // stays resumable once the file is back; a fresh run that fails while its file is hashed
+            // has none yet (both starts hash before they save), so there is nothing to resume.
+            failure = attempt.StatePath is null
+                ? (ex.Path is null
+                    ? "The file could not be read. Make it available and publish it again."
+                    : $"The file at {ex.Path} could not be read. Make it available and publish it again.")
+                : (ex.Path is null
+                    ? "The file could not be read while it was being published. Make it available again and resume the run."
+                    : $"The file at {ex.Path} could not be read while it was being published. Make it available again and resume the run.");
             finalState = PublicationRunState.Failed;
         }
         catch (XrplFileException ex) when (ex is { Error: XrplFileError.ResumeMismatch, SourceChanged: true } && statePath is not null)
@@ -745,19 +750,15 @@ public sealed class PublicationRun(
 
             if (statePath is null)
             {
-                SessionOptions estimateOptions = new() { StateDirectory = paths.StateDirectory };
-                BatchPublicationEstimate estimate = await PublicationSession.EstimateAsync(
-                    connection.Source, request.Account, payer, source.Length, estimateOptions, cancellationToken).ConfigureAwait(false);
-
                 SessionOptions options = new()
                 {
                     StateDirectory = paths.StateDirectory,
                     SourcePath = request.SourcePath,
                     FencePoll = fencePoll,
 
-                    // The approval is this run's ceiling (spec S25). A budget priced from the estimate
-                    // taken a moment ago would refuse an approved fee unit that rose under its ceiling,
-                    // which is the very case the approval exists to allow.
+                    // The approval is this run's ceiling (spec S25). A budget priced from a fresh estimate
+                    // would refuse an approval whose ceiling is above the current fee unit, which is the
+                    // case when the unit fell since it was given and the very case it exists to allow.
                     Approval = request.Approval,
                 };
 
