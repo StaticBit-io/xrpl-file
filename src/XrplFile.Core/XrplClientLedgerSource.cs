@@ -420,6 +420,7 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             TicketCount = UInt(tx, "TicketCount"),
             Fee = Drops(tx, "Fee"),
             ParentBatchID = parentBatch?.ToUpperInvariant(),
+            TransactionIndex = UInt(meta, "TransactionIndex") is { } position ? (int)position : null,
         };
     }
 

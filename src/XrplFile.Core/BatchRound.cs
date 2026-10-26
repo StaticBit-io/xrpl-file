@@ -8,7 +8,7 @@ namespace XrplFile;
 /// round has settled nothing it sent can still land, so the next round cannot collide with it.
 /// </summary>
 internal sealed class BatchRound(
-    BatchContext context, IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> pending, IDictionary<int, int> candidatesPerMemo,
+    BatchContext context, IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> pending, byte[] candidatesPerMemo,
     BatchProgress progress)
 {
     /// <summary>Transmissions of one blob, the first included (spec submit-answer table).</summary>
@@ -16,7 +16,7 @@ internal sealed class BatchRound(
 
     private readonly Lock _latestGate = new();
     private readonly Lock _historyGate = new();
-    private readonly List<LedgerTransaction> _writerHistory = [];
+    private readonly List<SweepRecord> _writerHistory = [];
     private readonly HashSet<string> _writerHashes = new(StringComparer.OrdinalIgnoreCase);
     private long _writerReadFrom;
     private LedgerSnapshot? _latest;
@@ -25,6 +25,10 @@ internal sealed class BatchRound(
     private DateTimeOffset _advancedAt;
     private long _allowance;
     private Exception? _fatal;
+    private readonly RoundMarkers _markers = new(memos, pending);
+
+    /// <summary>The round's candidates and their signed blobs; nothing outlives the round that holds it.</summary>
+    internal BatchRegistry Registry { get; } = new(context.Fence, candidatesPerMemo, context.Trace);
 
     private string Writer => context.Writer.Account;
 
@@ -37,7 +41,7 @@ internal sealed class BatchRound(
         LedgerSnapshot start = await SnapshotAsync(cancellationToken).ConfigureAwait(false);
         long unit = await UnitAsync(cancellationToken).ConfigureAwait(false);
         RoundPlan plan = BatchGrouping.Plan(pending, start.SequenceOf(Writer), start.SequenceOf(Payer));
-        BatchRegistry registry = new(context.Fence, candidatesPerMemo, context.Trace);
+        BatchRegistry registry = Registry;
 
         context.Trace.Add($"round:{start.LedgerIndex}");
 
@@ -58,7 +62,7 @@ internal sealed class BatchRound(
             }
 
             RoundResult result = await BatchSweep.FinalAsync(
-                context, memos, pending, registry.Candidates, start, settled, KnownWriterHistory(), cancellationToken).ConfigureAwait(false);
+                context, _markers, registry.Candidates, start, settled, KnownWriterHistory(), cancellationToken).ConfigureAwait(false);
             progress.Found(result.Landed.Keys);
 
             return result;
@@ -96,10 +100,10 @@ internal sealed class BatchRound(
                 long to = await context.Source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
                 if (to < from) continue;
 
-                IReadOnlyList<LedgerTransaction> records = await BatchSweep.HistoryAsync(
-                    context.Source, Writer, from, to, cancellationToken).ConfigureAwait(false);
+                IReadOnlyList<SweepRecord> records = await BatchSweep.CompactHistoryAsync(
+                    context.Source, Writer, from, to, _markers, cancellationToken).ConfigureAwait(false);
 
-                progress.Found(BatchSweep.Outcome(context, memos, pending, registry.Candidates, records, []).Landed.Keys);
+                progress.Found(BatchSweep.Outcome(registry.Candidates, records, []).Landed.Keys);
                 from = Math.Max(from, records.Count == 0 ? from : records.Max(tx => tx.LedgerIndex));
                 RememberWriterHistory(records, from);
             }
@@ -116,11 +120,11 @@ internal sealed class BatchRound(
     /// Keeps what a progress sweep read for the final sweep (spec B20, B30). The next sweep starts at
     /// <paramref name="readFrom"/> again, so only the ledgers below it are complete here.
     /// </summary>
-    private void RememberWriterHistory(IReadOnlyList<LedgerTransaction> records, long readFrom)
+    private void RememberWriterHistory(IReadOnlyList<SweepRecord> records, long readFrom)
     {
         lock (_historyGate)
         {
-            foreach (LedgerTransaction tx in records)
+            foreach (SweepRecord tx in records)
             {
                 if (_writerHashes.Add(tx.Hash)) _writerHistory.Add(tx);
             }

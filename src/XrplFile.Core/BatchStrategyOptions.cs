@@ -12,6 +12,15 @@ public sealed record BatchStrategyOptions
     /// <summary>The most batches sent past the payer's sequence in the latest checked snapshot (spec B10).</summary>
     public int MaxAhead { get; init; } = 256;
 
+    /// <summary>The most pending memos one round takes (spec S5): 2,048 batches, about 37 MB of signed blobs.</summary>
+    public const int DefaultMaxRoundMemos = 16_384;
+
+    /// <summary>
+    /// The most pending memos one round takes (spec S5); a pass with more runs a series of rounds,
+    /// each released when it ends. Tests lower it.
+    /// </summary>
+    public int MaxRoundMemos { get; init; } = DefaultMaxRoundMemos;
+
     /// <summary><c>LastLedgerSequence</c> = the snapshot's index plus this (spec B7).</summary>
     public int DeadlineLedgers { get; init; } = 20;
 

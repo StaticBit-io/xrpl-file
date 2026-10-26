@@ -5,12 +5,15 @@ namespace XrplFile;
 /// persists the deadline first and reserves the candidate for every memo it carries; a halt is set
 /// under the same lock, so once it is set nothing more registers and a signed blob is discarded unsent.
 /// </summary>
-internal sealed class BatchRegistry(BatchFence fence, IDictionary<int, int> candidatesPerMemo, BatchTrace trace)
+internal sealed class BatchRegistry(BatchFence fence, byte[] candidatesPerMemo, BatchTrace trace)
 {
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly Lock _listGate = new();
     private readonly List<BatchCandidate> _candidates = [];
     private volatile string? _halt;
+
+    /// <summary>The fence this registry covers its deadlines with: the strategy's, shared by every round.</summary>
+    internal BatchFence Fence => fence;
 
     public bool IsHalted => _halt is not null;
 
@@ -43,7 +46,7 @@ internal sealed class BatchRegistry(BatchFence fence, IDictionary<int, int> cand
 
             foreach (int memo in candidate.Memos)
             {
-                candidatesPerMemo[memo] = candidatesPerMemo.TryGetValue(memo, out int count) ? count + 1 : 1;
+                candidatesPerMemo[memo] = checked((byte)(candidatesPerMemo[memo] + 1));
             }
 
             lock (_listGate) _candidates.Add(candidate);

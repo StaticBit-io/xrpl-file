@@ -14,7 +14,7 @@ internal static class BatchSweep
     /// writer's whole round again took 14 s of the run's 114.
     /// </param>
     public static async Task<RoundResult> FinalAsync(
-        BatchContext context, IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> pending,
+        BatchContext context, RoundMarkers markers,
         IReadOnlyList<BatchCandidate> candidates, LedgerSnapshot start, LedgerSnapshot settled, KnownHistory? known,
         CancellationToken cancellationToken)
     {
@@ -28,14 +28,14 @@ internal static class BatchSweep
         while (true)
         {
             long writerFrom = reuse ? Math.Min(known!.ReadFrom, settled.LedgerIndex) : start.LedgerIndex + 1;
-            IReadOnlyList<LedgerTransaction> read = await BatchReads.RetryAsync(
-                token => HistoryAsync(context.Source, writer, writerFrom, settled.LedgerIndex, token),
+            IReadOnlyList<SweepRecord> read = await BatchReads.RetryAsync(
+                token => CompactHistoryAsync(context.Source, writer, writerFrom, settled.LedgerIndex, markers, token),
                 context.Options, cancellationToken).ConfigureAwait(false);
-            List<LedgerTransaction> writerRecords = Own(
+            List<SweepRecord> writerRecords = Own(
                 reuse ? [.. known!.Records.Where(tx => tx.LedgerIndex > start.LedgerIndex && tx.LedgerIndex < writerFrom), .. read] : read,
                 writer);
-            List<LedgerTransaction> payerRecords = Own(await BatchReads.RetryAsync(
-                token => HistoryAsync(context.Source, payer, start.LedgerIndex + 1, settled.LedgerIndex, token),
+            List<SweepRecord> payerRecords = Own(await BatchReads.RetryAsync(
+                token => CompactHistoryAsync(context.Source, payer, start.LedgerIndex + 1, settled.LedgerIndex, null, token),
                 context.Options, cancellationToken).ConfigureAwait(false), payer);
 
             if (Covers(writerRecords, start.SequenceOf(writer), settled.SequenceOf(writer))
@@ -43,7 +43,7 @@ internal static class BatchSweep
             {
                 RoundIdentity identity = new(candidates);
                 RequireIdentity(context, identity, writerRecords, payerRecords);
-                return Outcome(memos, pending, identity, writerRecords, payerRecords);
+                return Outcome(identity, writerRecords, payerRecords);
             }
 
             // A gap below where the progress sweeps stopped would never be read again: account_tx that
@@ -66,21 +66,28 @@ internal static class BatchSweep
     /// a record with a non-zero sequence covers it, and a TicketCreate also covers the sequences its
     /// tickets took. A ticketed record covers nothing. Records of any result count (spec B30).
     /// </summary>
-    internal static bool Covers(IEnumerable<LedgerTransaction> records, uint from, uint to)
+    internal static bool Covers(IEnumerable<LedgerTransaction> records, uint from, uint to) =>
+        CoversCore(records.Select(tx => (tx.Sequence, tx.TransactionType, tx.TicketCount)), from, to);
+
+    /// <inheritdoc cref="Covers(IEnumerable{LedgerTransaction}, uint, uint)"/>
+    internal static bool Covers(IEnumerable<SweepRecord> records, uint from, uint to) =>
+        CoversCore(records.Select(tx => (tx.Sequence, tx.TransactionType, tx.TicketCount)), from, to);
+
+    private static bool CoversCore(IEnumerable<(uint Sequence, string? TransactionType, uint? TicketCount)> records, uint from, uint to)
     {
         if (to <= from) return true;
 
         HashSet<uint> covered = [];
 
-        foreach (LedgerTransaction tx in records)
+        foreach ((uint sequence, string? type, uint? ticketCount) in records)
         {
-            if (tx.Sequence == 0) continue;
+            if (sequence == 0) continue;
 
-            covered.Add(tx.Sequence);
+            covered.Add(sequence);
 
-            if (string.Equals(tx.TransactionType, "TicketCreate", StringComparison.Ordinal) && tx.TicketCount is { } count)
+            if (string.Equals(type, "TicketCreate", StringComparison.Ordinal) && ticketCount is { } count)
             {
-                for (uint ticket = 1; ticket <= count; ticket++) covered.Add(tx.Sequence + ticket);
+                for (uint ticket = 1; ticket <= count; ticket++) covered.Add(sequence + ticket);
             }
         }
 
@@ -98,9 +105,9 @@ internal static class BatchSweep
     /// </summary>
     private static void RequireIdentity(
         BatchContext context, RoundIdentity identity,
-        IReadOnlyList<LedgerTransaction> writerRecords, IReadOnlyList<LedgerTransaction> payerRecords)
+        IReadOnlyList<SweepRecord> writerRecords, IReadOnlyList<SweepRecord> payerRecords)
     {
-        foreach (LedgerTransaction tx in payerRecords)
+        foreach (SweepRecord tx in payerRecords)
         {
             if (identity.IsOuter(tx.Hash)) continue;
 
@@ -109,7 +116,7 @@ internal static class BatchSweep
                 + "during the publication", role: AccountRole.Payer);
         }
 
-        foreach (LedgerTransaction tx in writerRecords)
+        foreach (SweepRecord tx in writerRecords)
         {
             if (identity.IsOurs(tx)) continue;
 
@@ -119,34 +126,27 @@ internal static class BatchSweep
         }
     }
 
-    internal static RoundResult Outcome(
-        BatchContext context, IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> pending, IReadOnlyList<BatchCandidate> candidates,
-        IReadOnlyList<LedgerTransaction> writerRecords, IReadOnlyList<LedgerTransaction> payerRecords) =>
-        Outcome(memos, pending, new RoundIdentity(candidates), writerRecords, payerRecords);
+    internal static RoundResult Outcome(IReadOnlyList<BatchCandidate> candidates, IReadOnlyList<SweepRecord> writerRecords, IReadOnlyList<SweepRecord> payerRecords) =>
+        Outcome(new RoundIdentity(candidates), writerRecords, payerRecords);
 
-    private static RoundResult Outcome(
-        IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> pending, RoundIdentity identity,
-        IReadOnlyList<LedgerTransaction> writerRecords, IReadOnlyList<LedgerTransaction> payerRecords)
+    private static RoundResult Outcome(RoundIdentity identity, IReadOnlyList<SweepRecord> writerRecords, IReadOnlyList<SweepRecord> payerRecords)
     {
-        Dictionary<string, int> byMarker = new(StringComparer.OrdinalIgnoreCase);
-        foreach (int index in pending) byMarker[memos[index].MemoTypeHex] = index;
-
         Dictionary<int, LandedInner> landed = [];
 
-        foreach (LedgerTransaction tx in writerRecords)
+        foreach (SweepRecord tx in writerRecords)
         {
-            if (!tx.Succeeded || !tx.Validated) continue;
+            if (!tx.Succeeded || !tx.Validated || !identity.IsOurs(tx)) continue;
 
-            if (!identity.IsOurs(tx) || tx.MemoTypeHex is null || !byMarker.TryGetValue(tx.MemoTypeHex, out int index)) continue;
-            if (!string.Equals(tx.MemoDataHex, memos[index].MemoDataHex, StringComparison.OrdinalIgnoreCase)) continue;
+            // Matched on marker and data (spec B28): the verdict was taken when the record was read.
+            if (tx.CallIndex < 0 || tx.Verdict != DataVerdict.Matches) continue;
 
-            landed.TryAdd(index, new LandedInner(tx.Hash, tx.LedgerIndex));
+            landed.TryAdd(tx.CallIndex, new LandedInner(tx.Hash, tx.LedgerIndex));
         }
 
         long fee = 0;
         bool known = true;
 
-        foreach (LedgerTransaction tx in payerRecords)
+        foreach (SweepRecord tx in payerRecords)
         {
             if (!tx.Validated || !identity.IsOuter(tx.Hash)) continue;
 
@@ -155,6 +155,23 @@ internal static class BatchSweep
         }
 
         return new RoundResult(landed, fee, known);
+    }
+
+    /// <summary>
+    /// An account's records over [<paramref name="from"/>, <paramref name="to"/>], classified as they
+    /// arrive (spec S6): no page's memo data outlives the page.
+    /// </summary>
+    internal static async Task<IReadOnlyList<SweepRecord>> CompactHistoryAsync(
+        ILedgerSource source, string account, long from, long to, RoundMarkers? markers, CancellationToken cancellationToken)
+    {
+        List<SweepRecord> records = [];
+
+        await foreach (LedgerTransaction tx in source.AccountTransactionsAsync(account, from, to, forward: true, cancellationToken).ConfigureAwait(false))
+        {
+            records.Add(SweepRecord.From(tx, markers));
+        }
+
+        return records;
     }
 
     internal static async Task<IReadOnlyList<LedgerTransaction>> HistoryAsync(
@@ -188,7 +205,7 @@ internal static class BatchSweep
         public bool IsOuter(string hash) => _outers.Contains(hash);
 
         /// <summary>A writer's record that is an inner of one of the round's outers, or the round's solo.</summary>
-        public bool IsOurs(LedgerTransaction tx) =>
+        public bool IsOurs(SweepRecord tx) =>
             tx.ParentBatchID is { } parent
                 ? _outers.Contains(parent)
                 : _solo is not null && string.Equals(tx.Hash, _solo, StringComparison.OrdinalIgnoreCase);
@@ -201,9 +218,9 @@ internal static class BatchSweep
     /// coverage when the missing record took a sequence, and the sweep then reads the round in full;
     /// a ticketed one (sequence 0) would go unseen by B12, as it would in a full read made too early.
     /// </summary>
-    internal sealed record KnownHistory(IReadOnlyList<LedgerTransaction> Records, long ReadFrom);
+    internal sealed record KnownHistory(IReadOnlyList<SweepRecord> Records, long ReadFrom);
 
     /// <summary>The records the account sent: account_tx also returns what others sent to it, which is not "of" it.</summary>
-    private static List<LedgerTransaction> Own(IReadOnlyList<LedgerTransaction> records, string account) =>
+    private static List<SweepRecord> Own(IReadOnlyList<SweepRecord> records, string account) =>
         [.. records.Where(tx => string.Equals(tx.Account, account, StringComparison.Ordinal))];
 }

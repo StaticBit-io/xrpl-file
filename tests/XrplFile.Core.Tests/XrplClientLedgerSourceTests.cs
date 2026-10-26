@@ -772,4 +772,13 @@ public class XrplClientLedgerSourceTests
             return Task.FromResult(_answers.Dequeue()());
         }
     }
+
+    [Fact]
+    public void A_record_carries_its_position_in_the_ledger()
+    {
+        using JsonDocument record = JsonDocument.Parse(
+            """{"hash":"ab","ledger_index":9,"validated":true,"tx_json":{"Account":"rW","TransactionType":"AccountSet","Sequence":3},"meta":{"TransactionResult":"tesSUCCESS","TransactionIndex":17}}""");
+
+        Assert.Equal(17, XrplClientLedgerSource.ParseRecord(record.RootElement).TransactionIndex);
+    }
 }

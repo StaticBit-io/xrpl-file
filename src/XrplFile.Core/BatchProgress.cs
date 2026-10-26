@@ -4,10 +4,10 @@ namespace XrplFile;
 /// The call's progress (spec B20, 4.4): the number of its memos a sweep found landed with tesSUCCESS.
 /// It counts memos found, never sequence movement, so it only grows.
 /// </summary>
-internal sealed class BatchProgress(IProgress<int>? inner)
+internal sealed class BatchProgress(IProgress<int>? inner, int count)
 {
     private readonly Lock _gate = new();
-    private readonly HashSet<int> _found = [];
+    private readonly LandedSet _found = new(count);
     private int _reported;
     private bool _sent;
 

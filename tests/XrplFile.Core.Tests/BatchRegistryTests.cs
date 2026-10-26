@@ -11,7 +11,7 @@ public class BatchRegistryTests
     public async Task A_candidate_is_registered_only_after_its_deadline_is_persisted()
     {
         RecordingFence recorder = new();
-        BatchRegistry registry = new(new BatchFence(recorder), new Dictionary<int, int>(), new BatchTrace());
+        BatchRegistry registry = new(new BatchFence(recorder), new byte[6], new BatchTrace());
 
         Assert.True(await registry.TryRegisterAsync(Candidate(0, 520, 0, 1), TestContext.Current.CancellationToken));
         Assert.True(await registry.TryRegisterAsync(Candidate(1, 520, 2, 3), TestContext.Current.CancellationToken));
@@ -25,7 +25,8 @@ public class BatchRegistryTests
     [Fact]
     public async Task Registering_reserves_a_candidate_for_every_memo_it_carries()
     {
-        Dictionary<int, int> candidates = new() { [1] = 2 };
+        byte[] candidates = new byte[2];
+        candidates[1] = 2;
         BatchRegistry registry = new(new BatchFence(new RecordingFence()), candidates, new BatchTrace());
 
         await registry.TryRegisterAsync(Candidate(0, 520, 0, 1), TestContext.Current.CancellationToken);
@@ -37,14 +38,14 @@ public class BatchRegistryTests
     [Fact]
     public async Task After_a_halt_nothing_registers_and_nothing_is_reserved()
     {
-        Dictionary<int, int> candidates = [];
+        byte[] candidates = new byte[2];
         BatchTrace trace = new();
         BatchRegistry registry = new(new BatchFence(new RecordingFence()), candidates, trace);
 
         await registry.HaltAsync("diverged", TestContext.Current.CancellationToken);
 
         Assert.False(await registry.TryRegisterAsync(Candidate(4, 520, 0, 1), TestContext.Current.CancellationToken));
-        Assert.Empty(candidates);
+        Assert.All(candidates, count => Assert.Equal(0, count));
         Assert.Empty(registry.Candidates);
         Assert.Equal(["halt:diverged", "discard:4"], trace.Events);
     }
@@ -52,12 +53,12 @@ public class BatchRegistryTests
     [Fact]
     public async Task A_fence_that_cannot_be_saved_registers_nothing()
     {
-        Dictionary<int, int> candidates = [];
+        byte[] candidates = new byte[2];
         BatchRegistry registry = new(new BatchFence(new RecordingFence { Fail = true }), candidates, new BatchTrace());
 
         await Assert.ThrowsAsync<IOException>(() => registry.TryRegisterAsync(Candidate(0, 520, 0, 1), TestContext.Current.CancellationToken));
 
-        Assert.Empty(candidates);
+        Assert.All(candidates, count => Assert.Equal(0, count));
         Assert.Empty(registry.Candidates);
     }
 

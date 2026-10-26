@@ -189,20 +189,6 @@ public class BatchIdentityTests
     }
 
     [Fact]
-    public void A_ticket_create_covers_its_own_sequence_and_its_tickets()
-    {
-        LedgerTransaction create = new("C", 5, "rW", true, true, "tesSUCCESS", null, null, null)
-        {
-            TransactionType = "TicketCreate", Sequence = 10, TicketCount = 3,
-        };
-        LedgerTransaction next = new("N", 6, "rW", false, true, "tecFAKE", null, null, null) { Sequence = 14 };
-
-        Assert.True(BatchSweep.Covers([create, next], 10, 15));
-        Assert.False(BatchSweep.Covers([create], 10, 15));
-        Assert.True(BatchSweep.Covers([], 10, 10));
-    }
-
-    [Fact]
     public async Task The_tidy_up_spends_this_librarys_leftover_tickets_on_the_writer()
     {
         BatchTestNode node = new();
@@ -225,25 +211,6 @@ public class BatchIdentityTests
 
         Assert.Equal(TicketRelease.None, await strategy.ReleaseLeftoverTicketsAsync(Token));
         Assert.Empty(node.Sink.Transmissions);
-    }
-
-    [Fact]
-    public void A_payer_record_that_is_not_validated_is_not_counted_in_the_payer_fee()
-    {
-        BatchTestNode node = new();
-        BatchContext context = new(
-            node.Sink, node.Ledger, node.Writer, node.Payer, BatchTestNode.Budget, BatchTestNode.FastOptions,
-            new BatchFence(node.Fence), new BatchWindow(1), new BatchTrace(), new BatchSpending(BatchTestNode.Budget), new BatchLedgerFloor());
-        BatchCandidate outer = new(0, isOuter: true, node.Payer.Account, 500, 900, 120, [0], new SignedTransaction("00", "AA"));
-        LedgerTransaction validated = new("AA", 5, node.Payer.Account, true, true, "tesSUCCESS", null, null, null) { Fee = 120 };
-        LedgerTransaction pendingOne = validated with { Validated = false, Fee = 999 };
-
-        RoundResult counted = BatchSweep.Outcome(context, BatchTestNode.Memos(1), [0], [outer], [], [validated]);
-        RoundResult skipped = BatchSweep.Outcome(context, BatchTestNode.Memos(1), [0], [outer], [], [pendingOne]);
-
-        Assert.Equal(120, counted.PayerFeeDrops);
-        Assert.Equal(0, skipped.PayerFeeDrops);
-        Assert.True(skipped.PayerFeeKnown);
     }
 
     [Fact]

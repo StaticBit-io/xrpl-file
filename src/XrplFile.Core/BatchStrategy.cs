@@ -6,13 +6,15 @@ namespace XrplFile;
 /// is queued, and nothing locks a reserve. Rounds assign sequences from one snapshot, send, settle
 /// and sweep; whatever is still missing goes into the next round with fresh sequences.
 ///
-/// One instance serves one session: the candidates per memo and the budget are counted over its
-/// lifetime, and SubmitAllAsync is not re-entrant.
+/// One instance serves one session: the budget is counted over its lifetime and the candidates per
+/// memo over each call, across its rounds, and SubmitAllAsync is not re-entrant.
 /// </summary>
 public sealed class BatchStrategy : ISubmissionStrategy
 {
     private readonly BatchContext _context;
     private readonly BatchStrategyOptions _options;
+    private readonly List<WeakReference> _finishedRegistries = [];
+    private readonly List<BatchFence> _roundFences = [];
     private long _payerFeeDrops;
     private bool _payerFeeUnknown;
 
@@ -69,37 +71,76 @@ public sealed class BatchStrategy : ISubmissionStrategy
 
     internal int WindowInFlight => _context.Window.InFlight;
 
+    /// <summary>One weak reference per round run, to its registry: a test seam that proves a round's blobs do not outlive it (spec S5).</summary>
+    internal IReadOnlyList<WeakReference> FinishedRegistries
+    {
+        get { lock (_finishedRegistries) return [.. _finishedRegistries]; }
+    }
+
+    /// <summary>The fence each round ran with: a test seam that proves the fence is the strategy's, not the round's (spec S5).</summary>
+    internal IReadOnlyList<BatchFence> RoundFences
+    {
+        get { lock (_finishedRegistries) return [.. _roundFences]; }
+    }
+
     public async Task<SubmittedMemos> SubmitAllAsync(
         IReadOnlyList<MemoSubmission> memos, IProgress<int>? submitted, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(memos);
-        RequireDistinctMarkers(memos);
 
-        Dictionary<int, LandedInner> landed = [];
-        Dictionary<int, int> candidates = [];
-        List<int> pending = [.. Enumerable.Range(0, memos.Count)];
-        BatchProgress progress = new(submitted);
+        // Per pass and compact (spec S19): a landed bit and a candidate count per memo. Each round
+        // takes at most MaxRoundMemos of the memos still missing, in index order, so what a round
+        // returned unlanded goes first into the next one.
+        SubmittedMemosBuilder landed = new(memos.Count, keepChunkFacts: false);
+        byte[] candidates = new byte[memos.Count];
+        BatchProgress progress = new(submitted, memos.Count);
 
-        while (pending.Count > 0)
+        while (landed.Landed.Count < memos.Count)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            int[] pending = NextRound(landed.Landed, _options.MaxRoundMemos);
             RequireAnotherCandidate(memos, pending, candidates);
 
-            RoundResult round = await new BatchRound(_context, memos, pending, candidates, progress).RunAsync(cancellationToken).ConfigureAwait(false);
+            RoundResult round = await RunRoundAsync(memos, pending, candidates, progress, cancellationToken).ConfigureAwait(false);
 
-            foreach ((int index, LandedInner inner) in round.Landed) landed.TryAdd(index, inner);
+            foreach ((int index, LandedInner inner) in round.Landed)
+            {
+                landed.Record(index, RoundMarkers.MarkerHexAt(memos, index), inner.Hash, inner.LedgerIndex);
+            }
 
             Interlocked.Add(ref _payerFeeDrops, round.PayerFeeDrops);
             if (!round.PayerFeeKnown) _payerFeeUnknown = true;
-
-            progress.Found(landed.Keys);
-            pending = [.. pending.Where(index => !landed.ContainsKey(index))];
         }
 
-        SubmittedMemosBuilder result = new(memos.Count, keepChunkFacts: false);
-        foreach ((int index, LandedInner inner) in landed.OrderBy(pair => pair.Key)) result.Record(index, memos[index].MemoTypeHex, inner.Hash, inner.LedgerIndex);
+        return landed.Build();
+    }
 
-        return result.Build();
+    /// <summary>Runs one round; its registry, history and marker map go out of scope with it.</summary>
+    private async Task<RoundResult> RunRoundAsync(
+        IReadOnlyList<MemoSubmission> memos, int[] pending, byte[] candidates, BatchProgress progress, CancellationToken cancellationToken)
+    {
+        BatchRound round = new(_context, memos, pending, candidates, progress);
+        lock (_finishedRegistries)
+        {
+            _finishedRegistries.Add(new WeakReference(round.Registry));
+            _roundFences.Add(round.Registry.Fence);
+        }
+
+        return await round.RunAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The first <paramref name="cap"/> memos that have not landed, in index order.</summary>
+    private static int[] NextRound(LandedSet landed, int cap)
+    {
+        List<int> pending = new(Math.Min(cap, landed.Capacity - landed.Count));
+
+        for (int index = landed.NextMissing(0); index >= 0 && pending.Count < cap; index = landed.NextMissing(index + 1))
+        {
+            pending.Add(index);
+        }
+
+        return [.. pending];
     }
 
     /// <summary>
@@ -113,29 +154,15 @@ public sealed class BatchStrategy : ISubmissionStrategy
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    /// <summary>A memo that would need a fourth candidate fails the run (spec B13).</summary>
-    private void RequireAnotherCandidate(IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> pending, IReadOnlyDictionary<int, int> candidates)
+    /// <summary>A memo that would need a fourth candidate fails the run (spec B13); the counts carry across rounds (spec S5).</summary>
+    private void RequireAnotherCandidate(IReadOnlyList<MemoSubmission> memos, IReadOnlyList<int> pending, byte[] candidates)
     {
         foreach (int index in pending)
         {
-            if (candidates.GetValueOrDefault(index) >= _options.MaxAttemptsPerMemo)
+            if (candidates[index] >= _options.MaxAttemptsPerMemo)
             {
                 throw new XrplFileException(XrplFileError.SubmitRefused,
-                    $"the memo marked {memos[index].MemoTypeHex} did not land in the {_options.MaxAttemptsPerMemo} candidates a session allows it");
-            }
-        }
-    }
-
-    private static void RequireDistinctMarkers(IReadOnlyList<MemoSubmission> memos)
-    {
-        HashSet<string> markers = new(memos.Count, StringComparer.OrdinalIgnoreCase);
-
-        foreach (MemoSubmission memo in memos)
-        {
-            if (!markers.Add(memo.MemoTypeHex))
-            {
-                throw new XrplFileException(XrplFileError.SubmitRefused,
-                    $"two memos carry the marker {memo.MemoTypeHex}, which the sweep could not tell apart");
+                    $"the memo marked {RoundMarkers.MarkerHexAt(memos, index)} did not land in the {_options.MaxAttemptsPerMemo} candidates a session allows it");
             }
         }
     }

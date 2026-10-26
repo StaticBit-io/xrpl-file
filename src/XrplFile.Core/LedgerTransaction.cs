@@ -36,4 +36,7 @@ public sealed record LedgerTransaction(
 
     /// <summary>The outer Batch an inner belongs to, upper case; null for anything that is not an inner (spec B12).</summary>
     public string? ParentBatchID { get; init; }
+
+    /// <summary>The transaction's position in its ledger (<c>meta.TransactionIndex</c>), or null when the record does not say (spec S6).</summary>
+    public int? TransactionIndex { get; init; }
 }
