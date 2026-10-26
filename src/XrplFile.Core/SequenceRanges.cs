@@ -20,7 +20,10 @@ internal sealed class SequenceRanges
         if (tx.Sequence == 0) return;
 
         uint tickets = string.Equals(tx.TransactionType, "TicketCreate", StringComparison.Ordinal) && tx.TicketCount is { } count ? count : 0;
-        Add(tx.Sequence, checked(tx.Sequence + 1 + tickets));
+
+        // A garbled record near the top of the range must not throw out of a reconciliation: its
+        // end is clamped, which at worst leaves a sequence uncovered, and coverage then fails safe.
+        Add(tx.Sequence, (uint)Math.Min((ulong)tx.Sequence + 1 + tickets, uint.MaxValue));
     }
 
     /// <summary>Adds [<paramref name="start"/>, <paramref name="end"/>), merging with every range it touches.</summary>

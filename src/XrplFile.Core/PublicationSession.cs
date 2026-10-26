@@ -594,7 +594,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         session._landed = (await session.StreamReconcileAsync(to, conflictsFail: false, preparation, cancellationToken).ConfigureAwait(false)).Landed;
 
         // Nothing is sent, so nothing has to be affordable (spec B27).
-        if (await session.FindManifestAsync(session._landed, to, cancellationToken).ConfigureAwait(false) is { } done)
+        if (await session.FindManifestAsync(session._landed, to, bound: null, preparation, cancellationToken).ConfigureAwait(false) is { } done)
         {
             session._alreadyPublished = done;
             return session;
@@ -673,12 +673,12 @@ public sealed class PublicationSession : IBatchFenceRecorder
         PublicationSession session = new(null, source, file, blocks, state, statePath, options, 0, 0, mintsAtStart: 0);
         session.RecordSourcePath(options.SourcePath);
 
-        // The manifest search streams the same pinned range the reconciliation covered, so it
-        // cannot miss what the reconciliation saw and send a second manifest (spec B27).
-        (LandedMemos landed, long to) = await session.CompleteReconcileAsync(preparation, cancellationToken).ConfigureAwait(false);
+        // The manifest search streams the same pinned range and must cover the same sequences, so a
+        // lagging node cannot hide the manifest from it and make this run send a second one (spec B27).
+        (LandedMemos landed, long to, SequenceBound bound) = await session.CompleteReconcileAsync(preparation, cancellationToken).ConfigureAwait(false);
         session._landed = landed;
 
-        if (await session.FindManifestAsync(landed, to, cancellationToken).ConfigureAwait(false) is { } done)
+        if (await session.FindManifestAsync(landed, to, bound, preparation, cancellationToken).ConfigureAwait(false) is { } done)
         {
             session._alreadyPublished = done;
             return session;
@@ -862,6 +862,12 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// <summary>What one streaming pass found: the landing and the kept lists, and the sequences the writer's records took.</summary>
     private sealed record Reconciled(LandedMemos Landed, SequenceRanges Sequences);
 
+    /// <summary>The writer's sequences [From, Through) a Batch resume's reads must account for (spec B30).</summary>
+    private sealed record SequenceBound(uint From, uint Through);
+
+    /// <summary>How a Batch resume's history reads are retried and paced.</summary>
+    private BatchStrategyOptions HistoryReads() => new() { ChainCheck = _options.FencePoll, NodeOutageLimit = _options.NodeOutageLimit };
+
     /// <summary>How often the "history" stage is reported while a pass streams.</summary>
     private const int HistoryReportEvery = 1_000;
 
@@ -980,10 +986,11 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// its deadline can still be missing once the fence has passed; trusting that answer would pay
     /// for the memo again, or send a second manifest.
     /// </summary>
-    private async Task<(LandedMemos Landed, long To)> CompleteReconcileAsync(IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
+    private async Task<(LandedMemos Landed, long To, SequenceBound Bound)> CompleteReconcileAsync(
+        IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
     {
         string writer = _state.Writer;
-        BatchStrategyOptions reads = new() { ChainCheck = _options.FencePoll, NodeOutageLimit = _options.NodeOutageLimit };
+        BatchStrategyOptions reads = HistoryReads();
         LedgerSnapshot snapshot = await BatchReads.RetryAsync(
             token => _source.SnapshotAsync([writer], token), reads, cancellationToken).ConfigureAwait(false);
         uint through = snapshot.SequenceOf(writer);
@@ -998,7 +1005,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
             // from. That still catches a history that lags at its end, which is where it lags.
             uint from = _state.StartSequence ?? pass.Sequences.Lowest ?? through;
 
-            if (pass.Sequences.Covers(from, through)) return (pass.Landed, snapshot.LedgerIndex);
+            if (pass.Sequences.Covers(from, through)) return (pass.Landed, snapshot.LedgerIndex, new SequenceBound(from, through));
 
             if (DateTimeOffset.UtcNow >= giveUp)
             {
@@ -1016,8 +1023,15 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// reconciled landing and lists, then matched in a second streaming pass over the same range
     /// against those exact bytes. The first validated, successful match of the writer is the one; a
     /// manifest with the same root and other bytes is another publication's and is not adopted.
+    ///
+    /// With a <paramref name="bound"/> (a Batch resume) a pass that finds nothing counts only when the
+    /// writer's records it read cover the bound, as the reconciliation's did (spec B30): a lagging
+    /// node would otherwise answer "no manifest" and the run would send a second one. A shortfall, or
+    /// a pass that breaks, is read again from the start, which costs nothing as the pass keeps no
+    /// partial state.
     /// </summary>
-    private async Task<PublishResult?> FindManifestAsync(LandedMemos landed, long to, CancellationToken cancellationToken)
+    private async Task<PublishResult?> FindManifestAsync(
+        LandedMemos landed, long to, SequenceBound? bound, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
     {
         if (!landed.Chunks.IsComplete) return null;
 
@@ -1040,16 +1054,62 @@ public sealed class PublicationSession : IBatchFenceRecorder
         PublicationState state = State;
         Manifest manifest = ManifestPlan.Build(state.Type, state.Name, state.Size, entries, window.First, lastLedger, listMemos.Count);
         string data = ManifestPlan.Memo(manifest).MemoDataHex;
+        BatchStrategyOptions reads = HistoryReads();
+        DateTimeOffset giveUp = DateTimeOffset.UtcNow + _options.HistoryLagLimit;
 
-        await foreach (LedgerTransaction tx in _source.AccountTransactionsAsync(state.Writer, state.StartedInLedger, to, forward: true, cancellationToken).ConfigureAwait(false))
+        while (true)
         {
-            if (!tx.Validated || !tx.Succeeded || !string.Equals(tx.Account, state.Writer, StringComparison.Ordinal)) continue;
-            if (!MemoLayout.IsManifest(tx.MemoTypeHex) || !string.Equals(tx.MemoDataHex, data, StringComparison.OrdinalIgnoreCase)) continue;
+            (string? hash, SequenceRanges sequences) = bound is null
+                ? await ScanForManifestAsync(state.Writer, to, data, preparation, cancellationToken).ConfigureAwait(false)
+                : await BatchReads.RetryAsync(
+                    token => ScanForManifestAsync(state.Writer, to, data, preparation, token), reads, cancellationToken).ConfigureAwait(false);
 
-            return new PublishResult(new XrplFileLink(state.Network, tx.Hash), manifest, state.Writer, landed.Chunks.ChunkCount, listMemos.Count, tx.Hash);
+            if (hash is not null)
+            {
+                return new PublishResult(new XrplFileLink(state.Network, hash), manifest, state.Writer, landed.Chunks.ChunkCount, listMemos.Count, hash);
+            }
+
+            if (bound is null || sequences.Covers(bound.From, bound.Through)) return null;
+
+            if (DateTimeOffset.UtcNow >= giveUp)
+            {
+                throw new XrplFileException(XrplFileError.NodeLacksHistory,
+                    $"account_tx did not cover the writer's sequences from {bound.From} up to {bound.Through} by ledger {to} "
+                    + $"within {_options.HistoryLagLimit} while looking for the manifest");
+            }
+
+            await Task.Delay(_options.FencePoll, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// One streaming pass for a validated, successful manifest record of the writer carrying exactly
+    /// <paramref name="manifestDataHex"/>: its hash, or null, with the sequences the writer's records
+    /// that were read took (those of a pass that stopped at a match are incomplete, and not asked for).
+    /// </summary>
+    private async Task<(string? Hash, SequenceRanges Sequences)> ScanForManifestAsync(
+        string writer, long to, string manifestDataHex, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
+    {
+        SequenceRanges sequences = new();
+        long read = 0;
+
+        preparation?.Report(new PublishProgress("history", 0, 0));
+
+        await foreach (LedgerTransaction tx in _source.AccountTransactionsAsync(writer, _state.StartedInLedger, to, forward: true, cancellationToken).ConfigureAwait(false))
+        {
+            if (++read % HistoryReportEvery == 0) preparation?.Report(new PublishProgress("history", read, 0));
+
+            if (!string.Equals(tx.Account, writer, StringComparison.Ordinal)) continue;
+
+            sequences.Add(tx);
+
+            if (!tx.Validated || !tx.Succeeded) continue;
+            if (!MemoLayout.IsManifest(tx.MemoTypeHex) || !string.Equals(tx.MemoDataHex, manifestDataHex, StringComparison.OrdinalIgnoreCase)) continue;
+
+            return (tx.Hash, sequences);
         }
 
-        return null;
+        return (null, sequences);
     }
 
     public async Task<PublicationReport> RunAsync(IProgress<PublishProgress>? progress, CancellationToken cancellationToken)

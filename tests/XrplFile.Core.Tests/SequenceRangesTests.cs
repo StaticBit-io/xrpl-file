@@ -31,4 +31,16 @@ public class SequenceRangesTests
         Assert.True(ranges.Covers(7, 7));
         Assert.False(ranges.Covers(19, 21));
     }
+
+    [Fact]
+    public void A_garbled_record_near_the_top_of_the_range_is_clamped_not_thrown()
+    {
+        SequenceRanges ranges = new();
+
+        ranges.Add(Tx(uint.MaxValue - 1, "TicketCreate", tickets: uint.MaxValue));
+        ranges.Add(Tx(uint.MaxValue));
+
+        Assert.True(ranges.Covers(uint.MaxValue - 1, uint.MaxValue));
+        Assert.Equal(uint.MaxValue - 1, ranges.Lowest);
+    }
 }

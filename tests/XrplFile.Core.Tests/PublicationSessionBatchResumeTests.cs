@@ -254,6 +254,36 @@ public class PublicationSessionBatchResumeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_manifest_search_that_reads_a_short_history_reads_again_and_sends_no_second_manifest()
+    {
+        BatchTestNode node = Funded();
+        byte[] file = VectorStream.Bytes("resume", 9_000);
+        PublicationSession first = await PublicationSession.StartAsync(
+            Factory(node, node.Payer), node.Ledger, file, "text/plain", null,
+            node.Writer.Account, "key-w", node.Payer.Account, "key-p", "testnet", Options, Token);
+        PublicationReport original = await first.RunAsync(null, Token);
+
+        PublicationState state = PublicationState.Load(first.StatePath);
+        (state with { Phase = "manifest", ManifestHash = null }).Save(first.StatePath);
+        int transmitted = node.Sink.Transmissions.Count;
+
+        // The reconciliation reads the whole history; the manifest search's first two reads are
+        // answered by an index that has not caught up with the writer's last ledgers.
+        int baseline = node.Ledger.AccountTransactionsCalls;
+        node.Ledger.HistoryHides = tx => string.Equals(tx.Account, node.Writer.Account, StringComparison.Ordinal)
+            && node.Ledger.AccountTransactionsCalls is var calls && (calls == baseline + 2 || calls == baseline + 3);
+        node.Ledger.HistoryHideReads = int.MaxValue;
+
+        PublicationSession resumed = await PublicationSession.ResumeAsync(
+            Factory(node, node.Payer), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options, null, Token);
+        PublicationReport report = await resumed.RunAsync(null, Token);
+
+        Assert.True(node.Ledger.AccountTransactionsCalls >= baseline + 4, "the short passes were not read again");
+        Assert.Equal(original.Link, report.Link);
+        Assert.Equal(transmitted, node.Sink.Transmissions.Count);
+    }
+
+    [Fact]
     public async Task A_one_account_run_is_not_resumed_as_a_Batch_run()
     {
         BatchTestNode node = Funded();
