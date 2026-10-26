@@ -6,21 +6,43 @@ namespace XrplFile;
 /// </summary>
 internal static class ManifestPlan
 {
-    /// <summary>Block entries: hash over the chunks in memory, first ledger the earliest of the block's own chunks.</summary>
-    public static IReadOnlyList<BlockEntry> Entries(IReadOnlyList<byte[]> chunks, IReadOnlyDictionary<int, long> chunkLedgers)
+    /// <summary>
+    /// Block entries from block hashes and each block's first ledger (spec S3): where a reader starts
+    /// paging for the block, the earliest ledger holding one of its adopted chunks.
+    /// </summary>
+    public static IReadOnlyList<BlockEntry> Entries(IReadOnlyList<byte[]> blockHashes, IReadOnlyList<long> blockFirstLedgers)
     {
-        int blocks = FileTree.BlockCount(chunks.Count);
-        List<BlockEntry> entries = new(blocks);
+        ArgumentNullException.ThrowIfNull(blockHashes);
+        ArgumentNullException.ThrowIfNull(blockFirstLedgers);
 
-        for (int block = 0; block < blocks; block++)
+        if (blockHashes.Count != blockFirstLedgers.Count)
         {
-            int firstChunk = block * FileTree.BlockChunks;
-            List<byte[]> members = [.. chunks.Skip(firstChunk).Take(FileTree.BlockChunks)];
-            long ledger = Enumerable.Range(firstChunk, members.Count).Min(i => chunkLedgers[i]);
-            entries.Add(new BlockEntry(block, Convert.ToHexString(FileTree.BlockHash(members)), ledger));
+            throw new ArgumentException($"{blockHashes.Count} block hashes and {blockFirstLedgers.Count} first ledgers", nameof(blockFirstLedgers));
+        }
+
+        List<BlockEntry> entries = new(blockHashes.Count);
+        for (int block = 0; block < blockHashes.Count; block++)
+        {
+            entries.Add(new BlockEntry(block, Convert.ToHexString(blockHashes[block]), blockFirstLedgers[block]));
         }
 
         return entries;
+    }
+
+    /// <summary>Each block's earliest chunk ledger, from per-chunk ledgers. Bounded use only: the one-account paths (64 MiB).</summary>
+    public static IReadOnlyList<long> FirstLedgers(int chunkCount, IReadOnlyDictionary<int, long> chunkLedgers)
+    {
+        int blocks = FileTree.BlockCount(chunkCount);
+        long[] firsts = new long[blocks];
+
+        for (int block = 0; block < blocks; block++)
+        {
+            int first = block * FileTree.BlockChunks;
+            int end = Math.Min(first + FileTree.BlockChunks, chunkCount);
+            firsts[block] = Enumerable.Range(first, end - first).Min(index => chunkLedgers[index]);
+        }
+
+        return firsts;
     }
 
     /// <summary>The block-list memos, only when there is more than one block.</summary>

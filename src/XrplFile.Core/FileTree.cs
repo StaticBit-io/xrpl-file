@@ -41,6 +41,62 @@ public static class FileTree
     public static byte[] BlockHash(IReadOnlyList<byte[]> chunks) =>
         MerkleTree.Root([.. chunks.Select(chunk => MerkleTree.Leaf(chunk))]);
 
+    /// <summary>Every block's hash, from chunks in memory. For small files and tests; publication streams (spec S3).</summary>
+    public static IReadOnlyList<byte[]> BlockHashes(IReadOnlyList<byte[]> chunks)
+    {
+        ArgumentNullException.ThrowIfNull(chunks);
+
+        int blocks = BlockCount(chunks.Count);
+        List<byte[]> hashes = new(blocks);
+
+        for (int block = 0; block < blocks; block++)
+        {
+            hashes.Add(BlockHash([.. chunks.Skip(block * BlockChunks).Take(BlockChunks)]));
+        }
+
+        return hashes;
+    }
+
+    /// <summary>
+    /// Every block's hash in one forward pass over the source, keeping only the 32 bytes of each
+    /// (spec S3): 1,651 blocks of a 1.7 GB file are 53 KB. <paramref name="progress"/> hears the
+    /// number of chunks hashed after each block.
+    /// </summary>
+    public static async Task<IReadOnlyList<byte[]>> BlockHashesAsync(
+        IPublicationSource source, IProgress<long>? progress, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        long chunks = ChunkCount(source.Length, MemoLayout.ChunkBytes);
+        if (chunks == 0) throw new ArgumentException("an empty file has no chunks and no root", nameof(source));
+
+        int blocks = BlockCount(chunks);
+        List<byte[]> hashes = new(blocks);
+        List<byte[]> leaves = new(BlockChunks);
+        byte[] buffer = new byte[MemoLayout.ChunkBytes];
+
+        for (int block = 0; block < blocks; block++)
+        {
+            leaves.Clear();
+            long first = (long)block * BlockChunks;
+            long end = Math.Min(first + BlockChunks, chunks);
+
+            for (long chunk = first; chunk < end; chunk++)
+            {
+                int length = await source.ReadChunkAsync(chunk, buffer, cancellationToken).ConfigureAwait(false);
+                leaves.Add(MerkleTree.Leaf(buffer.AsSpan(0, length)));
+            }
+
+            hashes.Add(MerkleTree.Root(leaves));
+            progress?.Report(end);
+        }
+
+        return hashes;
+    }
+
+    /// <summary>The file's root over its block hashes, in block order.</summary>
+    public static string RootHexOf(IReadOnlyList<byte[]> blockHashes) => Convert.ToHexString(MerkleTree.Root(blockHashes));
+
     public static string RootHex(IReadOnlyList<BlockEntry> entries) =>
         Convert.ToHexString(MerkleTree.Root(
             [.. entries.OrderBy(entry => entry.Index).Select(entry => Convert.FromHexString(entry.HashHex))]));

@@ -210,7 +210,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
         // Block entries: hash over the chunks in memory, first ledger from the ledger itself --
         // the earliest of the block's own chunks, which is where a reader has to start paging to
         // find all of them.
-        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(chunks, chunkLedgers);
+        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(FileTree.BlockHashes(chunks), ManifestPlan.FirstLedgers(chunks.Count, chunkLedgers));
 
         // Block lists, only when there is more than one block.
         List<string> listHashes = [];

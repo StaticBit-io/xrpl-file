@@ -229,7 +229,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
         PublicationState state = new(
             PublicationState.BatchVersion, network, writer, keyReference, type, name,
-            file.Length, MemoLayout.ChunkBytes, RootOf(chunks, startedIn), startedIn, Phase: Stages[0],
+            file.Length, MemoLayout.ChunkBytes, RootOf(chunks), startedIn, Phase: Stages[0],
             ChunkHashes: new Dictionary<int, string>(),
             Strategy: PublicationState.BatchStrategyName, SourcePath: options.SourcePath,
             Payer: payer, PayerKeyReference: payerKeyReference, Fence: 0, StartSequence: started.SequenceOf(writer));
@@ -244,7 +244,17 @@ public sealed class PublicationSession : IBatchFenceRecorder
     }
 
     /// <summary>The root a file will publish under: over block hashes alone, as the writer computes it.</summary>
-    public static string RootOf(ReadOnlyMemory<byte> file) => RootOf(FileTree.Split(file, MemoLayout.ChunkBytes), 0);
+    public static string RootOf(ReadOnlyMemory<byte> file) => RootOf(FileTree.Split(file, MemoLayout.ChunkBytes));
+
+    /// <summary>
+    /// The largest file a publication takes (spec S1): 16 GiB. Every chunk index stays an
+    /// <see cref="int"/>, and per-chunk tracking is about 19 MB at this size.
+    /// </summary>
+    public const long MaxPublicationBytes = 16L * 1024 * 1024 * 1024;
+
+    /// <summary>The root a source will publish under, in one streaming pass (spec S3, S7).</summary>
+    public static async Task<string> RootOfAsync(IPublicationSource file, IProgress<long>? progress, CancellationToken cancellationToken) =>
+        FileTree.RootHexOf(await FileTree.BlockHashesAsync(file, progress, cancellationToken).ConfigureAwait(false));
 
     /// <summary>
     /// A BatchStrategy needs the session's own fence recorder and a version-3 state; the one-account
@@ -407,10 +417,10 @@ public sealed class PublicationSession : IBatchFenceRecorder
         // Computed now, from the bytes alone, rather than left for the manifest to fill in later:
         // it is what a resume checks a second file against, and a run that dies before its first
         // transaction still needs an identity to be resumed by. The root is over block hashes
-        // only (see RootOf), so a placeholder ledger here costs the check nothing -- it is the
-        // same root the manifest will carry once the real per-block ledgers are known.
+        // only (see RootOf), so it is the same root the manifest will carry once the real
+        // per-block ledgers are known.
         IReadOnlyList<byte[]> chunks = FileTree.Split(file, MemoLayout.ChunkBytes);
-        string root = RootOf(chunks, startedIn);
+        string root = RootOf(chunks);
 
         PublicationState state = new(
             PublicationState.CurrentVersion, network, writer, keyReference, type, name,
@@ -661,7 +671,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         if (landed.Chunks.Count != chunks.Count) return null;
 
         Dictionary<int, long> chunkLedgers = landed.Chunks.ToDictionary(pair => pair.Key, pair => pair.Value.LedgerIndex);
-        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(chunks, chunkLedgers);
+        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(FileTree.BlockHashes(chunks), ManifestPlan.FirstLedgers(chunks.Count, chunkLedgers));
         IReadOnlyList<MemoSubmission> listMemos = ManifestPlan.ListMemos(entries);
         List<string> listHashes = [];
         List<long> listLedgers = [];
@@ -733,7 +743,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 $"{statePath} records no root, so there is nothing to check this file against");
         }
 
-        string root = RootOf(chunks, state.StartedInLedger);
+        string root = RootOf(chunks);
 
         if (!string.Equals(recorded, root, StringComparison.Ordinal))
         {
@@ -853,20 +863,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
     }
 
     /// <summary>The file's root, computed the way the writer will compute it -- over block hashes alone.</summary>
-    private static string RootOf(IReadOnlyList<byte[]> chunks, long placeholderLedger)
-    {
-        int blocks = FileTree.BlockCount(chunks.Count);
-        List<BlockEntry> entries = new(blocks);
-
-        for (int block = 0; block < blocks; block++)
-        {
-            List<byte[]> members = [.. chunks.Skip(block * FileTree.BlockChunks).Take(FileTree.BlockChunks)];
-            entries.Add(new BlockEntry(block, Convert.ToHexString(FileTree.BlockHash(members)), placeholderLedger));
-        }
-
-        // The root is over the block hashes alone; the ledger in an entry does not enter it.
-        return FileTree.RootHex(entries);
-    }
+    private static string RootOf(IReadOnlyList<byte[]> chunks) => FileTree.RootHexOf(FileTree.BlockHashes(chunks));
 
     public async Task<PublicationReport> RunAsync(IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
     {
