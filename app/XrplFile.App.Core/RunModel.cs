@@ -163,7 +163,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
                 ? TimeSpan.FromSeconds(ledgers / pace)
                 : LedgerTiming.ApproximateLedgerInterval * ledgers;
 
-            return $"{StageNameOf("fence")} — about {Duration(wait)}";
+            return $"{StageNameOf("fence")} — about {DurationText.Of(wait)}";
         }
 
         string head = $"{StageNameOf(progress.Stage)} — {progress.Done:N0} of {progress.Total:N0}";
@@ -180,12 +180,12 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
 
         if (rate is { } measured && RateText(measured) is { } shown)
         {
-            return $"{head} · {shown} {unit} · about {Duration(TimeSpan.FromSeconds(remaining / measured) + settles)} left{elapsed}";
+            return $"{head} · {shown} {unit} · about {DurationText.Of(TimeSpan.FromSeconds(remaining / measured) + settles)} left{elapsed}";
         }
 
         if (rate is null && snapshot.UsesBatch)
         {
-            return $"{head} · about {Duration(TimeSpan.FromSeconds(remaining / BatchPriorMemosPerSecond) + settles)} left{elapsed}";
+            return $"{head} · about {DurationText.Of(TimeSpan.FromSeconds(remaining / BatchPriorMemosPerSecond) + settles)} left{elapsed}";
         }
 
         return $"{head} · estimating…{elapsed}";
@@ -249,22 +249,6 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     {
         bool lists = fileBytes > 0 && FileTree.BlockCount(FileTree.ChunkCount(fileBytes, MemoLayout.ChunkBytes)) > 1;
         return stage == "chunks" ? (lists ? 2 : 1) : 1;
-    }
-
-    /// <summary>
-    /// A rough span in words: seconds under a minute and a half, then the nearest minute, then hours
-    /// and minutes. Rounded, not ceilinged: 64 s used to read "2 min".
-    /// </summary>
-    private static string Duration(TimeSpan span)
-    {
-        double seconds = Math.Max(1, Math.Ceiling(span.TotalSeconds));
-        if (seconds < 90) return $"{seconds:0} s";
-
-        long minutes = (long)Math.Round(seconds / 60, MidpointRounding.AwayFromZero);
-        if (minutes < 60) return $"{minutes} min";
-
-        long rest = minutes % 60;
-        return rest == 0 ? $"{minutes / 60} h" : $"{minutes / 60} h {rest} min";
     }
 
     private static string Lowered(string text) =>

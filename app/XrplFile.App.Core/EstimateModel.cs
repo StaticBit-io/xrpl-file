@@ -43,7 +43,26 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
     /// <summary><see cref="TooSmallForBatchNote"/> when the payer was dropped, otherwise null.</summary>
     public string? Note { get; private set; }
 
-    public bool CanPublish =>
+    /// <summary>The checkbox's words (spec S12).</summary>
+    public const string ConfirmationLabel = "I understand the cost and the time";
+
+    private SpendingApproval? _approval;
+
+    /// <summary>The cost-and-time summary of the current estimate, or null before one.</summary>
+    public CostSummary? Summary { get; private set; }
+
+    /// <summary>Whether the summary has to be confirmed before Publish (spec S12).</summary>
+    public bool NeedsConfirmation => Summary?.NeedsConfirmation == true;
+
+    /// <summary>Whether the person ticked the checkbox for the current estimate.</summary>
+    public bool Confirmed { get; private set; }
+
+    public void Confirm(bool understood) => Confirmed = understood;
+
+    public bool CanPublish => IsAffordable && (!NeedsConfirmation || Confirmed);
+
+    /// <summary>Whether the estimate could be published once confirmed: the accounts cover it and the run can be priced and placed.</summary>
+    private bool IsAffordable =>
         BatchEstimate is { } batch
             ? batch.WriterCovers && batch.PayerCovers
             : Estimate is not null
@@ -51,8 +70,11 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
                 && Estimate.FeeDropsPerTransaction <= int.MaxValue
                 && !PublishPolicy.HasNoTicketRoom(Estimate);
 
-    /// <summary>What a run started from this estimate may spend (spec S25); null while the estimate cannot be published.</summary>
-    public SpendingApproval? Approval { get; private set; }
+    /// <summary>
+    /// What a run started from this estimate may spend (spec S25); null while the estimate cannot be
+    /// published, which includes a large one the person has not confirmed.
+    /// </summary>
+    public SpendingApproval? Approval => CanPublish ? _approval : null;
 
     /// <summary>
     /// The estimated request with the held file and the approval, for a run to take (spec S24, S25).
@@ -83,6 +105,10 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
             _generation++;
         }
 
+        Summary = null;
+        Confirmed = false;
+        _approval = null;
+
         if (held is not null) await held.DisposeAsync().ConfigureAwait(false);
     }
 
@@ -112,7 +138,9 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         Message = null;
         BatchEstimate = null;
         MethodLine = null;
-        Approval = null;
+        Summary = null;
+        Confirmed = false;
+        _approval = null;
 
         IPublicationSource source;
 
@@ -184,6 +212,8 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
             return;
         }
 
+        Summary = CostSummary.Of(Estimate, Request!);
+
         if (Estimate.FeeDropsPerTransaction > int.MaxValue)
         {
             // Both strategy option types take an int fee, and the run prices its strategy from this
@@ -237,15 +267,17 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         }
 
         MethodLine = $"Batch, paid by {request.PayerLabel ?? payer}.";
+        Summary = CostSummary.Of(BatchEstimate, request);
         Message = ShortfallOf(BatchEstimate, request);
         SetApprovalIfPublishable();
     }
 
     private void SetApprovalIfPublishable()
     {
-        if (!CanPublish) return;
+        // Made before the confirmation: Approval hands it out only once CanPublish agrees.
+        if (!IsAffordable) return;
 
-        Approval = BatchEstimate is { } batch
+        _approval = BatchEstimate is { } batch
             ? SpendingApproval.For(batch, Request!.Account, Request.PayerAccount!)
             : SpendingApproval.For(Estimate!, Request!.Account);
     }

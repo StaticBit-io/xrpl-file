@@ -83,6 +83,25 @@ public sealed class PublicationRunBatchTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_run_whose_fee_unit_rose_past_the_approved_ceiling_is_refused_before_anything_is_sent()
+    {
+        (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync();
+        BatchPublicationEstimate estimate = await PublicationSession.EstimateAsync(
+            _connections.Ledger, request.Account, request.PayerAccount!, request.Size, new SessionOptions { StateDirectory = Paths.StateDirectory }, Token);
+        PublishRequest approved = request with { Approval = SpendingApproval.For(estimate, request.Account, request.PayerAccount!) };
+
+        // The Estimate screen approved a unit of 15 and a ceiling of 30; the node now asks 45.
+        _connections.Ledger.OpenLedgerFee = new OpenLedgerFee(30, 10);
+
+        Assert.True(run.Start(approved));
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
+        Assert.Contains("Estimate it again.", run.Snapshot.Failure, StringComparison.Ordinal);
+        Assert.Empty(_connections.BatchSink!.Transmissions);
+    }
+
+    [Fact]
     public async Task A_batch_run_writes_its_round_trace_to_the_log_under_its_state_file_name()
     {
         (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync();

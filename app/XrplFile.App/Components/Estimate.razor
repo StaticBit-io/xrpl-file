@@ -53,6 +53,15 @@
                 </tbody>
             </table>
 
+            @if (Model.Summary is { } summary)
+            {
+                <table class="table xf-kv-table mt-4">
+                    <tbody>
+                        <tr><th>Time</th><td>@DurationText.Of(summary.Duration)</td></tr>
+                    </tbody>
+                </table>
+            }
+
             <p class="mt-3 mb-0">@Model.MethodLine</p>
             <p class="mt-3 mb-0 xf-muted">Node: <code class="xf-mono">@Model.NodeUrl</code> (@Request.Network)</p>
         </section>
@@ -93,6 +102,15 @@
                 </tbody>
             </table>
 
+            @if (Model.Summary is { } summary)
+            {
+                <table class="table xf-kv-table mt-4">
+                    <tbody>
+                        <tr><th>Time</th><td>@DurationText.Of(summary.Duration)</td></tr>
+                    </tbody>
+                </table>
+            }
+
             <p class="mt-3 mb-0 xf-muted">Node: <code class="xf-mono">@Model.NodeUrl</code> (@Request.Network)</p>
             @if (Model.Note is { } note)
             {
@@ -101,9 +119,38 @@
         </section>
     }
 
+    @* A message means the estimate cannot be published whatever is ticked, so there is nothing to agree to. *@
+    @if (Model.NeedsConfirmation && Model.Message is null && Model.Summary is { } confirm)
+    {
+        <section class="xf-card">
+            <h2 class="xf-section-title">This publication is large</h2>
+            <table class="table xf-kv-table">
+                <tbody>
+                    <tr><th>Time</th><td>@DurationText.Of(confirm.Duration)</td></tr>
+                    <tr><th>Transactions</th><td>@confirm.Transactions.ToString("N0")</td></tr>
+                    @foreach (AccountCost account in confirm.Accounts)
+                    {
+                        <tr><th>@account.Role @account.Name needs</th><td>@XrpAmount.Format(account.RequiredDrops)</td></tr>
+                        <tr><th>@account.Role fees in the worst case</th><td>@XrpAmount.Format(account.WorstCaseFeeDrops)</td></tr>
+                    }
+                </tbody>
+            </table>
+            <div class="form-check mb-0">
+                <input class="form-check-input" type="checkbox" id="xf-understood" checked="@Model.Confirmed"
+                       @onchange="change => Model.Confirm(change.Value is true)" />
+                <label class="form-check-label" for="xf-understood">@EstimateModel.ConfirmationLabel</label>
+            </div>
+        </section>
+    }
+
     @if (Model.Message is not null)
     {
         <div class="alert alert-warning">@Model.Message</div>
+    }
+
+    @if (_notice is not null)
+    {
+        <div class="alert alert-warning">@_notice</div>
     }
 
     <div class="xf-actionbar">
@@ -117,6 +164,7 @@
 @code {
     private readonly ScreenLifetime _lifetime = new();
     private bool _starting;
+    private string? _notice;
 
     [Parameter, EditorRequired]
     public PublishRequest Request { get; set; } = null!;
@@ -150,7 +198,14 @@
             // would have paid for nothing (PublishPolicy.Effective), and the run must be what was priced.
             // It comes with the file the estimate held and the approval it made (spec S24, S25).
             PublishRequest? request = Model.HandOff();
-            if (request is null) return;
+            if (request is null)
+            {
+                // The held file is gone: the estimate was discarded or taken while this screen was still showing it.
+                _notice = "Nothing is ready to publish. Go back and estimate the file again.";
+                return;
+            }
+
+            _notice = null;
 
             // A run that refused the start did not take the file, so it is let go here.
             if (Run.Start(request)) Picker.RecordStarted(request);
