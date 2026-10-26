@@ -63,6 +63,74 @@ public sealed class ThreadKeepAwakeTests
     }
 
     [Fact]
+    public void A_refused_request_is_still_cleared_on_release()
+    {
+        RecordingExecutionState state = new(succeeds: false);
+        ThreadKeepAwake keepAwake = new(state);
+
+        keepAwake.Acquire();
+        keepAwake.Release();
+
+        Assert.Equal(["require", "clear"], state.Calls.Select(call => call.Call));
+        Assert.Equal(state.Calls[0].Thread, state.Calls[1].Thread);
+    }
+
+    [Fact]
+    public async Task The_state_is_held_while_any_holder_holds_it_and_cleared_at_the_last_release()
+    {
+        RecordingExecutionState state = new();
+        ThreadKeepAwake keepAwake = new(state);
+
+        // A publication and a read: whichever finishes first, the other is still covered.
+        keepAwake.Acquire();
+        keepAwake.Acquire();
+        await BatchTestWait.UntilAsync(() => state.Calls.Count == 1);
+
+        keepAwake.Release();
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["require"], state.Calls.Select(call => call.Call));
+
+        keepAwake.Release();
+
+        Assert.Equal(["require", "clear"], state.Calls.Select(call => call.Call));
+        Assert.Equal(state.Calls[0].Thread, state.Calls[1].Thread);
+        Assert.NotEqual(Environment.CurrentManagedThreadId, state.Calls[0].Thread);
+    }
+
+    [Fact]
+    public async Task A_holder_that_starts_while_another_is_held_shares_the_one_request()
+    {
+        RecordingExecutionState state = new();
+        ThreadKeepAwake keepAwake = new(state);
+
+        keepAwake.Acquire();
+        await BatchTestWait.UntilAsync(() => state.Calls.Count == 1);
+        keepAwake.Acquire();
+        keepAwake.Release();
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["require"], state.Calls.Select(call => call.Call));
+
+        keepAwake.Release();
+
+        Assert.Equal(["require", "clear"], state.Calls.Select(call => call.Call));
+    }
+
+    [Fact]
+    public void A_release_with_nothing_held_does_not_take_a_later_hold_away()
+    {
+        RecordingExecutionState state = new();
+        ThreadKeepAwake keepAwake = new(state);
+
+        keepAwake.Release();
+        keepAwake.Acquire();
+        keepAwake.Release();
+
+        Assert.Equal(["require", "clear"], state.Calls.Select(call => call.Call));
+    }
+
+    [Fact]
     public void It_can_be_held_again_after_a_release()
     {
         RecordingExecutionState state = new();

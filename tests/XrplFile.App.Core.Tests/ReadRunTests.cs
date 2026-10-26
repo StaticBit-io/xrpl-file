@@ -686,6 +686,59 @@ public sealed class ReadRunTests : IDisposable
         Assert.False(File.Exists(temporary));
     }
 
+    [Fact]
+    public async Task A_read_holds_the_computer_awake_and_lets_go_when_it_succeeds()
+    {
+        (ReadRun _, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
+        RecordingExecutionState state = new();
+        ReadRun run = Track(new ReadRun(_connections, _picker, new ThreadKeepAwake(state)));
+
+        Assert.True(run.Start(link, manifest));
+        await run.Completion;
+
+        Assert.Equal(ReadState.Succeeded, run.Snapshot.State);
+        Assert.Equal(["require", "clear"], state.Calls.Select(call => call.Call));
+        Assert.Equal(state.Calls[0].Thread, state.Calls[1].Thread);
+    }
+
+    [Fact]
+    public async Task A_read_that_fails_lets_the_computer_sleep_again()
+    {
+        (ReadRun _, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
+        _connections.Ledger.EarliestLedger = manifest.Manifest.FirstLedger + 1;
+        RecordingExecutionState state = new();
+        ReadRun run = Track(new ReadRun(_connections, _picker, new ThreadKeepAwake(state)));
+
+        Assert.True(run.Start(link, manifest));
+        await run.Completion;
+
+        Assert.Equal(ReadState.Failed, run.Snapshot.State);
+        Assert.Equal(["require", "clear"], state.Calls.Select(call => call.Call));
+    }
+
+    [Fact]
+    public async Task A_read_holds_the_computer_awake_while_it_runs_and_a_cancelled_one_lets_go()
+    {
+        (ReadRun _, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
+        GatedAccountTransactionsSource gate = new(_connections.Ledger);
+        RecordingExecutionState state = new();
+        ReadRun run = Track(new ReadRun(new GatedReadConnectionFactory(_connections, gate), _picker, new ThreadKeepAwake(state)));
+
+        Assert.True(run.Start(link, manifest));
+        await gate.Reached;
+
+        // Parked mid-download: held, not yet cleared.
+        await BatchTestWait.UntilAsync(() => state.Calls.Count == 1);
+        Assert.Equal(["require"], state.Calls.Select(call => call.Call));
+
+        run.Cancel();
+        gate.Release();
+        await run.Completion;
+
+        Assert.Equal(ReadState.Cancelled, run.Snapshot.State);
+        Assert.Equal(["require", "clear"], state.Calls.Select(call => call.Call));
+    }
+
     /// <summary>
     /// Holds the <paramref name="gateAt"/>-th <see cref="AccountTransactionsAsync"/> call open until
     /// <see cref="Release"/> is called, mirroring <c>GatedSubmitSink</c>: deliberately not looking at

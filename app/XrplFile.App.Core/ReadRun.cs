@@ -14,7 +14,7 @@ namespace XrplFile.App.Core;
 /// pinning <see cref="PublicationRun"/> has: <see cref="SaveAsync"/> writes to the snapshot after
 /// the terminal state is already published, which is exactly the window that lesson is about.
 /// </summary>
-public sealed class ReadRun(IConnectionFactory connections, IFilePickerService picker) : IDisposable
+public sealed class ReadRun(IConnectionFactory connections, IFilePickerService picker, IKeepAwake? keepAwake = null) : IDisposable
 {
     private readonly Lock _gate = new();
 
@@ -311,6 +311,10 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
 
         try
         {
+            // A read of any size is allowed (spec S15) and is not resumable, so a sleep half-way through
+            // throws the whole download away; held for the same reason a publication holds it (spec S13).
+            keepAwake?.Acquire();
+
             ILedgerConnection connection =
                 await connections.ConnectAsync(link.Network, cancellationToken).ConfigureAwait(false);
 
@@ -419,6 +423,11 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
         {
             finalState = ReadState.Failed;
             failure = ReadErrorMessages.ReadFailedGeneric;
+        }
+        finally
+        {
+            // Before the terminal state is published, as PublicationRun does: a screen that sees the read end finds the computer free to sleep.
+            keepAwake?.Release();
         }
 
         lock (_gate)

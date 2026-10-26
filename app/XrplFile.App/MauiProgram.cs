@@ -250,7 +250,7 @@ public static class MauiProgram
         });
         services.AddSingleton<IPublicationHistory>(provider => provider.GetRequiredService<PublicationHistory>());
 
-        // The display may still turn off; only system sleep is held off, and only while a run works (spec S13).
+        // The display may still turn off; only system sleep is held off, and only while a run or a read works (spec S13, S15).
         services.AddSingleton<IKeepAwake>(new ThreadKeepAwake(new WindowsExecutionState(), line => StartupLog.Write(line)));
 
         // A singleton because a publication outlives the screen that started it (design F5). It is
@@ -287,6 +287,9 @@ public static class MauiProgram
         // state survives switching tabs, and for ReadRun that is the whole of decision H6 -- a read
         // started on this tab must keep running while the person looks at Accounts or Publish.
         services.AddSingleton<ReadModel>();
-        services.AddSingleton<ReadRun>();
+        services.AddSingleton(provider => new ReadRun(
+            provider.GetRequiredService<IConnectionFactory>(),
+            provider.GetRequiredService<IFilePickerService>(),
+            provider.GetRequiredService<IKeepAwake>()));
     }
 }
