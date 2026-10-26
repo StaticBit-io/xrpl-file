@@ -588,7 +588,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         session.RecordSourcePath(options.SourcePath);
         long to = await source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<LedgerTransaction> history = await session.HistoryAsync(to, cancellationToken).ConfigureAwait(false);
-        session._landed = await session.ReconcileAsync(history, cancellationToken).ConfigureAwait(false);
+        session._landed = await session.ReconcileAsync(history, conflictsFail: false, cancellationToken).ConfigureAwait(false);
 
         // Nothing is sent, so nothing has to be affordable (spec B27).
         if (session.FindManifest(session._landed, history) is { } done)
@@ -673,7 +673,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         // One complete read serves both: a manifest search over a second read could miss what the
         // reconciliation saw, and send a second manifest (spec B27).
         IReadOnlyList<LedgerTransaction> history = await session.CompleteHistoryAsync(cancellationToken).ConfigureAwait(false);
-        session._landed = await session.ReconcileAsync(history, cancellationToken).ConfigureAwait(false);
+        session._landed = await session.ReconcileAsync(history, conflictsFail: true, cancellationToken).ConfigureAwait(false);
 
         if (session.FindManifest(session._landed, history) is { } done)
         {
@@ -815,6 +815,12 @@ public sealed class PublicationSession : IBatchFenceRecorder
     private static async Task<IReadOnlyList<byte[]>> RequireResumableAsync(
         PublicationState state, string statePath, IPublicationSource file, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
     {
+        if (string.Equals(state.Failure, PublicationState.WriterWindowConflictFailure, StringComparison.Ordinal))
+        {
+            throw new XrplFileException(XrplFileError.WriterWindowConflict,
+                $"{statePath} was stopped because the writer carries other data for this file's chunks; it is not resumed");
+        }
+
         if (string.Equals(state.Phase, "done", StringComparison.Ordinal))
         {
             throw new XrplFileException(XrplFileError.ResumeMismatch,
@@ -866,6 +872,18 @@ public sealed class PublicationSession : IBatchFenceRecorder
         return blocks;
     }
 
+    /// <summary>Writes a failure that must outlive this session (spec S17) before it is thrown.</summary>
+    private void RecordFailure(string failure)
+    {
+        lock (_stateLock)
+        {
+            if (string.Equals(_state.Failure, failure, StringComparison.Ordinal)) return;
+
+            _state = _state with { Failure = failure };
+            _state.Save(StatePath);
+        }
+    }
+
     /// <summary>A picked file at a new place is where the next resume reads from (spec B17).</summary>
     private void RecordSourcePath(string? sourcePath)
     {
@@ -893,8 +911,14 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// would have sent. The block lists cannot be checked that way here, because their payloads
     /// carry per-block ledgers that are not known until the chunks are reconciled; they are
     /// collected raw and checked byte for byte by the writer, which is where they are built.
+    ///
+    /// With <paramref name="conflictsFail"/> (a Batch resume, spec S17) a validated, successful
+    /// writer record carrying one of this file's chunk indices with other bytes ends the
+    /// reconciliation with <see cref="XrplFileError.WriterWindowConflict"/>, recorded on the state.
+    /// A one-account run ignores such a record as a straggler (spec I12).
     /// </summary>
-    private async Task<LandedMemos> ReconcileAsync(IReadOnlyList<LedgerTransaction> history, CancellationToken cancellationToken)
+    private async Task<LandedMemos> ReconcileAsync(
+        IReadOnlyList<LedgerTransaction> history, bool conflictsFail, CancellationToken cancellationToken)
     {
         long chunkCount = ChunkReads.ChunkCount(_file.Length);
         ChunkLanding landing = new(chunkCount);
@@ -904,17 +928,32 @@ public sealed class PublicationSession : IBatchFenceRecorder
         foreach (LedgerTransaction tx in history)
         {
             if (!tx.Succeeded || !tx.Validated) continue;
+            if (!string.Equals(tx.Account, _state.Writer, StringComparison.Ordinal)) continue;
             if (tx.MemoDataHex is not { } data) continue;
 
             if (MemoLayout.ChunkIndexOf(tx.MemoTypeHex) is { } chunkIndex)
             {
-                if (chunkIndex < 0 || chunkIndex >= chunkCount || landing.IsLanded(chunkIndex)) continue;
+                if (chunkIndex < 0 || chunkIndex >= chunkCount) continue;
+
+                // A one-account run stops at the first copy it adopted; a Batch run keeps reading
+                // the later copies of an adopted chunk, because a different one is a conflict.
+                if (landing.IsLanded(chunkIndex) && !conflictsFail) continue;
 
                 int length = await _file.ReadChunkAsync(chunkIndex, buffer, cancellationToken).ConfigureAwait(false);
 
-                // First in canonical order, exactly as a reader will resolve it; a copy with other
-                // bytes is another file's straggler and is not adopted (spec I12).
-                if (ChunkReads.MatchesHex(data, buffer.AsSpan(0, length))) landing.Land(chunkIndex, tx.LedgerIndex);
+                if (ChunkReads.MatchesHex(data, buffer.AsSpan(0, length)))
+                {
+                    // First in canonical order, exactly as a reader will resolve it.
+                    if (!landing.IsLanded(chunkIndex)) landing.Land(chunkIndex, tx.LedgerIndex);
+                }
+                else if (conflictsFail)
+                {
+                    RecordFailure(PublicationState.WriterWindowConflictFailure);
+                    throw new XrplFileException(XrplFileError.WriterWindowConflict,
+                        $"the writer's {tx.Hash} in ledger {tx.LedgerIndex} carries chunk {chunkIndex} with other data than this file's");
+                }
+
+                // A one-account run ignores a copy with other bytes as a straggler (spec I12).
                 continue;
             }
 

@@ -229,4 +229,12 @@ public sealed class PublishErrorMessagesTests
             PublishErrorMessages.For(XrplFileError.NodeLacksHistory),
             PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
     }
+
+    [Fact]
+    public void A_conflict_in_the_window_asks_for_a_fresh_writer()
+    {
+        Assert.Equal(
+            "The writer account carries other data for this file's chunks — was it used for another publication while this one was interrupted? Publish this file again from a fresh writer key.",
+            PublishErrorMessages.For(XrplFileError.WriterWindowConflict));
+    }
 }

@@ -50,6 +50,13 @@ public enum XrplFileError
     /// minute during a run (spec B15).
     /// </summary>
     FeeTooHigh,
+
+    /// <summary>
+    /// The writer carries a validated, successful chunk memo of this publication's index with other
+    /// data inside the publication's window (spec S17): a reader takes the first eligible copy, so
+    /// the block can break whatever the run adopted. Recorded on the state; a resume reports it again.
+    /// </summary>
+    WriterWindowConflict,
 }
 
 /// <summary>Which of a Batch run's two accounts an error is about.</summary>

@@ -86,6 +86,17 @@ public sealed class ReadErrorMessagesTests
     }
 
     [Fact]
+    public void The_streaming_publication_errors_share_the_publishing_only_sentence()
+    {
+        string shared = ReadErrorMessages.For(XrplFileError.SubmitRefused);
+
+        foreach (XrplFileError error in new[] { XrplFileError.WriterWindowConflict })
+        {
+            Assert.Equal(shared, ReadErrorMessages.For(error));
+        }
+    }
+
+    [Fact]
     public void A_reading_failure_does_not_describe_a_publication()
     {
         // The same enum value means something different to a reader. BlockMismatch to a publisher

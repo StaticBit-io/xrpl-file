@@ -235,7 +235,8 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
 
         try
         {
-            return !string.Equals(PublicationState.Load(path).Phase, "done", StringComparison.Ordinal);
+            PublicationState state = PublicationState.Load(path);
+            return !string.Equals(state.Phase, "done", StringComparison.Ordinal) && state.Failure is null;
         }
         catch (Exception e) when (e is FormatException or System.Text.Json.JsonException or IOException or UnauthorizedAccessException)
         {

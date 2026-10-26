@@ -230,6 +230,18 @@ public sealed class RunModelTests : VaultHarness
         AssertViewMatchesProperties(model);
     }
 
+    [Fact]
+    public void A_run_stopped_by_a_window_conflict_offers_no_Resume()
+    {
+        string path = Path.Combine(_directory, "conflict-run.json");
+        new PublicationState(3, "testnet", "rWriter", "key", "text/plain", null, 2500, 1000, "AB", 1, "chunks",
+            Strategy: "batch", Payer: XrplWallet.Generate().ClassicAddress, PayerKeyReference: "key-p", Fence: 0,
+            Failure: PublicationState.WriterWindowConflictFailure).Save(path);
+        RunSnapshot snapshot = new(PublicationRunState.Failed, null, null, "failed", "f", "testnet", null) { StatePath = path };
+
+        Assert.False(RunModel.IsResumable(snapshot));
+    }
+
     /// <summary>Every field <see cref="RunModel.Capture"/> derives, checked against its own
     /// per-property twin. Both are read back to back with nothing awaited in between, over a run
     /// that is either not yet started, parked at the gate, or already finished -- none of which can
