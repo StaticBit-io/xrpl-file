@@ -112,6 +112,13 @@ public sealed class BatchStrategy : ISubmissionStrategy
 
             Interlocked.Add(ref _payerFeeDrops, round.PayerFeeDrops);
             if (!round.PayerFeeKnown) _payerFeeUnknown = true;
+
+            // This loop usually runs as the continuation of the round that just ended, on its stack,
+            // and the next round's sending yields only once the window is full: its fence writes
+            // are synchronous. Until then the finished round's frames below kept its registry and
+            // every signed blob in it reachable, two rounds of blobs at once (spec S27). Yielding
+            // unwinds that stack before the next round starts.
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         }
 
         return landed.Build();

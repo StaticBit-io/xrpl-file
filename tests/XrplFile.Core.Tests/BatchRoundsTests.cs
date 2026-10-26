@@ -48,6 +48,34 @@ public class BatchRoundsTests
     }
 
     [Fact]
+    public async Task A_round_holds_no_registry_of_the_round_before_it_while_it_signs()
+    {
+        BatchTestNode node = new();
+        BatchStrategy? strategy = null;
+        bool? previousAlive = null;
+
+        // Checked from inside the second round's first signature, on the stack that round runs on: a
+        // round that ran on the continuation stack of the one before it kept that round's registry,
+        // and with it every signed blob of the round, reachable from the stack frames below it.
+        CheckingSigner payer = new(node.Payer, () =>
+        {
+            if (previousAlive is not null || strategy!.FinishedRegistries.Count != 2) return;
+
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+            previousAlive = strategy.FinishedRegistries[0].IsAlive;
+        });
+
+        await using (strategy = node.Strategy(Capped(64), payer: payer))
+        {
+            await strategy.SubmitAllAsync(BatchTestNode.Memos(128), null, Token);
+        }
+
+        Assert.False(previousAlive);
+    }
+
+    [Fact]
     public async Task One_memo_past_a_full_round_goes_as_a_solo_after_it()
     {
         BatchTestNode node = new();
@@ -152,5 +180,19 @@ public class BatchRoundsTests
         Assert.True(landed.TryHashOf(0, out string? hash));
         Assert.True(landed.TryLedgerOf(0, out long ledger));
         Assert.Equal(ledger, (await node.Ledger.TransactionAsync(hash, Token))!.LedgerIndex);
+    }
+
+    /// <summary>Signs with the inner signer after running a check, on the caller's stack.</summary>
+    private sealed class CheckingSigner(ITransactionSigner inner, Action check) : ITransactionSigner
+    {
+        public string Account => inner.Account;
+
+        public string PublicKey => inner.PublicKey;
+
+        public Task<SignedTransaction> SignAsync(IDictionary<string, object> transaction, CancellationToken cancellationToken)
+        {
+            check();
+            return inner.SignAsync(transaction, cancellationToken);
+        }
     }
 }
