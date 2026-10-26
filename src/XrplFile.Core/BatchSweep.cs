@@ -66,10 +66,6 @@ internal static class BatchSweep
     /// a record with a non-zero sequence covers it, and a TicketCreate also covers the sequences its
     /// tickets took. A ticketed record covers nothing. Records of any result count (spec B30).
     /// </summary>
-    internal static bool Covers(IEnumerable<LedgerTransaction> records, uint from, uint to) =>
-        CoversCore(records.Select(tx => (tx.Sequence, tx.TransactionType, tx.TicketCount)), from, to);
-
-    /// <inheritdoc cref="Covers(IEnumerable{LedgerTransaction}, uint, uint)"/>
     internal static bool Covers(IEnumerable<SweepRecord> records, uint from, uint to) =>
         CoversCore(records.Select(tx => (tx.Sequence, tx.TransactionType, tx.TicketCount)), from, to);
 
@@ -169,19 +165,6 @@ internal static class BatchSweep
         await foreach (LedgerTransaction tx in source.AccountTransactionsAsync(account, from, to, forward: true, cancellationToken).ConfigureAwait(false))
         {
             records.Add(SweepRecord.From(tx, markers));
-        }
-
-        return records;
-    }
-
-    internal static async Task<IReadOnlyList<LedgerTransaction>> HistoryAsync(
-        ILedgerSource source, string account, long from, long to, CancellationToken cancellationToken)
-    {
-        List<LedgerTransaction> records = [];
-
-        await foreach (LedgerTransaction tx in source.AccountTransactionsAsync(account, from, to, forward: true, cancellationToken).ConfigureAwait(false))
-        {
-            records.Add(tx);
         }
 
         return records;

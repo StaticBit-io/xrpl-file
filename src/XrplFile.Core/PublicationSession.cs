@@ -104,6 +104,9 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// <summary>The file's block hashes, streamed once at start or resume (spec S3, S7) and handed to the writer.</summary>
     private readonly IReadOnlyList<byte[]> _blockHashes;
 
+    /// <summary>This file's block hashes as list entries spell them, for the list filter of spec S20.</summary>
+    private readonly IReadOnlyList<string> _blockHashesHex;
+
     /// <summary>Set when a <see cref="ReadOnlyMemory{T}"/> overload wrapped the bytes: the session then disposes the source (spec 4.1).</summary>
     private bool _ownsFile;
 
@@ -159,6 +162,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         _source = source;
         _file = file;
         _blockHashes = blockHashes;
+        _blockHashesHex = [.. blockHashes.Select(Convert.ToHexString)];
         _state = state;
         _options = options;
         _feeDropsPerTransaction = feeDropsPerTransaction;
@@ -587,11 +591,10 @@ public sealed class PublicationSession : IBatchFenceRecorder
             strategy, source, file, blocks, state, statePath, options, 0, 0, mintsAtStart: null);
         session.RecordSourcePath(options.SourcePath);
         long to = await source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
-        IReadOnlyList<LedgerTransaction> history = await session.HistoryAsync(to, cancellationToken).ConfigureAwait(false);
-        session._landed = await session.ReconcileAsync(history, conflictsFail: false, cancellationToken).ConfigureAwait(false);
+        session._landed = (await session.StreamReconcileAsync(to, conflictsFail: false, preparation, cancellationToken).ConfigureAwait(false)).Landed;
 
         // Nothing is sent, so nothing has to be affordable (spec B27).
-        if (session.FindManifest(session._landed, history) is { } done)
+        if (await session.FindManifestAsync(session._landed, to, cancellationToken).ConfigureAwait(false) is { } done)
         {
             session._alreadyPublished = done;
             return session;
@@ -670,12 +673,12 @@ public sealed class PublicationSession : IBatchFenceRecorder
         PublicationSession session = new(null, source, file, blocks, state, statePath, options, 0, 0, mintsAtStart: 0);
         session.RecordSourcePath(options.SourcePath);
 
-        // One complete read serves both: a manifest search over a second read could miss what the
-        // reconciliation saw, and send a second manifest (spec B27).
-        IReadOnlyList<LedgerTransaction> history = await session.CompleteHistoryAsync(cancellationToken).ConfigureAwait(false);
-        session._landed = await session.ReconcileAsync(history, conflictsFail: true, cancellationToken).ConfigureAwait(false);
+        // The manifest search streams the same pinned range the reconciliation covered, so it
+        // cannot miss what the reconciliation saw and send a second manifest (spec B27).
+        (LandedMemos landed, long to) = await session.CompleteReconcileAsync(preparation, cancellationToken).ConfigureAwait(false);
+        session._landed = landed;
 
-        if (session.FindManifest(session._landed, history) is { } done)
+        if (await session.FindManifestAsync(landed, to, cancellationToken).ConfigureAwait(false) is { } done)
         {
             session._alreadyPublished = done;
             return session;
@@ -769,48 +772,6 @@ public sealed class PublicationSession : IBatchFenceRecorder
         }
     }
 
-    /// <summary>
-    /// The manifest this run would send, if the ledger already holds it (spec B27): when every chunk
-    /// and list has landed, the manifest is built from the reconciled hashes and ledgers, and a
-    /// validated tesSUCCESS transaction of the writer in <paramref name="history"/> carrying exactly
-    /// those bytes is the one. A manifest with the same root and other bytes is another publication's
-    /// and is not adopted.
-    /// </summary>
-    private PublishResult? FindManifest(LandedMemos landed, IReadOnlyList<LedgerTransaction> history)
-    {
-        if (!landed.Chunks.IsComplete) return null;
-
-        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(_blockHashes, landed.Chunks.BlockFirstLedgers());
-        IReadOnlyList<MemoSubmission> listMemos = ManifestPlan.ListMemos(entries);
-        LedgerRange window = landed.Chunks.Window();
-        long lastLedger = window.Last;
-
-        for (int j = 0; j < listMemos.Count; j++)
-        {
-            if (!landed.Lists.TryGetValue(j, out LandedMemo? list)
-                || !string.Equals(list.MemoDataHex, listMemos[j].MemoDataHex, StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
-
-            lastLedger = Math.Max(lastLedger, list.LedgerIndex);
-        }
-
-        PublicationState state = State;
-        Manifest manifest = ManifestPlan.Build(state.Type, state.Name, state.Size, entries, window.First, lastLedger, listMemos.Count);
-        string data = ManifestPlan.Memo(manifest).MemoDataHex;
-
-        foreach (LedgerTransaction tx in history)
-        {
-            if (!tx.Validated || !tx.Succeeded || !string.Equals(tx.Account, state.Writer, StringComparison.Ordinal)) continue;
-            if (!MemoLayout.IsManifest(tx.MemoTypeHex) || !string.Equals(tx.MemoDataHex, data, StringComparison.OrdinalIgnoreCase)) continue;
-
-            return new PublishResult(new XrplFileLink(state.Network, tx.Hash), manifest, state.Writer, landed.Chunks.ChunkCount, listMemos.Count, tx.Hash);
-        }
-
-        return null;
-    }
-
     /// <summary>The checks every resume makes before it reads the ledger; returns the file's block hashes (spec S7).</summary>
     private static async Task<IReadOnlyList<byte[]>> RequireResumableAsync(
         PublicationState state, string statePath, IPublicationSource file, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
@@ -898,9 +859,17 @@ public sealed class PublicationSession : IBatchFenceRecorder
         }
     }
 
+    /// <summary>What one streaming pass found: the landing and the kept lists, and the sequences the writer's records took.</summary>
+    private sealed record Reconciled(LandedMemos Landed, SequenceRanges Sequences);
+
+    /// <summary>How often the "history" stage is reported while a pass streams.</summary>
+    private const int HistoryReportEvery = 1_000;
+
     /// <summary>
-    /// Which of this publication's memos are already in the ledger, read from the writer's
-    /// <paramref name="history"/> since the run started.
+    /// Which of this publication's memos are already in the ledger, streamed from the writer's
+    /// history page by page, from <see cref="PublicationState.StartedInLedger"/> to
+    /// <paramref name="to"/> (spec S20). Nothing outlives a record but the compact landing, the lists
+    /// that carry this file's block hashes, and the sequence ranges.
     ///
     /// The sweep starts at the ledger the run started in, which is why that number is in the
     /// state file: without it this would read the account's whole history.
@@ -908,32 +877,46 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// Starting there excludes the account's earlier publications. It does not exclude a later
     /// one — a marker names no publication, so <c>xf/c/0</c> written by the next file up is
     /// <c>xf/c/0</c> here too — so a chunk is adopted only when its bytes are the bytes this run
-    /// would have sent. The block lists cannot be checked that way here, because their payloads
-    /// carry per-block ledgers that are not known until the chunks are reconciled; they are
-    /// collected raw and checked byte for byte by the writer, which is where they are built.
+    /// would have sent, and a list only when every entry it carries names one of this file's blocks
+    /// with that block's hash. The list's other bytes (the per-block ledgers) are checked by
+    /// <see cref="FindManifestAsync"/> and by the writer, which build them.
     ///
     /// With <paramref name="conflictsFail"/> (a Batch resume, spec S17) a validated, successful
     /// writer record carrying one of this file's chunk indices with other bytes ends the
     /// reconciliation with <see cref="XrplFileError.WriterWindowConflict"/>, recorded on the state.
     /// A one-account run ignores such a record as a straggler (spec I12).
     /// </summary>
-    private async Task<LandedMemos> ReconcileAsync(
-        IReadOnlyList<LedgerTransaction> history, bool conflictsFail, CancellationToken cancellationToken)
+    private async Task<Reconciled> StreamReconcileAsync(
+        long to, bool conflictsFail, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
     {
+        string writer = _state.Writer;
         long chunkCount = ChunkReads.ChunkCount(_file.Length);
-        ChunkLanding landing = new(chunkCount);
-        Dictionary<int, LandedMemo> landedLists = [];
-        byte[] buffer = new byte[MemoLayout.ChunkBytes];
 
-        foreach (LedgerTransaction tx in history)
+        // The packer's count at nine-digit ledgers bounds the real one (Spec question 7).
+        int listCount = _blockHashes.Count > 1 ? PublicationEstimator.BlockListMemoCount(_blockHashes.Count) : 0;
+        ChunkLanding landing = new(chunkCount);
+        Dictionary<int, LandedMemo> lists = [];
+        SequenceRanges sequences = new();
+        byte[] buffer = new byte[MemoLayout.ChunkBytes];
+        long read = 0;
+
+        preparation?.Report(new PublishProgress("history", 0, 0));
+
+        await foreach (LedgerTransaction tx in _source.AccountTransactionsAsync(writer, _state.StartedInLedger, to, forward: true, cancellationToken).ConfigureAwait(false))
         {
-            if (!tx.Succeeded || !tx.Validated) continue;
-            if (!string.Equals(tx.Account, _state.Writer, StringComparison.Ordinal)) continue;
-            if (tx.MemoDataHex is not { } data) continue;
+            if (++read % HistoryReportEvery == 0) preparation?.Report(new PublishProgress("history", read, 0));
+
+            // account_tx also returns what others sent to the writer, which is not "of" it.
+            if (!string.Equals(tx.Account, writer, StringComparison.Ordinal)) continue;
+
+            // Records of any result count towards the sequences (spec B30).
+            sequences.Add(tx);
+
+            if (!tx.Succeeded || !tx.Validated || tx.MemoDataHex is not { } data) continue;
 
             if (MemoLayout.ChunkIndexOf(tx.MemoTypeHex) is { } chunkIndex)
             {
-                if (chunkIndex < 0 || chunkIndex >= chunkCount) continue;
+                if (chunkIndex >= chunkCount) continue;
 
                 // A one-account run stops at the first copy it adopted; a Batch run keeps reading
                 // the later copies of an adopted chunk, because a different one is a conflict.
@@ -944,7 +927,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 if (ChunkReads.MatchesHex(data, buffer.AsSpan(0, length)))
                 {
                     // First in canonical order, exactly as a reader will resolve it.
-                    if (!landing.IsLanded(chunkIndex)) landing.Land(chunkIndex, tx.LedgerIndex);
+                    landing.Land(chunkIndex, tx.LedgerIndex);
                 }
                 else if (conflictsFail)
                 {
@@ -957,34 +940,47 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 continue;
             }
 
-            if (MemoLayout.ListIndexOf(tx.MemoTypeHex) is { } listIndex)
+            // Last copy per index wins, as the reader resolves a list; only one that names this
+            // file's blocks is this file's, so another publication's lists are not kept.
+            if (MemoLayout.ListIndexOf(tx.MemoTypeHex) is { } listIndex && listIndex < listCount && CarriesThisFilesBlocks(data))
             {
-                if (listIndex < 0 || listIndex > int.MaxValue) continue;
-
-                // Last in canonical order wins for a list, again exactly as the reader resolves
-                // one -- it walks the range backwards and keeps the first copy it meets.
-                landedLists[(int)listIndex] = new LandedMemo(tx.Hash, tx.LedgerIndex, data);
+                lists[(int)listIndex] = new LandedMemo(tx.Hash, tx.LedgerIndex, data);
             }
         }
 
-        return new LandedMemos(landing, landedLists);
+        return new Reconciled(new LandedMemos(landing, lists), sequences);
     }
 
-    /// <summary>The writer's history from <see cref="PublicationState.StartedInLedger"/> to <paramref name="to"/>, in canonical order.</summary>
-    private Task<IReadOnlyList<LedgerTransaction>> HistoryAsync(long to, CancellationToken cancellationToken) =>
-        BatchSweep.HistoryAsync(_source, _state.Writer, _state.StartedInLedger, to, cancellationToken);
+    private bool CarriesThisFilesBlocks(string payloadHex)
+    {
+        string payload;
+
+        try
+        {
+            payload = MemoLayout.FromHexUtf8(payloadHex);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+
+        return FileTree.TryDecodeFragment(payload, out IReadOnlyList<BlockEntry>? entries)
+            && entries.All(entry => entry.Index >= 0 && entry.Index < _blockHashesHex.Count
+                && string.Equals(entry.HashHex, _blockHashesHex[entry.Index], StringComparison.Ordinal));
+    }
 
     /// <summary>
-    /// The writer's history up to a snapshot taken after the fence, once it is complete (spec 5.2
-    /// step 3): its records cover the writer's sequence from <see cref="PublicationState.StartSequence"/>
-    /// up to the snapshot's, counted as a round's final sweep counts them (spec B30). account_tx lags
-    /// the validated ledger, so a memo that landed near its deadline can still be missing once the
-    /// fence has passed; trusting that answer would pay for the memo again, or send a second manifest.
-    /// The read is taken again every <see cref="SessionOptions.FencePoll"/> for up to
-    /// <see cref="SessionOptions.HistoryLagLimit"/>, then the resume fails with
-    /// <see cref="XrplFileError.NodeLacksHistory"/> having written nothing a later resume depends on.
+    /// A Batch resume's reconciliation (spec 5.2 step 3, B30, S20): a snapshot after the fence pins
+    /// the range, and a pass counts only when the writer's records cover its sequences from
+    /// <see cref="PublicationState.StartSequence"/> up to the snapshot's. A pass that breaks part-way,
+    /// or that does not cover them, is discarded and taken again from the start every
+    /// <see cref="SessionOptions.FencePoll"/>, for up to <see cref="SessionOptions.HistoryLagLimit"/>,
+    /// then the resume fails with <see cref="XrplFileError.NodeLacksHistory"/> having written nothing
+    /// a later resume depends on. account_tx lags the validated ledger, so a memo that landed near
+    /// its deadline can still be missing once the fence has passed; trusting that answer would pay
+    /// for the memo again, or send a second manifest.
     /// </summary>
-    private async Task<IReadOnlyList<LedgerTransaction>> CompleteHistoryAsync(CancellationToken cancellationToken)
+    private async Task<(LandedMemos Landed, long To)> CompleteReconcileAsync(IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
     {
         string writer = _state.Writer;
         BatchStrategyOptions reads = new() { ChainCheck = _options.FencePoll, NodeOutageLimit = _options.NodeOutageLimit };
@@ -995,16 +991,14 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
         while (true)
         {
-            IReadOnlyList<LedgerTransaction> history = await BatchReads.RetryAsync(
-                token => HistoryAsync(snapshot.LedgerIndex, token), reads, cancellationToken).ConfigureAwait(false);
-            List<LedgerTransaction> own = [.. history.Where(tx => string.Equals(tx.Account, writer, StringComparison.Ordinal))];
+            Reconciled pass = await BatchReads.RetryAsync(
+                token => StreamReconcileAsync(snapshot.LedgerIndex, conflictsFail: true, preparation, token), reads, cancellationToken).ConfigureAwait(false);
 
             // A state written before StartSequence was recorded has only its own records to start
             // from. That still catches a history that lags at its end, which is where it lags.
-            uint from = _state.StartSequence
-                ?? (own.Where(tx => tx.Sequence != 0).Select(tx => (uint?)tx.Sequence).Min() ?? through);
+            uint from = _state.StartSequence ?? pass.Sequences.Lowest ?? through;
 
-            if (BatchSweep.Covers(own, from, through)) return history;
+            if (pass.Sequences.Covers(from, through)) return (pass.Landed, snapshot.LedgerIndex);
 
             if (DateTimeOffset.UtcNow >= giveUp)
             {
@@ -1015,6 +1009,47 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
             await Task.Delay(_options.FencePoll, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// The manifest this run would send, if the ledger already holds it (spec B27, S20): built from the
+    /// reconciled landing and lists, then matched in a second streaming pass over the same range
+    /// against those exact bytes. The first validated, successful match of the writer is the one; a
+    /// manifest with the same root and other bytes is another publication's and is not adopted.
+    /// </summary>
+    private async Task<PublishResult?> FindManifestAsync(LandedMemos landed, long to, CancellationToken cancellationToken)
+    {
+        if (!landed.Chunks.IsComplete) return null;
+
+        IReadOnlyList<BlockEntry> entries = ManifestPlan.Entries(_blockHashes, landed.Chunks.BlockFirstLedgers());
+        IReadOnlyList<MemoSubmission> listMemos = ManifestPlan.ListMemos(entries);
+        LedgerRange window = landed.Chunks.Window();
+        long lastLedger = window.Last;
+
+        for (int j = 0; j < listMemos.Count; j++)
+        {
+            if (!landed.Lists.TryGetValue(j, out LandedMemo? list)
+                || !string.Equals(list.MemoDataHex, listMemos[j].MemoDataHex, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            lastLedger = Math.Max(lastLedger, list.LedgerIndex);
+        }
+
+        PublicationState state = State;
+        Manifest manifest = ManifestPlan.Build(state.Type, state.Name, state.Size, entries, window.First, lastLedger, listMemos.Count);
+        string data = ManifestPlan.Memo(manifest).MemoDataHex;
+
+        await foreach (LedgerTransaction tx in _source.AccountTransactionsAsync(state.Writer, state.StartedInLedger, to, forward: true, cancellationToken).ConfigureAwait(false))
+        {
+            if (!tx.Validated || !tx.Succeeded || !string.Equals(tx.Account, state.Writer, StringComparison.Ordinal)) continue;
+            if (!MemoLayout.IsManifest(tx.MemoTypeHex) || !string.Equals(tx.MemoDataHex, data, StringComparison.OrdinalIgnoreCase)) continue;
+
+            return new PublishResult(new XrplFileLink(state.Network, tx.Hash), manifest, state.Writer, landed.Chunks.ChunkCount, listMemos.Count, tx.Hash);
+        }
+
+        return null;
     }
 
     public async Task<PublicationReport> RunAsync(IProgress<PublishProgress>? progress, CancellationToken cancellationToken)

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 
@@ -183,6 +184,41 @@ public static class FileTree
         }
 
         return entries;
+    }
+
+    /// <summary>
+    /// One block-list memo's entries, or false when it is not a JSON array of well-formed entries
+    /// (spec S20). Unlike <see cref="DecodeEntries"/> it does not ask for the whole list: a resume
+    /// reads lists one memo at a time and keeps only those that name this file's blocks.
+    /// </summary>
+    internal static bool TryDecodeFragment(string payload, [NotNullWhen(true)] out IReadOnlyList<BlockEntry>? entries)
+    {
+        entries = null;
+        Wire[]? wires;
+
+        try
+        {
+            wires = JsonSerializer.Deserialize<Wire[]>(payload);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        if (wires is null || wires.Length == 0) return false;
+
+        List<BlockEntry> decoded = new(wires.Length);
+
+        foreach (Wire? wire in wires)
+        {
+            if (wire?.i is not { } index || wire.l is not { } ledger) return false;
+            if (wire.h is not { } hash || hash.Length != MerkleTree.HashBytes * 2 || !hash.All(Uri.IsHexDigit)) return false;
+
+            decoded.Add(new BlockEntry(index, hash.ToUpperInvariant(), ledger));
+        }
+
+        entries = decoded;
+        return true;
     }
 
     private static string Serialize(List<Wire> wires) => JsonSerializer.Serialize(wires);

@@ -126,4 +126,19 @@ public class FileTreeTests
 
         Assert.Equal(new string('C', 64), FileTree.DecodeEntries([payload])[0].HashHex);
     }
+
+    [Fact]
+    public void One_list_memo_decodes_on_its_own_and_garbage_does_not()
+    {
+        List<BlockEntry> entries =
+            [.. Enumerable.Range(0, 30).Select(i => new BlockEntry(i, Convert.ToHexString(MerkleTree.Leaf([(byte)i])), 106497159 + i))];
+        IReadOnlyList<string> payloads = FileTree.EncodeEntries(entries);
+        Assert.True(payloads.Count > 1);
+
+        Assert.True(FileTree.TryDecodeFragment(payloads[^1], out IReadOnlyList<BlockEntry>? fragment));
+        Assert.Equal(entries.Skip(entries.Count - fragment.Count).Take(fragment.Count), fragment);
+        Assert.False(FileTree.TryDecodeFragment("not json", out _));
+        Assert.False(FileTree.TryDecodeFragment("[{\"i\":0}]", out _));
+        Assert.False(FileTree.TryDecodeFragment("[]", out _));
+    }
 }
