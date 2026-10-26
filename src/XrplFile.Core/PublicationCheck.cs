@@ -10,9 +10,14 @@ namespace XrplFile;
 /// </summary>
 internal static class PublicationCheck
 {
-    private const int ManifestReadAttempts = 3;
+    /// <summary>
+    /// Ten reads a second apart, about nine seconds: more than two ledger closes, because a public node
+    /// can lag a few seconds behind the validation the submit side saw, and every miss would turn a good
+    /// run into a timeout.
+    /// </summary>
+    internal const int ManifestReadAttempts = 10;
 
-    private static readonly TimeSpan ManifestReadPause = TimeSpan.FromSeconds(1);
+    internal static readonly TimeSpan DefaultManifestReadPause = TimeSpan.FromSeconds(1);
 
     /// <summary>Spec S9(a), for every block.</summary>
     public static void RequireReachable(IReadOnlyList<BlockEntry> plan, ChunkLanding landing, Manifest manifest)
@@ -87,14 +92,14 @@ internal static class PublicationCheck
     /// accepts the link, and a manifest a resume recovered deserves the same proof.
     /// </summary>
     public static async Task RequireAcceptedAsync(
-        ILedgerSource source, XrplFileLink link, Manifest planned, string writer, CancellationToken cancellationToken)
+        ILedgerSource source, XrplFileLink link, Manifest planned, string writer, TimeSpan pause, CancellationToken cancellationToken)
     {
         XrplFileReader reader = new(source);
         ManifestRecord record;
 
         try
         {
-            record = await ReadAsync(reader, link, cancellationToken).ConfigureAwait(false);
+            record = await ReadAsync(reader, link, pause, cancellationToken).ConfigureAwait(false);
         }
         catch (XrplFileException e) when (e.Error == XrplFileError.CorruptManifest)
         {
@@ -118,7 +123,7 @@ internal static class PublicationCheck
     /// with <see cref="XrplFileError.NodeLacksHistory"/>; a manifest that just landed is missing in
     /// the same way. Still missing after that, the run stops resumable.
     /// </summary>
-    private static async Task<ManifestRecord> ReadAsync(XrplFileReader reader, XrplFileLink link, CancellationToken cancellationToken)
+    private static async Task<ManifestRecord> ReadAsync(XrplFileReader reader, XrplFileLink link, TimeSpan pause, CancellationToken cancellationToken)
     {
         for (int attempt = 1; ; attempt++)
         {
@@ -129,7 +134,7 @@ internal static class PublicationCheck
             catch (XrplFileException e) when (e.Error is XrplFileError.NodeUnreachable or XrplFileError.ManifestNotFound or XrplFileError.NodeLacksHistory
                 && attempt < ManifestReadAttempts)
             {
-                await Task.Delay(ManifestReadPause, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(pause, cancellationToken).ConfigureAwait(false);
             }
             catch (XrplFileException e) when (e.Error is XrplFileError.ManifestNotFound or XrplFileError.NodeLacksHistory)
             {

@@ -56,6 +56,9 @@ public sealed class SessionOptions
     /// up to the snapshot taken after the fence (spec 5.2 step 3, B30). Read again every <see cref="FencePoll"/>.
     /// </summary>
     public TimeSpan HistoryLagLimit { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>The wait between reads of the landed manifest (spec S22); a seam for tests, which must not sleep seconds.</summary>
+    internal TimeSpan ManifestReadPause { get; init; } = PublicationCheck.DefaultManifestReadPause;
 }
 
 /// <summary>
@@ -860,7 +863,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
     {
         try
         {
-            await PublicationCheck.RequireAcceptedAsync(source, found.Link, found.Manifest, found.Writer, cancellationToken).ConfigureAwait(false);
+            await PublicationCheck.RequireAcceptedAsync(source, found.Link, found.Manifest, found.Writer, _options.ManifestReadPause, cancellationToken).ConfigureAwait(false);
         }
         catch (XrplFileException e) when (e.Error == XrplFileError.ManifestRejected)
         {
@@ -1184,7 +1187,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
             PublicationState started = State;
 
-            XrplFileWriter writer = new(Strategy, _source, new WriterOptions { ReadBack = _options.ReadBack });
+            XrplFileWriter writer = new(Strategy, _source, new WriterOptions { ReadBack = _options.ReadBack, ManifestReadPause = _options.ManifestReadPause });
 
             PublishResult result;
 
