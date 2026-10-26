@@ -122,6 +122,8 @@ public static class PublishErrorMessages
             + "resume it when fees are back down.",
         XrplFileError.WriterWindowConflict =>
             "The writer account carries other data for this file's chunks — was it used for another publication while this one was interrupted? Publish this file again from a fresh writer key.",
+        XrplFileError.ManifestRejected =>
+            "The manifest landed, but reading it back did not give this file's description, so its link must not be shared. Publish the file again from a fresh writer key.",
         _ => throw new ArgumentOutOfRangeException(nameof(error), error, "no sentence for this error"),
     };
 
@@ -137,6 +139,8 @@ public static class PublishErrorMessages
         string sentence = exception is { Error: XrplFileError.AccountInUse, Role: { } role }
             ? AccountInUse(role == AccountRole.Writer ? "writer" : "payer")
             : For(exception.Error);
+
+        if (exception is { Error: XrplFileError.ManifestRejected, Link: { } link }) sentence = $"{sentence} The link that was written: {link}.";
 
         return exception.Block is int block ? $"{sentence} (block {block})" : sentence;
     }

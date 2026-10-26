@@ -237,4 +237,13 @@ public sealed class PublishErrorMessagesTests
             "The writer account carries other data for this file's chunks — was it used for another publication while this one was interrupted? Publish this file again from a fresh writer key.",
             PublishErrorMessages.For(XrplFileError.WriterWindowConflict));
     }
+
+    [Fact]
+    public void A_rejected_manifest_names_its_link()
+    {
+        XrplFileLink link = new("testnet", new string('A', 64));
+        XrplFileException thrown = new(XrplFileError.ManifestRejected, "rejected", link: link);
+
+        Assert.Contains(link.ToString(), PublishErrorMessages.For(thrown), StringComparison.Ordinal);
+    }
 }

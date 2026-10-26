@@ -194,9 +194,20 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
         Manifest manifest = ManifestPlan.Build(type, name, file.Length, entries, window.First, lastLedger, listMemos.Count);
 
+        PublicationCheck.RequireReachable(entries, landing, manifest);
+
         if (_options.ReadBack)
         {
-            await ReadEverythingBackAsync(file, manifest, writer, lastLedger, progress, cancellationToken).ConfigureAwait(false);
+            // Batch publications are sampled (spec S9, S21); ticket and sequence ones, at most 64 MiB
+            // and with no bytes checked as their memos land, are read back in full.
+            if (_strategy is BatchStrategy)
+            {
+                await ReadSampleBackAsync(file, entries, manifest, writer, lastLedger, progress, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await ReadEverythingBackAsync(file, entries, manifest, writer, lastLedger, progress, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         SubmittedMemos manifestLanded = await _strategy.SubmitAllAsync([ManifestPlan.Memo(manifest)], null, cancellationToken).ConfigureAwait(false);
@@ -206,9 +217,11 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
             throw new InvalidOperationException("the strategy kept no hash for the manifest, and the link is that hash");
         }
 
+        XrplFileLink link = new(network, manifestHash);
+        await PublicationCheck.RequireAcceptedAsync(_source, link, manifest, writer, cancellationToken).ConfigureAwait(false);
         progress?.Report(new PublishProgress("manifest", 1, 1));
 
-        return new PublishResult(new XrplFileLink(network, manifestHash), manifest, writer, chunkCount, listMemos.Count, manifestHash);
+        return new PublishResult(link, manifest, writer, chunkCount, listMemos.Count, manifestHash);
     }
 
     /// <summary>
@@ -292,13 +305,14 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
     /// sequence paths keep this full read-back (spec S9).
     /// </summary>
     private async Task ReadEverythingBackAsync(
-        IPublicationSource file, Manifest manifest, string writer, long lastLedger, IProgress<PublishProgress>? progress,
-        CancellationToken cancellationToken)
+        IPublicationSource file, IReadOnlyList<BlockEntry> plan, Manifest manifest, string writer, long lastLedger,
+        IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
     {
         XrplFileReader reader = new(_source, new ReaderOptions { MaxBytes = long.MaxValue });
         ManifestRecord unpublished = new(manifest, writer, lastLedger + 1, string.Empty);
         IReadOnlyList<BlockEntry> published = await ReadBackAsync(
             () => reader.BlockListAsync(unpublished, cancellationToken), cancellationToken).ConfigureAwait(false);
+        PublicationCheck.RequireListed(plan, published);
 
         for (int block = 0; block < published.Count; block++)
         {
@@ -308,6 +322,29 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
             await RequireSameAsSourceAsync(file, entry.Index, content, cancellationToken).ConfigureAwait(false);
             progress?.Report(new PublishProgress("read-back", block + 1, published.Count));
+        }
+    }
+
+    /// <summary>The full block list rooted to the manifest root and compared with the plan, then the blocks of spec S21, each compared with the source.</summary>
+    private async Task ReadSampleBackAsync(
+        IPublicationSource file, IReadOnlyList<BlockEntry> plan, Manifest manifest, string writer, long lastLedger,
+        IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
+    {
+        XrplFileReader reader = new(_source, new ReaderOptions { MaxBytes = long.MaxValue });
+        ManifestRecord unpublished = new(manifest, writer, lastLedger + 1, string.Empty);
+        IReadOnlyList<BlockEntry> published = await ReadBackAsync(
+            () => reader.BlockListAsync(unpublished, cancellationToken), cancellationToken).ConfigureAwait(false);
+        PublicationCheck.RequireListed(plan, published);
+        IReadOnlyList<int> sample = PublicationCheck.SampleBlocks(manifest.Root, published.Count);
+
+        for (int k = 0; k < sample.Count; k++)
+        {
+            BlockEntry entry = published[sample[k]];
+            byte[] content = await ReadBackAsync(
+                () => reader.BlockAsync(unpublished, entry, cancellationToken), cancellationToken).ConfigureAwait(false);
+
+            await RequireSameAsSourceAsync(file, entry.Index, content, cancellationToken).ConfigureAwait(false);
+            progress?.Report(new PublishProgress("read-back", k + 1, sample.Count));
         }
     }
 

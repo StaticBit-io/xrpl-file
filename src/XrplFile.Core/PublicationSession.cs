@@ -596,6 +596,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         // Nothing is sent, so nothing has to be affordable (spec B27).
         if (await session.FindManifestAsync(session._landed, to, bound: null, preparation, cancellationToken).ConfigureAwait(false) is { } done)
         {
+            await session.RequireRecoveredAcceptedAsync(source, done, cancellationToken).ConfigureAwait(false);
             session._alreadyPublished = done;
             return session;
         }
@@ -680,6 +681,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
         if (await session.FindManifestAsync(landed, to, bound, preparation, cancellationToken).ConfigureAwait(false) is { } done)
         {
+            await session.RequireRecoveredAcceptedAsync(source, done, cancellationToken).ConfigureAwait(false);
             session._alreadyPublished = done;
             return session;
         }
@@ -782,6 +784,13 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 $"{statePath} was stopped because the writer carries other data for this file's chunks; it is not resumed");
         }
 
+        if (string.Equals(state.ManifestStatus, PublicationState.ManifestLandedRejected, StringComparison.Ordinal))
+        {
+            XrplFileLink? link = state.ManifestHash is { } hash ? new XrplFileLink(state.Network, hash) : null;
+            throw new XrplFileException(XrplFileError.ManifestRejected,
+                $"{statePath} records a manifest that landed and that a reader does not accept; it is not resumed", link: link);
+        }
+
         if (string.Equals(state.Phase, "done", StringComparison.Ordinal))
         {
             throw new XrplFileException(XrplFileError.ResumeMismatch,
@@ -831,6 +840,33 @@ public sealed class PublicationSession : IBatchFenceRecorder
         }
 
         return blocks;
+    }
+
+    /// <summary>A landed, rejected manifest goes to the state before the error does (spec S22), so no resume can call the run done.</summary>
+    private void RecordRejectedManifest(string manifestHash)
+    {
+        lock (_stateLock)
+        {
+            _state = _state with { ManifestStatus = PublicationState.ManifestLandedRejected, ManifestHash = manifestHash };
+            _state.Save(StatePath);
+        }
+    }
+
+    /// <summary>
+    /// A manifest a resume recovered (spec B27) passes the check the writer makes of its own (spec
+    /// S22) before the run is called done; a rejection is recorded as it is for a run that wrote it.
+    /// </summary>
+    private async Task RequireRecoveredAcceptedAsync(ILedgerSource source, PublishResult found, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await PublicationCheck.RequireAcceptedAsync(source, found.Link, found.Manifest, found.Writer, cancellationToken).ConfigureAwait(false);
+        }
+        catch (XrplFileException e) when (e.Error == XrplFileError.ManifestRejected)
+        {
+            RecordRejectedManifest(found.ManifestHash);
+            throw;
+        }
     }
 
     /// <summary>Writes a failure that must outlive this session (spec S17) before it is thrown.</summary>
@@ -1150,9 +1186,19 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
             XrplFileWriter writer = new(Strategy, _source, new WriterOptions { ReadBack = _options.ReadBack });
 
-            PublishResult result = await writer.PublishAsync(
-                _file, _blockHashes, started.Type, started.Name, started.Writer, started.Network, _landed,
-                new PhaseRecordingProgress(this, progress), cancellationToken).ConfigureAwait(false);
+            PublishResult result;
+
+            try
+            {
+                result = await writer.PublishAsync(
+                    _file, _blockHashes, started.Type, started.Name, started.Writer, started.Network, _landed,
+                    new PhaseRecordingProgress(this, progress), cancellationToken).ConfigureAwait(false);
+            }
+            catch (XrplFileException e) when (e is { Error: XrplFileError.ManifestRejected, Link: { } rejected })
+            {
+                RecordRejectedManifest(rejected.TxHash);
+                throw;
+            }
 
             Advance("done", result.Manifest.Root, result.ManifestHash);
 

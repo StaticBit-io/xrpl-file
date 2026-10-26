@@ -44,6 +44,10 @@ namespace XrplFile;
 /// every sequence from here up to the writer's sequence after the fence (spec 5.2 step 3, B30).
 /// Absent in a state written before it was recorded.
 /// </param>
+/// <param name="ManifestStatus">
+/// <see cref="ManifestLandedRejected"/> when the manifest landed and a reader rejected it (spec S22);
+/// <see cref="ManifestHash"/> then names it. Absent otherwise.
+/// </param>
 /// <param name="Failure">
 /// Why the run cannot go on, when that outlives a resume: <see cref="WriterWindowConflictFailure"/>
 /// (spec S17). A resume reports it again without sending anything. Absent otherwise.
@@ -67,6 +71,7 @@ public sealed record PublicationState(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PayerKeyReference = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Fence = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] uint? StartSequence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ManifestStatus = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Failure = null)
 {
     /// <summary>
@@ -92,6 +97,9 @@ public sealed record PublicationState(
 
     /// <summary>The value of <see cref="Failure"/> for spec S17's conflict: the error's own name.</summary>
     public const string WriterWindowConflictFailure = nameof(XrplFileError.WriterWindowConflict);
+
+    /// <summary>The value of <see cref="ManifestStatus"/> for a manifest that landed and that a reader does not accept (spec S22).</summary>
+    public const string ManifestLandedRejected = "landed, rejected";
 
     /// <summary>The one this file ends with, on every platform, so two hosts write the same bytes.</summary>
     private const string LineEnding = "\n";

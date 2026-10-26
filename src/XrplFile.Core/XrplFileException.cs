@@ -57,6 +57,13 @@ public enum XrplFileError
     /// the block can break whatever the run adopted. Recorded on the state; a resume reports it again.
     /// </summary>
     WriterWindowConflict,
+
+    /// <summary>
+    /// The manifest landed and a reader does not accept it as this file's (spec S22). The link is on
+    /// <see cref="XrplFileException.Link"/>; the state records it as landed and rejected, and no resume
+    /// turns it into a success.
+    /// </summary>
+    ManifestRejected,
 }
 
 /// <summary>Which of a Batch run's two accounts an error is about.</summary>
@@ -84,6 +91,9 @@ public sealed class XrplFileException : Exception
     /// <summary>For <see cref="XrplFileError.AccountInUse"/>: the account that was in use; otherwise null.</summary>
     public AccountRole? Role { get; }
 
+    /// <summary>For <see cref="XrplFileError.ManifestRejected"/>: the link that was written; otherwise null.</summary>
+    public XrplFileLink? Link { get; }
+
     /// <summary>
     /// True when a resume was refused because the file differs from the one the run recorded (its
     /// size or its root), and only then. A caller may then ask for the file again; for any other
@@ -93,9 +103,10 @@ public sealed class XrplFileException : Exception
 
     public XrplFileException(
         XrplFileError error, string message, int? block = null, Exception? inner = null, string? engineResult = null,
-        AccountRole? role = null)
+        AccountRole? role = null, XrplFileLink? link = null)
         : base(message, inner)
     {
+        Link = link;
         Error = error;
         Block = block;
         EngineResult = engineResult;
