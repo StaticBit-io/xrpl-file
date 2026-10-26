@@ -382,4 +382,42 @@ public sealed class RunModelEtaTests : IDisposable
         (PublicationState.Load(path) with { Phase = "done" }).Save(path);
         Assert.False(RunModel.IsResumable(failed));
     }
+
+    [Fact]
+    public void Hashing_says_how_many_chunks_of_how_many()
+    {
+        string text = RunModel.StageTextOf(Running("hashing", 412_000, 1_689_810, batch: true, TimeSpan.FromSeconds(30)), Now, rate: null);
+
+        Assert.Equal("Hashing the file — 412,000 of 1,689,810 chunks · 0:30 elapsed", text);
+    }
+
+    [Fact]
+    public void Reading_the_history_says_so_before_and_after_its_first_thousand_records()
+    {
+        Assert.Equal(
+            "Reading the ledger history · 0:05 elapsed",
+            RunModel.StageTextOf(Running("history", 0, 0, batch: true, TimeSpan.FromSeconds(5)), Now, rate: null));
+        Assert.Equal(
+            $"Reading the ledger history — {3_000:N0} records · 0:05 elapsed",
+            RunModel.StageTextOf(Running("history", 3_000, 0, batch: true, TimeSpan.FromSeconds(5)), Now, rate: null));
+    }
+
+    [Fact]
+    public void A_run_stopped_while_hashing_says_where()
+    {
+        RunSnapshot cancelled = Running("hashing", 412_000, 1_689_810, batch: true, TimeSpan.FromSeconds(40)) with
+        {
+            State = PublicationRunState.Cancelled,
+            FinishedAt = Now - TimeSpan.FromSeconds(10),
+        };
+
+        Assert.Equal("Stopped while hashing the file — 412,000 of 1,689,810 chunks · 0:30 elapsed", RunModel.StageTextOf(cancelled, Now, rate: null));
+    }
+
+    [Fact]
+    public void The_stage_names_are_the_specs()
+    {
+        Assert.Equal("Hashing the file", RunModel.StageNameOf("hashing"));
+        Assert.Equal("Reading the ledger history", RunModel.StageNameOf("history"));
+    }
 }

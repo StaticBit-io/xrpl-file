@@ -167,7 +167,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
             return $"{StageNameOf("fence")} — about {DurationText.Of(wait)}";
         }
 
-        string head = $"{StageNameOf(progress.Stage)} — {progress.Done:N0} of {progress.Total:N0}";
+        string head = HeadOf(progress);
 
         if (progress.Stage == "read-back")
         {
@@ -216,7 +216,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
         {
             null => "Stopped while starting",
             { Stage: "fence" } => $"Stopped while {Lowered(StageNameOf("fence"))}",
-            { } progress => $"Stopped while {Lowered(StageNameOf(progress.Stage))} — {progress.Done:N0} of {progress.Total:N0}",
+            { } progress => $"Stopped while {Lowered(HeadOf(progress))}",
         };
 
         return took is null ? where : $"{where} · {took} elapsed";
@@ -275,6 +275,18 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
         bool lists = fileBytes > 0 && FileTree.BlockCount(FileTree.ChunkCount(fileBytes, MemoLayout.ChunkBytes)) > 1;
         return stage == "chunks" ? (lists ? 2 : 1) : 1;
     }
+
+    /// <summary>
+    /// A stage with its count (spec 5.3): hashing counts chunks of the file's total; the history pass
+    /// counts records and has no total, because how far back the writer's history goes is what it is
+    /// finding out.
+    /// </summary>
+    private static string HeadOf(PublishProgress progress) => progress.Stage switch
+    {
+        "hashing" => $"{StageNameOf("hashing")} — {progress.Done:N0} of {progress.Total:N0} chunks",
+        "history" => progress.Done > 0 ? $"{StageNameOf("history")} — {progress.Done:N0} records" : StageNameOf("history"),
+        _ => $"{StageNameOf(progress.Stage)} — {progress.Done:N0} of {progress.Total:N0}",
+    };
 
     private static string Lowered(string text) =>
         text.Length == 0 ? text : string.Concat(char.ToLowerInvariant(text[0]).ToString(), text.AsSpan(1));
@@ -513,6 +525,8 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// </summary>
     public static string StageNameOf(string stage) => stage switch
     {
+        "hashing" => "Hashing the file",
+        "history" => "Reading the ledger history",
         "chunks" => "Writing the file",
         "lists" => "Writing the block list",
         "read-back" => "Reading it back from the ledger",
