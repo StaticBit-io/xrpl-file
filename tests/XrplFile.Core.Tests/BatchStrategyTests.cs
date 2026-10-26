@@ -29,6 +29,30 @@ public class BatchStrategyTests
         Assert.All(node.Sink.Transmissions, transmission => Assert.Equal(node.Payer.Account, transmission.Account));
     }
 
+    [Theory]
+    [InlineData(0, 3)]
+    [InlineData(-1, 3)]
+    [InlineData(16_384, 0)]
+    [InlineData(16_384, 256)]
+    public void Options_a_round_cannot_run_on_are_refused_when_the_strategy_is_built(int maxRoundMemos, int maxAttemptsPerMemo)
+    {
+        BatchTestNode node = new();
+        BatchStrategyOptions options = BatchTestNode.FastOptions with { MaxRoundMemos = maxRoundMemos, MaxAttemptsPerMemo = maxAttemptsPerMemo };
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => node.Strategy(options));
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(16_384, 255)]
+    public void The_edges_of_the_allowed_options_are_accepted(int maxRoundMemos, int maxAttemptsPerMemo)
+    {
+        BatchTestNode node = new();
+        BatchStrategyOptions options = BatchTestNode.FastOptions with { MaxRoundMemos = maxRoundMemos, MaxAttemptsPerMemo = maxAttemptsPerMemo };
+
+        node.Strategy(options);
+    }
+
     [Fact]
     public async Task Nine_memos_go_as_seven_and_two()
     {

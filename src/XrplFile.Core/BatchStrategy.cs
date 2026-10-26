@@ -35,6 +35,12 @@ public sealed class BatchStrategy : ISubmissionStrategy
         }
 
         _options = options ?? new BatchStrategyOptions();
+
+        // A round of no memos never ends the pass, and a candidate count is a byte per memo (spec B13).
+        ArgumentOutOfRangeException.ThrowIfLessThan(_options.MaxRoundMemos, 1, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfLessThan(_options.MaxAttemptsPerMemo, 1, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(_options.MaxAttemptsPerMemo, byte.MaxValue, nameof(options));
+
         _context = new BatchContext(
             sink, source, writer, payer, budget, _options, new BatchFence(fence), new BatchWindow(_options.InitialWindow, _options.MaxWindow), new BatchTrace(_options.TraceListener), new BatchSpending(budget), new BatchLedgerFloor());
     }
