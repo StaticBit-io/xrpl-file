@@ -152,6 +152,30 @@ public sealed class PublicationRunBatchTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_run_whose_fee_unit_fell_below_the_approved_ceiling_starts_and_finishes()
+    {
+        (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync();
+        SessionOptions options = new() { StateDirectory = Paths.StateDirectory };
+
+        // Approved while the node asked more, then the fee fell: the approved ceiling is above the current one.
+        _connections.Ledger.OpenLedgerFee = new OpenLedgerFee(30, 10);
+        BatchPublicationEstimate high = await PublicationSession.EstimateAsync(
+            _connections.Ledger, request.Account, request.PayerAccount!, request.Size, options, Token);
+        PublishRequest approved = request with { Approval = SpendingApproval.For(high, request.Account, request.PayerAccount!) };
+
+        _connections.Ledger.OpenLedgerFee = new OpenLedgerFee(12, 10);
+        BatchPublicationEstimate low = await PublicationSession.EstimateAsync(
+            _connections.Ledger, request.Account, request.PayerAccount!, request.Size, options, Token);
+        Assert.True(low.FeeCeilingDrops < approved.Approval!.FeeUnitCeilingDrops);
+
+        Assert.True(run.Start(approved));
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
+        Assert.Null(run.Snapshot.Failure);
+    }
+
+    [Fact]
     public async Task A_batch_run_writes_its_round_trace_to_the_log_under_its_state_file_name()
     {
         (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync();
