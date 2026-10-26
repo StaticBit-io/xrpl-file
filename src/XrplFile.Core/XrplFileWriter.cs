@@ -209,10 +209,11 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
                 ? PublicationCheck.SampleBlocks(manifest.Root, entries.Count)
                 : [.. Enumerable.Range(0, entries.Count)];
 
-            // The history cache serves a block that starts where the one before it ended (spec S26);
-            // the sample's blocks are rarely adjacent, so it would only hold up to 4,096 records with their
-            // memo data while each walk passes through, long enough for the GC to promote them all.
-            int historyCache = sampled ? 0 : ForwardHistory.DefaultMaxRecords;
+            // The history cache serves a block that starts where the one before it ended (spec S26). A sparse
+            // sample's blocks are rarely adjacent, so the cache would only hold up to 4,096 records with their
+            // memo data while each walk passes through, long enough for the GC to promote them all; a sample
+            // that visits every block (a small file) walks adjacent blocks and keeps the cache.
+            int historyCache = sampled && visit.Count < entries.Count ? 0 : ForwardHistory.DefaultMaxRecords;
 
             await ReadBlocksBackAsync(file, entries, visit, manifest, writer, lastLedger, historyCache, progress, cancellationToken).ConfigureAwait(false);
         }

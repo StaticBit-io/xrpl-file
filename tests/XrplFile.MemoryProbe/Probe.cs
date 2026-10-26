@@ -18,7 +18,6 @@ internal static class Probe
     {
         ChainCheck = TimeSpan.FromMilliseconds(5),
         ProgressSweep = TimeSpan.FromMilliseconds(250),
-        HistoryLagLimit = TimeSpan.FromSeconds(2),
         FeeWait = TimeSpan.FromMilliseconds(20),
         TransportRetryStep = TimeSpan.FromMilliseconds(1),
         DeadlineLedgers = 200,
