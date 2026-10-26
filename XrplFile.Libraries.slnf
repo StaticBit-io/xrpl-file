@@ -8,6 +8,7 @@
       "tests\\XrplFile.App.Core.Tests\\XrplFile.App.Core.Tests.csproj",
       "tests\\XrplFile.Core.Tests\\XrplFile.Core.Tests.csproj",
       "tests\\XrplFile.Keys.Tests\\XrplFile.Keys.Tests.csproj",
+      "tests\\XrplFile.MemoryProbe\\XrplFile.MemoryProbe.csproj",
       "tests\\XrplFile.TestSupport\\XrplFile.TestSupport.csproj",
       "tools\\XrplFile.KeyBench\\XrplFile.KeyBench.csproj",
       "tools\\XrplFile.Vectors\\XrplFile.Vectors.csproj"

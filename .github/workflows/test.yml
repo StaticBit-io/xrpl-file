@@ -23,9 +23,11 @@ jobs:
       # the solution filter merely builds proves nothing: XrplFile.Keys.Tests was built and never
       # run from the day it was created, so the 217 tests behind this branch's interoperability
       # claim -- WalletCompatibilityTests above all -- could not fail CI.
-      - run: dotnet run --project tests/XrplFile.Core.Tests --configuration Release --no-build -- -trait- "Category=Integration"
-      - run: dotnet run --project tests/XrplFile.Keys.Tests --configuration Release --no-build -- -trait- "Category=Integration"
-      - run: dotnet run --project tests/XrplFile.App.Core.Tests --configuration Release --no-build -- -trait- "Category=Integration"
+      # Category=Slow is excluded everywhere: the memory test (spec S27) runs for tens of minutes and
+      # the 50 MB stand runs (Task 21) for longer. They are run by hand before a release.
+      - run: dotnet run --project tests/XrplFile.Core.Tests --configuration Release --no-build -- -trait- "Category=Integration" -trait- "Category=Slow"
+      - run: dotnet run --project tests/XrplFile.Keys.Tests --configuration Release --no-build -- -trait- "Category=Integration" -trait- "Category=Slow"
+      - run: dotnet run --project tests/XrplFile.App.Core.Tests --configuration Release --no-build -- -trait- "Category=Integration" -trait- "Category=Slow"
       - run: node --test test/*.test.mjs
         working-directory: web
       - name: the committed vectors are what the code produces
@@ -82,7 +84,7 @@ jobs:
           done
           echo "the stand did not answer server_info within 60 s" >&2
           exit 1
-      - run: dotnet run --project tests/XrplFile.Core.Tests --configuration Release --no-build -- -trait "Category=Integration" ${{ matrix.classes }}
+      - run: dotnet run --project tests/XrplFile.Core.Tests --configuration Release --no-build -- -trait "Category=Integration" -trait- "Category=Slow" ${{ matrix.classes }}
       - if: always()
         run: docker compose -p xrpl-file-ci -f .ci-config/docker-compose.ci.yml down
 

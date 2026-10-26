@@ -18,4 +18,18 @@
     <!-- State files written by the application before streaming publication (spec 4.5): they must keep resuming. -->
     <None Include="fixtures\state\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup>
+    <!--
+      Built with the tests, never loaded by them: PublicationMemoryTests runs it as a child process
+      (spec S27), so the peak it reports is the publication's and not the test host's.
+    -->
+    <ProjectReference Include="..\XrplFile.MemoryProbe\XrplFile.MemoryProbe.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>MemoryProbePath</_Parameter1>
+      <!-- Path.Combine, not backslashes: the path must resolve on Linux too (VmHWM there). -->
+      <_Parameter2>$([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', '..', 'XrplFile.MemoryProbe', 'bin', '$(Configuration)', '$(TargetFramework)', 'XrplFile.MemoryProbe.dll'))</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>

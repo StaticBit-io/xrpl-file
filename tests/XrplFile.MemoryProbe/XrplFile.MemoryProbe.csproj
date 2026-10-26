@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>XrplFile.MemoryProbe</RootNamespace>
+    <!--
+      One heap, collected without a background thread: the figure this process exists to report is
+      the run's memory, and server GC's per-core heaps would add headroom that grows with the host,
+      not with the file.
+    -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\XrplFile.Core\XrplFile.Core.csproj" />
+    <ProjectReference Include="..\XrplFile.TestSupport\XrplFile.TestSupport.csproj" />
+  </ItemGroup>
+</Project>
