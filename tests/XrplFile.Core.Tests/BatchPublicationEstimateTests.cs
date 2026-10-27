@@ -102,6 +102,40 @@ public class BatchPublicationEstimateTests
     }
 
     [Fact]
+    public async Task A_pass_of_exactly_one_round_has_no_solo()
+    {
+        // 16,384 chunks fill one round and no list is needed, so the only solo is the manifest.
+        BatchPublicationEstimate estimate = await PublicationEstimator.EstimateBatchAsync(Node(), "rWriter", "rPayer", 16_384, 1, 0, Token);
+
+        Assert.Equal(2_048, estimate.Batches);
+        Assert.Equal(1, estimate.SoloTransactions);
+        Assert.Equal(1 + 1, estimate.Rounds);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(9)]
+    [InlineData(16)]
+    [InlineData(17)]
+    [InlineData(16_384)]
+    [InlineData(16_385)]
+    public async Task The_estimate_counts_the_batches_and_solos_the_strategy_sends(int memos)
+    {
+        BatchTestNode node = new();
+        await using BatchStrategy strategy = node.Strategy();
+
+        await strategy.SubmitAllAsync(BatchTestNode.Memos(memos), null, Token);
+
+        int outers = node.Sink.Transmissions.Count(transmission => transmission.TransactionType == "Batch");
+        int solos = node.Sink.Transmissions.Count(transmission => transmission.TransactionType != "Batch");
+
+        BatchPublicationEstimate estimate = await PublicationEstimator.EstimateBatchAsync(Node(), "rWriter", "rPayer", memos, 1, 0, Token);
+
+        Assert.Equal(outers, estimate.Batches);
+        Assert.Equal(solos + 1, estimate.SoloTransactions);
+    }
+
+    [Fact]
     public async Task Owned_objects_lock_reserve_out_of_each_accounts_spendable_balance()
     {
         FakeLedgerSource node = Node(writerBalance: 2_000_000, payerBalance: 3_000_000);
