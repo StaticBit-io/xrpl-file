@@ -16,6 +16,10 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
     /// <summary>What the Balance column says when the last read of the row failed.</summary>
     public const string UnreadBalance = "Not available. Press Check to try again.";
 
+    // One gate for _rows, _checking and Rows: the model is a singleton, its continuations run on
+    // pool threads (ConfigureAwait(false)) while the renderer and Check clicks touch the same state.
+    // Never held across an await.
+    private readonly Lock _gate = new();
     private readonly Dictionary<string, AccountRow> _rows = new(StringComparer.Ordinal);
     private readonly HashSet<string> _checking = new(StringComparer.Ordinal);
 
@@ -30,7 +34,10 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
     /// this to disable a row's own Check button rather than tracking "which row I last clicked" as
     /// local, untestable state of its own.
     /// </summary>
-    public bool IsChecking(string reference) => _checking.Contains(reference);
+    public bool IsChecking(string reference)
+    {
+        lock (_gate) return _checking.Contains(reference);
+    }
 
     /// <summary>Re-reads the vault. Contacts no node: a list must be drawable with no network at all.</summary>
     public async Task RefreshAsync(CancellationToken cancellationToken)
@@ -41,28 +48,33 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
         {
             IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(cancellationToken).ConfigureAwait(false);
 
-            List<AccountRow> rows = [];
-            foreach (VaultEntryInfo info in listed.Where(entry => entry.Kind == VaultEntryKind.Generated))
+            // Built and committed under one hold of the gate: a read that lands between "what the
+            // rows knew" and "the new list" would otherwise be overwritten by the older copy.
+            lock (_gate)
             {
-                // A row already refreshed from a node keeps what it learned. A new one — or one no
-                // node has ever been asked about — starts as Unknown: a cached DeletableFromLedger may
-                // still ride along for display (it is what it is for), but it is not an answer, and
-                // claiming KeyOnly from the vault alone would say "nothing on the ledger" about an
-                // account that cache could only exist for if something had once been funded. Closed is
-                // the one stage the vault gets to declare outright — a closure is a fact it owns, and
-                // no node is needed to confirm it.
-                rows.Add(_rows.TryGetValue(info.Reference, out AccountRow? known) && info.Closure is null
-                    ? known with { Label = info.Label, Closure = info.Closure }
-                    : new AccountRow(
-                        info.Reference, info.Label, info.Address, info.Network,
-                        info.Closure is null ? AccountStage.Unknown : AccountStage.Closed,
-                        null, info.DeletableFromLedger, null, info.Closure));
+                List<AccountRow> rows = [];
+                foreach (VaultEntryInfo info in listed.Where(entry => entry.Kind == VaultEntryKind.Generated))
+                {
+                    // A row already refreshed from a node keeps what it learned. A new one — or one no
+                    // node has ever been asked about — starts as Unknown: a cached DeletableFromLedger may
+                    // still ride along for display (it is what it is for), but it is not an answer, and
+                    // claiming KeyOnly from the vault alone would say "nothing on the ledger" about an
+                    // account that cache could only exist for if something had once been funded. Closed is
+                    // the one stage the vault gets to declare outright — a closure is a fact it owns, and
+                    // no node is needed to confirm it.
+                    rows.Add(_rows.TryGetValue(info.Reference, out AccountRow? known) && info.Closure is null
+                        ? known with { Label = info.Label, Closure = info.Closure }
+                        : new AccountRow(
+                            info.Reference, info.Label, info.Address, info.Network,
+                            info.Closure is null ? AccountStage.Unknown : AccountStage.Closed,
+                            null, info.DeletableFromLedger, null, info.Closure));
+                }
+
+                _rows.Clear();
+                foreach (AccountRow row in rows) _rows[row.Reference] = row;
+
+                Rows = rows;
             }
-
-            _rows.Clear();
-            foreach (AccountRow row in rows) _rows[row.Reference] = row;
-
-            Rows = rows;
         }
         catch (VaultException ex)
         {
@@ -80,9 +92,15 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
 
         Message = null;
 
-        if (!_rows.TryGetValue(reference, out AccountRow? row) || row.Stage == AccountStage.Closed) return;
+        AccountRow? row;
+        lock (_gate)
+        {
+            row = OpenRowLocked(reference);
+            if (row is null) return;
 
-        _checking.Add(reference);
+            _checking.Add(reference);
+        }
+
         try
         {
             await using ILedgerConnection connection =
@@ -90,13 +108,13 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
 
             await CheckOnAsync(connection, row, cancellationToken).ConfigureAwait(false);
         }
-        catch (XrplFileException ex)
+        catch (Exception ex) when (IsReadFailure(ex, cancellationToken))
         {
-            Message = PublishErrorMessages.For(ex);
+            Fail(reference, ex);
         }
         finally
         {
-            _checking.Remove(reference);
+            lock (_gate) _checking.Remove(reference);
         }
     }
 
@@ -107,16 +125,33 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
     /// </summary>
     public async Task RefreshAllFromLedgerAsync(CancellationToken cancellationToken)
     {
-        Message = null;
+        // Message is not cleared here: the screen calls this right after RefreshAsync, and a vault
+        // error that call just set must reach the person.
 
         // A row someone is already checking is theirs to finish; reading it twice would race two
-        // writes to the same row.
-        List<AccountRow> targets = [.. Rows.Where(row =>
-            row.Stage != AccountStage.Closed && !_checking.Contains(row.Reference))];
+        // writes to the same row. Every other row reads as checking from the start, not as its
+        // group's turn comes, so the list says honestly that all of it is being read.
+        List<AccountRow> targets;
+        HashSet<string> held = new(StringComparer.Ordinal);
+        lock (_gate)
+        {
+            targets = [.. Rows.Where(row =>
+                row.Stage != AccountStage.Closed && !_checking.Contains(row.Reference))];
 
-        // Every row reads as checking from the start, not as its group's turn comes, so the list
-        // says honestly that all of it is being read.
-        foreach (AccountRow row in targets) _checking.Add(row.Reference);
+            foreach (AccountRow row in targets)
+            {
+                _checking.Add(row.Reference);
+                held.Add(row.Reference);
+            }
+        }
+
+        // Releases a row this read still holds; a row it let go of may be a Check click's by now.
+        void Release(string reference)
+        {
+            if (!held.Remove(reference)) return;
+
+            lock (_gate) _checking.Remove(reference);
+        }
 
         try
         {
@@ -127,13 +162,12 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
                 {
                     connection = await connections.ConnectAsync(group.Key, cancellationToken).ConfigureAwait(false);
                 }
-                catch (XrplFileException ex)
+                catch (Exception ex) when (IsReadFailure(ex, cancellationToken))
                 {
-                    Message = PublishErrorMessages.For(ex);
                     foreach (AccountRow row in group)
                     {
-                        Apply(row.Reference, current => current with { CheckFailed = true });
-                        _checking.Remove(row.Reference);
+                        Fail(row.Reference, ex);
+                        Release(row.Reference);
                     }
 
                     continue;
@@ -144,19 +178,22 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
                     foreach (AccountRow row in group)
                     {
                         // Re-read: the list may have been rebuilt since the snapshot above.
-                        if (_rows.TryGetValue(row.Reference, out AccountRow? latest) && latest.Stage != AccountStage.Closed)
+                        AccountRow? latest;
+                        lock (_gate) latest = OpenRowLocked(row.Reference);
+
+                        if (latest is not null)
                         {
                             await CheckOnAsync(connection, latest, cancellationToken).ConfigureAwait(false);
                         }
 
-                        _checking.Remove(row.Reference);
+                        Release(row.Reference);
                     }
                 }
             }
         }
         finally
         {
-            foreach (AccountRow row in targets) _checking.Remove(row.Reference);
+            foreach (string reference in held.ToArray()) Release(reference);
         }
     }
 
@@ -181,12 +218,38 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
     {
         // Applied to the row as it is now, not as the caller saw it: a list rebuilt meanwhile may
         // carry a renamed label that an older copy would put back.
-        if (!_rows.TryGetValue(reference, out AccountRow? current)) return;
+        lock (_gate)
+        {
+            if (!_rows.TryGetValue(reference, out AccountRow? current)) return;
 
-        AccountRow updated = change(current);
-        _rows[reference] = updated;
-        Rows = [.. Rows.Select(existing =>
-            string.Equals(existing.Reference, reference, StringComparison.Ordinal) ? updated : existing)];
+            AccountRow updated = change(current);
+            _rows[reference] = updated;
+            Rows = [.. Rows.Select(existing =>
+                string.Equals(existing.Reference, reference, StringComparison.Ordinal) ? updated : existing)];
+        }
+    }
+
+    /// <summary>The row for this reference unless it is gone or closed. Caller holds <c>_gate</c>.</summary>
+    private AccountRow? OpenRowLocked(string reference) =>
+        _rows.TryGetValue(reference, out AccountRow? row) && row.Stage != AccountStage.Closed ? row : null;
+
+    /// <summary>
+    /// A failure to read one account or connect to its network, as opposed to the screen being left:
+    /// any exception, unless the caller's own token is what ended it. A connect timeout surfaces as an
+    /// <see cref="OperationCanceledException"/> that is not the screen closing.
+    /// </summary>
+    private static bool IsReadFailure(Exception exception, CancellationToken cancellationToken) =>
+        exception is XrplFileException || !cancellationToken.IsCancellationRequested;
+
+    private void Fail(string reference, Exception exception)
+    {
+        // Anything that is not already a node answer is a node that did not give one: a dropped
+        // socket or an unparseable reply says the same thing to the person.
+        Message = exception is XrplFileException known
+            ? PublishErrorMessages.For(known)
+            : PublishErrorMessages.For(XrplFileError.NodeUnreachable);
+
+        Apply(reference, current => current with { CheckFailed = true });
     }
 
     private async Task CheckOnAsync(ILedgerConnection connection, AccountRow row, CancellationToken cancellationToken)
@@ -256,14 +319,13 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
                     cancellationToken).ConfigureAwait(false);
             }
         }
-        catch (XrplFileException ex)
-        {
-            Message = PublishErrorMessages.For(ex);
-            Apply(row.Reference, latest => latest with { CheckFailed = true });
-        }
         catch (VaultException ex)
         {
             Message = VaultErrorMessages.For(ex.Error);
+        }
+        catch (Exception ex) when (IsReadFailure(ex, cancellationToken))
+        {
+            Fail(row.Reference, ex);
         }
     }
 }

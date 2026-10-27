@@ -334,6 +334,103 @@ public sealed class AccountsModelTests : VaultHarness
         Assert.Equal(before, model.Rows);
     }
 
+    [Fact]
+    public async Task A_vault_error_survives_the_balance_read_that_follows_it()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        await vault.LockAsync();
+
+        // The screen reads balances right after listing; the reason the list is empty must not be
+        // wiped by that second call.
+        await model.RefreshAsync(token);
+        await model.RefreshAllFromLedgerAsync(token);
+
+        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
+    }
+
+    [Fact]
+    public async Task A_failure_that_is_not_a_node_answer_marks_its_network_and_the_others_still_read()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        NewVaultEntry reachable = GeneratedOn("reachable", "testnet");
+        await vault.StoreAsync(reachable, token);
+        await vault.StoreAsync(GeneratedOn("cut", "devnet"), token);
+        _connections.Ledger.Balances[reachable.Address] = 25_000_000;
+        _connections.BeforeConnect = (network, _) =>
+            string.Equals(network, "devnet", StringComparison.Ordinal)
+                ? throw new InvalidOperationException("the socket closed")
+                : Task.CompletedTask;
+        await model.RefreshAsync(token);
+
+        await model.RefreshAllFromLedgerAsync(token);
+
+        Assert.True(RowOf(model, "cut").CheckFailed);
+        Assert.NotNull(model.Message);
+        Assert.Equal(XrpAmount.Format(25_000_000), model.BalanceTextOf(RowOf(model, "reachable")));
+        Assert.All(model.Rows, row => Assert.False(model.IsChecking(row.Reference)));
+    }
+
+    [Fact]
+    public async Task A_connect_timeout_that_is_not_the_screen_closing_marks_the_row_instead_of_ending_the_read()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        NewVaultEntry reachable = GeneratedOn("reachable", "testnet");
+        await vault.StoreAsync(reachable, token);
+        await vault.StoreAsync(GeneratedOn("slow", "devnet"), token);
+        _connections.Ledger.Balances[reachable.Address] = 25_000_000;
+        _connections.BeforeConnect = (network, _) =>
+            string.Equals(network, "devnet", StringComparison.Ordinal)
+                ? throw new OperationCanceledException("connect timed out")
+                : Task.CompletedTask;
+        await model.RefreshAsync(token);
+
+        await model.RefreshAllFromLedgerAsync(token);
+
+        Assert.True(RowOf(model, "slow").CheckFailed);
+        Assert.Equal(XrpAmount.Format(25_000_000), model.BalanceTextOf(RowOf(model, "reachable")));
+    }
+
+    [Fact]
+    public async Task A_row_already_being_checked_is_skipped_by_the_balance_read()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        string reference = await vault.StoreAsync(GeneratedOn("busy", "testnet"), token);
+        await model.RefreshAsync(token);
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _connections.BeforeConnect = (_, _) => gate.Task;
+        Task check = model.RefreshFromLedgerAsync(reference, token);
+        _connections.BeforeConnect = null;
+
+        await model.RefreshAllFromLedgerAsync(token);
+
+        Assert.Equal(0, _connections.Connections);
+        Assert.True(model.IsChecking(reference));
+
+        gate.SetResult();
+        await check;
+
+        Assert.Equal(1, _connections.Connections);
+        Assert.False(model.IsChecking(reference));
+    }
+
+    [Fact]
+    public async Task A_check_that_cannot_connect_marks_the_row_like_the_balance_read_does()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        string reference = await vault.StoreAsync(GeneratedOn("cut", "testnet"), token);
+        await model.RefreshAsync(token);
+        _connections.ConnectThrows = new XrplFileException(XrplFileError.NodeUnreachable, "no answer");
+
+        await model.RefreshFromLedgerAsync(reference, token);
+
+        Assert.Equal(AccountsModel.UnreadBalance, model.BalanceTextOf(Assert.Single(model.Rows)));
+    }
+
     private static AccountRow RowOf(AccountsModel model, string label) =>
         model.Rows.Single(row => string.Equals(row.Label, label, StringComparison.Ordinal));
 }
