@@ -117,4 +117,29 @@ public sealed class LegacyStateTests : IDisposable
         Assert.Equal(payer.Account, report.Payer);
         Assert.DoesNotContain("ChunkHashes", File.ReadAllText(path), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task A_resumed_runs_saves_carry_the_applications_working_time_through_every_phase_and_fence()
+    {
+        string path = Fixture("v3-batch.json");
+        (PublicationState.Load(path) with { WorkedSeconds = 645 }).Save(path);
+        FakeLedgerSource ledger = new() { Fees = new NetworkFees(10, 1_000_000, 200_000), CurrentLedger = 40 };
+        FakeBatchLedgerSink sink = new(ledger);
+        WalletSigner writer = new(WriterWallet);
+        WalletSigner payer = new(PayerWallet);
+        sink.SetSequence(writer.Account, 100);
+        sink.SetSequence(payer.Account, 500);
+        ledger.Balances[writer.Account] = 100_000_000;
+        ledger.Balances[payer.Account] = 100_000_000;
+
+        PublicationSession session = await PublicationSession.ResumeAsync(
+            (budget, fence) => new BatchStrategy(sink, ledger, writer, payer, budget, fence, BatchTestNode.FastOptions),
+            ledger, LegacyFile, path, payer.Account, "key-payer", Options, null, Token);
+        await session.RunAsync(null, Token);
+
+        // The resume wrote the fence and every phase up to "done"; none of those saves may rebuild the record without the field.
+        PublicationState saved = PublicationState.Load(path);
+        Assert.Equal("done", saved.Phase);
+        Assert.Equal(645, saved.WorkedSeconds);
+    }
 }

@@ -891,18 +891,29 @@ public sealed class PublicationRun(
 
         try
         {
+            // A state the person forgot between this check and the save would be written again; the
+            // window is milliseconds, and the next start-up lists it as an unfinished run they can forget.
             if (!File.Exists(statePath)) return;
+
+            WorkedWriting?.Invoke(statePath);
 
             PublicationState state = PublicationState.Load(statePath);
             long seconds = (long)Math.Floor(Math.Max(0, worked.TotalSeconds));
 
             (state with { WorkedSeconds = seconds }).Save(statePath);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or FormatException or System.Text.Json.JsonException)
+        catch (Exception)
         {
-            // The figure is lost, nothing else.
+            // The figure is shown, never decided on: whatever goes wrong here is no reason to leave the
+            // run Running or to replace the outcome it is about to publish.
         }
     }
+
+    /// <summary>
+    /// Called with the state file just before the working time is written into it. A seam for the tests,
+    /// which make the write fail in ways the file system rarely does.
+    /// </summary>
+    internal Action<string>? WorkedWriting { get; set; }
 
     /// <summary>
     /// Removes a finished run's state file. One that cannot be removed now is removed at the next

@@ -257,10 +257,35 @@ public sealed class ResumeConfirmationTests : VaultHarness
         Assert.True(run.Start(request));
 
         // A screen that offers Resume the moment it sees the run stop must find the figure already written.
-        while (run.Snapshot.State == PublicationRunState.Running) await Task.Yield();
+        // Polled without a delay so the window between publishing and writing, if it existed, would be seen.
+        DateTimeOffset until = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(10);
+
+        while (run.Snapshot.State == PublicationRunState.Running)
+        {
+            Assert.True(DateTimeOffset.UtcNow < until, "the run did not stop within 10 s");
+            await Task.Yield();
+        }
 
         Assert.Equal(PublicationRunState.Cancelled, run.Snapshot.State);
         Assert.Equal(600, PublicationState.Load(run.Snapshot.StatePath!).WorkedSeconds);
+    }
+
+    [Fact]
+    public async Task A_working_time_that_cannot_be_written_never_keeps_the_run_from_stopping()
+    {
+        (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync(400_000);
+        _connections.Ledger.OpenLedgerFee = new OpenLedgerFee(190, 10);
+        _connections.BatchSink!.Transmitting = transmission =>
+        {
+            if (transmission.Ordinal == 1) run.Cancel();
+        };
+        run.WorkedWriting = _ => throw new InvalidOperationException("not an IO failure");
+
+        Assert.True(run.Start(request));
+        await run.Completion.WaitAsync(TimeSpan.FromSeconds(20), Token);
+
+        Assert.Equal(PublicationRunState.Cancelled, run.Snapshot.State);
+        Assert.Null(PublicationState.Load(run.Snapshot.StatePath!).WorkedSeconds);
     }
 
     [Fact]
