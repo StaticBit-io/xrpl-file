@@ -9,10 +9,11 @@
    would be a different lie in the other direction (design G8).
 
    AccountsModel.RefreshAsync only re-reads the vault -- no network -- so the list itself is always
-   cheap to draw. Learning what a given row actually holds costs one connection, which is why that is
-   a per-row "Check" button (RefreshFromLedgerAsync) rather than something this screen does for every
-   row on its own; AccountsModel's own remarks on why opening one connection per row would make the
-   list slower than useful.
+   cheap to draw, and draws first. The list then reads every row once on open, one connection per
+   network (RefreshAllFromLedgerAsync), without holding up that first draw: each row says "Checking…"
+   in its Balance cell until its answer lands. The per-row "Check" button (RefreshFromLedgerAsync)
+   stays for a retry after a read that failed, and for a fresh reading later. Leaving the screen
+   ends the reads (ScreenLifetime), and nothing is drawn after that.
 
    The timer is copied from Shell.razor and Publish.razor -- same Timer / ScreenLifetime /
    _disposed shape -- and, like Publish.razor's, only redraws: the countdown on a row ("about 14
@@ -52,6 +53,7 @@
                                 <th>Label</th>
                                 <th>Address</th>
                                 <th>Network</th>
+                                <th>Balance</th>
                                 <th>Status</th>
                                 <th></th>
                             </tr>
@@ -63,6 +65,7 @@
                                     <td>@row.Label</td>
                                     <td><code class="xf-mono">@row.Address</code></td>
                                     <td>@row.Network</td>
+                                    <td>@Model.BalanceTextOf(row)</td>
                                     <td>
                                         @switch (row.Stage)
                                         {
@@ -79,12 +82,9 @@
                                                    once a node has actually answered); the null-forgiving operator states
                                                    that invariant rather than GetValueOrDefault() quietly standing in for
                                                    an answer nobody gave, which is exactly the zero design G8 forbids.
-                                                   DeletableFromLedger and LedgersRemaining are set alongside BalanceDrops
-                                                   by the same AccountsModel.RefreshFromLedgerAsync branch, so they are
-                                                   just as guaranteed here -- this is design 4.1's third state, "an
+                                                   DeletableFromLedger and LedgersRemaining are set together by the same
+                                                   AccountsModel read, so they are guaranteed here -- this is design 4.1's third state, "an
                                                    account that can be closed from ledger N -- with the countdown". *@
-                                                <span>@XrpAmount.Format(row.BalanceDrops!.Value)</span>
-                                                <br />
                                                 <span class="text-muted">
                                                     Closable from ledger @row.DeletableFromLedger!.Value.ToString("N0")
                                                     &mdash; about @row.LedgersRemaining!.Value.ToString("N0") ledgers
@@ -172,6 +172,10 @@
     {
         await Model.RefreshAsync(_lifetime.Token);
 
+        // Not awaited: the list draws as soon as the vault has answered, and the balances arrive
+        // into it afterwards.
+        _ = ReadBalancesAsync();
+
         // Started only once the first refresh has run, matching Shell.razor's own reasoning: a tick
         // can then never race the first render.
         _pollTimer = new Timer(OnPollTick, state: null, PollInterval, PollInterval);
@@ -220,6 +224,32 @@
         _activeReference = null;
         _view = SubView.List;
         await Model.RefreshAsync(_lifetime.Token);
+
+        // What a funding or a closing changed shows in the balances; a row a read is still busy
+        // with is skipped by the model, not read twice.
+        _ = ReadBalancesAsync();
+    }
+
+    private async Task ReadBalancesAsync()
+    {
+        try
+        {
+            await Model.RefreshAllFromLedgerAsync(_lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The person left the screen; the model has already cleared every row's checking state.
+            return;
+        }
+
+        // Dispose can run while this was awaiting; a render after it would touch a gone component.
+        await InvokeAsync(() =>
+        {
+            if (!_disposed)
+            {
+                StateHasChanged();
+            }
+        });
     }
 
     public void Dispose()

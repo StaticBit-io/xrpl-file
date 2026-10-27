@@ -193,4 +193,147 @@ public sealed class AccountsModelTests : VaultHarness
         Assert.Equal(LedgerTiming.Describe(LedgerTiming.Estimate(64)), counting.TimeRemainingDescription);
         Assert.NotNull(counting.TimeRemainingDescription);
     }
+
+    private static NewVaultEntry GeneratedOn(string label, string network) =>
+        new(VaultEntryKind.Generated, label, network, "rAddressOf" + label, "sSecretOf" + label);
+
+    [Fact]
+    public async Task Opening_the_list_reads_every_accounts_balance_with_one_connection_per_network()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        NewVaultEntry funded = GeneratedOn("funded", "testnet");
+        NewVaultEntry unfunded = GeneratedOn("unfunded", "testnet");
+        NewVaultEntry other = GeneratedOn("other", "devnet");
+        await vault.StoreAsync(funded, token);
+        await vault.StoreAsync(unfunded, token);
+        await vault.StoreAsync(other, token);
+        _connections.Ledger.Balances[funded.Address] = 25_000_000;
+        _connections.Ledger.Balances[other.Address] = 5_000_000;
+
+        await model.RefreshAsync(token);
+        await model.RefreshAllFromLedgerAsync(token);
+
+        Assert.Equal(["devnet", "testnet"], _connections.ConnectedNetworks.Order(StringComparer.Ordinal));
+        Assert.Equal(2, _connections.Connections);
+        Assert.Equal(XrpAmount.Format(25_000_000), model.BalanceTextOf(RowOf(model, "funded")));
+        Assert.Equal(XrpAmount.Format(5_000_000), model.BalanceTextOf(RowOf(model, "other")));
+
+        // A key with no account yet leaves the Balance cell empty: its Status says so.
+        Assert.Equal(AccountStage.KeyOnly, RowOf(model, "unfunded").Stage);
+        Assert.Equal(string.Empty, model.BalanceTextOf(RowOf(model, "unfunded")));
+    }
+
+    [Fact]
+    public async Task A_row_reads_as_checking_while_its_balance_is_read()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        await vault.StoreAsync(GeneratedOn("first", "testnet"), token);
+        await vault.StoreAsync(GeneratedOn("second", "devnet"), token);
+        await model.RefreshAsync(token);
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _connections.BeforeConnect = (_, _) => gate.Task;
+
+        Task reading = model.RefreshAllFromLedgerAsync(token);
+
+        Assert.All(model.Rows, row => Assert.Equal(AccountsModel.CheckingBalance, model.BalanceTextOf(row)));
+
+        gate.SetResult();
+        await reading;
+
+        Assert.All(model.Rows, row => Assert.NotEqual(AccountsModel.CheckingBalance, model.BalanceTextOf(row)));
+        Assert.All(model.Rows, row => Assert.False(model.IsChecking(row.Reference)));
+    }
+
+    [Fact]
+    public async Task A_network_that_cannot_be_reached_marks_only_its_rows()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        NewVaultEntry reachable = GeneratedOn("reachable", "testnet");
+        NewVaultEntry cut = GeneratedOn("cut", "devnet");
+        await vault.StoreAsync(reachable, token);
+        await vault.StoreAsync(cut, token);
+        _connections.Ledger.Balances[reachable.Address] = 25_000_000;
+        _connections.Ledger.Balances[cut.Address] = 5_000_000;
+        XrplFileException unreachable = new(XrplFileError.NodeUnreachable, "no answer");
+        _connections.BeforeConnect = (network, _) =>
+            string.Equals(network, "devnet", StringComparison.Ordinal) ? throw unreachable : Task.CompletedTask;
+        await model.RefreshAsync(token);
+
+        await model.RefreshAllFromLedgerAsync(token);
+
+        AccountRow failed = RowOf(model, "cut");
+        Assert.True(failed.CheckFailed);
+        Assert.Equal(AccountsModel.UnreadBalance, model.BalanceTextOf(failed));
+        Assert.Equal(PublishErrorMessages.For(unreachable), model.Message);
+
+        AccountRow read = RowOf(model, "reachable");
+        Assert.False(read.CheckFailed);
+        Assert.Equal(XrpAmount.Format(25_000_000), model.BalanceTextOf(read));
+    }
+
+    [Fact]
+    public async Task A_closed_account_is_not_asked_about_when_the_list_opens()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        string reference = await vault.StoreAsync(GeneratedOn("closed", "testnet"), token);
+        await vault.UpdateAsync(
+            reference,
+            new VaultEntryEdit(Closure: new AccountClosure(DateTimeOffset.UnixEpoch, "rHome", 28_800_000, "ABC")),
+            token);
+        await model.RefreshAsync(token);
+
+        await model.RefreshAllFromLedgerAsync(token);
+
+        Assert.Equal(0, _connections.Connections);
+        Assert.Equal(string.Empty, model.BalanceTextOf(Assert.Single(model.Rows)));
+    }
+
+    [Fact]
+    public async Task Reading_balances_writes_the_vault_only_when_the_closable_ledger_moved()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        NewVaultEntry entry = GeneratedOn("funded", "testnet");
+        await vault.StoreAsync(entry, token);
+        _connections.Ledger.Balances[entry.Address] = 25_000_000;
+        await model.RefreshAsync(token);
+        byte[] beforeFirstRead = await File.ReadAllBytesAsync(VaultPath, token);
+
+        await model.RefreshAllFromLedgerAsync(token);
+        byte[] afterFirstRead = await File.ReadAllBytesAsync(VaultPath, token);
+
+        await model.RefreshAllFromLedgerAsync(token);
+        byte[] afterSecondRead = await File.ReadAllBytesAsync(VaultPath, token);
+
+        Assert.NotEqual(beforeFirstRead, afterFirstRead);
+        Assert.Equal(afterFirstRead, afterSecondRead);
+    }
+
+    [Fact]
+    public async Task Leaving_while_balances_are_read_leaves_no_row_checking()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        await vault.StoreAsync(GeneratedOn("first", "testnet"), token);
+        await vault.StoreAsync(GeneratedOn("second", "devnet"), token);
+        await model.RefreshAsync(token);
+        IReadOnlyList<AccountRow> before = model.Rows;
+        _connections.BeforeConnect = (_, cancellation) => Task.Delay(Timeout.Infinite, cancellation);
+        using CancellationTokenSource leaving = CancellationTokenSource.CreateLinkedTokenSource(token);
+
+        Task reading = model.RefreshAllFromLedgerAsync(leaving.Token);
+        Assert.All(model.Rows, row => Assert.True(model.IsChecking(row.Reference)));
+        await leaving.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reading);
+        Assert.All(model.Rows, row => Assert.False(model.IsChecking(row.Reference)));
+        Assert.Equal(before, model.Rows);
+    }
+
+    private static AccountRow RowOf(AccountsModel model, string label) =>
+        model.Rows.Single(row => string.Equals(row.Label, label, StringComparison.Ordinal));
 }

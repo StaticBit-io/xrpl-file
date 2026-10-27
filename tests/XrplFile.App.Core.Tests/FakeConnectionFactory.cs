@@ -20,6 +20,15 @@ public sealed class FakeConnectionFactory : IConnectionFactory
     /// <summary>When set, <see cref="ConnectAsync"/> returns a failed task with it.</summary>
     public Exception? ConnectThrows { get; set; }
 
+    /// <summary>
+    /// Awaited first in <see cref="ConnectAsync"/> with the network asked for: a test may throw from
+    /// it, hold the connection on a gate, or ignore the token to model a node that does not answer.
+    /// </summary>
+    public Func<string, CancellationToken, Task>? BeforeConnect { get; set; }
+
+    /// <summary>The network of every connection handed out, in order.</summary>
+    public List<string> ConnectedNetworks { get; } = [];
+
     /// <summary>The Batch node, once <see cref="EnableBatch"/> created it; connections then hand it out as their sink.</summary>
     public FakeBatchLedgerSink? BatchSink { get; private set; }
 
@@ -31,12 +40,15 @@ public sealed class FakeConnectionFactory : IConnectionFactory
     /// </summary>
     public FakeBatchLedgerSink EnableBatch() => BatchSink ??= new FakeBatchLedgerSink(Ledger);
 
-    public Task<ILedgerConnection> ConnectAsync(string network, CancellationToken cancellationToken)
+    public async Task<ILedgerConnection> ConnectAsync(string network, CancellationToken cancellationToken)
     {
-        if (ConnectThrows is not null) return Task.FromException<ILedgerConnection>(ConnectThrows);
+        if (BeforeConnect is not null) await BeforeConnect(network, cancellationToken);
+
+        if (ConnectThrows is not null) throw ConnectThrows;
 
         Connections++;
-        return Task.FromResult<ILedgerConnection>(new Connection(this));
+        ConnectedNetworks.Add(network);
+        return new Connection(this);
     }
 
     private sealed class Connection(FakeConnectionFactory owner) : ILedgerConnection

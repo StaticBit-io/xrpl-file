@@ -23,6 +23,12 @@ public sealed record AccountRow(
     AccountClosure? Closure)
 {
     /// <summary>
+    /// Whether the last read of this row from a node failed. Cleared by the next read that gets an
+    /// answer; the balance and stage the row carries are from the last answer, not from the failure.
+    /// </summary>
+    public bool CheckFailed { get; init; }
+
+    /// <summary>
     /// Whether this row still has anything to offer — false only once <see cref="Stage"/> is
     /// <see cref="AccountStage.Closed"/>, since checking, funding or closing a closed account is
     /// nothing a node or the vault has any answer for. The Accounts screen reads this rather than
