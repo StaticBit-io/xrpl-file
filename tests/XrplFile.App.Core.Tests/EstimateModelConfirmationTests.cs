@@ -14,12 +14,17 @@ public sealed class EstimateModelConfirmationTests : IDisposable
 
     private EstimateModel NewModel() => new(_connections, new RunPaths(_directory), _files.Open);
 
-    private PublishRequest Batch(string path, int size) =>
-        new(size, "application/octet-stream", "f.bin", "ref-w", "rWriter", "standalone", "ref-p", "rPayer", _files.Add(path, new byte[size]))
-        {
-            WriterLabel = "writer",
-            PayerLabel = "payer",
-        };
+    private PublishRequest Batch(string path, int size, bool payer = true) =>
+        payer
+            ? new(size, "application/octet-stream", "f.bin", "ref-w", "rWriter", "standalone", "ref-p", "rPayer", _files.Add(path, new byte[size]))
+            {
+                WriterLabel = "writer",
+                PayerLabel = "payer",
+            }
+            : new(size, "application/octet-stream", "f.bin", "ref-w", "rWriter", "standalone", SourcePath: _files.Add(path, new byte[size]))
+            {
+                WriterLabel = "writer",
+            };
 
     public EstimateModelConfirmationTests()
     {
@@ -57,7 +62,52 @@ public sealed class EstimateModelConfirmationTests : IDisposable
         model.Confirm(true);
 
         Assert.True(model.CanPublish);
+        Assert.NotNull(model.Approval);
         Assert.NotNull(model.HandOff());
+    }
+
+    [Fact]
+    public async Task Unticking_the_checkbox_takes_the_approval_and_the_hand_off_back()
+    {
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(Batch("large.bin", 5_000_000), Token);
+        model.Confirm(true);
+        Assert.True(model.CanPublish);
+        Assert.NotNull(model.Approval);
+
+        model.Confirm(false);
+
+        Assert.True(model.NeedsConfirmation);
+        Assert.False(model.CanPublish);
+        Assert.Null(model.Approval);
+        Assert.Null(model.HandOff());
+    }
+
+    [Fact]
+    public async Task A_ticketed_file_longer_than_an_hour_needs_confirming_even_under_one_XRP()
+    {
+        EstimateModel model = NewModel();
+
+        // One account, no payer: 4,000 chunks, one list and the manifest are 4,002 memos, past the ticket
+        // threshold. The ticket path's slow end is 1 memo/s, so the longest figure is 4,002 s plus the 7 s
+        // read-back against the 3,600 s limit: 11% above it. The fast end, 2 memos/s, is about 2,008 s,
+        // so only the longest figure puts this over. The worst-case fee is 123,820 drops, an eighth of
+        // the one-XRP trigger, so the time alone asks for the confirmation.
+        await model.EstimateAsync(Batch("ticketed.bin", 4_000_000, payer: false), Token);
+
+        Assert.Null(model.BatchEstimate);
+        Assert.True(model.Estimate!.FeeDropsWorstCase < CostSummary.ConfirmationDrops);
+        Assert.True(model.Summary!.Duration.Shortest < CostSummary.ConfirmationDuration);
+        Assert.True(model.Summary.Duration.Longest > CostSummary.ConfirmationDuration);
+        Assert.True(model.NeedsConfirmation);
+        Assert.False(model.CanPublish);
+        Assert.Null(model.Approval);
+        Assert.Null(model.HandOff());
+
+        model.Confirm(true);
+
+        Assert.True(model.CanPublish);
+        Assert.NotNull(model.Approval);
     }
 
     [Fact]
