@@ -993,10 +993,12 @@ public sealed class PublicationSession : IBatchFenceRecorder
         Dictionary<int, LandedMemo> lists = [];
         SequenceRanges sequences = new();
 
-        // The latest differing copy met for a chunk with no adopted copy, per block: whether it is
-        // inside the window depends on the block's first adopted ledger, which the rest of the
-        // stream can still lower.
-        Dictionary<int, (long Ledger, long Chunk, string Hash)> candidates = [];
+        // The first and the latest differing copy met for a chunk with no adopted copy, per block:
+        // whether either is inside the window depends on the block's first adopted ledger, which the
+        // rest of the stream can still lower. The latest decides whether there is a conflict, being
+        // the one most likely to be at or after that ledger; the first is the one named when it is
+        // inside the window too, because it is the copy a reader meets first.
+        Dictionary<int, (ForeignCopy First, ForeignCopy Latest)> candidates = [];
         byte[] buffer = new byte[MemoLayout.ChunkBytes];
         long read = 0;
 
@@ -1035,7 +1037,11 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 }
                 else
                 {
-                    candidates[FileTree.BlockOf(chunkIndex)] = (tx.LedgerIndex, chunkIndex, tx.Hash);
+                    int block = FileTree.BlockOf(chunkIndex);
+                    ForeignCopy copy = new(tx.LedgerIndex, chunkIndex, tx.Hash);
+                    candidates[block] = candidates.TryGetValue(block, out (ForeignCopy First, ForeignCopy Latest) met)
+                        ? (met.First, copy)
+                        : (copy, copy);
                 }
 
                 continue;
@@ -1049,16 +1055,20 @@ public sealed class PublicationSession : IBatchFenceRecorder
             }
         }
 
-        foreach ((long ledger, long chunk, string hash) in candidates.Values)
+        foreach ((int block, (ForeignCopy first, ForeignCopy latest)) in candidates)
         {
-            if (landing.TryBlockLedgers(FileTree.BlockOf(chunk), out LedgerRange block) && ledger >= block.First)
+            if (landing.TryBlockLedgers(block, out LedgerRange adopted) && latest.Ledger >= adopted.First)
             {
-                throw WindowConflict(hash, ledger, chunk);
+                ForeignCopy named = first.Ledger >= adopted.First ? first : latest;
+                throw WindowConflict(named.Hash, named.Ledger, named.Chunk);
             }
         }
 
         return new Reconciled(new LandedMemos(landing, lists), sequences);
     }
+
+    /// <summary>A writer record carrying one of this file's chunk indices with other bytes than this file's.</summary>
+    private readonly record struct ForeignCopy(long Ledger, long Chunk, string Hash);
 
     /// <summary>Records the conflict on the state (spec S17) and returns the error to throw.</summary>
     private XrplFileException WindowConflict(string hash, long ledger, long chunk)
