@@ -75,4 +75,6 @@
         <ProjectReference Include="..\XrplFile.App.Core\XrplFile.App.Core.csproj" />
     </ItemGroup>
 
+    <Import Project="..\DesktopGarbageCollection.props" />
+
 </Project>

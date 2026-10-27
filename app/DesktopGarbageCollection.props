@@ -1,0 +1,18 @@
+<Project>
+  <!--
+    The desktop application's collector settings, imported by the application and by
+    tests/XrplFile.ResumeMemoryProbe, so that the probe measures a resume under exactly these.
+
+    The SDK answers every account_tx page as one array of the whole frame, about 1.2 MB for 400
+    records, and the answer is parsed into JsonElement copies of the same size. Above 85,000 bytes
+    each of them is a large-object-heap array, which only a gen2 collection reclaims, and how far
+    that heap may grow before one is a budget the collector learns from the collections before:
+    after an unlock, whose Argon2id lanes were live across one, it let about 860 MiB of dead pages
+    pile up during a resume's history read (measured over 98,000 records with the real client). At
+    this threshold those arrays are small objects that die in gen0 collections, whatever that budget
+    is. The runtime caps the threshold at about 4 MiB, so a higher value would change nothing.
+  -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.LOHThreshold" Value="4194304" />
+  </ItemGroup>
+</Project>
