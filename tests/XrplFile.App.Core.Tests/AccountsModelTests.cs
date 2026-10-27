@@ -431,6 +431,116 @@ public sealed class AccountsModelTests : VaultHarness
         Assert.Equal(AccountsModel.UnreadBalance, model.BalanceTextOf(Assert.Single(model.Rows)));
     }
 
+    [Fact]
+    public async Task A_network_that_hangs_on_connect_does_not_hold_another_networks_rows_at_checking()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+
+        // The hanging network's row is stored first, so a read that went network by network would wait on it
+        // before it ever reached the other one. The reachable row has no account: its read needs no vault write.
+        await vault.StoreAsync(GeneratedOn("hung", "devnet"), token);
+        await vault.StoreAsync(GeneratedOn("reachable", "testnet"), token);
+        await model.RefreshAsync(token);
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _connections.BeforeConnect = (network, _) =>
+            string.Equals(network, "devnet", StringComparison.Ordinal) ? gate.Task : Task.CompletedTask;
+
+        Task reading = model.RefreshAllFromLedgerAsync(token);
+
+        AccountRow reachable = RowOf(model, "reachable");
+        Assert.False(model.IsChecking(reachable.Reference));
+        Assert.Equal(AccountStage.KeyOnly, reachable.Stage);
+        Assert.True(model.IsChecking(RowOf(model, "hung").Reference));
+
+        gate.SetResult();
+        await reading;
+
+        Assert.All(model.Rows, row => Assert.False(model.IsChecking(row.Reference)));
+    }
+
+    [Fact]
+    public async Task A_read_asks_for_the_current_ledger_once_per_connection_not_once_per_funded_row()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+
+        foreach (string network in new[] { "testnet", "devnet" })
+        {
+            foreach (string number in new[] { "1", "2", "3" })
+            {
+                NewVaultEntry entry = GeneratedOn(network + number, network);
+                await vault.StoreAsync(entry, token);
+                _connections.Ledger.Balances[entry.Address] = 25_000_000;
+            }
+        }
+
+        await model.RefreshAsync(token);
+        await model.RefreshAllFromLedgerAsync(token);
+
+        Assert.All(model.Rows, row => Assert.Equal(AccountStage.Funded, row.Stage));
+        Assert.Equal(2, _connections.Connections);
+        Assert.Equal(2, _connections.Ledger.CurrentLedgerReads);
+    }
+
+    [Fact]
+    public async Task A_check_on_a_row_that_is_already_being_checked_leaves_the_hold_to_the_read_that_owns_it()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        string reference = await vault.StoreAsync(GeneratedOn("busy", "testnet"), token);
+        await model.RefreshAsync(token);
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _connections.BeforeConnect = (_, _) => gate.Task;
+        Task bulk = model.RefreshAllFromLedgerAsync(token);
+        Assert.True(model.IsChecking(reference));
+
+        // Returns at once when it leaves the row alone; the bound makes a regression fail rather than wait on the gate.
+        await model.RefreshFromLedgerAsync(reference, token).WaitAsync(TimeSpan.FromSeconds(30), token);
+
+        Assert.True(model.IsChecking(reference));
+
+        gate.SetResult();
+        await bulk;
+
+        Assert.False(model.IsChecking(reference));
+        Assert.Equal(1, _connections.Connections);
+    }
+
+    [Fact]
+    public async Task An_unknown_row_says_not_checked_yet_only_until_a_check_has_run()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        string reference = await vault.StoreAsync(GeneratedOn("fresh", "testnet"), token);
+        await model.RefreshAsync(token);
+        Assert.Equal(AccountsModel.NotCheckedStatus, model.UnknownStatusTextOf(RowOf(model, "fresh")));
+
+        // While a node is asked, the Balance cell says so.
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _connections.BeforeConnect = (_, _) => gate.Task;
+        _connections.ConnectThrows = new XrplFileException(XrplFileError.NodeUnreachable, "no answer");
+        Task check = model.RefreshFromLedgerAsync(reference, token);
+
+        Assert.Equal(string.Empty, model.UnknownStatusTextOf(RowOf(model, "fresh")));
+
+        // After a failed one, the Balance cell says that.
+        gate.SetResult();
+        await check;
+
+        Assert.True(RowOf(model, "fresh").CheckFailed);
+        Assert.Equal(AccountStage.Unknown, RowOf(model, "fresh").Stage);
+        Assert.Equal(string.Empty, model.UnknownStatusTextOf(RowOf(model, "fresh")));
+
+        // After an answer the row has left the Unknown stage, and the Status column has its own words.
+        _connections.BeforeConnect = null;
+        _connections.ConnectThrows = null;
+        await model.RefreshFromLedgerAsync(reference, token);
+
+        Assert.Equal(AccountStage.KeyOnly, RowOf(model, "fresh").Stage);
+        Assert.Equal(string.Empty, model.UnknownStatusTextOf(RowOf(model, "fresh")));
+    }
+
     private static AccountRow RowOf(AccountsModel model, string label) =>
         model.Rows.Single(row => string.Equals(row.Label, label, StringComparison.Ordinal));
 }

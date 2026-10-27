@@ -96,9 +96,10 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
         lock (_gate)
         {
             row = OpenRowLocked(reference);
-            if (row is null) return;
 
-            _checking.Add(reference);
+            // A row someone is already checking is theirs to finish: this call's finally would
+            // clear their hold, and reading it twice would race two writes to the same row.
+            if (row is null || !_checking.Add(reference)) return;
         }
 
         try
@@ -106,7 +107,7 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
             await using ILedgerConnection connection =
                 await connections.ConnectAsync(row.Network, cancellationToken).ConfigureAwait(false);
 
-            await CheckOnAsync(connection, row, cancellationToken).ConfigureAwait(false);
+            await CheckOnAsync(connection, new LedgerReading(connection), row, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsReadFailure(ex, cancellationToken))
         {
@@ -146,54 +147,70 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
         }
 
         // Releases a row this read still holds; a row it let go of may be a Check click's by now.
+        // The networks are read at the same time, so `held` is touched under the gate as well.
         void Release(string reference)
         {
-            if (!held.Remove(reference)) return;
-
-            lock (_gate) _checking.Remove(reference);
+            lock (_gate)
+            {
+                if (held.Remove(reference)) _checking.Remove(reference);
+            }
         }
 
+        // Concurrently: a node that never answers (the connect has no timeout of its own but the
+        // socket's) must not keep every other network's rows at "Checking…". The groups hold
+        // disjoint rows, and every write to a row goes through the gate.
         try
         {
-            foreach (IGrouping<string, AccountRow> group in targets.GroupBy(row => row.Network, StringComparer.Ordinal))
-            {
-                ILedgerConnection connection;
-                try
-                {
-                    connection = await connections.ConnectAsync(group.Key, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (IsReadFailure(ex, cancellationToken))
-                {
-                    foreach (AccountRow row in group)
-                    {
-                        Fail(row.Reference, ex);
-                        Release(row.Reference);
-                    }
-
-                    continue;
-                }
-
-                await using (connection.ConfigureAwait(false))
-                {
-                    foreach (AccountRow row in group)
-                    {
-                        // Re-read: the list may have been rebuilt since the snapshot above.
-                        AccountRow? latest;
-                        lock (_gate) latest = OpenRowLocked(row.Reference);
-
-                        if (latest is not null)
-                        {
-                            await CheckOnAsync(connection, latest, cancellationToken).ConfigureAwait(false);
-                        }
-
-                        Release(row.Reference);
-                    }
-                }
-            }
+            await Task.WhenAll(targets
+                .GroupBy(row => row.Network, StringComparer.Ordinal)
+                .Select(group => ReadNetworkAsync(group.Key, [.. group], Release, cancellationToken))).ConfigureAwait(false);
         }
         finally
         {
-            foreach (string reference in held.ToArray()) Release(reference);
+            string[] leftover;
+            lock (_gate) leftover = [.. held];
+
+            foreach (string reference in leftover) Release(reference);
+        }
+    }
+
+    /// <summary>One network's rows over one connection. A connection that cannot be made marks the rows and ends here.</summary>
+    private async Task ReadNetworkAsync(
+        string network, List<AccountRow> rows, Action<string> release, CancellationToken cancellationToken)
+    {
+        ILedgerConnection connection;
+        try
+        {
+            connection = await connections.ConnectAsync(network, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsReadFailure(ex, cancellationToken))
+        {
+            foreach (AccountRow row in rows)
+            {
+                Fail(row.Reference, ex);
+                release(row.Reference);
+            }
+
+            return;
+        }
+
+        await using (connection.ConfigureAwait(false))
+        {
+            LedgerReading ledger = new(connection);
+
+            foreach (AccountRow row in rows)
+            {
+                // Re-read: the list may have been rebuilt since the snapshot the caller took.
+                AccountRow? latest;
+                lock (_gate) latest = OpenRowLocked(row.Reference);
+
+                if (latest is not null)
+                {
+                    await CheckOnAsync(connection, ledger, latest, cancellationToken).ConfigureAwait(false);
+                }
+
+                release(row.Reference);
+            }
         }
     }
 
@@ -212,6 +229,23 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
         if (row.BalanceDrops is null || row.Stage == AccountStage.KeyOnly) return string.Empty;
 
         return XrpAmount.Format(row.BalanceDrops.Value);
+    }
+
+    /// <summary>What the Status column says for a row no node has answered about.</summary>
+    public const string NotCheckedStatus = "Not checked yet";
+
+    /// <summary>
+    /// What the Status column says for a row of the <see cref="AccountStage.Unknown"/> stage: that
+    /// nothing has asked a node yet, and nothing else. While a read is under way, and after one has
+    /// failed, the Balance column already says so, and a second line would contradict it.
+    /// </summary>
+    public string UnknownStatusTextOf(AccountRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return row.Stage == AccountStage.Unknown && !row.CheckFailed && !IsChecking(row.Reference)
+            ? NotCheckedStatus
+            : string.Empty;
     }
 
     private void Apply(string reference, Func<AccountRow, AccountRow> change)
@@ -252,7 +286,19 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
         Apply(reference, current => current with { CheckFailed = true });
     }
 
-    private async Task CheckOnAsync(ILedgerConnection connection, AccountRow row, CancellationToken cancellationToken)
+    /// <summary>
+    /// The ledger a connection is at, asked for once: every funded row of a read counts its
+    /// countdown from the same number, and a public node answers a request in about half a second.
+    /// </summary>
+    private sealed class LedgerReading(ILedgerConnection connection)
+    {
+        private long? _ledger;
+
+        public async Task<long> CurrentAsync(CancellationToken cancellationToken) =>
+            _ledger ??= await connection.Source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task CheckOnAsync(ILedgerConnection connection, LedgerReading ledger, AccountRow row, CancellationToken cancellationToken)
     {
         try
         {
@@ -283,7 +329,7 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
                 return;
             }
 
-            long currentLedger = await connection.Source.CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
+            long currentLedger = await ledger.CurrentAsync(cancellationToken).ConfigureAwait(false);
             uint sequence = await connection.Sink
                 .SequenceAsync(row.Address, validated: true, cancellationToken).ConfigureAwait(false);
 

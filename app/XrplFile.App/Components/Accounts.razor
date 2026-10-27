@@ -70,7 +70,7 @@
                                         @switch (row.Stage)
                                         {
                                             case AccountStage.Unknown:
-                                                <span class="text-muted">Not checked yet</span>
+                                                <span class="text-muted">@Model.UnknownStatusTextOf(row)</span>
                                                 break;
 
                                             case AccountStage.KeyOnly:

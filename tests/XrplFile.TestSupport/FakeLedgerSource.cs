@@ -544,6 +544,12 @@ public sealed class FakeLedgerSource : ILedgerSource
 
     private int _currentLedgerCalls;
 
+    /// <summary>How many times <see cref="CurrentLedgerAsync"/> was asked, failed answers included.</summary>
+    public int CurrentLedgerReads
+    {
+        get { lock (_gate) return _currentLedgerCalls; }
+    }
+
     /// <summary>
     /// How many of the next <see cref="CurrentLedgerAsync"/> calls fail with
     /// <see cref="XrplFileError.NodeUnreachable"/> before it recovers — a node that drops one ledger
