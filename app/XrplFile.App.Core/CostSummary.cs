@@ -39,8 +39,25 @@ public sealed record CostSummary(DurationRange Duration, long Transactions, IRea
         ArgumentNullException.ThrowIfNull(estimate);
         ArgumentNullException.ThrowIfNull(request);
 
+        return Priced(PublicationDuration.ForBatch(estimate), estimate, request);
+    }
+
+    /// <summary>
+    /// A Batch resume's summary, made of the chunks still to write. It is shown after the hash pass and
+    /// the history read, so its duration is the remaining work alone (<see cref="PublicationDuration.ForBatchRemaining"/>).
+    /// </summary>
+    public static CostSummary OfResume(BatchPublicationEstimate remaining, PublishRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(remaining);
+        ArgumentNullException.ThrowIfNull(request);
+
+        return Priced(PublicationDuration.ForBatchRemaining(remaining), remaining, request);
+    }
+
+    private static CostSummary Priced(DurationRange duration, BatchPublicationEstimate estimate, PublishRequest request)
+    {
         return new CostSummary(
-            PublicationDuration.ForBatch(estimate), estimate.Memos + estimate.Batches,
+            duration, estimate.Memos + estimate.Batches,
             [
                 new AccountCost("Payer", request.PayerLabel ?? request.PayerAccount ?? string.Empty, estimate.PayerRequiredDrops, estimate.PayerFeeDropsWorstCase),
                 new AccountCost("Writer", request.WriterLabel ?? request.Account, estimate.WriterRequiredDrops, estimate.WriterFeeDropsWorstCase),

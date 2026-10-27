@@ -863,7 +863,7 @@ public sealed class PublicationRun(
     /// </summary>
     private ResumeApproval ApproveResume(PublishRequest request, int generation) => async (quote, cancellationToken) =>
     {
-        CostSummary summary = quote.Batch is { } batch ? CostSummary.Of(batch, request) : CostSummary.Of(quote.OneAccount!, request);
+        CostSummary summary = quote.Batch is { } batch ? CostSummary.OfResume(batch, request) : CostSummary.Of(quote.OneAccount!, request);
         SpendingApproval approval = quote.Batch is { } priced
             ? SpendingApproval.For(priced, quote.Writer, quote.Payer!)
             : SpendingApproval.For(quote.OneAccount!, quote.Writer);

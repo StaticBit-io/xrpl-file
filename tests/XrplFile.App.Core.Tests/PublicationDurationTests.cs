@@ -8,17 +8,43 @@ public sealed class PublicationDurationTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task The_spec_example_of_a_1_7_GB_file_takes_about_six_to_seven_hours_through_Batch()
+    public async Task The_spec_example_of_a_1_7_GB_file_takes_about_three_to_seven_hours_through_Batch()
     {
         BatchPublicationEstimate estimate = await PublicationEstimator.EstimateBatchAsync(new FakeLedgerSource(), "rWriter", "rPayer", 1_689_809_534, Token);
 
         DurationRange range = PublicationDuration.ForBatch(estimate);
 
-        // 1,689,977 memos at 85 and 70 a second, 106 rounds of 12 s, and four sampled blocks of 1,024 records at 0.7 s per 400.
+        // 1,689,977 memos at 160 and 70 a second, 106 rounds of 12 s, four sampled blocks of 1,024 records at 0.7 s per 400,
+        // and the hash pass over 1,689,810 chunks at 9,000 and 4,500 a second.
         double fixedPart = 106 * 12 + 4 * 1_024 * 0.7 / 400;
-        Assert.Equal(1_689_977 / 85.0 + fixedPart, range.Shortest.TotalSeconds, precision: 3);
-        Assert.Equal(1_689_977 / 70.0 + fixedPart, range.Longest.TotalSeconds, precision: 3);
-        Assert.Equal("5 h 53 min to 7 h 4 min", DurationText.Of(range));
+        Assert.Equal(1_689_977 / 160.0 + fixedPart + 1_689_810 / 9_000.0, range.Shortest.TotalSeconds, precision: 3);
+        Assert.Equal(1_689_977 / 70.0 + fixedPart + 1_689_810 / 4_500.0, range.Longest.TotalSeconds, precision: 3);
+        Assert.Equal("3 h 21 min to 7 h 10 min", DurationText.Of(range));
+    }
+
+    [Fact]
+    public async Task The_300_MB_acceptance_file_is_priced_around_what_it_took()
+    {
+        BatchPublicationEstimate estimate = await PublicationEstimator.EstimateBatchAsync(new FakeLedgerSource(), "rWriter", "rPayer", 300_343_426, Token);
+
+        DurationRange range = PublicationDuration.ForBatch(estimate);
+
+        TimeSpan netWallTime = TimeSpan.FromSeconds(37 * 60 + 53);
+        Assert.True(range.Shortest <= netWallTime);
+        Assert.True(netWallTime <= range.Longest);
+        Assert.True(range.Longest > CostSummary.ConfirmationDuration);
+    }
+
+    [Fact]
+    public async Task A_resume_quote_prices_only_the_work_after_continue()
+    {
+        BatchPublicationEstimate remaining = await PublicationEstimator.EstimateBatchAsync(new FakeLedgerSource(), "rWriter", "rPayer", 202_040_000, Token);
+
+        DurationRange quote = PublicationDuration.ForBatchRemaining(remaining);
+        DurationRange fresh = PublicationDuration.ForBatch(remaining);
+
+        Assert.Equal(202_040 / 9_000.0, (fresh.Shortest - quote.Shortest).TotalSeconds, precision: 3);
+        Assert.Equal(202_040 / 4_500.0, (fresh.Longest - quote.Longest).TotalSeconds, precision: 3);
     }
 
     [Fact]

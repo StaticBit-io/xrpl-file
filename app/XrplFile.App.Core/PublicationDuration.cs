@@ -5,11 +5,17 @@ public readonly record struct DurationRange(TimeSpan Shortest, TimeSpan Longest)
 
 public static class PublicationDuration
 {
-    /// <summary>Batch writing, fast end: the platform's measured best (spec S11).</summary>
-    public const double BatchFastMemosPerSecond = 85;
+    /// <summary>Batch writing, fast end: the best rate the testnet acceptance measured (spec S11, amended 2026-10-27).</summary>
+    public const double BatchFastMemosPerSecond = 160;
 
     /// <summary>Batch writing, slow end: the platform's conservative figure, also the run screen's prior (spec B21).</summary>
     public const double BatchSlowMemosPerSecond = 70;
+
+    /// <summary>Hashing the file, fast end: the acceptance's first pass, 300,344 chunks in 0:32, rounded down (spec S11).</summary>
+    public const double HashingFastChunksPerSecond = 9_000;
+
+    /// <summary>Hashing the file, slow end: the acceptance's resume pass, 300,344 chunks in 1:05, rounded down (spec S11).</summary>
+    public const double HashingSlowChunksPerSecond = 4_500;
 
     /// <summary>The ticket path's measured testnet range (spec S11).</summary>
     public const double TicketFastMemosPerSecond = 2;
@@ -31,17 +37,38 @@ public static class PublicationDuration
     /// <summary>Reading this many history records at the reader's pace.</summary>
     public static TimeSpan Reading(long records) => TimeSpan.FromSeconds(records * ReaderSecondsPer400Records / 400);
 
+    /// <summary>The hash pass over this many chunks, as a range between the fast and the slow rate.</summary>
+    public static DurationRange Hashing(long chunks) => new(
+        TimeSpan.FromSeconds(chunks / HashingFastChunksPerSecond),
+        TimeSpan.FromSeconds(chunks / HashingSlowChunksPerSecond));
+
+    /// <summary>A fresh Batch publication: the hash pass over the whole file, then <see cref="ForBatchRemaining"/> of all of it.</summary>
     public static DurationRange ForBatch(BatchPublicationEstimate estimate)
     {
         ArgumentNullException.ThrowIfNull(estimate);
 
-        TimeSpan settles = SettlePerRound * estimate.Rounds;
-        TimeSpan verification = Reading(Math.Min(estimate.Chunks, (long)SampledBlocks(estimate.Blocks) * RecordsPerSampledBlock));
+        DurationRange writing = ForBatchRemaining(estimate);
+        DurationRange hashing = Hashing(estimate.Chunks);
+
+        return new DurationRange(writing.Shortest + hashing.Shortest, writing.Longest + hashing.Longest);
+    }
+
+    /// <summary>
+    /// What a Batch publication still has to do once its file is hashed and its history read: the writing,
+    /// the settles and the verification. A resume's quote is made of the remaining chunks and prices this
+    /// alone, because the hash pass and the history read are over by the time the person sees it.
+    /// </summary>
+    public static DurationRange ForBatchRemaining(BatchPublicationEstimate remaining)
+    {
+        ArgumentNullException.ThrowIfNull(remaining);
+
+        TimeSpan settles = SettlePerRound * remaining.Rounds;
+        TimeSpan verification = Reading(Math.Min(remaining.Chunks, (long)SampledBlocks(remaining.Blocks) * RecordsPerSampledBlock));
         TimeSpan fixedPart = settles + verification;
 
         return new DurationRange(
-            TimeSpan.FromSeconds(estimate.Memos / BatchFastMemosPerSecond) + fixedPart,
-            TimeSpan.FromSeconds(estimate.Memos / BatchSlowMemosPerSecond) + fixedPart);
+            TimeSpan.FromSeconds(remaining.Memos / BatchFastMemosPerSecond) + fixedPart,
+            TimeSpan.FromSeconds(remaining.Memos / BatchSlowMemosPerSecond) + fixedPart);
     }
 
     public static DurationRange ForOneAccount(PublicationEstimate estimate)

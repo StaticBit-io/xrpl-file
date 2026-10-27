@@ -1,3 +1,4 @@
+using XrplFile.Tests;
 using Xunit;
 
 namespace XrplFile.App.Core.Tests;
@@ -22,5 +23,19 @@ public sealed class CostSummaryTests
             [new AccountCost("Payer", "p", 3_000_000, 1_000_001), new AccountCost("Writer", "w", 2_000_000, 5)]);
 
         Assert.True(summary.NeedsConfirmation);
+    }
+
+    [Fact]
+    public async Task A_resume_summary_prices_only_the_remaining_work()
+    {
+        BatchPublicationEstimate remaining = await PublicationEstimator.EstimateBatchAsync(
+            new FakeLedgerSource(), "rWriter", "rPayer", 202_040_000, TestContext.Current.CancellationToken);
+        PublishRequest request = new(202_040_000, "application/octet-stream", "big.bin", "ref-w", "rWriter", "testnet", "ref-p", "rPayer", "big.bin");
+
+        CostSummary summary = CostSummary.OfResume(remaining, request);
+
+        Assert.Equal(PublicationDuration.ForBatchRemaining(remaining), summary.Duration);
+        Assert.Equal(remaining.Memos + remaining.Batches, summary.Transactions);
+        Assert.Equivalent(CostSummary.Of(remaining, request).Accounts, summary.Accounts);
     }
 }
