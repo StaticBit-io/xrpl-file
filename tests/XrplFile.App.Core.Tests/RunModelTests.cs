@@ -413,6 +413,24 @@ public sealed class RunModelTests : VaultHarness
         Assert.StartsWith("\"the file\" is still publishing.", RunModel.CloseConfirmation(snapshot), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void A_resume_waiting_for_its_confirmation_reads_as_waiting_for_the_person()
+    {
+        DateTimeOffset now = new(2026, 10, 27, 12, 0, 0, TimeSpan.Zero);
+        CostSummary asked = new(
+            new DurationRange(TimeSpan.FromHours(2), TimeSpan.FromHours(3)),
+            1_000,
+            [new AccountCost("Payer", "payer", 5_000_000, 2_000_000)]);
+        RunSnapshot snapshot = new(
+            PublicationRunState.Running, new PublishProgress("history", 98_000, 0), null, null, "big.bin", "1", null)
+        {
+            StartedAt = now - TimeSpan.FromMinutes(5) - TimeSpan.FromSeconds(2),
+            Confirmation = asked,
+        };
+
+        Assert.Equal("Waiting for you to confirm the cost below.", RunModel.StageTextOf(snapshot, now, rate: null));
+    }
+
     /// <summary>A report whose tidy-up ran and found nothing, unless the caller says otherwise.</summary>
     private static PublicationReport Report() =>
         new(

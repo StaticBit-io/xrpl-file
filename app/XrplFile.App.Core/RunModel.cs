@@ -21,7 +21,8 @@ public readonly record struct RunView(
     string? StateNote,
     bool CanResume,
     string? StatePath,
-    CostSummary? Confirmation);
+    CostSummary? Confirmation,
+    bool ShowsProgress);
 
 /// <summary>
 /// The run screen (design 4.3). It decides nothing about the run itself — that lives in
@@ -30,6 +31,12 @@ public readonly record struct RunView(
 /// </summary>
 public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
 {
+    /// <summary>
+    /// The stage line while a resume's cost waits for the person: the run is stopped on the answer, so it
+    /// shows no progress, rate or elapsed time (spec amendment 3).
+    /// </summary>
+    public const string AwaitingConfirmationText = "Waiting for you to confirm the cost below.";
+
     /// <summary>The window the rate is measured over (spec B21).</summary>
     public static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(30);
 
@@ -148,6 +155,9 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
         {
             return StoppedTextOf(snapshot);
         }
+
+        // The run is stopped on the person's answer, so a clock or a rate here would read as work in progress.
+        if (snapshot.Confirmation is not null) return AwaitingConfirmationText;
 
         string elapsed = snapshot.StartedAt is { } started ? $" · {Clock(now - started)} elapsed" : string.Empty;
 
@@ -409,7 +419,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
         RunSnapshot snapshot = run.Snapshot;
 
         return new RunView(
-            CanCancel: snapshot.State == PublicationRunState.Running,
+            CanCancel: snapshot.State == PublicationRunState.Running && snapshot.Confirmation is null,
             IsFinished: snapshot.State is
                 PublicationRunState.Succeeded or PublicationRunState.Failed or PublicationRunState.Cancelled,
             WasCancelled: snapshot.State == PublicationRunState.Cancelled,
@@ -423,7 +433,8 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
             StateNote: StateNoteOf(snapshot),
             CanResume: IsResumable(snapshot),
             StatePath: snapshot.StatePath,
-            Confirmation: snapshot.Confirmation);
+            Confirmation: snapshot.Confirmation,
+            ShowsProgress: snapshot.Confirmation is null);
     }
 
     /// <inheritdoc cref="TicketNoteOf"/>

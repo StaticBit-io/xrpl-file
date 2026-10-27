@@ -44,9 +44,12 @@
 
         <section class="xf-card">
             <p>@view.StageText</p>
-            <div class="progress" role="progressbar" aria-valuenow="@view.Percent" aria-valuemin="0" aria-valuemax="100">
-                <div class="progress-bar" style="width: @(view.Percent)%">@view.Percent%</div>
-            </div>
+            @if (view.ShowsProgress)
+            {
+                <div class="progress" role="progressbar" aria-valuenow="@view.Percent" aria-valuemin="0" aria-valuemax="100">
+                    <div class="progress-bar" style="width: @(view.Percent)%">@view.Percent%</div>
+                </div>
+            }
 
             @if (view.Confirmation is { } confirm)
             {
@@ -67,17 +70,20 @@
                     <label class="form-check-label" for="xf-resume-understood">@EstimateModel.ConfirmationLabel</label>
                 </div>
                 <div class="xf-actionbar">
-                    <button type="button" class="btn btn-outline-secondary" @onclick="() => Model.DeclineResume()">Stop</button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => Model.DeclineResume()">Cancel</button>
                     <button type="button" class="btn btn-primary" disabled="@(!_understood)" @onclick="() => Model.ConfirmResume()">Continue</button>
                 </div>
             }
         </section>
 
-        <div class="xf-actionbar">
-            <button type="button" class="btn btn-outline-secondary" disabled="@(!view.CanCancel)" @onclick="Cancel">
-                Cancel
-            </button>
-        </div>
+        @if (view.ShowsProgress)
+        {
+            <div class="xf-actionbar">
+                <button type="button" class="btn btn-outline-secondary" disabled="@(!view.CanCancel)" @onclick="Cancel">
+                    Cancel
+                </button>
+            </div>
+        }
     </div>
 }
 else

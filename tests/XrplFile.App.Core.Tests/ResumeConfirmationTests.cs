@@ -111,6 +111,26 @@ public sealed class ResumeConfirmationTests : VaultHarness
     }
 
     [Fact]
+    public async Task While_a_confirmation_waits_the_screen_offers_one_way_to_decline_and_no_progress()
+    {
+        (PublicationRun run, PublishRequest request, string statePath, _) = await InterruptedExpensiveAsync();
+        await File.WriteAllBytesAsync(request.SourcePath!, VectorStream.Bytes("app-batch", 400_000), Token);
+        RunModel model = new(run);
+
+        Assert.True(run.Resume(statePath, Resuming(request, request.SourcePath!)));
+        await BatchTestWait.UntilAsync(() => run.Snapshot.Confirmation is not null);
+        RunView view = model.Capture();
+
+        Assert.False(view.ShowsProgress);
+        Assert.False(view.CanCancel);
+        Assert.NotNull(view.Confirmation);
+        Assert.Equal(RunModel.AwaitingConfirmationText, view.StageText);
+
+        Assert.True(run.AnswerConfirmation(false));
+        await run.Completion;
+    }
+
+    [Fact]
     public async Task A_declined_resume_sends_nothing_and_stays_resumable()
     {
         (PublicationRun run, PublishRequest request, string statePath, _) = await InterruptedExpensiveAsync();
