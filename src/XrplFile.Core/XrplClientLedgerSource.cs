@@ -76,7 +76,7 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             // not a failure to read -- the same rule the balance lookup below follows. It is the
             // state a throwaway account is in until somebody funds it, and it is precisely then
             // that a caller asks who paid.
-            JsonElement? page = await AskOrAbsentAsync(
+            NodeAnswer? page = await AskPageOrAbsentAsync(
                 new AccountTransactionsRequest(account)
                 {
                     LedgerIndexMin = (int)fromLedger,
@@ -91,13 +91,23 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
             if (page is not { } answer) yield break;
 
-            foreach (LedgerTransaction tx in ParseTransactions(answer))
+            IReadOnlyList<LedgerTransaction> transactions;
+
+            // The page's buffers go back to the pool before its records are handed out: the
+            // records are plain strings by now, and the consumer may take as long as it likes.
+            using (answer)
+            {
+                transactions = ParseTransactions(answer.Result);
+
+                // The marker goes back to the node as it came; its shape is the node's business.
+                // It is cloned because the page that holds it is released here.
+                marker = answer.Result.TryGetProperty("marker", out JsonElement next) ? next.Clone() : null;
+            }
+
+            foreach (LedgerTransaction tx in transactions)
             {
                 yield return tx;
             }
-
-            // The marker goes back to the node as it came; its shape is the node's business.
-            marker = answer.TryGetProperty("marker", out JsonElement next) ? next.Clone() : null;
 
             if (marker is null) yield break;
         }
@@ -446,21 +456,27 @@ public sealed class XrplClientLedgerSource : ILedgerSource
     /// <summary>One request, with every way it can fail turned into NodeUnreachable.</summary>
     private async Task<JsonElement> AskAsync(BaseRequest request, string command, CancellationToken cancellationToken)
     {
-        JsonElement answer;
+        NodeAnswer raw;
 
         try
         {
-            NodeAnswer raw = await _request(request, cancellationToken).ConfigureAwait(false);
-            if (string.Equals(raw.Warning, "load", StringComparison.Ordinal)) Interlocked.Increment(ref _loadWarnings);
-            answer = raw.Result;
+            raw = await _request(request, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception e) when (IsNodeFailure(e, cancellationToken))
         {
             throw Unreachable(command, e);
         }
 
-        return answer.TryGetProperty("error", out JsonElement error) ? throw Answered(command, error) : answer;
+        using (raw)
+        {
+            if (string.Equals(raw.Warning, "load", StringComparison.Ordinal)) Interlocked.Increment(ref _loadWarnings);
+
+            return raw.Result.TryGetProperty("error", out JsonElement error) ? throw Answered(command, error) : Detach(raw);
+        }
     }
+
+    /// <summary>The answer's element, copied out when a pooled document backs it, so it outlives the answer.</summary>
+    private static JsonElement Detach(NodeAnswer answer) => answer.Owner is null ? answer.Result : answer.Result.Clone();
 
     /// <summary>
     /// One request where a single node error code is itself an answer -- "nothing here" -- rather
@@ -483,13 +499,32 @@ public sealed class XrplClientLedgerSource : ILedgerSource
     private async Task<JsonElement?> AskOrAbsentAsync(
         BaseRequest request, string command, IReadOnlyList<string> absentCodes, CancellationToken cancellationToken)
     {
-        JsonElement answer;
+        NodeAnswer? page = await AskPageOrAbsentAsync(request, command, absentCodes, cancellationToken).ConfigureAwait(false);
+
+        if (page is not { } answer) return null;
+
+        using (answer)
+        {
+            return Detach(answer);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="AskOrAbsentAsync(BaseRequest, string, string, CancellationToken)"/> for a caller
+    /// that reads a page-sized answer in place: the answer is returned still backed by its pooled
+    /// buffers, with the same absent and failure rules, and the caller disposes it.
+    /// </summary>
+    private Task<NodeAnswer?> AskPageOrAbsentAsync(BaseRequest request, string command, string absentCode, CancellationToken cancellationToken) =>
+        AskPageOrAbsentAsync(request, command, [absentCode], cancellationToken);
+
+    private async Task<NodeAnswer?> AskPageOrAbsentAsync(
+        BaseRequest request, string command, IReadOnlyList<string> absentCodes, CancellationToken cancellationToken)
+    {
+        NodeAnswer raw;
 
         try
         {
-            NodeAnswer raw = await _request(request, cancellationToken).ConfigureAwait(false);
-            if (string.Equals(raw.Warning, "load", StringComparison.Ordinal)) Interlocked.Increment(ref _loadWarnings);
-            answer = raw.Result;
+            raw = await _request(request, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception e) when (e is not OperationCanceledException && IsAbsent(e.Classify().RawError, absentCodes))
         {
@@ -500,14 +535,19 @@ public sealed class XrplClientLedgerSource : ILedgerSource
             throw Unreachable(command, e);
         }
 
-        if (answer.TryGetProperty("error", out JsonElement error))
+        if (string.Equals(raw.Warning, "load", StringComparison.Ordinal)) Interlocked.Increment(ref _loadWarnings);
+
+        if (raw.Result.TryGetProperty("error", out JsonElement error))
         {
-            return IsAbsent(error.GetString(), absentCodes)
-                ? null
-                : throw Answered(command, error);
+            using (raw)
+            {
+                return IsAbsent(error.GetString(), absentCodes)
+                    ? null
+                    : throw Answered(command, error);
+            }
         }
 
-        return answer;
+        return raw;
     }
 
     private static bool IsAbsent(string? code, IReadOnlyList<string> absentCodes)
@@ -542,24 +582,24 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
     private async Task<NodeAnswer> SendAsync(BaseRequest request, CancellationToken cancellationToken)
     {
-        XrplResponse<object> response = await ClientKeeper.For(_client!)
+        XrplResponse<UnreadResult> response = await ClientKeeper.For(_client!)
             .SendAsync(() => Send(request, cancellationToken), cancellationToken).ConfigureAwait(false);
 
-        return new NodeAnswer(response.Raw.ToJsonElement(), response.Warning);
+        return NodeAnswer.Parse(response.Raw.Span, response.Warning);
     }
 
-    private Task<XrplResponse<object>> Send(BaseRequest request, CancellationToken cancellationToken) =>
+    private Task<XrplResponse<UnreadResult>> Send(BaseRequest request, CancellationToken cancellationToken) =>
         request switch
         {
-            TxRequest tx => _client!.GRequest<object, TxRequest>(tx, cancellationToken),
-            AccountTransactionsRequest transactions => _client!.GRequest<object, AccountTransactionsRequest>(transactions, cancellationToken),
-            ServerInfoRequest info => _client!.GRequest<object, ServerInfoRequest>(info, cancellationToken),
-            ServerStateRequest state => _client!.GRequest<object, ServerStateRequest>(state, cancellationToken),
-            AccountInfoRequest accountInfo => _client!.GRequest<object, AccountInfoRequest>(accountInfo, cancellationToken),
-            AccountObjectsRequest objects => _client!.GRequest<object, AccountObjectsRequest>(objects, cancellationToken),
-            LedgerRequest ledger => _client!.GRequest<object, LedgerRequest>(ledger, cancellationToken),
-            FeeRequest fee => _client!.GRequest<object, FeeRequest>(fee, cancellationToken),
-            LedgerEntryRequest entry => _client!.GRequest<object, LedgerEntryRequest>(entry, cancellationToken),
+            TxRequest tx => _client!.GRequest<UnreadResult, TxRequest>(tx, cancellationToken),
+            AccountTransactionsRequest transactions => _client!.GRequest<UnreadResult, AccountTransactionsRequest>(transactions, cancellationToken),
+            ServerInfoRequest info => _client!.GRequest<UnreadResult, ServerInfoRequest>(info, cancellationToken),
+            ServerStateRequest state => _client!.GRequest<UnreadResult, ServerStateRequest>(state, cancellationToken),
+            AccountInfoRequest accountInfo => _client!.GRequest<UnreadResult, AccountInfoRequest>(accountInfo, cancellationToken),
+            AccountObjectsRequest objects => _client!.GRequest<UnreadResult, AccountObjectsRequest>(objects, cancellationToken),
+            LedgerRequest ledger => _client!.GRequest<UnreadResult, LedgerRequest>(ledger, cancellationToken),
+            FeeRequest fee => _client!.GRequest<UnreadResult, FeeRequest>(fee, cancellationToken),
+            LedgerEntryRequest entry => _client!.GRequest<UnreadResult, LedgerEntryRequest>(entry, cancellationToken),
             _ => throw new ArgumentOutOfRangeException(nameof(request), request.Command, "this source sends tx, account_tx, server_info, server_state, account_info, account_objects, ledger, fee and ledger_entry, nothing else"),
         };
 
@@ -572,4 +612,14 @@ public sealed class XrplClientLedgerSource : ILedgerSource
         json.ValueKind == JsonValueKind.Object && json.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out long result)
             ? result
             : null;
+}
+
+/// <summary>
+/// The <c>T</c> of every request <see cref="XrplClientLedgerSource"/> sends. The source reads
+/// <see cref="XrplResponse{T}.Raw"/> only, and with <see cref="object"/> the SDK built a
+/// page-sized <see cref="JsonElement"/> per page that nothing used. Every member of the answer is
+/// unknown to this type, and the SDK's deserializer skips unknown members, so it reads nothing.
+/// </summary>
+internal sealed class UnreadResult
+{
 }

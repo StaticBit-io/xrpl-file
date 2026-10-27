@@ -1,4 +1,7 @@
+using System.Reflection;
 using System.Text.Json;
+using Xrpl.Client;
+using Xrpl.Client.Json;
 using Xrpl.Models.Methods;
 using Xunit;
 
@@ -780,5 +783,225 @@ public class XrplClientLedgerSourceTests
             """{"hash":"ab","ledger_index":9,"validated":true,"tx_json":{"Account":"rW","TransactionType":"AccountSet","Sequence":3},"meta":{"TransactionResult":"tesSUCCESS","TransactionIndex":17}}""");
 
         Assert.Equal(17, XrplClientLedgerSource.ParseRecord(record.RootElement).TransactionIndex);
+    }
+
+    /// <summary>
+    /// An account_tx <c>result</c> of <paramref name="records"/> records shaped like a Batch inner
+    /// (about 3 KB each, the size that made the real pages 1.2 MB), numbered from
+    /// <paramref name="firstRecord"/> so two pages carry different hashes. The marker is raw JSON
+    /// text, as rippled sends it (an object); null leaves it out.
+    /// </summary>
+    private static byte[] AccountTxPage(int records, string? marker, int firstRecord = 0)
+    {
+        string memoData = new('A', 2000);
+
+        using MemoryStream stream = new();
+        using (Utf8JsonWriter writer = new(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("account", "rWriter");
+            writer.WriteStartArray("transactions");
+
+            for (int i = 0; i < records; i++)
+            {
+                int number = firstRecord + i;
+
+                writer.WriteStartObject();
+                writer.WriteStartObject("tx_json");
+                writer.WriteString("Account", "rWriter");
+                writer.WriteString("TransactionType", "AccountSet");
+                writer.WriteNumber("Sequence", number);
+                writer.WriteString("Fee", "12");
+                writer.WriteStartArray("Memos");
+                writer.WriteStartObject();
+                writer.WriteStartObject("Memo");
+                writer.WriteString("MemoType", MemoLayout.ChunkMarkerHex(number));
+                writer.WriteString("MemoData", memoData);
+                writer.WriteEndObject();
+                writer.WriteEndObject();
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+                writer.WriteStartObject("meta");
+                writer.WriteString("TransactionResult", "tesSUCCESS");
+                writer.WriteNumber("TransactionIndex", number);
+                writer.WriteString("ParentBatchID", number.ToString("X64"));
+                writer.WriteEndObject();
+                writer.WriteString("hash", number.ToString("X64"));
+                writer.WriteNumber("ledger_index", 100 + number);
+                writer.WriteBoolean("validated", true);
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+
+            if (marker is not null)
+            {
+                writer.WritePropertyName("marker");
+                writer.WriteRawValue(marker);
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return stream.ToArray();
+    }
+
+    [Fact]
+    public void A_page_is_parsed_from_the_frame_into_pooled_buffers()
+    {
+        byte[] frame = AccountTxPage(400, marker: """{"ledger":5,"seq":3}""");
+        using (NodeAnswer warm = NodeAnswer.Parse(frame, null)) { }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        using (NodeAnswer answer = NodeAnswer.Parse(frame, null))
+        {
+            Assert.Equal(400, answer.Result.GetProperty("transactions").GetArrayLength());
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(allocated < 64 * 1024, $"parsing a {frame.Length:N0}-byte page allocated {allocated:N0} bytes");
+    }
+
+    [Fact]
+    public void An_empty_result_parses_to_an_answer_with_nothing_to_release()
+    {
+        using NodeAnswer answer = NodeAnswer.Parse(ReadOnlySpan<byte>.Empty, "load");
+
+        Assert.Equal("load", answer.Warning);
+        Assert.Null(answer.Owner);
+    }
+
+    [Fact]
+    public void The_result_type_the_source_asks_for_reads_nothing_of_the_page()
+    {
+        byte[] frame = AccountTxPage(400, marker: null);
+        _ = JsonSerializer.Deserialize<UnreadResult>(frame, XrplJsonOptions.Default);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        Assert.NotNull(JsonSerializer.Deserialize<UnreadResult>(frame, XrplJsonOptions.Default));
+        Assert.True(GC.GetAllocatedBytesForCurrentThread() - before < 4 * 1024);
+    }
+
+    [Fact]
+    public async Task Every_request_the_source_sends_asks_the_sdk_for_the_unread_result_type()
+    {
+        // The seam above replaces the whole send path, so the one place the result type is chosen
+        // is only reachable through the client: a client that records the type of each GRequest.
+        GRequestRecorder.Create(out IXrplClient client, out GRequestRecorder recorder);
+        XrplClientLedgerSource source = new(client);
+        CancellationToken token = TestContext.Current.CancellationToken;
+
+        await Record.ExceptionAsync(() => source.TransactionAsync("ABCD", token));
+        await Record.ExceptionAsync(() => Drain(source, token));
+        await Record.ExceptionAsync(() => source.EarliestLedgerAsync(token));
+        await Record.ExceptionAsync(() => source.FeesAsync(token));
+        await Record.ExceptionAsync(() => source.AccountStateAsync("rWriter", token));
+        await Record.ExceptionAsync(() => source.LiveTicketsAsync("rWriter", token));
+        await Record.ExceptionAsync(() => source.CurrentLedgerAsync(token));
+        await Record.ExceptionAsync(() => source.OpenLedgerFeeAsync(token));
+        await Record.ExceptionAsync(() => source.IsAmendmentEnabledAsync(Amendments.Batch, token));
+
+        Assert.Equal(9, recorder.Sent.Count);
+        Assert.All(recorder.Sent, sent => Assert.Equal(typeof(UnreadResult), sent.Result));
+        Assert.Equal(9, recorder.Sent.Select(sent => sent.Request).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task A_history_walk_releases_each_page_and_sends_its_marker_on()
+    {
+        const string firstMarker = """{"ledger":7,"seq":2}""";
+        RecordingOwner[] owners = new RecordingOwner[2];
+        List<BaseRequest> requests = [];
+        byte[][] pages = [AccountTxPage(3, firstMarker), AccountTxPage(2, null, firstRecord: 3)];
+        int served = 0;
+
+        XrplClientLedgerSource source = new(
+            (Func<BaseRequest, CancellationToken, Task<NodeAnswer>>)((request, _) =>
+            {
+                requests.Add(request);
+
+                NodeAnswer parsed = NodeAnswer.Parse(pages[served], null);
+                owners[served] = new RecordingOwner(parsed.Owner!);
+                NodeAnswer answer = new(parsed.Result, null, owners[served]);
+                served++;
+
+                return Task.FromResult(answer);
+            }),
+            pageSize: 3);
+
+        List<LedgerTransaction> read = await Read(source, TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            Enumerable.Range(0, 5).Select(number => number.ToString("X64")).ToArray(),
+            read.Select(tx => tx.Hash).ToArray());
+        Assert.Equal([1, 1], owners.Select(owner => owner.Disposals).ToArray());
+        Assert.Equal(2, requests.Count);
+        Assert.Null(((AccountTransactionsRequest)requests[0]).Marker);
+        Assert.Equal(firstMarker, JsonSerializer.Serialize(((AccountTransactionsRequest)requests[1]).Marker));
+    }
+
+    [Fact]
+    public async Task A_small_answer_outlives_the_frame_it_came_in()
+    {
+        byte[] frame = """{"state":{"validated_ledger":{"base_fee":10,"reserve_base":1000000,"reserve_inc":200000},"load_factor":512,"load_base":256}}"""u8.ToArray();
+        RecordingOwner? owner = null;
+
+        XrplClientLedgerSource source = new(
+            (Func<BaseRequest, CancellationToken, Task<NodeAnswer>>)((_, _) =>
+            {
+                NodeAnswer parsed = NodeAnswer.Parse(frame, null);
+                owner = new RecordingOwner(parsed.Owner!);
+
+                return Task.FromResult(new NodeAnswer(parsed.Result, null, owner));
+            }));
+
+        NetworkFees? fees = null;
+        Exception? error = await Record.ExceptionAsync(async () => fees = await source.FeesAsync(TestContext.Current.CancellationToken));
+
+        // FeesAsync reads the element after the answer it came in has been released.
+        Assert.Null(error);
+        Assert.Equal(1, owner!.Disposals);
+        Assert.NotNull(fees);
+        Assert.Equal(20, fees.OpenLedgerFeeDrops);
+        Assert.Equal(1_000_000, fees.BaseReserveDrops);
+        Assert.Equal(200_000, fees.OwnerReserveDrops);
+    }
+
+    private sealed class RecordingOwner(IDisposable inner) : IDisposable
+    {
+        public int Disposals { get; private set; }
+
+        public void Dispose()
+        {
+            Disposals++;
+            inner.Dispose();
+        }
+    }
+
+    /// <summary>An <see cref="IXrplClient"/> that is connected, records what each GRequest asked for and fails it.</summary>
+    public class GRequestRecorder : DispatchProxy
+    {
+        public List<(Type Result, Type Request)> Sent { get; } = [];
+
+        public static void Create(out IXrplClient client, out GRequestRecorder recorder)
+        {
+            client = Create<IXrplClient, GRequestRecorder>();
+            recorder = (GRequestRecorder)(object)client;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            switch (targetMethod?.Name)
+            {
+                case "IsConnected":
+                    return true;
+                case "GRequest":
+                    Type[] arguments = targetMethod.GetGenericArguments();
+                    Sent.Add((arguments[0], arguments[1]));
+                    throw new InvalidOperationException("recorded, not sent");
+                default:
+                    throw new NotSupportedException(targetMethod?.Name);
+            }
+        }
     }
 }
