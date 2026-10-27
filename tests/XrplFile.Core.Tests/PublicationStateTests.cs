@@ -62,6 +62,16 @@ public class PublicationStateTests : IDisposable
     }
 
     [Fact]
+    public void A_state_of_an_unknown_version_without_a_size_is_refused_as_that_version()
+    {
+        WriteJson("v9.json", "{\"Version\": 9, \"Network\": \"testnet\", \"Total\": 5}");
+
+        FormatException error = Assert.Throws<FormatException>(() => PublicationState.Load(PathOf("v9.json")));
+
+        Assert.Contains("state version 9 is not one this library reads", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void The_working_time_round_trips_and_is_absent_until_set()
     {
         Version3().Save(PathOf("unset.json"));

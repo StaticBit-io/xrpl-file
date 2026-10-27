@@ -142,15 +142,10 @@ public sealed record PublicationState(
 
         if (state is null) throw new FormatException($"{path} did not deserialize as a publication state");
 
-        // No run starts on an empty file or on one above the cap, so a recorded size outside the
-        // range is a damaged file that would otherwise reach the chunk arithmetic of a resume.
-        if (state.Size < 1 || state.Size > PublicationSession.MaxPublicationBytes)
-        {
-            throw new FormatException($"a state records a size of {state.Size} bytes, which no run can have");
-        }
-
         if (state.Version == CurrentVersion)
         {
+            RequireRunnableSize(state);
+
             if (state.Strategy is not (null or SequenceStrategyName or TicketStrategyName))
             {
                 throw new FormatException($"a version {CurrentVersion} state records the strategy '{state.Strategy}', which is not one it can carry");
@@ -161,6 +156,8 @@ public sealed record PublicationState(
 
         if (state.Version == BatchVersion)
         {
+            RequireRunnableSize(state);
+
             if (!string.Equals(state.Strategy, BatchStrategyName, StringComparison.Ordinal))
             {
                 throw new FormatException($"a version {BatchVersion} state must record the strategy '{BatchStrategyName}'");
@@ -185,5 +182,19 @@ public sealed record PublicationState(
         }
 
         throw new FormatException($"state version {state.Version} is not one this library reads");
+    }
+
+    /// <summary>
+    /// No run starts on an empty file or on one above the cap, so a recorded size outside the range
+    /// is a damaged file that would otherwise reach the chunk arithmetic of a resume. It is checked
+    /// per known version: a newer version may lay its fields out differently and must be reported
+    /// as a version this library does not read, not as a bad size.
+    /// </summary>
+    private static void RequireRunnableSize(PublicationState state)
+    {
+        if (state.Size < 1 || state.Size > PublicationSession.MaxPublicationBytes)
+        {
+            throw new FormatException($"a state records a size of {state.Size} bytes, which no run can have");
+        }
     }
 }
