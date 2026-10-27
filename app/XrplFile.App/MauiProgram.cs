@@ -263,7 +263,8 @@ public static class MauiProgram
             provider.GetRequiredService<IPublicationHistory>(),
             autoLock,
             provider.GetRequiredService<TimeProvider>(),
-            keepAwake: provider.GetRequiredService<IKeepAwake>()));
+            keepAwake: provider.GetRequiredService<IKeepAwake>(),
+            log: line => StartupLog.Write(line)));
 
         services.AddSingleton<PublishModel>();
         services.AddSingleton<EstimateModel>();
@@ -290,6 +291,7 @@ public static class MauiProgram
         services.AddSingleton(provider => new ReadRun(
             provider.GetRequiredService<IConnectionFactory>(),
             provider.GetRequiredService<IFilePickerService>(),
-            provider.GetRequiredService<IKeepAwake>()));
+            provider.GetRequiredService<IKeepAwake>(),
+            line => StartupLog.Write(line)));
     }
 }

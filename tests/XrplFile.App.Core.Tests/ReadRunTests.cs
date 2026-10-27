@@ -706,7 +706,8 @@ public sealed class ReadRunTests : IDisposable
     {
         (ReadRun _, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
         ThrowingReleaseKeepAwake keepAwake = new();
-        ReadRun run = Track(new ReadRun(_connections, _picker, keepAwake));
+        List<string> log = [];
+        ReadRun run = Track(new ReadRun(_connections, _picker, keepAwake, line => { lock (log) log.Add(line); }));
 
         Assert.True(run.Start(link, manifest));
         await run.Completion.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
@@ -714,6 +715,10 @@ public sealed class ReadRunTests : IDisposable
         Assert.Equal(ReadState.Succeeded, run.Snapshot.State);
         Assert.Equal(1, keepAwake.Acquired);
         Assert.Equal(1, keepAwake.Released);
+
+        string line = Assert.Single(log);
+        Assert.Contains(nameof(InvalidOperationException), line, StringComparison.Ordinal);
+        Assert.Contains("the platform refused to let the computer sleep again", line, StringComparison.Ordinal);
     }
 
     [Fact]

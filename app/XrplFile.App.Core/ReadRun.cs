@@ -14,7 +14,7 @@ namespace XrplFile.App.Core;
 /// pinning <see cref="PublicationRun"/> has: <see cref="SaveAsync"/> writes to the snapshot after
 /// the terminal state is already published, which is exactly the window that lesson is about.
 /// </summary>
-public sealed class ReadRun(IConnectionFactory connections, IFilePickerService picker, IKeepAwake? keepAwake = null) : IDisposable
+public sealed class ReadRun(IConnectionFactory connections, IFilePickerService picker, IKeepAwake? keepAwake = null, Action<string>? log = null) : IDisposable
 {
     private readonly Lock _gate = new();
 
@@ -427,7 +427,7 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
         finally
         {
             // Before the terminal state is published, as PublicationRun does: a screen that sees the read end finds the computer free to sleep.
-            keepAwake.ReleaseQuietly();
+            keepAwake.ReleaseQuietly(log);
         }
 
         lock (_gate)

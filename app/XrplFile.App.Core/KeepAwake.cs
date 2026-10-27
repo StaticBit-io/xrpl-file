@@ -19,17 +19,27 @@ internal static class KeepAwakeExtensions
     /// <summary>
     /// Gives up a hold without letting a failure of the release reach the run that held it. The keep-awake
     /// is a courtesy and the outcome is the run's: a release that throws from a run's <c>finally</c> would
-    /// replace that outcome and leave the run Running for good.
+    /// replace that outcome and leave the run Running for good. <see cref="ThreadKeepAwake"/> logs the
+    /// platform calls that fail, so what reaches here is a defect and is recorded, not hidden.
     /// </summary>
-    public static void ReleaseQuietly(this IKeepAwake? keepAwake)
+    /// <param name="keepAwake">The hold to give up, or <see langword="null"/> where the run holds nothing.</param>
+    /// <param name="log">Where the failure is written; a log that fails too is ignored.</param>
+    public static void ReleaseQuietly(this IKeepAwake? keepAwake, Action<string>? log = null)
     {
         try
         {
             keepAwake?.Release();
         }
-        catch (Exception)
+        catch (Exception error)
         {
-            // Nothing to do about a computer that will not be told it may sleep.
+            try
+            {
+                log?.Invoke($"keep-awake: releasing the hold failed: {error.GetType().Name}: {error.Message}");
+            }
+            catch (Exception)
+            {
+                // A diagnostic that fails must not do what the release was kept from doing.
+            }
         }
     }
 }

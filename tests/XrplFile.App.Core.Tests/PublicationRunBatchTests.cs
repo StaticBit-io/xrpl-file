@@ -32,7 +32,7 @@ public sealed class PublicationRunBatchTests : VaultHarness
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private async Task<(PublicationRun Run, PublishRequest Request, PublicationHistory History, KeyVault Vault)> ReadyAsync(int size = 20_000, IKeepAwake? keepAwake = null)
+    private async Task<(PublicationRun Run, PublishRequest Request, PublicationHistory History, KeyVault Vault)> ReadyAsync(int size = 20_000, IKeepAwake? keepAwake = null, Action<string>? log = null)
     {
         KeyVault vault = NewVault();
         await vault.CreateAsync(Password("a master password"), Token);
@@ -49,7 +49,7 @@ public sealed class PublicationRunBatchTests : VaultHarness
         _connections.Ledger.Balances[payer.ClassicAddress] = 100_000_000;
 
         PublicationHistory history = new(Paths.HistoryPath);
-        PublicationRun run = new(_connections, vault, Paths, history, batchOptions: Fast, keepAwake: keepAwake);
+        PublicationRun run = new(_connections, vault, Paths, history, batchOptions: Fast, keepAwake: keepAwake, log: log);
 
         // On disk because a resume opens the recorded path itself.
         string path = Path.Combine(_directory, "file.bin");
@@ -116,7 +116,9 @@ public sealed class PublicationRunBatchTests : VaultHarness
     public async Task A_keep_awake_that_throws_on_release_does_not_change_the_runs_outcome()
     {
         ThrowingReleaseKeepAwake keepAwake = new();
-        (PublicationRun run, PublishRequest request, PublicationHistory history, _) = await ReadyAsync(keepAwake: keepAwake);
+        List<string> log = [];
+        (PublicationRun run, PublishRequest request, PublicationHistory history, _) = await ReadyAsync(
+            keepAwake: keepAwake, log: line => { lock (log) log.Add(line); });
 
         Assert.True(run.Start(request));
         await run.Completion.WaitAsync(TimeSpan.FromSeconds(20), Token);
@@ -126,6 +128,11 @@ public sealed class PublicationRunBatchTests : VaultHarness
         Assert.Single(history.Read());
         Assert.Equal(1, keepAwake.Acquired);
         Assert.Equal(1, keepAwake.Released);
+
+        // Swallowed so the outcome stays the run's, but not hidden: what failed is on record.
+        string line = Assert.Single(log);
+        Assert.Contains(nameof(InvalidOperationException), line, StringComparison.Ordinal);
+        Assert.Contains("the platform refused to let the computer sleep again", line, StringComparison.Ordinal);
     }
 
     [Fact]

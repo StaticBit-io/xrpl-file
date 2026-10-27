@@ -97,7 +97,8 @@ public sealed class PublicationRun(
     TimeProvider? time = null,
     BatchStrategyOptions? batchOptions = null,
     Func<string, IPublicationSource>? openSource = null,
-    IKeepAwake? keepAwake = null)
+    IKeepAwake? keepAwake = null,
+    Action<string>? log = null)
 {
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly Func<string, IPublicationSource> _openSource = openSource ?? (path => FilePublicationSource.Open(path));
@@ -498,7 +499,7 @@ public sealed class PublicationRun(
             // Released before the terminal state is published, so a screen that sees the run end finds the file free.
             if (source is not null) await DisposeQuietlyAsync(source).ConfigureAwait(false);
 
-            keepAwake.ReleaseQuietly();
+            keepAwake.ReleaseQuietly(log);
         }
 
         // Every connection and strategy acquired above has already been disposed (quietly; see the
