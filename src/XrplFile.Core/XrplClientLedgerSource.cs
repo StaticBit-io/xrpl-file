@@ -21,6 +21,13 @@ namespace XrplFile;
 /// <see cref="XrplFileError.NodeUnreachable"/>, carrying what the node said. The browser mirror
 /// raises the same error in the same places.
 /// </summary>
+/// <remarks>
+/// <para>
+/// A host that reads long histories through this source should set <c>System.GC.LOHThreshold</c> to
+/// <c>4194304</c>: each account_tx page is a large-object-heap frame of about 1.2 MB, and the
+/// setting lets the collector reclaim it in gen0 (README, "Collector settings for hosts").
+/// </para>
+/// </remarks>
 public sealed class XrplClientLedgerSource : ILedgerSource
 {
     private readonly IXrplClient? _client;

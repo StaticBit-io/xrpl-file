@@ -294,3 +294,7 @@ public sealed class MemoryPublicationSource : IPublicationSource
 - It does not promise more than Windows sharing modes give on network file systems.
 - It does not measure mainnet. A gigabyte publication there is about 1.7 million transactions in
   the shared network, at the payer's cost.
+
+## Amendments (2026-10-27)
+
+4. **S27 (Task 2).** S27 bounds the publication run. The vault unlock's transient Argon2id peak (about 1 s at the default 256 MiB cost) is outside it; the lanes are released before the run starts (ruling 2026-10-26).

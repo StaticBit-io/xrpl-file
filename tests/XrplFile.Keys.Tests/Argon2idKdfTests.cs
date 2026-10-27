@@ -5,6 +5,18 @@ namespace XrplFile.Keys.Tests;
 
 public class Argon2idKdfTests
 {
+    [Theory]
+    [InlineData(16_384, 1, 1, "8a06458623ef3ebec7e6704bf05b32eb942ca25b0aeae0be0ded08e750685169")]
+    [InlineData(16_383, 1, 1, "d972ede7cab4bf85576585f6595a7f6b4f21c5f130a2e6c8c1c5acfdabb74e93")]
+    [InlineData(16_384, 1, 4, "beff63dcb56d703ac0e56cc4f095fdfc371d0fbd4cf22bb1499be2b48798fc0f")]
+    public void A_derivation_at_and_below_the_collection_threshold_is_standard_argon2id(int memoryKib, int iterations, int parallelism, string expectedHex)
+    {
+        byte[] derived = new Argon2idKdf().Derive(
+            "correct horse battery staple"u8, Enumerable.Repeat((byte)0x07, 16).ToArray(), new KdfParameters(memoryKib, iterations, parallelism), 32);
+
+        Assert.Equal(Convert.FromHexString(expectedHex), derived);
+    }
+
     [Fact]
     public void The_library_computes_standard_Argon2id()
     {

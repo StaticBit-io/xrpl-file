@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Xrpl.Client;
 using XrplFile.Keys;
 
@@ -8,7 +9,8 @@ namespace XrplFile.ResumeMemoryProbe;
 /// <param name="AfterUnlockPrivateBytes">Its private bytes once the vault is unlocked again, before the resume starts.</param>
 /// <param name="ResumePeakPrivateBytes">The highest private bytes sampled from the start of the resume to its approval.</param>
 /// <param name="MissingChunks">The chunks the resume's history read did not find in the ledger.</param>
-internal sealed record ResumeProbeResult(long FloorPrivateBytes, long AfterUnlockPrivateBytes, long ResumePeakPrivateBytes, long MissingChunks);
+/// <param name="LohThreshold">The <c>System.GC.LOHThreshold</c> this process started with, 0 when none was configured.</param>
+internal sealed record ResumeProbeResult(long FloorPrivateBytes, long AfterUnlockPrivateBytes, long ResumePeakPrivateBytes, long MissingChunks, long LohThreshold);
 
 /// <summary>
 /// A Batch resume as the desktop application runs one after Lock (D1): the vault is unlocked at its
@@ -73,7 +75,9 @@ internal static class ResumeProbe
                 // Declined at the quote, as intended: the history read is behind it.
             }
 
-            return new ResumeProbeResult(floor, afterUnlock, sampler.Stop(), missing);
+            return new ResumeProbeResult(
+                floor, afterUnlock, sampler.Stop(), missing,
+                Convert.ToInt64(AppContext.GetData("System.GC.LOHThreshold") ?? 0, CultureInfo.InvariantCulture));
         }
         finally
         {

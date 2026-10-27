@@ -3,6 +3,13 @@ using Konscious.Security.Cryptography;
 namespace XrplFile.Keys;
 
 /// <inheritdoc cref="IPasswordKdf"/>
+/// <remarks>
+/// A derivation with 16 MiB of working memory or more ends with a blocking, compacting, aggressive
+/// full collection (<see cref="GCCollectionMode.Aggressive"/>), so its lanes do not stay committed
+/// after the key exists. That collection pauses every thread of the process for as long as a full
+/// collection of the process's heap takes. Call <see cref="Derive"/> off any UI thread;
+/// <c>KeyVault</c> already does, inside <c>Task.Run</c>.
+/// </remarks>
 public sealed class Argon2idKdf : IPasswordKdf
 {
     /// <summary>
@@ -36,10 +43,7 @@ public sealed class Argon2idKdf : IPasswordKdf
 
         // Konscious allocates one managed array per lane, 64 MiB each at the vault's default cost:
         // large-object-heap garbage the moment the key exists, which only a gen2 collection
-        // reclaims. Nothing an unlocked application does next allocates enough to bring one soon,
-        // so the process kept the whole 256 MiB committed into the next run (measured on a resume
-        // after Lock: 341-395 MiB private while it hashed the file, against 100-205 MiB through the
-        // first pass). Only an aggressive collection returns it at once; a forced one leaves the
+        // reclaims. Only an aggressive collection returns it at once; a forced one leaves the
         // freed regions committed. It runs off the dispatcher, while the person waits for the
         // unlock anyway.
         if (parameters.MemoryKib >= ReleaseFromMemoryKib)

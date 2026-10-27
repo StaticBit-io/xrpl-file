@@ -124,6 +124,27 @@ a submission and its record. The state file never holds a seed; it holds a `keyR
 the caller chose, meaningful only to whatever key store the caller uses to resolve it back to a
 signer.
 
+### Collector settings for hosts
+
+A host that resumes Batch publications or reads long histories should set `System.GC.LOHThreshold`
+to `4194304`. Every `account_tx` page reaches the SDK as one frame of about 1.2 MB, which is
+large-object-heap garbage, and after an Argon2id unlock the collector's budget for that heap lets
+hundreds of megabytes of dead pages pile up during a resume's history read; at this threshold the
+frames die in gen0 collections instead.
+
+```xml
+<ItemGroup>
+  <RuntimeHostConfigurationOption Include="System.GC.LOHThreshold" Value="4194304" />
+</ItemGroup>
+```
+
+The environment form is `DOTNET_GCLOHThreshold=0x400000`. The runtime caps the threshold at about
+4 MiB, so a higher value changes nothing.
+
+`Argon2idKdf.Derive` with 16 MiB of working memory or more ends with one aggressive, blocking,
+compacting full collection, so the key derivation's lanes do not stay committed. It pauses every
+thread of the process while it runs: derive off the UI thread, as `KeyVault` does.
+
 ### Publishing without a funded account
 
 An application can publish on behalf of somebody who never hands it a seed. A key is generated

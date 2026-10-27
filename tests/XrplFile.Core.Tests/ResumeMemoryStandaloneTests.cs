@@ -23,6 +23,9 @@ public sealed class ResumeMemoryStandaloneTests : IDisposable
     /// <summary>About 32,000 chunks in the ledger: enough history that dead pages piled up past the bound before the fix.</summary>
     private const int StopAfterOuters = 4_000;
 
+    /// <summary>Six of every eight chunks an outer carries: the run is stopped mid-round, so the last rounds' chunks may not all have landed.</summary>
+    private const long MinimumChunksFound = StopAfterOuters * 6L;
+
     private static readonly BatchStrategyOptions Options = new()
     {
         ChainCheck = TimeSpan.FromMilliseconds(500),
@@ -43,7 +46,7 @@ public sealed class ResumeMemoryStandaloneTests : IDisposable
         typeof(ResumeMemoryStandaloneTests).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
             .Single(attribute => attribute.Key == "ResumeMemoryProbePath").Value!;
 
-    private sealed record ProbeResult(long FloorPrivateBytes, long AfterUnlockPrivateBytes, long ResumePeakPrivateBytes, long MissingChunks);
+    private sealed record ProbeResult(long FloorPrivateBytes, long AfterUnlockPrivateBytes, long ResumePeakPrivateBytes, long MissingChunks, long LohThreshold);
 
     [Fact]
     public async Task A_resume_after_an_unlock_reads_the_history_within_the_memory_bound_and_keeps_no_kdf_memory()
@@ -115,8 +118,11 @@ public sealed class ResumeMemoryStandaloneTests : IDisposable
             $"floor {result.FloorPrivateBytes:N0}, after unlock {result.AfterUnlockPrivateBytes:N0}, resume peak {result.ResumePeakPrivateBytes:N0}; "
             + $"{chunks - result.MissingChunks:N0} of {chunks:N0} chunks found in the history");
 
+        Assert.True(result.LohThreshold == 4_194_304,
+            $"the probe did not run under the application's collector settings (System.GC.LOHThreshold was {result.LohThreshold:N0})");
+
         // The history read had real work to do: most of what was sent is in the ledger.
-        Assert.InRange(chunks - result.MissingChunks, StopAfterOuters * 6L, chunks - 1);
+        Assert.InRange(chunks - result.MissingChunks, MinimumChunksFound, chunks - 1);
 
         // S27's bound, for the resume as the application runs it.
         Assert.True(result.ResumePeakPrivateBytes < 300_000_000, $"the resume peaked at {result.ResumePeakPrivateBytes:N0} bytes");

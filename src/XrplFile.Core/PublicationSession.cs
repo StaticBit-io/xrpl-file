@@ -101,6 +101,11 @@ public sealed record UnfinishedRun(string Path, PublicationState? State, string?
 ///
 /// One session is one run. <see cref="RunAsync"/> may be called once; the checks that make a run
 /// safe to pay for happen in <see cref="StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> and are not repeated.
+/// <para>
+/// A host that resumes Batch publications should set <c>System.GC.LOHThreshold</c> to <c>4194304</c>, which
+/// keeps the history read's page frames from piling up as large-object-heap garbage (README, "Collector
+/// settings for hosts").
+/// </para>
 /// </summary>
 public sealed class PublicationSession : IBatchFenceRecorder
 {
