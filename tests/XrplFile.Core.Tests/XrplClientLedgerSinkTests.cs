@@ -442,6 +442,55 @@ public class XrplClientLedgerSinkTests
         Assert.Equal(["submit"], node.Commands);
     }
 
+    [Theory]
+    [InlineData("[1,2]")]
+    [InlineData("7")]
+    public async Task A_submit_answered_with_a_result_that_is_not_an_object_is_treated_as_unanswered(string frame)
+    {
+        ScriptedNode node = new();
+
+        // Each unanswered submit is followed by a lookup of its hash, which this node fails the same way.
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            node.Answer(frame);
+            node.Answer(frame);
+        }
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => Submit(node));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+        Assert.Equal(["submit", "tx", "submit", "tx", "submit", "tx"], node.Commands);
+    }
+
+    [Fact]
+    public async Task A_lookup_answered_with_a_result_that_is_not_an_object_says_nothing_about_the_transaction()
+    {
+        ScriptedNode node = new();
+        node.Throw(new Xrpl.Client.Exceptions.TimeoutException("submit timed out"));
+        node.Answer("[1]");
+        node.Answer("""{"engine_result":"tesSUCCESS"}""");
+
+        SubmitOutcome outcome = await Submit(node);
+
+        Assert.Equal("tesSUCCESS", outcome.EngineResult);
+        Assert.Equal(["submit", "tx", "submit"], node.Commands);
+    }
+
+    [Theory]
+    [InlineData("[1,2]")]
+    [InlineData("7")]
+    public async Task A_blob_answered_with_a_result_that_is_not_an_object_is_NodeUnreachable(string frame)
+    {
+        ScriptedNode node = new();
+        node.Answer(frame);
+        XrplClientLedgerSink sink = new(node.HandleAsync);
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(
+            () => sink.SubmitBlobAsync("AA", TestContext.Current.CancellationToken));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
+    }
+
     /// <summary>A node whose answers are scripted, in call order: raw JSON with the envelope's warning, or an exception.</summary>
     private sealed class ScriptedNode
     {

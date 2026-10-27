@@ -96,12 +96,13 @@ public sealed class XrplClientLedgerSink : ILedgerSink
 
             try
             {
-                NodeAnswer answer = await AskAsync(new SubmitRequest { TxBlob = signed.TxBlob }, cancellationToken).ConfigureAwait(false);
+                SubmitRequest request = new() { TxBlob = signed.TxBlob };
+                JsonElement result = ObjectResult(request, await AskAsync(request, cancellationToken).ConfigureAwait(false));
 
                 outcome =
-                    answer.Result.TryGetProperty("engine_result", out JsonElement code) ? code.GetString() ?? string.Empty
-                    : answer.Result.TryGetProperty("error", out JsonElement error) ? "error:" + error.GetString()
-                    : answer.Result.GetRawText();
+                    result.TryGetProperty("engine_result", out JsonElement code) ? code.GetString() ?? string.Empty
+                    : result.TryGetProperty("error", out JsonElement error) ? "error:" + error.GetString()
+                    : result.GetRawText();
             }
             catch (RippledException e)
             {
@@ -143,11 +144,12 @@ public sealed class XrplClientLedgerSink : ILedgerSink
 
         try
         {
-            NodeAnswer answer = await AskAsync(new SubmitRequest { TxBlob = txBlob }, cancellationToken).ConfigureAwait(false);
+            SubmitRequest request = new() { TxBlob = txBlob };
+            JsonElement result = ObjectResult(request, await AskAsync(request, cancellationToken).ConfigureAwait(false));
 
-            return answer.Result.TryGetProperty("engine_result", out JsonElement code) ? code.GetString() ?? string.Empty
-                : answer.Result.TryGetProperty("error", out JsonElement error) ? "error:" + error.GetString()
-                : answer.Result.GetRawText();
+            return result.TryGetProperty("engine_result", out JsonElement code) ? code.GetString() ?? string.Empty
+                : result.TryGetProperty("error", out JsonElement error) ? "error:" + error.GetString()
+                : result.GetRawText();
         }
         catch (RippledException e)
         {
@@ -188,11 +190,12 @@ public sealed class XrplClientLedgerSink : ILedgerSink
     /// </summary>
     private async Task<string?> ResultOfAsync(string hash, CancellationToken cancellationToken)
     {
-        NodeAnswer answer;
+        JsonElement result;
 
         try
         {
-            answer = await AskAsync(new TxRequest(hash), cancellationToken).ConfigureAwait(false);
+            TxRequest request = new(hash);
+            result = ObjectResult(request, await AskAsync(request, cancellationToken).ConfigureAwait(false));
         }
         catch (RippledException)
         {
@@ -203,9 +206,9 @@ public sealed class XrplClientLedgerSink : ILedgerSink
             return null;
         }
 
-        if (answer.Result.TryGetProperty("error", out _)) return null;
+        if (result.TryGetProperty("error", out _)) return null;
 
-        return TransactionResult(answer.Result) ?? Queued;
+        return TransactionResult(result) ?? Queued;
     }
 
     /// <summary>The <c>meta.TransactionResult</c> of a <c>tx</c> answer, in either api_version's shape.</summary>
@@ -221,6 +224,24 @@ public sealed class XrplClientLedgerSink : ILedgerSink
             && result.ValueKind == JsonValueKind.String
                 ? result.GetString()
                 : null;
+    }
+
+    /// <summary>
+    /// The node's <c>result</c>, which must be an object to be probed for <c>engine_result</c> or
+    /// <c>error</c>: an array or a scalar would make <see cref="JsonElement.TryGetProperty(string, out JsonElement)"/>
+    /// throw <see cref="InvalidOperationException"/>, which no caller treats as the node's doing.
+    /// It is reported as <see cref="XrplFileError.NodeUnreachable"/>, so every caller handles it as
+    /// it does any other answer the node failed to give (<see cref="DidNotAnswer"/>).
+    /// </summary>
+    private static JsonElement ObjectResult(BaseRequest request, NodeAnswer answer)
+    {
+        if (answer.Result.ValueKind != JsonValueKind.Object)
+        {
+            throw new XrplFileException(XrplFileError.NodeUnreachable,
+                $"the node answered {request.Command} with a result that is {answer.Result.ValueKind}, not an object");
+        }
+
+        return answer.Result;
     }
 
     /// <summary>Sends one request and counts the envelope's load warning before the answer is read.</summary>
