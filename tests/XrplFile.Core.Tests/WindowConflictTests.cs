@@ -213,23 +213,102 @@ public sealed class WindowConflictTests : IDisposable
         Assert.Equal(file, (await new XrplFileReader(ledger).ReadAsync(report.Link, Token)).Bytes);
     }
 
+    /// <summary>Every chunk record of the account, as the one-account run that died left them.</summary>
+    private static async Task<List<LedgerTransaction>> ChunkRecordsAsync(FakeLedgerSource ledger, string account)
+    {
+        List<LedgerTransaction> records = [];
+
+        await foreach (LedgerTransaction tx in ledger.AccountTransactionsAsync(account, 0, ledger.CurrentLedger, true, Token))
+        {
+            if (MemoLayout.ChunkIndexOf(tx.MemoTypeHex) is not null) records.Add(tx);
+        }
+
+        return records;
+    }
+
+    /// <summary>
+    /// Takes chunk 0's own copy out of the ledger, puts a copy of chunk 0 with other bytes in
+    /// <paramref name="foreignLedger"/> and puts the own copy back after it (in <paramref name="ownLedger"/>).
+    /// The foreign copy is then met for a chunk with no adopted copy.
+    /// </summary>
+    private static void ForeignCopyAheadOfChunk0(FakeLedgerSource ledger, LedgerTransaction own, long foreignLedger, long ownLedger)
+    {
+        ledger.Remove(tx => string.Equals(tx.Hash, own.Hash, StringComparison.Ordinal));
+        ledger.Add(PlantedChunk(ledger, own.Account, 0, [1, 2, 3], new string('C', 64)) with { LedgerIndex = foreignLedger });
+        ledger.Add(own with { LedgerIndex = ownLedger });
+    }
+
     [Fact]
-    public async Task A_one_account_resume_passes_by_a_copy_with_other_bytes_that_comes_before_any_copy_it_adopts()
+    public async Task A_one_account_resume_fails_on_a_copy_with_other_bytes_in_the_ledger_of_the_blocks_first_adopted_copy()
     {
         (FakeLedgerSource ledger, FakeLedgerSink sink, ITransactionSigner signer, string account, PublicationSession first, byte[] file) = await DiedAtTheManifestAsync();
 
-        // Ahead of the original in the same ledger, so reconciliation meets it with nothing landed for chunk 0:
-        // only the Batch path calls that a conflict (spec I12). What a reader makes of the two copies is not this
-        // test's question, so the run is not driven on.
-        LedgerTransaction original = await FirstChunkAsync(ledger, account);
-        ledger.Remove(tx => string.Equals(tx.Hash, original.Hash, StringComparison.Ordinal));
-        ledger.Add(PlantedChunk(ledger, account, 0, [1, 2, 3], new string('C', 64)) with { LedgerIndex = original.LedgerIndex });
-        ledger.Add(original);
+        // The block's first ledger is where a reader starts, and it reads that whole ledger: a foreign copy of
+        // chunk 0 there is met before chunk 0's own copy, which lies later (spec S17).
+        List<LedgerTransaction> records = await ChunkRecordsAsync(ledger, account);
+        LedgerTransaction own = records.Single(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 0);
+        long blockFirst = records.Min(tx => tx.LedgerIndex);
+        ForeignCopyAheadOfChunk0(ledger, own, blockFirst, own.LedgerIndex);
+        int sent = sink.Submitted.Count;
+
+        await using SequenceStrategy again = new(sink, signer, new SequenceStrategyOptions { FeeDrops = 10 });
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() =>
+            PublicationSession.ResumeAsync(again, ledger, file, first.StatePath, Options, Token));
+
+        Assert.Equal(XrplFileError.WriterWindowConflict, error.Error);
+        Assert.Equal(PublicationState.WriterWindowConflictFailure, PublicationState.Load(first.StatePath).Failure);
+        Assert.Equal(sent, sink.Submitted.Count);
+
+        // The record is on the state, so a second resume reports it without reading the history or sending.
+        int reads = ledger.AccountTransactionsCalls;
+        XrplFileException repeated = await Assert.ThrowsAsync<XrplFileException>(() =>
+            PublicationSession.ResumeAsync(again, ledger, file, first.StatePath, Options, Token));
+
+        Assert.Equal(XrplFileError.WriterWindowConflict, repeated.Error);
+        Assert.Equal(reads, ledger.AccountTransactionsCalls);
+        Assert.Equal(sent, sink.Submitted.Count);
+    }
+
+    [Fact]
+    public async Task A_one_account_resume_fails_on_a_copy_with_other_bytes_after_the_blocks_first_adopted_ledger_and_ahead_of_the_chunks_own_copy()
+    {
+        (FakeLedgerSource ledger, FakeLedgerSink sink, ITransactionSigner signer, string account, PublicationSession first, byte[] file) = await DiedAtTheManifestAsync();
+
+        // Chunks 1 and 2 are adopted at the block's first ledger or later; chunk 0's own copy lies after everything,
+        // and the foreign copy of chunk 0 is in the last ledger of the others.
+        ledger.CurrentLedger += 5;
+        List<LedgerTransaction> records = await ChunkRecordsAsync(ledger, account);
+        LedgerTransaction own = records.Single(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 0);
+        long lastOfOthers = records.Where(tx => tx.Hash != own.Hash).Max(tx => tx.LedgerIndex);
+        ForeignCopyAheadOfChunk0(ledger, own, lastOfOthers, lastOfOthers + 1);
+        int sent = sink.Submitted.Count;
+
+        await using SequenceStrategy again = new(sink, signer, new SequenceStrategyOptions { FeeDrops = 10 });
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() =>
+            PublicationSession.ResumeAsync(again, ledger, file, first.StatePath, Options, Token));
+
+        Assert.Equal(XrplFileError.WriterWindowConflict, error.Error);
+        Assert.Equal(sent, sink.Submitted.Count);
+    }
+
+    [Fact]
+    public async Task A_one_account_resume_passes_by_a_copy_with_other_bytes_that_lies_before_every_adopted_copy_of_its_block()
+    {
+        (FakeLedgerSource ledger, FakeLedgerSink sink, ITransactionSigner signer, string account, PublicationSession first, byte[] file) = await DiedAtTheManifestAsync();
+        ledger.CurrentLedger += 2;
+
+        // Strictly before the block's first ledger, which is where a reader starts: it never meets this copy.
+        List<LedgerTransaction> records = await ChunkRecordsAsync(ledger, account);
+        LedgerTransaction own = records.Single(tx => MemoLayout.ChunkIndexOf(tx.MemoTypeHex) == 0);
+        long blockFirst = records.Min(tx => tx.LedgerIndex);
+        Assert.True(blockFirst - 1 >= PublicationState.Load(first.StatePath).StartedInLedger, "the copy has to be inside the swept range, or the test proves nothing");
+        ForeignCopyAheadOfChunk0(ledger, own, blockFirst - 1, own.LedgerIndex);
 
         await using SequenceStrategy again = new(sink, signer, new SequenceStrategyOptions { FeeDrops = 10 });
         PublicationSession resumed = await PublicationSession.ResumeAsync(again, ledger, file, first.StatePath, Options, Token);
+        PublicationReport report = await resumed.RunAsync(null, Token);
 
         Assert.Null(PublicationState.Load(first.StatePath).Failure);
-        Assert.NotNull(resumed);
+        Assert.Equal(file, (await new XrplFileReader(ledger).ReadAsync(report.Link, Token)).Bytes);
     }
 }

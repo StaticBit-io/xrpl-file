@@ -972,7 +972,14 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// With <paramref name="conflictsFail"/> (a Batch resume, spec S17) a validated, successful
     /// writer record carrying one of this file's chunk indices with other bytes ends the
     /// reconciliation with <see cref="XrplFileError.WriterWindowConflict"/>, recorded on the state.
-    /// A one-account run ignores such a record as a straggler (spec I12).
+    ///
+    /// A one-account run applies S17 within the publication's window only. A reader walks a block
+    /// from the block's first ledger and takes the first eligible copy of a chunk, so such a record
+    /// is a conflict when it is for a chunk this pass had not adopted a copy of when it met it and
+    /// lies at or after the first ledger of an adopted copy of the same block. One before every
+    /// adopted copy of its block is never read, and one after the chunk's own adopted copy is a
+    /// straggler (spec I12). Which block's first ledger a record is held against is only known
+    /// once the pass is over, so the candidates are decided then.
     /// </summary>
     internal async Task<Reconciled> StreamReconcileAsync(
         long to, bool conflictsFail, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
@@ -985,6 +992,11 @@ public sealed class PublicationSession : IBatchFenceRecorder
         ChunkLanding landing = new(chunkCount);
         Dictionary<int, LandedMemo> lists = [];
         SequenceRanges sequences = new();
+
+        // The latest differing copy met for a chunk with no adopted copy, per block: whether it is
+        // inside the window depends on the block's first adopted ledger, which the rest of the
+        // stream can still lower.
+        Dictionary<int, (long Ledger, long Chunk, string Hash)> candidates = [];
         byte[] buffer = new byte[MemoLayout.ChunkBytes];
         long read = 0;
 
@@ -1019,12 +1031,13 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 }
                 else if (conflictsFail)
                 {
-                    RecordFailure(PublicationState.WriterWindowConflictFailure);
-                    throw new XrplFileException(XrplFileError.WriterWindowConflict,
-                        $"the writer's {tx.Hash} in ledger {tx.LedgerIndex} carries chunk {chunkIndex} with other data than this file's");
+                    throw WindowConflict(tx.Hash, tx.LedgerIndex, chunkIndex);
+                }
+                else
+                {
+                    candidates[FileTree.BlockOf(chunkIndex)] = (tx.LedgerIndex, chunkIndex, tx.Hash);
                 }
 
-                // A one-account run ignores a copy with other bytes as a straggler (spec I12).
                 continue;
             }
 
@@ -1036,7 +1049,24 @@ public sealed class PublicationSession : IBatchFenceRecorder
             }
         }
 
+        foreach ((long ledger, long chunk, string hash) in candidates.Values)
+        {
+            if (landing.TryBlockLedgers(FileTree.BlockOf(chunk), out LedgerRange block) && ledger >= block.First)
+            {
+                throw WindowConflict(hash, ledger, chunk);
+            }
+        }
+
         return new Reconciled(new LandedMemos(landing, lists), sequences);
+    }
+
+    /// <summary>Records the conflict on the state (spec S17) and returns the error to throw.</summary>
+    private XrplFileException WindowConflict(string hash, long ledger, long chunk)
+    {
+        RecordFailure(PublicationState.WriterWindowConflictFailure);
+
+        return new XrplFileException(XrplFileError.WriterWindowConflict,
+            $"the writer's {hash} in ledger {ledger} carries chunk {chunk} with other data than this file's");
     }
 
     private bool CarriesThisFilesBlocks(string payloadHex)
