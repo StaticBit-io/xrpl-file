@@ -130,7 +130,10 @@ public sealed class StreamingReconciliationTests : IDisposable
 
         Assert.Equal(original.Link, report.Link);
         Assert.Equal(submitted, sink.Submitted.Count);
-        Assert.Equal(reads + 2, ledger.AccountTransactionsCalls);
+
+        // The reconciliation and the manifest's pass, each read once, and nothing else of the writer's.
+        Assert.Equal(2, ledger.Passes(Wallet.ClassicAddress, run.State.StartedInLedger, reads).Count);
+        Assert.All(ledger.Calls.Skip(reads), call => Assert.True(call.FromLedger >= run.State.StartedInLedger));
         Assert.Contains(preparation, progress => progress.Stage == "history");
     }
 
@@ -253,7 +256,7 @@ public sealed class StreamingReconciliationTests : IDisposable
         BatchStrategyFactory factory = Factory(node);
         (PublicationSession first, byte[] file) = await InterruptedBatchAsync(node, factory, stopAtOrdinal: 2);
 
-        // The break fires only in a walk of more than five records: make sure the first one is.
+        // The break fires only in a read of more than five records: make sure the first one is.
         long startedIn = first.State.StartedInLedger;
         int writerRecords = 0;
         await foreach (LedgerTransaction _ in node.Ledger.AccountTransactionsAsync(node.Writer.Account, startedIn, node.Ledger.CurrentLedger, true, Token))
@@ -263,13 +266,14 @@ public sealed class StreamingReconciliationTests : IDisposable
 
         Assert.True(writerRecords > 5, $"the interrupted run left {writerRecords} writer records; the break needs more than five");
         int callsBefore = node.Ledger.Calls.Count;
-        node.Ledger.HistoryFailsAfter = 5;
+        node.Ledger.HistoryReadFailsAfter = 5;
 
         PublicationSession resumed = await PublicationSession.ResumeAsync(
             factory, node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options, null, Token);
 
-        // Broken once, read again from the start: two walks of the writer from the run's first ledger.
-        Assert.Equal(2, node.Ledger.Calls.Skip(callsBefore).Count(call => call.Account == node.Writer.Account && call.FromLedger == startedIn));
+        // Broken once, read again from the start: two reads of the writer from the run's first ledger.
+        Assert.Null(node.Ledger.HistoryReadFailsAfter);
+        Assert.Equal(2, node.Ledger.Passes(node.Writer.Account, startedIn, callsBefore).Count);
 
         PublicationReport report = await resumed.RunAsync(null, Token);
 

@@ -66,8 +66,8 @@ public class PublicationSessionBatchResumeTests : IDisposable
             Factory(node, node.Payer), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options,
             new SynchronousProgress<PublishProgress>(waited.Add), Token);
 
-        AccountTransactionsCall firstRead = node.Ledger.Calls[callsBefore];
-        Assert.True(firstRead.ToLedger > fence + 2, $"read at {firstRead.ToLedger} with the fence at {fence}");
+        (long _, long firstRead) = node.Ledger.Passes(node.Writer.Account, first.State.StartedInLedger, callsBefore)[0];
+        Assert.True(firstRead > fence + 2, $"read to {firstRead} with the fence at {fence}");
         Assert.Contains(waited, progress => progress.Stage == "fence");
 
         PublicationReport report = await resumed.RunAsync(null, Token);
@@ -204,9 +204,14 @@ public class PublicationSessionBatchResumeTests : IDisposable
         // the writer did is missing from the first reads, though its sequence has long moved.
         node.Ledger.HistoryHides = tx => string.Equals(tx.Account, node.Writer.Account, StringComparison.Ordinal);
         node.Ledger.HistoryHideReads = 3;
+        node.Ledger.HistoryHideReadsFrom = first.State.StartedInLedger;
+        int callsBefore = node.Ledger.AccountTransactionsCalls;
 
         PublicationSession resumed = await PublicationSession.ResumeAsync(
             Factory(node, node.Payer, budgets), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options, null, Token);
+
+        // Three lagging reads, each discarded, then one that covers the writer's sequences.
+        Assert.Equal(4, node.Ledger.Passes(node.Writer.Account, first.State.StartedInLedger, callsBefore).Count);
 
         Assert.True(Assert.Single(budgets).PayerBudgetDrops < whole.PayerFeeDropsWorstCase);
 
@@ -261,10 +266,15 @@ public class PublicationSessionBatchResumeTests : IDisposable
 
         node.Ledger.HistoryHides = tx => MemoLayout.IsManifest(tx.MemoTypeHex);
         node.Ledger.HistoryHideReads = 2;
+        node.Ledger.HistoryHideReadsFrom = first.State.StartedInLedger;
+        int callsBefore = node.Ledger.AccountTransactionsCalls;
 
         PublicationSession resumed = await PublicationSession.ResumeAsync(
             Factory(node, node.Payer), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options, null, Token);
         PublicationReport report = await resumed.RunAsync(null, Token);
+
+        // The reconciliation and the first manifest search both read before the manifest showed.
+        Assert.True(node.Ledger.Passes(node.Writer.Account, first.State.StartedInLedger, callsBefore).Count >= 3);
 
         Assert.Equal(original.Link, report.Link);
         Assert.Equal(transmitted, node.Sink.Transmissions.Count);
