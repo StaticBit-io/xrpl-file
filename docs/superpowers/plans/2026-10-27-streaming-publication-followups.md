@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close what the 2026-10-26 testnet acceptance and the final review left open: the library carries its share of the history read's memory (D1), "Finished in" counts the whole publication (D2), the resume confirmation reads as waiting for the person (D3), the duration range matches what testnet measured and includes the hash pass and, on a resume, the history read (M9, O1), the ticket strategy stops rebuilding memos for their markers (M8), the Accounts screen shows balances (O4), the history read's time is measured before anyone speeds it up (O2), the deferred minors that carry real risk get their fix or test, and the VM acceptance runs again.
+**Goal:** Close what the 2026-10-26 testnet acceptance and the final review left open: the library carries its share of the history read's memory (D1), "Finished in" counts the whole publication (D2), the resume confirmation reads as waiting for the person (D3), the duration range matches what testnet measured and includes the hash pass, while a resume quote prices only the remaining work (M9, O1), the ticket strategy stops rebuilding memos for their markers (M8), the Accounts screen shows balances (O4), the history read's time is measured before anyone speeds it up (O2), the deferred minors that carry real risk get their fix or test, and the VM acceptance runs again.
 
 **Architecture:** Core's `XrplClientLedgerSource` asks the SDK for a memberless result type and parses each `account_tx` page once, out of the SDK's frame into pooled buffers it returns when the page is parsed; hosts are told about the collector setting in the README and the XML docs. The app computes durations and working time in `XrplFile.App.Core` (`PublicationDuration`, `CostSummary`, `PublicationRun`, `RunModel`); the state file carries the earlier sessions' working time as one optional field the library never reads. The Accounts screen reads balances through the same `ILedgerSource.AccountStateAsync` the estimate card uses, one connection per network. The history-read measurement runs in a scratch harness and lands as a report; speedup code follows only on a measured go.
 
@@ -24,7 +24,7 @@
 - New user-facing strings (skill `writing-site-copy`): no "—" in new text; say what the person waits for or does next; one fact in one place. The exact new strings are given in the tasks.
 - Never decompile Xrpl NuGet packages. Read `E:\GIT\XRPL\XrplCSharp` with `git show v11.2.0:<path>`; do not switch that repository's branch.
 - Commits: conventional, English, subject and body; no attribution lines of any kind (no `Co-Authored-By`, no "Generated with").
-- Exact values used by this plan: Batch writing 160 and 70 memos/s; hashing 9,000 and 4,500 chunks/s; history read 400 records/s; one-hour threshold (S12) unchanged; `System.GC.LOHThreshold` = 4,194,304; Argon2id collection threshold 16 MiB (16,384 KiB); `account_tx` page size 400 (unchanged); S27 bounds unchanged (peak(800) < 300,000,000 bytes, slope < 40 MB); `ResumeMemoryStandaloneTests` bounds unchanged (resume peak < 300,000,000 bytes, unlock residue < 64 MiB).
+- Exact values used by this plan: Batch writing 160 and 70 memos/s; hashing 9,000 and 4,500 chunks/s; one-hour threshold (S12) unchanged; `System.GC.LOHThreshold` = 4,194,304; Argon2id collection threshold 16 MiB (16,384 KiB); `account_tx` page size 400 (unchanged); S27 bounds unchanged (peak(800) < 300,000,000 bytes, slope < 40 MB); `ResumeMemoryStandaloneTests` bounds unchanged (resume peak < 300,000,000 bytes, unlock residue < 64 MiB).
 
 ## Review Focus
 
@@ -61,7 +61,7 @@ The final review's M1–M6 and I3 are in the code: `EstimateModelConfirmationTes
 | `src/XrplFile.Core/PublicationSession.cs` | class remarks point at the host setting; two state saves stop masking the error | 2, 10 |
 | `tests/XrplFile.ResumeMemoryProbe/*`, `tests/XrplFile.Core.Tests/ResumeMemoryStandaloneTests.cs` | probe reports the configured LOH threshold; named minimum | 2 |
 | `docs/superpowers/reports/2026-10-27-history-read/report.md` | O2 measurement | 3 |
-| `app/XrplFile.App.Core/PublicationDuration.cs`, `CostSummary.cs`, `PublicationRun.cs` | rates, hash pass, resume history read | 5 |
+| `app/XrplFile.App.Core/PublicationDuration.cs`, `CostSummary.cs`, `PublicationRun.cs` | rates, hash pass, resume quote of the remaining work | 5 |
 | `src/XrplFile.Core/PublicationState.cs` | optional `WorkedSeconds`; `Load` validates `Size` | 6, 10 |
 | `app/XrplFile.App.Core/PublicationRun.cs`, `RunModel.cs` | working time; waiting line; `RunView.ShowsProgress` | 6, 7, 14 |
 | `app/XrplFile.App/Components/Run.razor` | confirmation without bar and second Cancel | 7 |
@@ -231,7 +231,7 @@ The removed figures (860 MiB over 98,000 records) go into this task's commit bod
 
 - [ ] **Step 5: Spec amendment 4**
 
-Append the section `## Amendments (2026-10-27)` to the spec with amendment 4 of this plan, verbatim.
+Append the section `## Amendments (2026-10-27)` to the spec with amendment 4 of this plan, verbatim; later tasks insert amendments 1-3 above it so the section reads in numeric order.
 
 - [ ] **Step 6: Run the unit suites and the app build**
 
@@ -918,7 +918,7 @@ Publish › `accept-30mb.mp4`, writer `batch-writer`, paid by `batch-payer`, Est
 
 - [ ] **Step 5: (a) The 300 MB file with Lock and Resume, memory sampled**
 
-Publish `accept-300mb.mp4` the same way; screenshot the estimate (`06-estimate-300mb.jpg`: the range should read about 36 min to 1 h 17 min, and "This publication is large"). Start the sampler (`C:\Lab\private-bytes-300mb.csv`). About ten minutes in, Lock; wait about a minute; Unlock (note the press time); Resume. Expected: no file dialog, hashing, history, the confirmation as in Step 4 with "Time" now including the hash pass and the history read (screenshot `07-confirm-300mb.jpg`); wait about 20 s, then Continue; then "Published." with "Finished in …" (screenshot `08-published-300mb.jpg`). Stop the sampler and copy both CSVs to the report folder.
+Publish `accept-300mb.mp4` the same way; screenshot the estimate (`06-estimate-300mb.jpg`: the range should read about 36 min to 1 h 17 min, and "This publication is large"). Start the sampler (`C:\Lab\private-bytes-300mb.csv`). About ten minutes in, Lock; wait about a minute; Unlock (note the press time); Resume. Expected: no file dialog, hashing, history, the confirmation as in Step 4 with "Time" pricing only the remaining work, not the hash pass or the history read already done (screenshot `07-confirm-300mb.jpg`); wait about 20 s, then Continue; then "Published." with "Finished in …" (screenshot `08-published-300mb.jpg`). Stop the sampler and copy both CSVs to the report folder.
 
 - [ ] **Step 6: (d) Read back both links**
 
@@ -926,7 +926,7 @@ In Read, look each link up (screenshot `09-read-lookup.jpg` for the 300 MB one),
 
 - [ ] **Step 7: Restore the guest and hand back**
 
-Delete the sources and read-back copies from the guest, close the application, leave the VM Saved. Return the report text, with: environment and commit; the files; for each run the estimate's range against net wall time (Publish to "Published." less the locked interval and less the time the confirmation waited) and against "Finished in" (D2 holds when "Finished in" equals that net figure within the seconds of the waits you timed by hand); the fence wait seen or not and for how long (O3/b); the confirmation's look (D3); the Accounts balances before and after with the payer's spend (O4); private bytes: the peak over the 300 MB run excluding the window from the unlock press to 5 s after it, against 300,000,000 bytes, and the peak inside that window reported separately (D1, a); the read-back hashes (d); every defect with a screenshot and a one-line reproduction.
+Delete the sources and read-back copies from the guest, close the application, leave the VM Saved. Return the report text, with: environment and commit; the files; for each run the estimate's range against net wall time (Publish to "Published." less the time from Lock to Resume and less the time the confirmation waited) and against "Finished in" (D2 holds when "Finished in" equals that net figure within the seconds of the waits you timed by hand); the fence wait seen or not and for how long (O3/b); the confirmation's look (D3); the Accounts balances before and after with the payer's spend (O4); private bytes: the peak over the 300 MB run excluding the window from the unlock press to 5 s after it, against 300,000,000 bytes, and the peak inside that window reported separately (D1, a); the read-back hashes (d); every defect with a screenshot and a one-line reproduction.
 
 - [ ] **Step 8: Controller writes and commits the report**
 
