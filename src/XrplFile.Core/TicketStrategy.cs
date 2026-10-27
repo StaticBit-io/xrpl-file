@@ -134,16 +134,18 @@ public sealed class TicketStrategy(
     {
         HashSet<string> markers = new(memos.Count, StringComparer.Ordinal);
 
-        foreach (MemoSubmission memo in memos)
+        for (int index = 0; index < memos.Count; index++)
         {
+            string marker = RoundMarkers.MarkerHexAt(memos, index);
+
             // A memo is recognised in the ledger by its marker and its data, so two memos wearing
             // the same marker could still be told apart by data — but not if their data is equal,
             // and the writer never sends two such memos. Refusing here keeps the ambiguity off the
             // ledger — and keeps a raw ArgumentException out of the contract.
-            if (!markers.Add(memo.MemoTypeHex))
+            if (!markers.Add(marker))
             {
                 throw new XrplFileException(XrplFileError.SubmitRefused,
-                    $"two memos carry the marker {memo.MemoTypeHex}, which the sweep could not tell apart");
+                    $"two memos carry the marker {marker}, which the sweep could not tell apart");
             }
         }
 
@@ -185,7 +187,7 @@ public sealed class TicketStrategy(
 
             foreach (int index in batch)
             {
-                wanted[memos[index].MemoTypeHex] = index;
+                wanted[RoundMarkers.MarkerHexAt(memos, index)] = index;
                 attempts[index] = attempts.GetValueOrDefault(index) + 1;
             }
 
@@ -206,7 +208,7 @@ public sealed class TicketStrategy(
             foreach (int index in sent.Gone)
             {
                 attempts[index]--;
-                wanted.Remove(memos[index].MemoTypeHex);
+                wanted.Remove(RoundMarkers.MarkerHexAt(memos, index));
             }
 
             int landedBefore = landed.Count;
@@ -237,12 +239,12 @@ public sealed class TicketStrategy(
             if (pending.FirstOrDefault(index => attempts.GetValueOrDefault(index) >= _options.MaxAttemptsPerMemo, -1) is int stuck and >= 0)
             {
                 throw new XrplFileException(XrplFileError.SubmitRefused,
-                    $"the memo marked {memos[stuck].MemoTypeHex} did not reach the ledger in {_options.MaxAttemptsPerMemo} attempts");
+                    $"the memo marked {RoundMarkers.MarkerHexAt(memos, stuck)} did not reach the ledger in {_options.MaxAttemptsPerMemo} attempts");
             }
         }
 
         SubmittedMemosBuilder result = new(memos.Count, keepChunkFacts: true);
-        foreach ((int index, LedgerTransaction tx) in landed.OrderBy(pair => pair.Key)) result.Record(index, memos[index].MemoTypeHex, tx.Hash, tx.LedgerIndex);
+        foreach ((int index, LedgerTransaction tx) in landed.OrderBy(pair => pair.Key)) result.Record(index, RoundMarkers.MarkerHexAt(memos, index), tx.Hash, tx.LedgerIndex);
 
         return result.Build();
     }

@@ -46,6 +46,21 @@ public class TicketStrategyTests
     }
 
     [Fact]
+    public async Task A_lazy_chunk_pass_reads_each_chunk_once_to_send_it_and_once_to_sweep_for_it()
+    {
+        CountingPublicationSource source = new(new VectorPublicationSource("tickets", 50_000));
+        LazyMemoList memos = new(source, IndexRanges.Of([(0, 50)]));
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        await using TicketStrategy strategy = Strategy(sink, ledger, ticketsPerBatch: 50);
+
+        SubmittedMemos landed = await strategy.SubmitAllAsync(memos, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(50, landed.Each().Count);
+        Assert.Equal(2 * 50, source.Reads);
+    }
+
+    [Fact]
     public async Task A_strategy_counts_the_mints_it_made()
     {
         FakeLedgerSource ledger = new();
