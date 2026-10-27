@@ -65,6 +65,9 @@ public sealed class StreamingReconciliationTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first.RunAsync(null, stop.Token));
         node.Sink.Transmitting = null;
 
+        // The fake closes a ledger on each read; what the cancelled run had sent may still be open.
+        for (int read = 0; read < 3; read++) await node.Ledger.CurrentLedgerAsync(Token);
+
         return (first, file);
     }
 
@@ -78,9 +81,11 @@ public sealed class StreamingReconciliationTests : IDisposable
             ?? throw new InvalidOperationException("PublicationSession.StreamReconcileAsync was renamed; update this test");
         Task task = (Task)pass.Invoke(session, [to, false, null, Token])!;
         await task;
-        object reconciled = task.GetType().GetProperty("Result")!.GetValue(task)!;
+        object reconciled = task.GetType().GetProperty("Result")?.GetValue(task)
+            ?? throw new InvalidOperationException("StreamReconcileAsync no longer returns a Task<T> with a result; update this test");
 
-        return (LandedMemos)reconciled.GetType().GetProperty("Landed")!.GetValue(reconciled)!;
+        return (LandedMemos?)reconciled.GetType().GetProperty("Landed")?.GetValue(reconciled)
+            ?? throw new InvalidOperationException("the result of StreamReconcileAsync no longer has a Landed property; update this test");
     }
 
     /// <summary>A finished two-block run whose ending is forgotten, as a crash before "done" leaves it.</summary>
@@ -192,6 +197,9 @@ public sealed class StreamingReconciliationTests : IDisposable
         LedgerTransaction own = (await ledger.TransactionAsync(original.ManifestHash, Token))!;
         Manifest foreign = original.Manifest with { FirstLedger = 1, LastLedger = 2 };
         ledger.Remove(tx => string.Equals(tx.Hash, own.Hash, StringComparison.OrdinalIgnoreCase));
+
+        // Plant puts the foreign manifest in the current ledger, so it sorts first only while the own one is in it too.
+        Assert.Equal(own.LedgerIndex, ledger.CurrentLedger);
         Plant(ledger, new string('2', 64), MemoLayout.ManifestMarkerHex, MemoLayout.Utf8Hex(foreign.Encode()));
         ledger.Add(own);
         int submitted = sink.Submitted.Count;
