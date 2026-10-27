@@ -45,6 +45,22 @@ public class PublicationStateTests : IDisposable
         Assert.Equal("tickets", PublicationState.Load(PathOf("v2.json")).Strategy);
     }
 
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(-1L)]
+    [InlineData(16L * 1024 * 1024 * 1024 + 1)]
+    public void A_state_whose_size_no_run_could_have_is_refused(long size)
+    {
+        (Version2(PublicationState.SequenceStrategyName) with { Size = size }).Save(PathOf("v2-size.json"));
+        (Version3() with { Size = size }).Save(PathOf("v3-size.json"));
+
+        FormatException version2 = Assert.Throws<FormatException>(() => PublicationState.Load(PathOf("v2-size.json")));
+        FormatException version3 = Assert.Throws<FormatException>(() => PublicationState.Load(PathOf("v3-size.json")));
+
+        Assert.Contains($"a size of {size} bytes", version2.Message, StringComparison.Ordinal);
+        Assert.Contains($"a size of {size} bytes", version3.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void The_working_time_round_trips_and_is_absent_until_set()
     {

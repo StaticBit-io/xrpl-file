@@ -66,6 +66,23 @@ public sealed class WindowConflictTests : IDisposable
     }
 
     [Fact]
+    public async Task A_conflict_whose_record_cannot_be_written_still_fails_with_the_conflict()
+    {
+        BatchTestNode node = Funded();
+        (PublicationSession first, byte[] file) = await InterruptedAsync(node);
+        Plant(node, 0, [1, 2, 3], new string('C', 64));
+
+        // A directory where Save writes its temporary file: a read-only attribute would not stop a write on Linux.
+        Directory.CreateDirectory(first.StatePath + ".writing");
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            Factory(node), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options, null, Token));
+
+        Assert.Equal(XrplFileError.WriterWindowConflict, error.Error);
+        Assert.Null(PublicationState.Load(first.StatePath).Failure);
+    }
+
+    [Fact]
     public async Task A_recorded_conflict_is_reported_again_without_reading_or_sending()
     {
         BatchTestNode node = Funded();

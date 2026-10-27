@@ -43,6 +43,60 @@ public sealed class SessionSourceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_session_never_disposes_a_source_it_borrowed()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using SequenceStrategy strategy = new(sink, new WalletSigner(Wallet), new SequenceStrategyOptions { FeeDrops = 10, ValidationPoll = TimeSpan.FromMilliseconds(1) });
+
+        await using CountingPublicationSource whole = new(new VectorPublicationSource("borrowed-whole", 2_500));
+        PublicationSession finished = await PublicationSession.StartAsync(
+            strategy, ledger, whole, "text/plain", null, Wallet.ClassicAddress, "key", "testnet", Options, null, Token);
+        Assert.False(whole.Disposed);
+        await finished.RunAsync(null, Token);
+        Assert.False(whole.Disposed);
+
+        await using CountingPublicationSource stopped = new(new VectorPublicationSource("borrowed-stopped", 2_500));
+        ScriptedStrategy dies = new(strategy) { FailAtCall = 2 };
+        PublicationSession first = await PublicationSession.StartAsync(
+            dies, ledger, stopped, "text/plain", null, Wallet.ClassicAddress, "key", "testnet", Options, null, Token);
+        await Assert.ThrowsAsync<XrplFileException>(() => first.RunAsync(null, Token));
+        Assert.False(stopped.Disposed);
+        PublicationSession resumed = await PublicationSession.ResumeAsync(strategy, ledger, stopped, first.StatePath, Options, null, Token);
+        Assert.False(stopped.Disposed);
+        await resumed.RunAsync(null, Token);
+        Assert.False(stopped.Disposed);
+
+        BatchTestNode node = new();
+        node.Ledger.Fees = new NetworkFees(10, 1_000_000, 200_000);
+        node.Ledger.Balances[node.Writer.Account] = 100_000_000;
+        node.Ledger.Balances[node.Payer.Account] = 100_000_000;
+        SessionOptions batchOptions = new() { StateDirectory = _directory, FencePoll = TimeSpan.FromMilliseconds(1) };
+        BatchStrategyFactory factory = (budget, fence) =>
+            new BatchStrategy(node.Sink, node.Ledger, node.Writer, node.Payer, budget, fence, BatchTestNode.FastOptions);
+
+        await using CountingPublicationSource batch = new(new VectorPublicationSource("borrowed-batch", 40_000));
+        PublicationSession batchFirst = await PublicationSession.StartAsync(
+            factory, node.Ledger, batch, "text/plain", null,
+            node.Writer.Account, "key-w", node.Payer.Account, "key-p", "testnet", batchOptions, null, Token);
+        Assert.False(batch.Disposed);
+        using CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        node.Sink.Transmitting = transmission =>
+        {
+            if (transmission.Ordinal + 1 >= 2) stop.Cancel();
+        };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => batchFirst.RunAsync(null, stop.Token));
+        node.Sink.Transmitting = null;
+        Assert.False(batch.Disposed);
+
+        PublicationSession batchResumed = await PublicationSession.ResumeAsync(
+            factory, node.Ledger, batch, batchFirst.StatePath, node.Payer.Account, "key-p", batchOptions, null, Token);
+        Assert.False(batch.Disposed);
+        await batchResumed.RunAsync(null, Token);
+        Assert.False(batch.Disposed);
+    }
+
+    [Fact]
     public async Task A_resume_from_another_file_is_refused_before_the_ledger_is_read()
     {
         FakeLedgerSource ledger = Node();

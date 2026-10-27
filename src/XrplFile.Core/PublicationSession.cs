@@ -888,7 +888,10 @@ public sealed class PublicationSession : IBatchFenceRecorder
         lock (_stateLock)
         {
             _state = _state with { ManifestStatus = PublicationState.ManifestLandedRejected, ManifestHash = manifestHash };
-            _state.Save(StatePath);
+
+            // The caller throws ManifestRejected with its link next. A save error here would replace
+            // it, and the recovered manifest is checked again on the next resume anyway (B27, S22).
+            TrySaveState();
         }
     }
 
@@ -917,7 +920,10 @@ public sealed class PublicationSession : IBatchFenceRecorder
             if (string.Equals(_state.Failure, failure, StringComparison.Ordinal)) return;
 
             _state = _state with { Failure = failure };
-            _state.Save(StatePath);
+
+            // The caller throws the conflict next. A save error here would replace it, and the
+            // next resume's reconciliation finds the conflict again (B27, S22).
+            TrySaveState();
         }
     }
 
@@ -1402,19 +1408,26 @@ public sealed class PublicationSession : IBatchFenceRecorder
                 ManifestHash = manifestHash ?? _state.ManifestHash,
             };
 
-            try
-            {
-                _state.Save(StatePath);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                // The state file is a record of money, not the money itself. By the time the last
-                // save runs the transactions are paid for, and the report is the only thing that
-                // names what they bought — so the failure is kept for the caller to see and the
-                // run carries on rather than throwing the report away. The first failure is the
-                // one kept: it is the one that explains what the file on disk now says.
-                _stateSaveFailure ??= e;
-            }
+            TrySaveState();
+        }
+    }
+
+    /// <summary>
+    /// Saves <see cref="_state"/> and keeps a failed write instead of throwing it. The state file is
+    /// a record of money, not the money itself: by the time the last save runs the transactions are
+    /// paid for, and the report or the real failure is the only thing that names what they bought,
+    /// so the run carries on rather than throwing that away. The first failure is the one kept: it
+    /// is the one that explains what the file on disk now says. Call it under <see cref="_stateLock"/>.
+    /// </summary>
+    private void TrySaveState()
+    {
+        try
+        {
+            _state.Save(StatePath);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _stateSaveFailure ??= e;
         }
     }
 

@@ -142,6 +142,13 @@ public sealed record PublicationState(
 
         if (state is null) throw new FormatException($"{path} did not deserialize as a publication state");
 
+        // No run starts on an empty file or on one above the cap, so a recorded size outside the
+        // range is a damaged file that would otherwise reach the chunk arithmetic of a resume.
+        if (state.Size < 1 || state.Size > PublicationSession.MaxPublicationBytes)
+        {
+            throw new FormatException($"a state records a size of {state.Size} bytes, which no run can have");
+        }
+
         if (state.Version == CurrentVersion)
         {
             if (state.Strategy is not (null or SequenceStrategyName or TicketStrategyName))

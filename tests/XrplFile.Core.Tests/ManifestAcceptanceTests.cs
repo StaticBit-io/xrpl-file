@@ -87,6 +87,29 @@ public sealed class ManifestAcceptanceTests : IDisposable
         Assert.Equal(PublicationState.ManifestLandedRejected, PublicationState.Load(run.StatePath).ManifestStatus);
     }
 
+    [Fact]
+    public async Task A_rejected_manifest_whose_record_cannot_be_written_still_reports_the_rejection_with_its_link()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using SequenceStrategy strategy = new(sink, Signer, new SequenceStrategyOptions { FeeDrops = Fee });
+        byte[] file = VectorStream.Bytes("s22-recovered-unsaved", 2_500);
+        PublicationSession run = await PublicationSession.StartAsync(
+            strategy, ledger, file, "text/plain", "s.txt", Wallet.ClassicAddress, "key", "testnet", Options, Token);
+        PublicationReport report = await run.RunAsync(null, Token);
+        PublicationState finished = PublicationState.Load(run.StatePath);
+        (finished with { Phase = "manifest", ManifestHash = null }).Save(run.StatePath);
+
+        // A directory where Save writes its temporary file: a read-only attribute would not stop a write on Linux.
+        Directory.CreateDirectory(run.StatePath + ".writing");
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() =>
+            PublicationSession.ResumeAsync(strategy, new TamperingSource(ledger), file, run.StatePath, Options, Token));
+
+        Assert.Equal(XrplFileError.ManifestRejected, error.Error);
+        Assert.Equal(report.ManifestHash, error.Link?.TxHash);
+    }
+
     private async Task<(PublicationSession Session, SequenceStrategy Strategy, FakeLedgerSource Ledger, byte[] File)> StartedAsync(
         Func<FakeLedgerSource, ILedgerSource> through)
     {

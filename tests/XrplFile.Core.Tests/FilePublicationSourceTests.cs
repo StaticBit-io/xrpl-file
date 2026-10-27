@@ -151,6 +151,7 @@ public sealed class FilePublicationSourceTests : IDisposable
         using SafeFileHandle handle = new(pipe.SafePipeHandle.DangerousGetHandle(), ownsHandle: false);
 
         Assert.Throws<ArgumentException>(() => new FilePublicationSource(handle));
+        Assert.False(handle.IsClosed);
     }
 
     [Fact]

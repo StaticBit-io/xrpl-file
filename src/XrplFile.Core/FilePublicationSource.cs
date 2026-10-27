@@ -23,7 +23,10 @@ public sealed class FilePublicationSource : IPublicationSource, IDisposable
     private readonly IPositionalReader _reader;
     private int _disposed;
 
-    /// <summary>Takes ownership of <paramref name="handle"/>: disposing the source closes it.</summary>
+    /// <summary>
+    /// Takes ownership of <paramref name="handle"/> once it is constructed: disposing the source closes it.
+    /// A handle it refuses stays the caller's and is not closed.
+    /// </summary>
     /// <exception cref="ArgumentException">The handle is a pipe or a socket, which cannot be read at an offset.</exception>
     public FilePublicationSource(SafeFileHandle handle)
         : this(handle, path: null)

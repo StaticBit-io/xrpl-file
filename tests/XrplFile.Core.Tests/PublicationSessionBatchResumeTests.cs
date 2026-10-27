@@ -103,6 +103,24 @@ public class PublicationSessionBatchResumeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Batch_resume_of_a_file_of_another_size_is_a_changed_file_refused_before_the_ledger_is_read()
+    {
+        BatchTestNode node = Funded();
+        (PublicationSession first, byte[] file) = await InterruptedAsync(node);
+        byte[] other = VectorStream.Bytes("resume", file.Length - 1);
+        int reads = node.Ledger.AccountTransactionsCalls;
+        int transmitted = node.Sink.Transmissions.Count;
+
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => PublicationSession.ResumeAsync(
+            Factory(node, node.Payer), node.Ledger, other, first.StatePath, node.Payer.Account, "key-p", Options, null, Token));
+
+        Assert.Equal(XrplFileError.ResumeMismatch, error.Error);
+        Assert.True(error.SourceChanged);
+        Assert.Equal(reads, node.Ledger.AccountTransactionsCalls);
+        Assert.Equal(transmitted, node.Sink.Transmissions.Count);
+    }
+
+    [Fact]
     public async Task A_resume_prices_only_what_is_still_missing()
     {
         BatchTestNode node = Funded();
