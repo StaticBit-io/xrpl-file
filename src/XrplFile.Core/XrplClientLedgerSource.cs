@@ -24,7 +24,7 @@ namespace XrplFile;
 /// <remarks>
 /// <para>
 /// A host that reads long histories through this source should set <c>System.GC.LOHThreshold</c> to
-/// <c>4194304</c>: each account_tx page is a large-object-heap frame of about 1.2 MB, and the
+/// <c>4194304</c>: each account_tx page is a large-object-heap frame of up to about 1.2 MB, and the
 /// setting lets the collector reclaim it in gen0 (README, "Collector settings for hosts").
 /// </para>
 /// </remarks>
@@ -478,7 +478,7 @@ public sealed class XrplClientLedgerSource : ILedgerSource
         {
             if (string.Equals(raw.Warning, "load", StringComparison.Ordinal)) Interlocked.Increment(ref _loadWarnings);
 
-            return raw.Result.TryGetProperty("error", out JsonElement error) ? throw Answered(command, error) : Detach(raw);
+            return TryReadError(command, raw.Result, out JsonElement error) ? throw Answered(command, error) : Detach(raw);
         }
     }
 
@@ -544,7 +544,20 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
         if (string.Equals(raw.Warning, "load", StringComparison.Ordinal)) Interlocked.Increment(ref _loadWarnings);
 
-        if (raw.Result.TryGetProperty("error", out JsonElement error))
+        JsonElement error;
+        bool answeredWithError;
+
+        try
+        {
+            answeredWithError = TryReadError(command, raw.Result, out error);
+        }
+        catch
+        {
+            raw.Dispose();
+            throw;
+        }
+
+        if (answeredWithError)
         {
             using (raw)
             {
@@ -555,6 +568,23 @@ public sealed class XrplClientLedgerSource : ILedgerSource
         }
 
         return raw;
+    }
+
+    /// <summary>
+    /// Looks for the <c>error</c> member of a node's answer. A <c>result</c> that is not an object
+    /// (an empty window, a node answering with a scalar or an array) has none to look for and is a
+    /// node failure like any other, rather than the <see cref="InvalidOperationException"/> that
+    /// <see cref="JsonElement.TryGetProperty(string, out JsonElement)"/> throws on one.
+    /// </summary>
+    private static bool TryReadError(string command, JsonElement result, out JsonElement error)
+    {
+        if (result.ValueKind != JsonValueKind.Object)
+        {
+            throw new XrplFileException(XrplFileError.NodeUnreachable,
+                $"the node answered {command} with a result that is {result.ValueKind}, not an object");
+        }
+
+        return result.TryGetProperty("error", out error);
     }
 
     private static bool IsAbsent(string? code, IReadOnlyList<string> absentCodes)

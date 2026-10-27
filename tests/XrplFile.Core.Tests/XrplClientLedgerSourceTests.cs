@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using Xrpl.Client;
 using Xrpl.Client.Json;
@@ -965,6 +966,33 @@ public class XrplClientLedgerSourceTests
         Assert.Equal(20, fees.OpenLedgerFeeDrops);
         Assert.Equal(1_000_000, fees.BaseReserveDrops);
         Assert.Equal(200_000, fees.OwnerReserveDrops);
+    }
+
+    [Theory]
+    [InlineData("[1,2]")]
+    [InlineData("7")]
+    public async Task A_result_that_is_not_an_object_is_an_unreachable_node_and_its_buffers_go_back(string frame)
+    {
+        List<RecordingOwner> owners = [];
+
+        XrplClientLedgerSource source = new(
+            (Func<BaseRequest, CancellationToken, Task<NodeAnswer>>)((_, _) =>
+            {
+                NodeAnswer parsed = NodeAnswer.Parse(Encoding.UTF8.GetBytes(frame), null);
+                RecordingOwner owner = new(parsed.Owner!);
+                owners.Add(owner);
+
+                return Task.FromResult(new NodeAnswer(parsed.Result, null, owner));
+            }));
+        CancellationToken token = TestContext.Current.CancellationToken;
+
+        // The history walk takes the page path, the transaction lookup the single-answer one.
+        XrplFileException walk = await Assert.ThrowsAsync<XrplFileException>(() => Read(source, token));
+        XrplFileException lookup = await Assert.ThrowsAsync<XrplFileException>(() => source.EarliestLedgerAsync(token));
+
+        Assert.Equal(XrplFileError.NodeUnreachable, walk.Error);
+        Assert.Equal(XrplFileError.NodeUnreachable, lookup.Error);
+        Assert.Equal([1, 1], owners.Select(owner => owner.Disposals).ToArray());
     }
 
     private sealed class RecordingOwner(IDisposable inner) : IDisposable
