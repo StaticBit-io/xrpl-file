@@ -25,6 +25,13 @@ internal sealed class BatchTrace(Action<BatchTraceEntry>? listener = null)
     private readonly long _started = Stopwatch.GetTimestamp();
     private long _total;
     private long _signingTicks;
+    private long _listenerFailures;
+
+    /// <summary>Listener calls that threw and were swallowed.</summary>
+    internal long ListenerFailures
+    {
+        get { lock (_gate) return _listenerFailures; }
+    }
 
     /// <summary>Entries ever added, the dropped ones included.</summary>
     public long Total
@@ -62,7 +69,16 @@ internal sealed class BatchTrace(Action<BatchTraceEntry>? listener = null)
             BatchTraceEntry added = new(Stopwatch.GetElapsedTime(_started), entry);
             _ring[(int)(_total % Capacity)] = added;
             _total++;
-            listener?.Invoke(added);
+
+            try
+            {
+                listener?.Invoke(added);
+            }
+            catch (Exception)
+            {
+                // A diagnostic that can fail the run it describes is worse than none; the entry is already kept.
+                _listenerFailures++;
+            }
         }
     }
 

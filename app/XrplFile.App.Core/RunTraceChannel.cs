@@ -20,11 +20,17 @@ public sealed class RunTraceChannel
     private readonly Task _drain;
     private long _dropped;
 
-    public RunTraceChannel(Func<IReadOnlyList<string>, Task> write)
+    /// <summary>How long <see cref="CompleteAsync"/> waits for the writer; a log write that hangs must not keep a run from ending.</summary>
+    public static readonly TimeSpan CompletionLimit = TimeSpan.FromSeconds(10);
+
+    private readonly TimeProvider _time;
+
+    public RunTraceChannel(Func<IReadOnlyList<string>, Task> write, TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(write);
 
         _write = write;
+        _time = time ?? TimeProvider.System;
         _channel = Channel.CreateBounded<string>(
             new BoundedChannelOptions(Capacity) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true },
             _ => Interlocked.Increment(ref _dropped));
@@ -40,11 +46,21 @@ public sealed class RunTraceChannel
     /// <summary>Queues a line without waiting; a full channel drops its oldest line instead.</summary>
     public void Post(string line) => _channel.Writer.TryWrite(line);
 
-    /// <summary>Stops taking lines and waits until every queued one, and the count of the dropped, is written.</summary>
+    /// <summary>
+    /// Stops taking lines and waits until every queued one, and the count of the dropped, is written;
+    /// gives up after <see cref="CompletionLimit"/> when a write does not return.
+    /// </summary>
     public async Task CompleteAsync()
     {
         _channel.Writer.TryComplete();
-        await _drain.ConfigureAwait(false);
+
+        try
+        {
+            await _drain.WaitAsync(CompletionLimit, _time).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+        }
     }
 
     private async Task DrainAsync()

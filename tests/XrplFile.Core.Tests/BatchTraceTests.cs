@@ -28,6 +28,19 @@ public partial class BatchTraceTests
     }
 
     [Fact]
+    public void A_listener_that_throws_does_not_reach_the_caller_and_the_entry_is_kept()
+    {
+        BatchTrace trace = new(_ => throw new IOException("log"));
+
+        trace.Add("round:1");
+        trace.Add("round:2");
+
+        Assert.Equal(["round:1", "round:2"], trace.Events);
+        Assert.Equal(2, trace.Total);
+        Assert.Equal(2, trace.ListenerFailures);
+    }
+
+    [Fact]
     public async Task A_strategy_hands_its_entries_to_the_listener_its_options_name()
     {
         BatchTestNode node = new();

@@ -1,3 +1,4 @@
+using XrplFile.Tests;
 using Xunit;
 
 namespace XrplFile.App.Core.Tests;
@@ -60,5 +61,21 @@ public sealed class RunTraceChannelTests
         await channel.CompleteAsync();
 
         Assert.True(calls >= 2);
+    }
+
+    [Fact]
+    public async Task Completing_stops_waiting_for_a_write_that_never_returns_after_its_limit()
+    {
+        ManualTimeProvider time = new();
+        RunTraceChannel channel = new(_ => new TaskCompletionSource().Task, time);
+
+        channel.Post("one");
+        Task done = channel.CompleteAsync();
+
+        Assert.False(done.IsCompleted);
+
+        time.Advance(RunTraceChannel.CompletionLimit);
+
+        await done.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
     }
 }
