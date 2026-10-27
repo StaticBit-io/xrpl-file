@@ -152,7 +152,13 @@ public sealed class AccountsModelTests : VaultHarness
         await model.RefreshFromLedgerAsync(reference, TestContext.Current.CancellationToken);
 
         Assert.Single(model.Rows);
-        Assert.NotNull(model.Message);
+        Assert.Equal(AccountsModel.ReadFailedMessage, model.Message);
+    }
+
+    [Fact]
+    public void A_failed_read_does_not_claim_that_nothing_was_spent()
+    {
+        Assert.DoesNotContain("spent", AccountsModel.ReadFailedMessage, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -267,7 +273,7 @@ public sealed class AccountsModelTests : VaultHarness
         AccountRow failed = RowOf(model, "cut");
         Assert.True(failed.CheckFailed);
         Assert.Equal(AccountsModel.UnreadBalance, model.BalanceTextOf(failed));
-        Assert.Equal(PublishErrorMessages.For(unreachable), model.Message);
+        Assert.Equal(AccountsModel.ReadFailedMessage, model.Message);
 
         AccountRow read = RowOf(model, "reachable");
         Assert.False(read.CheckFailed);

@@ -16,6 +16,13 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
     /// <summary>What the Balance column says when the last read of the row failed.</summary>
     public const string UnreadBalance = "Not available. Press Check to try again.";
 
+    /// <summary>
+    /// Why a read from a node came back with nothing. Its own sentence, not the publication one:
+    /// a balance check spends nothing, so "nothing was spent" would answer a question nobody asked.
+    /// </summary>
+    public const string ReadFailedMessage =
+        "The node did not answer, so the balance could not be read. Check the node URL in Settings, then press Check to try again.";
+
     // One gate for _rows, _checking and Rows: the model is a singleton, its continuations run on
     // pool threads (ConfigureAwait(false)) while the renderer and Check clicks touch the same state.
     // Never held across an await.
@@ -111,7 +118,7 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
         }
         catch (Exception ex) when (IsReadFailure(ex, cancellationToken))
         {
-            Fail(reference, ex);
+            Fail(reference);
         }
         finally
         {
@@ -187,7 +194,7 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
         {
             foreach (AccountRow row in rows)
             {
-                Fail(row.Reference, ex);
+                Fail(row.Reference);
                 release(row.Reference);
             }
 
@@ -275,13 +282,12 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
     private static bool IsReadFailure(Exception exception, CancellationToken cancellationToken) =>
         exception is XrplFileException || !cancellationToken.IsCancellationRequested;
 
-    private void Fail(string reference, Exception exception)
+    private void Fail(string reference)
     {
-        // Anything that is not already a node answer is a node that did not give one: a dropped
-        // socket or an unparseable reply says the same thing to the person.
-        Message = exception is XrplFileException known
-            ? PublishErrorMessages.For(known)
-            : PublishErrorMessages.For(XrplFileError.NodeUnreachable);
+        // Whatever the exception, the person's next step is the same: a read returned nothing, so
+        // check the node. The publication sentences describe runs and spending, none of which a
+        // read has.
+        Message = ReadFailedMessage;
 
         Apply(reference, current => current with { CheckFailed = true });
     }
@@ -371,7 +377,7 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
         }
         catch (Exception ex) when (IsReadFailure(ex, cancellationToken))
         {
-            Fail(row.Reference, ex);
+            Fail(row.Reference);
         }
     }
 }
