@@ -1,3 +1,4 @@
+using Xrpl.Wallet;
 using Xunit;
 
 namespace XrplFile.Tests;
@@ -45,11 +46,16 @@ public sealed class WindowConflictTests : IDisposable
 
     /// <summary>A chunk memo of the writer, validated and successful, that another publication left in the window.</summary>
     private static void Plant(BatchTestNode node, long chunk, byte[] data, string hash) =>
-        node.Ledger.Add(new LedgerTransaction(hash, node.Ledger.CurrentLedger, node.Writer.Account, true, true, "tesSUCCESS",
-            MemoLayout.ChunkMarkerHex(chunk), MemoLayout.Hex(data), null)
+        Plant(node.Ledger, node.Writer.Account, chunk, data, hash);
+
+    private static void Plant(FakeLedgerSource ledger, string account, long chunk, byte[] data, string hash) =>
+        ledger.Add(PlantedChunk(ledger, account, chunk, data, hash));
+
+    private static LedgerTransaction PlantedChunk(FakeLedgerSource ledger, string account, long chunk, byte[] data, string hash) =>
+        new(hash, ledger.CurrentLedger, account, true, true, "tesSUCCESS", MemoLayout.ChunkMarkerHex(chunk), MemoLayout.Hex(data), null)
         {
             TransactionType = "AccountSet", Sequence = 0, TicketSequence = 900_000, Fee = 12,
-        });
+        };
 
     [Fact]
     public async Task A_conflicting_copy_in_the_window_fails_the_resume_and_is_recorded()
@@ -106,12 +112,73 @@ public sealed class WindowConflictTests : IDisposable
     {
         BatchTestNode node = Funded();
         (PublicationSession first, byte[] file) = await InterruptedAsync(node);
+        IReadOnlyDictionary<string, List<LedgerTransaction>> landed = await node.LandedByMarkerAsync();
+        long originalFirst = landed.Where(pair => MemoLayout.ChunkIndexOf(pair.Key) is not null).SelectMany(pair => pair.Value).Min(tx => tx.LedgerIndex);
+        long originalOfChunk0 = Assert.Single(landed[MemoLayout.ChunkMarkerHex(0)]).LedgerIndex;
+
+        // In a ledger after the original's: a copy adopted in place of the original would move the block's first ledger.
+        node.Ledger.CurrentLedger += 3;
         Plant(node, 0, file.AsSpan(0, MemoLayout.ChunkBytes).ToArray(), new string('D', 64));
+        Assert.True(node.Ledger.CurrentLedger > originalOfChunk0);
 
         PublicationSession resumed = await PublicationSession.ResumeAsync(
             Factory(node), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options, null, Token);
         PublicationReport report = await resumed.RunAsync(null, Token);
 
+        Assert.Equal(originalFirst, report.Manifest.FirstLedger);
         Assert.Equal(file, (await new XrplFileReader(node.Ledger).ReadAsync(report.Link, Token)).Bytes);
+    }
+
+    [Fact]
+    public async Task A_record_of_another_account_carrying_this_files_marker_is_ignored()
+    {
+        BatchTestNode node = Funded();
+        (PublicationSession first, byte[] file) = await InterruptedAsync(node);
+        IReadOnlyDictionary<string, List<LedgerTransaction>> landed = await node.LandedByMarkerAsync();
+        int unsent = Enumerable.Range(0, (int)ChunkReads.ChunkCount(file.Length)).First(index => !landed.ContainsKey(MemoLayout.ChunkMarkerHex(index)));
+
+        // The payer's records reach the writer's account_tx the way any record touching the writer does.
+        // One carries a chunk the run has not sent, with the bytes it would send: counted as the writer's,
+        // the chunk would never be paid for. The other carries chunk 0 with other bytes: counted as the
+        // writer's, it would be a window conflict.
+        int from = unsent * MemoLayout.ChunkBytes;
+        byte[] unsentBytes = file.AsSpan(from, Math.Min(MemoLayout.ChunkBytes, file.Length - from)).ToArray();
+        node.Ledger.AddAffecting(PlantedChunk(node.Ledger, node.Payer.Account, unsent, unsentBytes, new string('A', 64)), node.Writer.Account);
+        node.Ledger.AddAffecting(PlantedChunk(node.Ledger, node.Payer.Account, 0, [1, 2, 3], new string('B', 64)), node.Writer.Account);
+
+        PublicationSession resumed = await PublicationSession.ResumeAsync(
+            Factory(node), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options, null, Token);
+        PublicationReport report = await resumed.RunAsync(null, Token);
+
+        Assert.Null(PublicationState.Load(first.StatePath).Failure);
+        Assert.Equal(file, (await new XrplFileReader(node.Ledger).ReadAsync(report.Link, Token)).Bytes);
+        IReadOnlyDictionary<string, List<LedgerTransaction>> after = await node.LandedByMarkerAsync();
+        Assert.Single(after[MemoLayout.ChunkMarkerHex(unsent)], tx => string.Equals(tx.Account, node.Writer.Account, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_one_account_resume_ignores_a_writer_copy_with_other_bytes()
+    {
+        XrplWallet wallet = XrplWallet.Generate();
+        FakeLedgerSource ledger = new() { Fees = new NetworkFees(10, 1_000_000, 200_000) };
+        ledger.Balances[wallet.ClassicAddress] = 500_000_000;
+        FakeLedgerSink sink = new(ledger);
+        ITransactionSigner signer = new WalletSigner(wallet);
+        byte[] file = VectorStream.Bytes("one-account", 2500);
+
+        // Dies at the manifest: every chunk has landed and the manifest has not.
+        ScriptedStrategy dying = new(new SequenceStrategy(sink, signer, new SequenceStrategyOptions { FeeDrops = 10 })) { FailAtCall = 2 };
+        PublicationSession first = await PublicationSession.StartAsync(
+            dying, ledger, file, "text/plain", null, wallet.ClassicAddress, "key-w", "testnet", Options, Token);
+        await Assert.ThrowsAsync<XrplFileException>(() => first.RunAsync(null, Token));
+        ledger.CurrentLedger += 2;
+        Plant(ledger, wallet.ClassicAddress, 0, [1, 2, 3], new string('C', 64));
+
+        await using SequenceStrategy again = new(sink, signer, new SequenceStrategyOptions { FeeDrops = 10 });
+        PublicationSession resumed = await PublicationSession.ResumeAsync(again, ledger, file, first.StatePath, Options, Token);
+        PublicationReport report = await resumed.RunAsync(null, Token);
+
+        Assert.Null(PublicationState.Load(first.StatePath).Failure);
+        Assert.Equal(file, (await new XrplFileReader(ledger).ReadAsync(report.Link, Token)).Bytes);
     }
 }

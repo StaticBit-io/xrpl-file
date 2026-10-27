@@ -242,6 +242,22 @@ public sealed class RunModelTests : VaultHarness
         Assert.False(RunModel.IsResumable(snapshot));
     }
 
+    [Fact]
+    public void A_run_whose_manifest_was_rejected_is_not_offered_a_resume()
+    {
+        string rejected = Path.Combine(_directory, "rejected-run.json");
+        string interrupted = Path.Combine(_directory, "interrupted-run.json");
+        PublicationState state = new(3, "testnet", "rWriter", "key", "text/plain", null, 2500, 1000, "AB", 1, "chunks",
+            Strategy: "batch", Payer: XrplWallet.Generate().ClassicAddress, PayerKeyReference: "key-p", Fence: 0);
+        (state with { ManifestStatus = PublicationState.ManifestLandedRejected }).Save(rejected);
+        state.Save(interrupted);
+
+        Assert.False(RunModel.IsResumable(new RunSnapshot(PublicationRunState.Failed, null, null, "failed", "f", "testnet", null) { StatePath = rejected }));
+
+        // The same state without the rejection is what a resume is for.
+        Assert.True(RunModel.IsResumable(new RunSnapshot(PublicationRunState.Failed, null, null, "failed", "f", "testnet", null) { StatePath = interrupted }));
+    }
+
     /// <summary>Every field <see cref="RunModel.Capture"/> derives, checked against its own
     /// per-property twin. Both are read back to back with nothing awaited in between, over a run
     /// that is either not yet started, parked at the gate, or already finished -- none of which can

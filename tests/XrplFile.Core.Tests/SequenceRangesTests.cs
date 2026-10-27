@@ -20,6 +20,29 @@ public class SequenceRangesTests
     }
 
     [Fact]
+    public void Disjoint_ranges_stay_apart_and_a_record_bridging_them_joins_them()
+    {
+        SequenceRanges ranges = new();
+        ranges.Add(Tx(10));
+        ranges.Add(Tx(11));
+        ranges.Add(Tx(20));
+        ranges.Add(Tx(21));
+
+        Assert.True(ranges.Covers(10, 12));
+        Assert.True(ranges.Covers(20, 22));
+        Assert.False(ranges.Covers(10, 22));
+        Assert.False(ranges.Covers(12, 20));
+
+        // A TicketCreate at 12 with seven tickets took 12 through 19, the gap between the two ranges.
+        ranges.Add(Tx(12, "TicketCreate", tickets: 7));
+
+        Assert.True(ranges.Covers(10, 22));
+        Assert.False(ranges.Covers(9, 22));
+        Assert.False(ranges.Covers(10, 23));
+        Assert.Equal(10u, ranges.Lowest);
+    }
+
+    [Fact]
     public void A_ticket_create_covers_the_sequences_its_tickets_took_and_a_ticketed_record_covers_nothing()
     {
         SequenceRanges ranges = new();
