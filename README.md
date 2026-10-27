@@ -127,10 +127,10 @@ signer.
 ### Collector settings for hosts
 
 A host that resumes Batch publications or reads long histories should set `System.GC.LOHThreshold`
-to `4194304`. Every `account_tx` page reaches the SDK as one frame of about 1.2 MB, which is
+to `4194304`. Every `account_tx` page reaches the SDK as one frame of up to about 1.2 MB, which is
 large-object-heap garbage, and after an Argon2id unlock the collector's budget for that heap lets
 hundreds of megabytes of dead pages pile up during a resume's history read; at this threshold the
-frames die in gen0 collections instead.
+frames die in gen0 collections instead. The setting goes in the csproj of the host executable:
 
 ```xml
 <ItemGroup>

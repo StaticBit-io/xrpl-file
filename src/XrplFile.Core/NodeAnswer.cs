@@ -15,7 +15,8 @@ internal readonly record struct NodeAnswer(JsonElement Result, string? Warning, 
     /// <summary>
     /// Reads one <c>result</c> member out of the SDK's frame. <see cref="JsonDocument.ParseValue"/>
     /// copies it into <see cref="System.Buffers.ArrayPool{T}"/> buffers that go back on
-    /// <see cref="Dispose"/>, so a page-sized answer leaves no large-object-heap array behind.
+    /// <see cref="Dispose"/>, so a page-sized answer leaves no page-sized garbage of its own;
+    /// the SDK's frame stays the one large-object-heap array per page.
     /// <c>RawJson</c> exposes only a span, hence the one copy.
     /// </summary>
     internal static NodeAnswer Parse(ReadOnlySpan<byte> result, string? warning)
