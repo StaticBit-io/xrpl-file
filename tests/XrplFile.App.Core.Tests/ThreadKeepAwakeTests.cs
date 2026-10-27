@@ -19,6 +19,25 @@ internal sealed class RecordingExecutionState(bool succeeds = true) : IExecution
     public void Clear() => _calls.Enqueue(("clear", Environment.CurrentManagedThreadId));
 }
 
+/// <summary>A keep-awake whose release fails, as a platform call may: counts the calls so a test sees the release was tried.</summary>
+internal sealed class ThrowingReleaseKeepAwake : IKeepAwake
+{
+    private int _acquired;
+    private int _released;
+
+    public int Acquired => Volatile.Read(ref _acquired);
+
+    public int Released => Volatile.Read(ref _released);
+
+    public void Acquire() => Interlocked.Increment(ref _acquired);
+
+    public void Release()
+    {
+        Interlocked.Increment(ref _released);
+        throw new InvalidOperationException("fake: the platform refused to let the computer sleep again");
+    }
+}
+
 public sealed class ThreadKeepAwakeTests
 {
     [Fact]

@@ -427,7 +427,7 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
         finally
         {
             // Before the terminal state is published, as PublicationRun does: a screen that sees the read end finds the computer free to sleep.
-            keepAwake?.Release();
+            keepAwake.ReleaseQuietly();
         }
 
         lock (_gate)

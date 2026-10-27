@@ -702,6 +702,21 @@ public sealed class ReadRunTests : IDisposable
     }
 
     [Fact]
+    public async Task A_keep_awake_that_throws_on_release_does_not_change_the_reads_outcome()
+    {
+        (ReadRun _, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);
+        ThrowingReleaseKeepAwake keepAwake = new();
+        ReadRun run = Track(new ReadRun(_connections, _picker, keepAwake));
+
+        Assert.True(run.Start(link, manifest));
+        await run.Completion.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
+
+        Assert.Equal(ReadState.Succeeded, run.Snapshot.State);
+        Assert.Equal(1, keepAwake.Acquired);
+        Assert.Equal(1, keepAwake.Released);
+    }
+
+    [Fact]
     public async Task A_read_that_fails_lets_the_computer_sleep_again()
     {
         (ReadRun _, XrplFileLink link, ManifestRecord manifest) = await ReadyAsync(TestContext.Current.CancellationToken);

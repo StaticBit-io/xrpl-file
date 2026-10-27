@@ -174,6 +174,23 @@ public sealed class HeldSourceTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
+        Assert.StartsWith(PublishErrorMessages.For(XrplFileError.ResumeMismatch), run.Snapshot.Failure, StringComparison.Ordinal);
+        Assert.False(run.HasRejectedSource(statePath));
+    }
+
+    [Fact]
+    public async Task A_resume_whose_recorded_file_cannot_be_opened_asks_for_it_again_without_a_node()
+    {
+        (PublicationRun run, PublishRequest request) = await RunReadyAsync(
+            size: 30_000, openSource: _ => throw new IOException("fake: the drive the file was on went away"));
+        string statePath = Path.Combine(_directory, "recorded.state");
+
+        Assert.True(run.Resume(statePath, request with { Source = null, SourceRecorded = true }));
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
+        Assert.Equal($"The file at {request.SourcePath} could not be read. Choose it again.", run.Snapshot.Failure);
+        Assert.Equal(0, _connections.Connections);
         Assert.False(run.HasRejectedSource(statePath));
     }
 
@@ -215,7 +232,8 @@ public sealed class HeldSourceTests : VaultHarness
         return model;
     }
 
-    private async Task<(PublicationRun Run, PublishRequest Request)> RunReadyAsync(int size = 4_096)
+    private async Task<(PublicationRun Run, PublishRequest Request)> RunReadyAsync(
+        int size = 4_096, Func<string, IPublicationSource>? openSource = null)
     {
         KeyVault vault = NewVault();
         await vault.CreateAsync(Password("a master password"), Token);
@@ -230,7 +248,7 @@ public sealed class HeldSourceTests : VaultHarness
         await File.WriteAllBytesAsync(path, bytes, Token);
         _files.Add(path, bytes);
 
-        PublicationRun run = new(_connections, vault, Paths, new PublicationHistory(Paths.HistoryPath), openSource: _files.Open);
+        PublicationRun run = new(_connections, vault, Paths, new PublicationHistory(Paths.HistoryPath), openSource: openSource ?? _files.Open);
         PublishRequest request = Requests.Fresh(bytes, "application/octet-stream", "file.bin", reference, wallet.ClassicAddress, "1", sourcePath: path)
             with { Source = _files.Open(path) };
 

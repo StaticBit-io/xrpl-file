@@ -258,7 +258,7 @@ public sealed class PublicationRun(
 
         if (running.IsCompleted) return true;
 
-        Task finished = await Task.WhenAny(running, Task.Delay(timeout)).ConfigureAwait(false);
+        Task finished = await Task.WhenAny(running, Task.Delay(timeout, _time)).ConfigureAwait(false);
         return ReferenceEquals(finished, running);
     }
 
@@ -498,7 +498,7 @@ public sealed class PublicationRun(
             // Released before the terminal state is published, so a screen that sees the run end finds the file free.
             if (source is not null) await DisposeQuietlyAsync(source).ConfigureAwait(false);
 
-            keepAwake?.Release();
+            keepAwake.ReleaseQuietly();
         }
 
         // Every connection and strategy acquired above has already been disposed (quietly; see the

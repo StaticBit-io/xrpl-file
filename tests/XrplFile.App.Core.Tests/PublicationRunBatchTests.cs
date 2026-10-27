@@ -113,6 +113,22 @@ public sealed class PublicationRunBatchTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_keep_awake_that_throws_on_release_does_not_change_the_runs_outcome()
+    {
+        ThrowingReleaseKeepAwake keepAwake = new();
+        (PublicationRun run, PublishRequest request, PublicationHistory history, _) = await ReadyAsync(keepAwake: keepAwake);
+
+        Assert.True(run.Start(request));
+        await run.Completion.WaitAsync(TimeSpan.FromSeconds(20), Token);
+
+        Assert.Equal(PublicationRunState.Succeeded, run.Snapshot.State);
+        Assert.NotNull(run.Snapshot.Report);
+        Assert.Single(history.Read());
+        Assert.Equal(1, keepAwake.Acquired);
+        Assert.Equal(1, keepAwake.Released);
+    }
+
+    [Fact]
     public async Task A_batch_publication_succeeds_and_History_records_its_payer_from_the_state()
     {
         (PublicationRun run, PublishRequest request, PublicationHistory history, _) = await ReadyAsync();

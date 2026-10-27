@@ -14,6 +14,26 @@ public interface IKeepAwake
     void Release();
 }
 
+internal static class KeepAwakeExtensions
+{
+    /// <summary>
+    /// Gives up a hold without letting a failure of the release reach the run that held it. The keep-awake
+    /// is a courtesy and the outcome is the run's: a release that throws from a run's <c>finally</c> would
+    /// replace that outcome and leave the run Running for good.
+    /// </summary>
+    public static void ReleaseQuietly(this IKeepAwake? keepAwake)
+    {
+        try
+        {
+            keepAwake?.Release();
+        }
+        catch (Exception)
+        {
+            // Nothing to do about a computer that will not be told it may sleep.
+        }
+    }
+}
+
 /// <summary>The platform's execution-state calls, made on <see cref="ThreadKeepAwake"/>'s own thread.</summary>
 public interface IExecutionState
 {
