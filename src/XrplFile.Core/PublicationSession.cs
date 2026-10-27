@@ -942,7 +942,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
     }
 
     /// <summary>What one streaming pass found: the landing and the kept lists, and the sequences the writer's records took.</summary>
-    private sealed record Reconciled(LandedMemos Landed, SequenceRanges Sequences);
+    internal sealed record Reconciled(LandedMemos Landed, SequenceRanges Sequences);
 
     /// <summary>The writer's sequences [From, Through) a Batch resume's reads must account for (spec B30).</summary>
     private sealed record SequenceBound(uint From, uint Through);
@@ -974,7 +974,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// reconciliation with <see cref="XrplFileError.WriterWindowConflict"/>, recorded on the state.
     /// A one-account run ignores such a record as a straggler (spec I12).
     /// </summary>
-    private async Task<Reconciled> StreamReconcileAsync(
+    internal async Task<Reconciled> StreamReconcileAsync(
         long to, bool conflictsFail, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
     {
         string writer = _state.Writer;

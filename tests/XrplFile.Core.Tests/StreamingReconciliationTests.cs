@@ -1,4 +1,3 @@
-using System.Reflection;
 using Xrpl.Wallet;
 using Xunit;
 
@@ -72,21 +71,11 @@ public sealed class StreamingReconciliationTests : IDisposable
     }
 
     /// <summary>
-    /// What one streaming pass keeps. The pass is private and its result is not exposed on the session,
-    /// and a list that is kept but never asked for leaves no trace in the report, so the pass is read directly.
+    /// What one streaming pass keeps. The result is not exposed on the session, and a list that is kept
+    /// but never asked for leaves no trace in the report, so the pass is read directly.
     /// </summary>
-    private static async Task<LandedMemos> ReconcileAsync(PublicationSession session, long to)
-    {
-        MethodInfo pass = typeof(PublicationSession).GetMethod("StreamReconcileAsync", BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("PublicationSession.StreamReconcileAsync was renamed; update this test");
-        Task task = (Task)pass.Invoke(session, [to, false, null, Token])!;
-        await task;
-        object reconciled = task.GetType().GetProperty("Result")?.GetValue(task)
-            ?? throw new InvalidOperationException("StreamReconcileAsync no longer returns a Task<T> with a result; update this test");
-
-        return (LandedMemos?)reconciled.GetType().GetProperty("Landed")?.GetValue(reconciled)
-            ?? throw new InvalidOperationException("the result of StreamReconcileAsync no longer has a Landed property; update this test");
-    }
+    private static async Task<LandedMemos> ReconcileAsync(PublicationSession session, long to) =>
+        (await session.StreamReconcileAsync(to, false, null, Token)).Landed;
 
     /// <summary>A finished two-block run whose ending is forgotten, as a crash before "done" leaves it.</summary>
     private async Task<(FakeLedgerSource Ledger, FakeLedgerSink Sink, SequenceStrategy Strategy, byte[] File, PublicationSession Run, PublicationReport Original)> ForgottenEndingAsync()
