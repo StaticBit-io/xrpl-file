@@ -505,24 +505,6 @@ public class BatchPublicationStandaloneTests : IDisposable
         }
     }
 
-    /// <summary>Forwards, and cancels the run once <paramref name="stopAfter"/> blobs have been transmitted — closing the window mid-run.</summary>
-    private sealed class StoppingSink(ILedgerSink inner, CancellationTokenSource stop, int stopAfter) : ILedgerSink
-    {
-        private int _count;
-
-        public Task<uint> SequenceAsync(string account, bool validated, CancellationToken cancellationToken) => inner.SequenceAsync(account, validated, cancellationToken);
-
-        public Task<SubmitOutcome> SubmitAsync(Dictionary<string, object> transaction, ITransactionSigner signer, CancellationToken cancellationToken) =>
-            inner.SubmitAsync(transaction, signer, cancellationToken);
-
-        public async Task<string> SubmitBlobAsync(string txBlob, CancellationToken cancellationToken)
-        {
-            string answer = await inner.SubmitBlobAsync(txBlob, cancellationToken);
-            if (Interlocked.Increment(ref _count) == stopAfter) await stop.CancelAsync();
-            return answer;
-        }
-    }
-
     /// <summary>
     /// Stops the run at the manifest's blob: after transmitting it (<paramref name="transmitFirst"/>)
     /// — the manifest in flight — or instead of transmitting it.
