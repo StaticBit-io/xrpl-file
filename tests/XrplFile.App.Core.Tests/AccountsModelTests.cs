@@ -547,6 +547,34 @@ public sealed class AccountsModelTests : VaultHarness
         Assert.Equal(string.Empty, model.UnknownStatusTextOf(RowOf(model, "fresh")));
     }
 
+    [Fact]
+    public async Task A_row_being_read_shows_no_status_from_the_read_before()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        NewVaultEntry entry = GeneratedOn("funded", "testnet");
+        string reference = await vault.StoreAsync(entry, token);
+        _connections.Ledger.Balances[entry.Address] = 25_000_000;
+        await model.RefreshAsync(token);
+        await model.RefreshFromLedgerAsync(reference, token);
+        Assert.NotEqual(AccountStage.Unknown, RowOf(model, "funded").Stage);
+        Assert.True(model.ShowsStatus(RowOf(model, "funded")));
+
+        // The Balance cell says "Checking…" now, and the Status cell must not still carry the answer
+        // of the read that is being replaced.
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _connections.BeforeConnect = (_, _) => gate.Task;
+        Task check = model.RefreshFromLedgerAsync(reference, token);
+
+        Assert.Equal(AccountsModel.CheckingBalance, model.BalanceTextOf(RowOf(model, "funded")));
+        Assert.False(model.ShowsStatus(RowOf(model, "funded")));
+
+        gate.SetResult();
+        await check;
+
+        Assert.True(model.ShowsStatus(RowOf(model, "funded")));
+    }
+
     private static AccountRow RowOf(AccountsModel model, string label) =>
         model.Rows.Single(row => string.Equals(row.Label, label, StringComparison.Ordinal));
 }

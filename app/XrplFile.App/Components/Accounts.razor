@@ -67,44 +67,47 @@
                                     <td>@row.Network</td>
                                     <td>@Model.BalanceTextOf(row)</td>
                                     <td>
-                                        @switch (row.Stage)
+                                        @if (Model.ShowsStatus(row))
                                         {
-                                            case AccountStage.Unknown:
-                                                <span class="text-muted">@Model.UnknownStatusTextOf(row)</span>
-                                                break;
+                                            @switch (row.Stage)
+                                            {
+                                                case AccountStage.Unknown:
+                                                    <span class="text-muted">@Model.UnknownStatusTextOf(row)</span>
+                                                    break;
 
-                                            case AccountStage.KeyOnly:
-                                                <span>a key, no account yet</span>
-                                                break;
+                                                case AccountStage.KeyOnly:
+                                                    <span>a key, no account yet</span>
+                                                    break;
 
-                                            case AccountStage.Funded:
-                                                @* Guaranteed non-null on this branch (AccountsModel only reaches Funded
-                                                   once a node has actually answered); the null-forgiving operator states
-                                                   that invariant rather than GetValueOrDefault() quietly standing in for
-                                                   an answer nobody gave, which is exactly the zero design G8 forbids.
-                                                   DeletableFromLedger and LedgersRemaining are set together by the same
-                                                   AccountsModel read, so they are guaranteed here -- this is design 4.1's third state, "an
-                                                   account that can be closed from ledger N -- with the countdown". *@
-                                                <span class="text-muted">
-                                                    Closable from ledger @row.DeletableFromLedger!.Value.ToString("N0")
-                                                    &mdash; about @row.LedgersRemaining!.Value.ToString("N0") ledgers
-                                                    remaining (@row.TimeRemainingDescription)
-                                                </span>
-                                                break;
-
-                                            case AccountStage.Closable:
-                                                <span>can be closed now</span>
-                                                break;
-
-                                            case AccountStage.Closed:
-                                                @if (row.Closure is { } closure)
-                                                {
-                                                    <span>
-                                                        Closed &mdash; sent @XrpAmount.Format(closure.ArrivedDrops) to
-                                                        <span class="xf-mono">@closure.Destination</span>
+                                                case AccountStage.Funded:
+                                                    @* Guaranteed non-null on this branch (AccountsModel only reaches Funded
+                                                       once a node has actually answered); the null-forgiving operator states
+                                                       that invariant rather than GetValueOrDefault() quietly standing in for
+                                                       an answer nobody gave, which is exactly the zero design G8 forbids.
+                                                       DeletableFromLedger and LedgersRemaining are set together by the same
+                                                       AccountsModel read, so they are guaranteed here -- this is design 4.1's third state, "an
+                                                       account that can be closed from ledger N -- with the countdown". *@
+                                                    <span class="text-muted">
+                                                        Closable from ledger @row.DeletableFromLedger!.Value.ToString("N0")
+                                                        &mdash; about @row.LedgersRemaining!.Value.ToString("N0") ledgers
+                                                        remaining (@row.TimeRemainingDescription)
                                                     </span>
-                                                }
-                                                break;
+                                                    break;
+
+                                                case AccountStage.Closable:
+                                                    <span>can be closed now</span>
+                                                    break;
+
+                                                case AccountStage.Closed:
+                                                    @if (row.Closure is { } closure)
+                                                    {
+                                                        <span>
+                                                            Closed &mdash; sent @XrpAmount.Format(closure.ArrivedDrops) to
+                                                            <span class="xf-mono">@closure.Destination</span>
+                                                        </span>
+                                                    }
+                                                    break;
+                                            }
                                         }
                                     </td>
                                     <td class="text-end">

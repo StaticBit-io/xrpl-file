@@ -255,6 +255,18 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
             : string.Empty;
     }
 
+    /// <summary>
+    /// Whether the Status column says anything for the row yet. While a node is being asked the
+    /// Balance column says "Checking…", and the status left over from the previous read would be a
+    /// second, older answer to the same question.
+    /// </summary>
+    public bool ShowsStatus(AccountRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return !IsChecking(row.Reference);
+    }
+
     private void Apply(string reference, Func<AccountRow, AccountRow> change)
     {
         // Applied to the row as it is now, not as the caller saw it: a list rebuilt meanwhile may
