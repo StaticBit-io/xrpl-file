@@ -31,14 +31,14 @@
 1. **A history page's marker after its page is released.** The marker goes back to the node on the next request; if it were read from a released document the walk would throw or send garbage. Test in Task 1 (`A_history_walk_releases_each_page_and_sends_its_marker_on`).
 2. **A resume after the application restarted.** "Finished in" must include the sessions of the earlier process, which only the state file knows. Test in Task 6 (`A_new_run_instance_resuming_a_state_counts_its_recorded_working_time`).
 3. **Accounts on two networks, one unreachable.** The reachable network's balances still show, and only the other network's rows say they could not be read. Test in Task 8 (`A_network_that_cannot_be_reached_marks_only_its_rows`).
-4. **A resume quote where nothing landed, or where everything but one chunk landed.** No negative history read and no hash pass priced at the remaining chunks instead of the whole file. Tests in Task 5 (`A_resume_with_nothing_landed_adds_no_history_read`, `A_resume_quote_adds_the_hash_pass_over_the_whole_file_and_the_history_read_of_what_landed`).
+4. **A resume quote prices only what is still to come.** When "Resuming costs" appears, the hash pass and the history read are already done (user decision 2026-10-27); the quote must not add a hash pass priced at the remaining chunks either. Tests in Task 5 (`A_resume_quote_prices_only_the_work_after_continue`, `A_resume_summary_prices_only_the_remaining_work`).
 5. **The person leaves the Accounts screen while balances are being read.** The read stops, nothing renders after the screen is gone, and no row stays "Checking…". Test in Task 8 (`Leaving_while_balances_are_read_leaves_no_row_checking`).
 
 ## Spec amendments
 
 Each owning task appends its line to a new final section `## Amendments (2026-10-27)` of `docs/superpowers/specs/2026-10-23-streaming-publication-design.md`, and Task 5 also edits S11's row in place.
 
-1. **S11 (Task 5).** Batch writing is priced at 160 and 70 memos/s (best and conservative testnet rates, acceptance 2026-10-26), plus the hash pass over the whole file at 9,000 and 4,500 chunks/s (300,344 chunks in 0:32 on the first pass and 1:05 on resume, rounded down). A resume's quote prices the resume from the moment Resume is pressed: the hash pass over the whole file, the history read of its landed chunks at 400 records/s (98,000 records in 3:57), then the remaining work as for a fresh run. The one-account paths are unchanged (their hash pass is at most 64 MiB, seconds). The one-hour threshold of S12 is unchanged.
+1. **S11 (Task 5).** Batch writing is priced at 160 and 70 memos/s (best and conservative testnet rates, acceptance 2026-10-26), plus the hash pass over the whole file at 9,000 and 4,500 chunks/s (300,344 chunks in 0:32 on the first pass and 1:05 on resume, rounded down). A resume's quote is shown after its hash pass and history read are done, so it prices only the work after Continue: the remaining chunks' writing, settles and verification, without a hash pass (user decision 2026-10-27). The one-account paths are unchanged (their hash pass is at most 64 MiB, seconds). The one-hour threshold of S12 is unchanged.
 2. **Run screen, D2 (Task 6).** "Finished in" is the publication's working time: the sum, over its sessions that got past their approval, of each session's time from start to stop less the time a resume confirmation waited for the person. A session that sends nothing (declined, unanswered, refused before submitting) leaves the state file as it was and adds nothing. The sum of earlier sessions is the state's optional `WorkedSeconds`, written by the application when such a session ends; the library carries it and never reads it.
 3. **Run screen, D3 (Task 7).** While a resume confirmation waits, the stage line reads "Waiting for you to confirm the cost below.", the progress bar and the run's own Cancel are hidden, and the card's Cancel is the one way to decline.
 4. **S27 (Task 2).** S27 bounds the publication run. The vault unlock's transient Argon2id peak (about 1 s at the default 256 MiB cost) is outside it; the lanes are released before the run starts (ruling 2026-10-26).
@@ -349,12 +349,12 @@ git commit -m "perf(core): ask for the next history page while this one is read"
 - Produces:
   - `PublicationDuration.BatchFastMemosPerSecond = 160` (was 85); `BatchSlowMemosPerSecond = 70` unchanged; `RunModel.BatchPriorMemosPerSecond` unchanged.
   - `public const double HashingFastChunksPerSecond = 9_000;` `public const double HashingSlowChunksPerSecond = 4_500;` (doc: from the acceptance, 300,344 chunks in 0:32 and 1:05, rounded down).
-  - `public const double HistoryRecordsPerSecond = 400;` (doc: 98,000 records in 3:57).
-  - `public static DurationRange Hashing(long chunks)`; `public static TimeSpan HistoryRead(long records)`.
-  - `ForBatch(BatchPublicationEstimate estimate)` = writing at 160 / 70 + settles + verification (as today) + `Hashing(estimate.Chunks)`.
-  - `public static DurationRange ForBatchResume(BatchPublicationEstimate remaining, long fileChunks)` = writing, settles and verification of `remaining` + `Hashing(fileChunks)` + `HistoryRead(Math.Max(0, fileChunks - remaining.Chunks))`.
-  - `public static CostSummary CostSummary.OfResume(BatchPublicationEstimate remaining, PublishRequest request)` — `ForBatchResume(remaining, FileTree.ChunkCount(request.Size, MemoLayout.ChunkBytes))`, transactions and accounts as `Of(BatchPublicationEstimate, …)`.
+  - `public static DurationRange Hashing(long chunks)`.
+  - `ForBatch(BatchPublicationEstimate estimate)` = `ForBatchRemaining(estimate)` + `Hashing(estimate.Chunks)`.
+  - `public static DurationRange ForBatchRemaining(BatchPublicationEstimate remaining)` = writing at 160 / 70 + settles + verification (today's `ForBatch` body), no hash pass.
+  - `public static CostSummary CostSummary.OfResume(BatchPublicationEstimate remaining, PublishRequest request)` — duration `ForBatchRemaining(remaining)`, transactions and accounts as `Of(BatchPublicationEstimate, …)`.
   - `PublicationRun.ApproveResume`: the Batch branch uses `CostSummary.OfResume`; the one-account branch is unchanged.
+  - No history-read rate is added: the quote appears after the history read.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -374,40 +374,36 @@ public async Task The_300_MB_acceptance_file_is_priced_around_what_it_took()
 // and Assert.True(range.Longest > CostSummary.ConfirmationDuration) (still "large").
 
 [Fact]
-public async Task A_resume_quote_adds_the_hash_pass_over_the_whole_file_and_the_history_read_of_what_landed()
-// remaining = EstimateBatchAsync(…, 202_040_000, Token)  (Chunks 202,040); fileChunks 300,344, so 98,304 landed.
-// resume = ForBatchResume(remaining, 300_344); fresh = ForBatch(remaining).
-Assert.Equal(300_344 / 9_000.0 - 202_040 / 9_000.0 + 98_304 / 400.0, (resume.Shortest - fresh.Shortest).TotalSeconds, precision: 3);
-Assert.Equal(300_344 / 4_500.0 - 202_040 / 4_500.0 + 98_304 / 400.0, (resume.Longest - fresh.Longest).TotalSeconds, precision: 3);
-
-[Fact]
-public async Task A_resume_with_nothing_landed_adds_no_history_read()
-// remaining for 1_000_000 bytes (Chunks 1,000); ForBatchResume(remaining, 1_000) equals ForBatch(remaining) exactly.
+public async Task A_resume_quote_prices_only_the_work_after_continue()
+// remaining = EstimateBatchAsync(…, 202_040_000, Token)  (Chunks 202,040).
+// quote = ForBatchRemaining(remaining); fresh = ForBatch(remaining).
+Assert.Equal(202_040 / 9_000.0, (fresh.Shortest - quote.Shortest).TotalSeconds, precision: 3);
+Assert.Equal(202_040 / 4_500.0, (fresh.Longest - quote.Longest).TotalSeconds, precision: 3);
 ```
 
-In `CostSummaryTests`: `A_resume_summary_prices_the_resume_from_the_moment_it_was_pressed` — `CostSummary.OfResume(remaining, request).Duration == PublicationDuration.ForBatchResume(remaining, FileTree.ChunkCount(request.Size, MemoLayout.ChunkBytes))`, transactions `remaining.Memos + remaining.Batches`.
+In `CostSummaryTests`: `A_resume_summary_prices_only_the_remaining_work` — `CostSummary.OfResume(remaining, request).Duration == PublicationDuration.ForBatchRemaining(remaining)`, transactions `remaining.Memos + remaining.Batches`.
 
 - [ ] **Step 2: Run them to see them fail**
 
 Run: `dotnet run --project tests/XrplFile.App.Core.Tests -- -class XrplFile.App.Core.Tests.PublicationDurationTests -class XrplFile.App.Core.Tests.CostSummaryTests`
-Expected: build errors (`ForBatchResume`, `OfResume`), then value failures.
+Expected: build errors (`ForBatchRemaining`, `OfResume`), then value failures.
 
 - [ ] **Step 3: Implement the Interfaces above**
 
 - [ ] **Step 4: Amend S11 and add amendment 1**
 
-In S11's row, the Batch sentence becomes, verbatim: "**Batch:** writing at 160 and 70 memos/s, plus `LedgerTiming.ApproximateLedgerInterval` × 3 per round (S5); a pass's last round is already one of these, so there is no separate per-pass term; plus the hash pass over the whole file at 9,000 and 4,500 chunks/s. A resume's quote also prices what the resume did before it asked: the hash pass over the whole file and the history read of its landed chunks at 400 records/s." The row's last cell gains: "Rates amended 2026-10-27 from the testnet acceptance (see Amendments)." Append amendment 1 to the Amendments section.
+In S11's row, the Batch sentence becomes, verbatim: "**Batch:** writing at 160 and 70 memos/s, plus `LedgerTiming.ApproximateLedgerInterval` × 3 per round (S5); a pass's last round is already one of these, so there is no separate per-pass term; plus the hash pass over the whole file at 9,000 and 4,500 chunks/s. A resume's quote, shown after its hash pass and history read, prices only the remaining chunks' writing, settles and verification." The row's last cell gains: "Rates amended 2026-10-27 from the testnet acceptance (see Amendments)." Append amendment 1 to the Amendments section.
 
 - [ ] **Step 5: Run the App.Core unit suite**
 
 Run: `dotnet run --project tests/XrplFile.App.Core.Tests -- -trait- "Category=Integration" -trait- "Category=Slow"`
-Expected: 786 (782 + 4), 0 failed. A test that relied on the 85 memos/s figure for a threshold decision fails here: fix its fixture size, never the threshold.
+Expected: 784 (782 + 2 new; the renamed 1.7 GB test is not new), 0 failed. A test that relied on the 85 memos/s figure for a threshold decision fails here: fix its fixture size, never the threshold.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add app/XrplFile.App.Core/PublicationDuration.cs app/XrplFile.App.Core/CostSummary.cs app/XrplFile.App.Core/PublicationRun.cs tests/XrplFile.App.Core.Tests/PublicationDurationTests.cs tests/XrplFile.App.Core.Tests/CostSummaryTests.cs docs/superpowers/specs/2026-10-23-streaming-publication-design.md
-git commit -m "fix(app): price Batch time at the measured rates, with the hash pass and a resume's history read"
+git commit -m "fix(app): price Batch time at the measured rates, with the hash pass, and quote a resume's remaining work"
 ```
 
 ---
@@ -1035,6 +1031,6 @@ Not a deferred minor, recorded for completeness: O3's "Choose a file to publish.
 
 **Review Focus.** Each line has its test in the owning task: marker after release (1), restart (6), two networks (8), resume quote edges (5), leaving the Accounts screen (8).
 
-**Type consistency.** `NodeAnswer(JsonElement, string?, IDisposable?)`, `NodeAnswer.Parse`, `UnreadResult`, `AskPageOrAbsentAsync` (1, 4); `ResumeProbeResult.LohThreshold` (2); `PublicationDuration.Hashing`, `HistoryRead`, `ForBatchResume`, `CostSummary.OfResume` (5, used in 14); `PublicationState.WorkedSeconds`, `RunSnapshot.WorkedBefore`, `WaitedForPerson` (6); `RunModel.AwaitingConfirmationText`, `RunView.ShowsProgress` (7); `AccountRow.CheckFailed`, `AccountsModel.RefreshAllFromLedgerAsync`, `BalanceTextOf`, `CheckingBalance`, `NotFundedBalance`, `UnreadBalance`, `FakeConnectionFactory.BeforeConnect`, `ConnectedNetworks` (8, used in 14); `RunTraceChannel.CompletionLimit` (13); `ReleaseQuietly` (14).
+**Type consistency.** `NodeAnswer(JsonElement, string?, IDisposable?)`, `NodeAnswer.Parse`, `UnreadResult`, `AskPageOrAbsentAsync` (1, 4); `ResumeProbeResult.LohThreshold` (2); `PublicationDuration.Hashing`, `ForBatchRemaining`, `CostSummary.OfResume` (5, used in 14); `PublicationState.WorkedSeconds`, `RunSnapshot.WorkedBefore`, `WaitedForPerson` (6); `RunModel.AwaitingConfirmationText`, `RunView.ShowsProgress` (7); `AccountRow.CheckFailed`, `AccountsModel.RefreshAllFromLedgerAsync`, `BalanceTextOf`, `CheckingBalance`, `NotFundedBalance`, `UnreadBalance`, `FakeConnectionFactory.BeforeConnect`, `ConnectedNetworks` (8, used in 14); `RunTraceChannel.CompletionLimit` (13); `ReleaseQuietly` (14).
 
 **Test counts.** The expected totals after each task assume the tasks run in order and each new `[Theory]` counts its cases; an executor who finds a different total reports it rather than adjusting the expectation silently.
