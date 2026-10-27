@@ -120,6 +120,20 @@ public sealed class RunModelEtaTests : IDisposable
     }
 
     [Fact]
+    public void A_resumed_run_finishes_in_the_whole_publications_working_time()
+    {
+        RunSnapshot published = Running("manifest", 1, 1, batch: true, TimeSpan.FromSeconds(26 * 60 + 43)) with
+        {
+            State = PublicationRunState.Succeeded,
+            FinishedAt = Now,
+            WorkedBefore = TimeSpan.FromSeconds(10 * 60 + 45),
+            WaitedForPerson = TimeSpan.FromSeconds(19),
+        };
+
+        Assert.Equal("Finished in 37:09", RunModel.StageTextOf(published, Now, rate: null));
+    }
+
+    [Fact]
     public void A_cancelled_run_shows_where_it_stopped_without_a_rate_or_a_time_left()
     {
         RunSnapshot cancelled = Running("chunks", 1240, 7124, batch: true, TimeSpan.FromSeconds(90)) with

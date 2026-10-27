@@ -46,6 +46,18 @@ public class PublicationStateTests : IDisposable
     }
 
     [Fact]
+    public void The_working_time_round_trips_and_is_absent_until_set()
+    {
+        Version3().Save(PathOf("unset.json"));
+        Assert.DoesNotContain("WorkedSeconds", File.ReadAllText(PathOf("unset.json")), StringComparison.Ordinal);
+        Assert.Null(PublicationState.Load(PathOf("unset.json")).WorkedSeconds);
+
+        (Version3() with { WorkedSeconds = 645 }).Save(PathOf("set.json"));
+        Assert.Contains("\"WorkedSeconds\": 645", File.ReadAllText(PathOf("set.json")), StringComparison.Ordinal);
+        Assert.Equal(645, PublicationState.Load(PathOf("set.json")).WorkedSeconds);
+    }
+
+    [Fact]
     public void A_version_2_state_written_before_strategies_were_recorded_loads_with_none()
     {
         WriteJson("old.json", """

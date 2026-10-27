@@ -66,6 +66,18 @@ public sealed record RunSnapshot(
     /// waiting. <see cref="PublicationRun.AnswerConfirmation"/> answers it.
     /// </summary>
     public CostSummary? Confirmation { get; init; }
+
+    /// <summary>
+    /// The working time of this publication's earlier sessions, from its state file; zero for a run
+    /// that was started rather than resumed.
+    /// </summary>
+    public TimeSpan WorkedBefore { get; init; }
+
+    /// <summary>
+    /// How long this session's resume confirmation waited for the person: time that is no one's work,
+    /// taken off the session's own span when the working time is added up.
+    /// </summary>
+    public TimeSpan WaitedForPerson { get; init; }
 }
 
 /// <summary>
@@ -98,6 +110,8 @@ public sealed class PublicationRun(
     private DateTimeOffset? _startedAt;
     private DateTimeOffset? _finishedAt;
     private long _fileBytes;
+    private TimeSpan _workedBefore;
+    private TimeSpan _waited;
 
     private readonly Lock _gate = new();
 
@@ -163,6 +177,8 @@ public sealed class PublicationRun(
                     FinishedAt = _finishedAt,
                     FileBytes = _fileBytes,
                     Confirmation = _confirmation,
+                    WorkedBefore = _workedBefore,
+                    WaitedForPerson = _waited,
                 };
             }
         }
@@ -267,6 +283,8 @@ public sealed class PublicationRun(
             _startedAt = null;
             _finishedAt = null;
             _fileBytes = 0;
+            _workedBefore = TimeSpan.Zero;
+            _waited = TimeSpan.Zero;
             _confirmation = null;
             _answer?.TrySetCanceled();
             _answer = null;
@@ -315,6 +333,8 @@ public sealed class PublicationRun(
             _startedAt = _time.GetUtcNow();
             _finishedAt = null;
             _fileBytes = request.Size;
+            _workedBefore = TimeSpan.Zero;
+            _waited = TimeSpan.Zero;
 
             // Inside the lock that starts the run, so a refusal this very run records cannot be erased
             // by a removal that comes after it: a file the person just picked is a fresh try.
@@ -376,7 +396,11 @@ public sealed class PublicationRun(
                 // The strategy actually run decides what the screen assumes about its pace, not the request: a resume runs the recorded one.
                 lock (_gate)
                 {
-                    if (_generation == generation) _usesBatch = batch;
+                    if (_generation == generation)
+                    {
+                        _usesBatch = batch;
+                        _workedBefore = TimeSpan.FromSeconds(recorded?.WorkedSeconds ?? 0);
+                    }
                 }
 
                 (report, finished, finishedPath) = batch
@@ -585,11 +609,17 @@ public sealed class PublicationRun(
         }
         else
         {
+            DateTimeOffset finishedAt = _time.GetUtcNow();
+
+            // Before the state is published: a screen that sees the run stop may offer Resume at once, and
+            // a resume reads this figure from the file.
+            RecordWorked(attempt, generation, finishedAt);
+
             lock (_gate)
             {
                 _failure = failure;
                 _state = finalState;
-                _finishedAt = _time.GetUtcNow();
+                _finishedAt = finishedAt;
                 _cancellation?.Dispose();
                 _cancellation = null;
             }
@@ -841,6 +871,40 @@ public sealed class PublicationRun(
     }
 
     /// <summary>
+    /// Writes the working time to the state of a run that stopped without finishing, so a resume can
+    /// carry the whole publication's figure. Only a session that got past its approval writes: one that
+    /// was declined, left unanswered or refused before submitting sent nothing and leaves the file as it
+    /// was. The figure is shown, never decided on, so a state that cannot be read or written is left alone.
+    /// </summary>
+    private void RecordWorked(RunAttempt attempt, int generation, DateTimeOffset finishedAt)
+    {
+        if (attempt is not { Point: RunFailurePoint.WhileSubmitting, StatePath: { } statePath }) return;
+
+        TimeSpan worked;
+
+        lock (_gate)
+        {
+            if (_generation != generation || _startedAt is not { } startedAt) return;
+
+            worked = _workedBefore + (finishedAt - startedAt - _waited);
+        }
+
+        try
+        {
+            if (!File.Exists(statePath)) return;
+
+            PublicationState state = PublicationState.Load(statePath);
+            long seconds = (long)Math.Floor(Math.Max(0, worked.TotalSeconds));
+
+            (state with { WorkedSeconds = seconds }).Save(statePath);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or FormatException or System.Text.Json.JsonException)
+        {
+            // The figure is lost, nothing else.
+        }
+    }
+
+    /// <summary>
     /// Removes a finished run's state file. One that cannot be removed now is removed at the next
     /// start-up, which finds its link already listed (<c>PublicationHistory.RecordFinishedRuns</c>, Task 22).
     /// </summary>
@@ -879,6 +943,8 @@ public sealed class PublicationRun(
             _answer = answer;
         }
 
+        DateTimeOffset shownAt = _time.GetUtcNow();
+
         try
         {
             using CancellationTokenRegistration cancelled = cancellationToken.Register(() => answer.TrySetCanceled(cancellationToken));
@@ -909,6 +975,8 @@ public sealed class PublicationRun(
             {
                 _confirmation = null;
                 _answer = null;
+
+                if (_generation == generation) _waited += _time.GetUtcNow() - shownAt;
             }
         }
     };

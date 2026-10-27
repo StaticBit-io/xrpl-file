@@ -52,6 +52,10 @@ namespace XrplFile;
 /// Why the run cannot go on, when that outlives a resume: <see cref="WriterWindowConflictFailure"/>
 /// (spec S17). A resume reports it again without sending anything. Absent otherwise.
 /// </param>
+/// <param name="WorkedSeconds">
+/// How long the sessions before this one worked, in whole seconds, as the application measured it.
+/// The library carries it and never reads it. Absent until a session that sent something has ended.
+/// </param>
 public sealed record PublicationState(
     int Version,
     string Network,
@@ -72,7 +76,8 @@ public sealed record PublicationState(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Fence = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] uint? StartSequence = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ManifestStatus = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Failure = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Failure = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WorkedSeconds = null)
 {
     /// <summary>
     /// Sequence and ticket runs. 2 since <see cref="Root"/> became something a run records at its start rather than at its

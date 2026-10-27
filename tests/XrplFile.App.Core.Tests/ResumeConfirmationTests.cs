@@ -33,7 +33,7 @@ public sealed class ResumeConfirmationTests : VaultHarness
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     /// <summary>A writer and a payer of 100 XRP each in a vault, and a Batch request for <paramref name="size"/> bytes recorded at <c>file.bin</c>.</summary>
-    private async Task<(PublicationRun Run, PublishRequest Request, PublicationHistory History, KeyVault Vault)> ReadyAsync(int size = 20_000)
+    private async Task<(PublicationRun Run, PublishRequest Request, PublicationHistory History, KeyVault Vault)> ReadyAsync(int size = 20_000, TimeProvider? time = null)
     {
         KeyVault vault = NewVault();
         await vault.CreateAsync(Password("a master password"), Token);
@@ -50,7 +50,7 @@ public sealed class ResumeConfirmationTests : VaultHarness
         _connections.Ledger.Balances[payer.ClassicAddress] = 100_000_000;
 
         PublicationHistory history = new(Paths.HistoryPath);
-        PublicationRun run = new(_connections, vault, Paths, history, batchOptions: Fast);
+        PublicationRun run = new(_connections, vault, Paths, history, time: time, batchOptions: Fast);
         PublishRequest request = Requests.Fresh(
             VectorStream.Bytes("app-batch", size), "application/octet-stream", "file.bin", writerRef, writer.ClassicAddress, "testnet",
             payerRef, payer.ClassicAddress, sourcePath: Path.Combine(_directory, "file.bin"));
@@ -63,15 +63,21 @@ public sealed class ResumeConfirmationTests : VaultHarness
     /// case for the whole file is about 1.7 million drops; the resume quotes what remains, measured at 2,888 fee
     /// units x 570 = 1,646,160 drops after the two transmissions the cancel leaves (about 15 chunks landed). That is
     /// 646,160 past the 1,000,000 line, room for some 150 landed chunks, so the confirmation appears whatever the
-    /// timing of the fake's rounds.
+    /// timing of the fake's rounds. With a <paramref name="time"/>, that clock moves on by
+    /// <paramref name="transmitting"/> during the first transmission, so the interrupted session has worked for
+    /// a known time.
     /// </summary>
-    private async Task<(PublicationRun Run, PublishRequest Request, string StatePath, KeyVault Vault)> InterruptedExpensiveAsync()
+    private async Task<(PublicationRun Run, PublishRequest Request, string StatePath, KeyVault Vault)> InterruptedExpensiveAsync(
+        ManualTimeProvider? time = null, TimeSpan transmitting = default)
     {
-        (PublicationRun run, PublishRequest request, _, KeyVault vault) = await ReadyAsync(400_000);
+        (PublicationRun run, PublishRequest request, _, KeyVault vault) = await ReadyAsync(400_000, time);
         _connections.Ledger.OpenLedgerFee = new OpenLedgerFee(190, 10);
         _connections.BatchSink!.Transmitting = transmission =>
         {
-            if (transmission.Ordinal == 1) run.Cancel();
+            if (transmission.Ordinal != 1) return;
+
+            time?.Advance(transmitting);
+            run.Cancel();
         };
 
         Assert.True(run.Start(request));
@@ -182,6 +188,79 @@ public sealed class ResumeConfirmationTests : VaultHarness
         Assert.True(vault.IsUnlocked);
         time.Advance(idle);
         await BatchTestWait.UntilAsync(() => !vault.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task A_resumed_publication_counts_both_sessions_and_not_the_wait_for_the_person()
+    {
+        ManualTimeProvider time = new();
+        (PublicationRun run, PublishRequest request, string statePath, _) =
+            await InterruptedExpensiveAsync(time, TimeSpan.FromMinutes(10));
+        Assert.Equal(600, PublicationState.Load(statePath).WorkedSeconds);
+        await File.WriteAllBytesAsync(request.SourcePath!, VectorStream.Bytes("app-batch", 400_000), Token);
+
+        bool advanced = false;
+        _connections.BatchSink!.Transmitting = _ =>
+        {
+            if (advanced) return;
+
+            advanced = true;
+            time.Advance(TimeSpan.FromMinutes(5));
+        };
+
+        Assert.True(run.Resume(statePath, Resuming(request, request.SourcePath!)));
+        await BatchTestWait.UntilAsync(() => run.Snapshot.Confirmation is not null);
+        time.Advance(TimeSpan.FromMinutes(3));
+        Assert.True(run.AnswerConfirmation(true));
+        await run.Completion;
+
+        RunSnapshot snapshot = run.Snapshot;
+        Assert.Equal(PublicationRunState.Succeeded, snapshot.State);
+        Assert.Equal(TimeSpan.FromSeconds(600), snapshot.WorkedBefore);
+        Assert.Equal(TimeSpan.FromSeconds(180), snapshot.WaitedForPerson);
+        Assert.Equal("Finished in 15:00", RunModel.StageTextOf(snapshot, time.GetUtcNow(), rate: null));
+    }
+
+    [Fact]
+    public async Task A_new_run_instance_resuming_a_state_counts_its_recorded_working_time()
+    {
+        ManualTimeProvider time = new();
+        (_, PublishRequest request, string statePath, KeyVault vault) =
+            await InterruptedExpensiveAsync(time, TimeSpan.FromMinutes(10));
+        await File.WriteAllBytesAsync(request.SourcePath!, VectorStream.Bytes("app-batch", 400_000), Token);
+
+        PublicationRun fresh = new(_connections, vault, Paths, new PublicationHistory(Paths.HistoryPath), time: time, batchOptions: Fast);
+
+        Assert.True(fresh.Resume(statePath, Resuming(request, request.SourcePath!)));
+        await BatchTestWait.UntilAsync(() => fresh.Snapshot.Confirmation is not null);
+        Assert.True(fresh.AnswerConfirmation(true));
+        await fresh.Completion;
+
+        Assert.Equal(PublicationRunState.Succeeded, fresh.Snapshot.State);
+        Assert.Equal(TimeSpan.FromSeconds(600), fresh.Snapshot.WorkedBefore);
+    }
+
+    [Fact]
+    public async Task A_stopped_run_has_its_working_time_in_the_state_before_it_reports_stopped()
+    {
+        ManualTimeProvider time = new();
+        (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync(400_000, time);
+        _connections.Ledger.OpenLedgerFee = new OpenLedgerFee(190, 10);
+        _connections.BatchSink!.Transmitting = transmission =>
+        {
+            if (transmission.Ordinal != 1) return;
+
+            time.Advance(TimeSpan.FromMinutes(10));
+            run.Cancel();
+        };
+
+        Assert.True(run.Start(request));
+
+        // A screen that offers Resume the moment it sees the run stop must find the figure already written.
+        while (run.Snapshot.State == PublicationRunState.Running) await Task.Yield();
+
+        Assert.Equal(PublicationRunState.Cancelled, run.Snapshot.State);
+        Assert.Equal(600, PublicationState.Load(run.Snapshot.StatePath!).WorkedSeconds);
     }
 
     [Fact]

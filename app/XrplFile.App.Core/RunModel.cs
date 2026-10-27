@@ -210,7 +210,13 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     {
         string? took = snapshot is { StartedAt: { } started, FinishedAt: { } finished } ? Clock(finished - started) : null;
 
-        if (snapshot.State == PublicationRunState.Succeeded) return took is null ? "Finished" : $"Finished in {took}";
+        // The whole publication's working time: the sessions before this one, and this one without its wait for the person.
+        if (snapshot.State == PublicationRunState.Succeeded)
+        {
+            return snapshot is { StartedAt: { } began, FinishedAt: { } ended }
+                ? $"Finished in {Clock(snapshot.WorkedBefore + (ended - began - snapshot.WaitedForPerson))}"
+                : "Finished";
+        }
 
         string where = snapshot.Progress switch
         {
