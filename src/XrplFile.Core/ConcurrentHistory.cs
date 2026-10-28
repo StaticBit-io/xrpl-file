@@ -17,9 +17,9 @@ namespace XrplFile;
 /// each segment is one forward walk, and segments are handed over whole and in ledger order. The
 /// reconciliation's rules, which depend on that order, are unchanged (spec H2).
 ///
-/// Memory is bounded by <see cref="HeldRecords"/>: the segment the consumer reads holds fewer than
-/// that, and the others together hand a record over only while fewer than that are held in all, so
-/// at most twice as many are held whatever the file's size (spec H7).
+/// Memory is bounded whatever the file's size (spec H7): the segment the consumer reads holds at most
+/// <see cref="HeadRecords"/>, and the others hand a record over only while fewer than
+/// <see cref="HeldRecords"/> are held in all.
 ///
 /// A failure reaches the consumer in the walk's order: after every record of the segments before the
 /// one that failed and that segment's own records, as a single walk failing on the same page would
@@ -36,11 +36,19 @@ internal sealed class ConcurrentHistory
     internal const int TargetRecords = 1_000;
 
     /// <summary>
-    /// The records waiting for the consumer that let a segment other than the one it reads hand over
-    /// another, and the most the one it reads may hold (spec H7): above the 3,000 that four equal
-    /// segments need ahead of the consumer, and the reader's own cache size.
+    /// The records waiting for the consumer below which a segment other than the one it reads may hand
+    /// over another (spec H7). A Batch ledger on testnet holds up to about 2,000 of a writer's records
+    /// and a ledger is never split, so three lanes ahead of the consumer need about 6,000; at 4,096 four
+    /// lanes read 1.5 times as fast as one walk, at 8,192 2.4 times (testnet, 2026-10-27).
     /// </summary>
-    internal const int HeldRecords = 4_096;
+    internal const int HeldRecords = 8_192;
+
+    /// <summary>
+    /// The most the segment the consumer reads may hold of its own (spec H7). The consumer takes its
+    /// records as they come, far faster than a node answers, so this only matters to a consumer slower
+    /// than the node; held to two pages, it keeps the bound near <see cref="HeldRecords"/> rather than twice it.
+    /// </summary>
+    internal const int HeadRecords = 1_024;
 
     private readonly ILedgerSource _source;
     private readonly Lock _gate = new();
@@ -140,7 +148,7 @@ internal sealed class ConcurrentHistory
 
         // An empty stretch (days between two sessions, or the ledgers after the last one) is crossed in
         // a handful of round trips rather than one per doubling; a span that lands on dense records is
-        // split for idle lanes (spec H5).
+        // shared by the next free lanes (spec H5).
         handed == 0
             ? Math.Max(current, Times(span, EmptyGrowth))
             : Math.Clamp(TargetRecords * span / handed, 1, Times(span, 2));
@@ -171,14 +179,18 @@ internal sealed class ConcurrentHistory
     {
         public long First { get; } = first;
 
-        /// <summary>Lowered when the segment gives the rest of its range away (spec H5).</summary>
+        /// <summary>Lowered when another lane takes the rest of its range (spec H5).</summary>
         public long Last { get; set; } = last;
 
         public Segment? Next { get; set; }
 
-        public bool Started { get; set; }
+        /// <summary>The ledger of the last record it handed over; one before <see cref="First"/> until then.</summary>
+        public long Position { get; set; } = first - 1;
 
-        /// <summary>Its walk is over: it reached its end, stopped past a split, or failed.</summary>
+        /// <summary>The ledger of the first record it handed over: its density is measured from here, not across the empty ledgers before it.</summary>
+        public long FirstRecord { get; set; }
+
+        /// <summary>Its walk is over: it reached its end, stopped past a ledger another lane took, or failed.</summary>
         public bool Finished { get; set; }
 
         /// <summary>Dropped because a segment before it failed: whatever its walk does now is never delivered.</summary>
@@ -188,15 +200,12 @@ internal sealed class ConcurrentHistory
 
         public Queue<LedgerTransaction> Waiting { get; } = new();
 
-        /// <summary>Every record it handed over, for the density of spec H4.</summary>
+        /// <summary>Every record it handed over, for the density of spec H4 and H5.</summary>
         public long Handed { get; set; }
 
-        /// <summary>Records handed over since it started or last split (spec H5).</summary>
-        public long SinceSplit { get; set; }
-
         /// <summary>
-        /// Set when the segment is started, cancelled when the read stops or an earlier segment fails,
-        /// and disposed with the read.
+        /// Cancelled when the read stops or an earlier segment fails, and disposed by its lane when its
+        /// walk is over.
         /// </summary>
         public CancellationTokenSource? Cancel { get; set; }
     }
@@ -210,15 +219,6 @@ internal sealed class ConcurrentHistory
         private readonly CancellationTokenSource _stop;
         private readonly Lock _gate = new();
         private readonly Task[] _lanes;
-        private readonly List<CancellationTokenSource> _cancels = [];
-
-        // Which lanes wait in Take for work that may yet appear; only lanes within the allowed
-        // number are counted, as only they are what a split is made for (spec H5).
-        private readonly bool[] _idle;
-        private int _idleCount;
-
-        // Split pieces no lane has started; each was made for one idle lane.
-        private int _unstarted;
 
         // Segments not yet taken by the consumer, in ledger order; _head is the one it reads.
         private Segment? _head;
@@ -239,7 +239,6 @@ internal sealed class ConcurrentHistory
             _toLedger = toLedger;
             _frontier = fromLedger;
             _stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            _idle = new bool[lanes];
             _lanes = new Task[lanes];
 
             for (int lane = 0; lane < lanes; lane++)
@@ -310,7 +309,6 @@ internal sealed class ConcurrentHistory
                 _held = 0;
             }
 
-            foreach (CancellationTokenSource cancel in _cancels) cancel.Dispose();
             _stop.Dispose();
         }
 
@@ -358,39 +356,26 @@ internal sealed class ConcurrentHistory
         }
 
         /// <summary>
-        /// The work for <paramref name="lane"/> (spec H6, H9): the earliest segment nobody has started,
-        /// else, for a lane within the allowed number, a new one cut at the frontier. Null with a task
-        /// to wait for when there is nothing yet; null with none when the lane is done.
+        /// The work for <paramref name="lane"/> (spec H6, H9): the rest of the earliest segment that
+        /// still has about <see cref="TargetRecords"/> ahead of it, else a new segment cut at the
+        /// frontier. Null with a task to wait for when there is nothing yet; null with none when the
+        /// lane is done.
         /// </summary>
         private Segment? Take(int lane, out Task? changed)
         {
             changed = null;
 
-            if (_idle[lane])
-            {
-                _idle[lane] = false;
-                _idleCount--;
-            }
-
-            // A piece nobody has started is taken by any lane, even one past the allowed number: it
-            // was split off for a lane that was idle then, and must not wait behind lanes held up by
-            // the records before them.
-            for (Segment? segment = _head; segment is not null; segment = segment.Next)
-            {
-                if (!segment.Started)
-                {
-                    _unstarted--;
-                    return Start(segment);
-                }
-            }
-
             // The first lane carries the read on alone if the others are let go (spec H9).
             _owner.ObserveLoad();
-            bool allowed = lane == 0 || lane < _owner.Lanes;
+            if (lane > 0 && lane >= _owner.Lanes) return null;
 
-            if (!allowed) return null;
+            // Work closest to the consumer first: a lane that cut far ahead instead would only fill the
+            // hold and wait, while the segment the consumer reads went on one page at a time.
+            if (Steal() is { } piece) return Start(piece);
 
-            if (_frontier <= _toLedger)
+            // With the hold full a segment cut ahead could only wait, and its first page would keep a
+            // lane from the work the consumer reaches sooner.
+            if (_frontier <= _toLedger && (_held < HeldRecords || _head is null))
             {
                 long last = _toLedger - _frontier < _span ? _toLedger : _frontier + _span - 1;
                 Segment cut = new(_frontier, last);
@@ -409,16 +394,46 @@ internal sealed class ConcurrentHistory
                 return Start(cut);
             }
 
+            // The frontier waits for room; a segment still being read may yet have enough ahead of it
+            // to share (spec H5).
+            bool more = _frontier <= _toLedger;
+
+            for (Segment? segment = _head; segment is not null && !more; segment = segment.Next)
+            {
+                more = !segment.Finished;
+            }
+
+            if (more) changed = WhenChanged();
+
+            return null;
+        }
+
+        /// <summary>
+        /// Takes what the earliest segment still being read has beyond about <see cref="TargetRecords"/>
+        /// ahead of its walk, judged by its density since its first record (spec H5). The ledger of its
+        /// last record stays with it: the rest of that ledger may still be ahead in its walk.
+        /// </summary>
+        private Segment? Steal()
+        {
             for (Segment? segment = _head; segment is not null; segment = segment.Next)
             {
-                // A segment still being read may yet give part of its range away.
-                if (!segment.Finished)
-                {
-                    _idle[lane] = true;
-                    _idleCount++;
-                    changed = WhenChanged();
-                    return null;
-                }
+                if (segment.Finished || segment.Abandoned || segment.Handed == 0) continue;
+
+                // Halving what is left would hand a lane the empty far end of a segment cut across a
+                // long empty stretch, while the dense ledgers next to the walk stayed with it.
+                long covered = segment.Position - segment.FirstRecord + 1;
+                long keep = TargetRecords * covered / segment.Handed;
+                if (keep >= segment.Last - segment.Position) continue;
+
+                long at = segment.Position + 1 + keep;
+                Segment rest = new(at, segment.Last) { Next = segment.Next };
+
+                segment.Next = rest;
+                segment.Last = at - 1;
+
+                if (ReferenceEquals(_tail, segment)) _tail = rest;
+
+                return rest;
             }
 
             return null;
@@ -426,9 +441,7 @@ internal sealed class ConcurrentHistory
 
         private Segment Start(Segment segment)
         {
-            segment.Started = true;
             segment.Cancel = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
-            _cancels.Add(segment.Cancel);
             return segment;
         }
 
@@ -474,13 +487,32 @@ internal sealed class ConcurrentHistory
 
                 // Outside the lock: a cancellation can run the cancelled lane's continuation inline,
                 // and that continuation takes the lock.
-                foreach (CancellationTokenSource cancel in abandoned) await cancel.CancelAsync().ConfigureAwait(false);
+                foreach (CancellationTokenSource cancel in abandoned)
+                {
+                    try
+                    {
+                        await cancel.CancelAsync().ConfigureAwait(false);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Its walk ended after the lock was let go; there is nothing left to cancel.
+                    }
+                }
+            }
+            finally
+            {
+                // Released with the walk, not the read: a long history is many segments.
+                lock (_gate)
+                {
+                    segment.Cancel!.Dispose();
+                    segment.Cancel = null;
+                }
             }
         }
 
         /// <summary>
         /// Gives the consumer one record once there is room for it (spec H7). False when the record lies
-        /// past the segment's end after a split, which ends the segment's walk.
+        /// past the segment's end after another lane took the rest, which ends the segment's walk.
         /// </summary>
         private async Task<bool> HandOverAsync(Segment segment, LedgerTransaction tx, CancellationToken cancellationToken)
         {
@@ -496,16 +528,15 @@ internal sealed class ConcurrentHistory
                     // Counting only a segment's predecessors would let segments answered out of order
                     // each fill to the bound; counting everything for the one the consumer reads could
                     // stall it behind records it alone can release.
-                    bool room = ReferenceEquals(segment, _head) ? segment.Waiting.Count < HeldRecords : _held < HeldRecords;
+                    bool room = ReferenceEquals(segment, _head) ? segment.Waiting.Count < HeadRecords : _held < HeldRecords;
 
                     if (room)
                     {
                         segment.Waiting.Enqueue(tx);
-                        segment.Handed++;
-                        segment.SinceSplit++;
+                        if (segment.Handed++ == 0) segment.FirstRecord = tx.LedgerIndex;
+                        segment.Position = tx.LedgerIndex;
                         _held++;
                         _owner.RecordHeld(_held);
-                        Split(segment, tx.LedgerIndex);
                         Changed();
                         return true;
                     }
@@ -515,26 +546,6 @@ internal sealed class ConcurrentHistory
 
                 await changed.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
-        }
-
-        /// <summary>
-        /// Gives away the upper half of what is left of a segment that has handed over twice its target
-        /// since it started or last split, when a lane is idle to take it (spec H5). The ledger of the
-        /// record just handed over stays with it: the rest of that ledger may still be ahead in its walk.
-        /// </summary>
-        private void Split(Segment segment, long ledger)
-        {
-            if (segment.SinceSplit < 2L * TargetRecords || ledger >= segment.Last || _idleCount <= _unstarted) return;
-
-            long at = ledger + 1 + (segment.Last - ledger - 1) / 2;
-            Segment rest = new(at, segment.Last) { Next = segment.Next };
-
-            segment.Next = rest;
-            segment.Last = at - 1;
-            segment.SinceSplit = 0;
-            _unstarted++;
-
-            if (ReferenceEquals(_tail, segment)) _tail = rest;
         }
 
         /// <summary>The span the next cut segment gets, from what a finished one held (spec H4).</summary>
@@ -549,15 +560,7 @@ internal sealed class ConcurrentHistory
                 segment.Waiting.Clear();
                 segment.Abandoned = true;
 
-                if (segment.Started)
-                {
-                    cancels.Add(segment.Cancel!);
-                }
-                else
-                {
-                    _unstarted--;
-                    segment.Finished = true;
-                }
+                if (segment.Cancel is { } cancel) cancels.Add(cancel);
             }
 
             failed.Next = null;

@@ -183,7 +183,7 @@ public class ConcurrentHistoryTests
         });
 
         Assert.Equal(records, read);
-        Assert.InRange(history.PeakHeld, 0, 2 * ConcurrentHistory.HeldRecords);
+        Assert.InRange(history.PeakHeld, 0, ConcurrentHistory.HeldRecords + ConcurrentHistory.HeadRecords);
     }
 
     [Fact]
@@ -200,7 +200,7 @@ public class ConcurrentHistoryTests
         });
 
         Assert.Equal(records, read);
-        Assert.InRange(history.PeakHeld, ConcurrentHistory.TargetRecords, 2 * ConcurrentHistory.HeldRecords);
+        Assert.InRange(history.PeakHeld, ConcurrentHistory.TargetRecords, ConcurrentHistory.HeldRecords + ConcurrentHistory.HeadRecords);
     }
 
     [Fact]
@@ -217,7 +217,7 @@ public class ConcurrentHistoryTests
         ConcurrentHistory history = new(source, 4);
 
         Assert.Equal(records, await ReadAllAsync(history, 1, 4, Token));
-        Assert.InRange(history.PeakHeld, ConcurrentHistory.HeldRecords - 1, 2 * ConcurrentHistory.HeldRecords);
+        Assert.InRange(history.PeakHeld, ConcurrentHistory.HeldRecords - 1, ConcurrentHistory.HeldRecords + ConcurrentHistory.HeadRecords);
     }
 
     [Fact]
@@ -262,6 +262,27 @@ public class ConcurrentHistoryTests
         together.Stop();
 
         Assert.InRange(lanes.PeakInFlight, 2, 4);
+        Assert.True(together.Elapsed < walk.Elapsed / 2, $"four lanes took {together.Elapsed}, one walk {walk.Elapsed}");
+    }
+
+    [Fact]
+    public async Task Dense_ledgers_after_a_long_empty_stretch_are_shared_between_the_lanes()
+    {
+        // The empty stretch grows the span until one segment lands on every dense ledger at once; the
+        // free lanes must take shares of it rather than leave it to one walk.
+        List<LedgerTransaction> records = History(Enumerable.Range(200_001, 60).Select(ledger => ((long)ledger, 600)));
+        TimeSpan delay = TimeSpan.FromMilliseconds(40);
+
+        PagedSource single = new(records) { PageDelay = delay };
+        System.Diagnostics.Stopwatch walk = System.Diagnostics.Stopwatch.StartNew();
+        Assert.Equal(records, await ReadAllAsync(new ConcurrentHistory(single, 1), 1, 300_000, Token));
+        walk.Stop();
+
+        PagedSource lanes = new(records) { PageDelay = delay };
+        System.Diagnostics.Stopwatch together = System.Diagnostics.Stopwatch.StartNew();
+        Assert.Equal(records, await ReadAllAsync(new ConcurrentHistory(lanes, 4), 1, 300_000, Token));
+        together.Stop();
+
         Assert.True(together.Elapsed < walk.Elapsed / 2, $"four lanes took {together.Elapsed}, one walk {walk.Elapsed}");
     }
 
