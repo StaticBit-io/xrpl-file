@@ -34,12 +34,28 @@ All six reads yielded the same 64,135 records in the same order (SHA-256 prefix 
 
 Every read of the whole history yielded the same sequence (SHA-256 prefix `F6428114E96AF586`).
 
-The final read of the whole history drew 825 answers carrying `warning: load`, and the read halved its lanes twice, as spec H9 says, ending at one lane; it read 168 segments. The one walk (29 minutes) and the first version (21 minutes, about three requests a second) drew none, nor did any read of the 64,135-record range (under a minute each). The harness did not record when the warnings came, so how long the node tolerates about five requests a second, and whether one lane after the burst kept drawing them, is not known.
+The final read of the whole history drew 825 answers carrying `warning: load`, and the read halved its lanes twice, as spec H9 says, ending at one lane; it read 168 segments. The one walk (29 minutes) and the first version (21 minutes, about three requests a second) drew none, nor did any read of the 64,135-record range (under a minute each).
+
+### When the warnings come (2026-10-28, the whole history again, one line a second)
+
+| Minutes | records/s | Warnings | Lanes allowed | Walks at once |
+|---|---:|---:|---:|---:|
+| 0 | 932 | 0 | 4 | 4.0 |
+| 1 | 700 | 0 | 4 | 4.0 |
+| 2 | 1,329 | 5 | 4, then 2 at 175 s, 1 at 178 s | 3.9 |
+| 3 to 23, each | 460 to 477 | 59 to 61 | 1 | 1.0 |
+| 24 (last 14 s) | 471 | 14 | 1 | 1.0 |
+
+772,116 records in 1,454 s (531 records/s, 1.18 times the one walk), 1,280 warnings, the same sequence (`F6428114E96AF586`).
+
+- The node let four lanes read for 175 s, 164,522 records, before its first warning.
+- From then on it warned once a second, about four answers in ten, for the 22 minutes the read went on with one lane at the one walk's own rate. A one walk started cold at that rate drew no warning in 29 minutes, so the node's warning state, once reached, did not clear while reading continued. What the node counts is not visible from the client.
+- Letting lanes return after a quiet spell (the plan's open question) would not help here: under a continuing read the spell never comes. H9 stays as it is: halve on a warning, never rise again in the session.
 
 ## Verdict
 
 - On a history the size of a resume of about 64,000 chunks, four lanes read 2.3 times as fast as one walk (median of three), with no load warning: the goal is met there.
-- On the whole 772,116-record history the public node warned of load and the read backed off to one lane, ending 1.34 times as fast as one walk: the goal is not met for a read that long against this node. The back-off is the politeness the spec asks for; lanes never rise again within a session (H9), so a single burst of warnings costs the rest of the read.
+- On the whole 772,116-record history the public node warned of load after about three minutes (164,522 records) and the read backed off to one lane, ending 1.18 to 1.34 times as fast as one walk: the goal is not met for a read that long against this node. The back-off is the politeness the spec asks for, and the node kept warning at one lane, so recovering lanes would not have bought the speed back.
 
 ## What the first measurement changed
 

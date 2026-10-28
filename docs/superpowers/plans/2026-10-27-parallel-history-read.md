@@ -26,5 +26,5 @@
 
 ## Open
 
-- Lanes never rise again in a session after a load warning (H9). On a long read a single burst costs the rest of it; whether lanes may return after a quiet period, and at what request rate a public node stops warning, needs a measurement that records when warnings arrive.
+- Lanes never rise again in a session after a load warning (H9). Measured 2026-10-28 (report, "When the warnings come"): testnet let four lanes read 175 s (164,522 records), then warned once a second for the rest of the read even at one lane, so recovering lanes after a quiet period would not help and is not planned.
 - The Slow tests' headroom is smaller than before (S27 peak(800) 233 MB, ResumeMemory 165 MB, both bounded at 300 MB).
