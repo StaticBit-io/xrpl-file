@@ -91,8 +91,9 @@ public sealed class FakeLedgerSource : ILedgerSource
     /// <summary>
     /// When set, <see cref="HistoryHideReads"/> counts reads that start at this ledger rather than
     /// calls: a resume reads its range as several ledger ranges at once (ConcurrentHistory), and the
-    /// calls for its later ranges hide what the read's first call did. Calls starting before this
-    /// ledger hide nothing.
+    /// calls for its later ranges hide what the read's first call did, or hide when that call has not
+    /// come yet and hidden reads remain. The first read after the hidden ones may therefore be hidden
+    /// in part. Calls starting before this ledger hide nothing.
     /// </summary>
     public long? HistoryHideReadsFrom
     {
@@ -467,7 +468,9 @@ public sealed class FakeLedgerSource : ILedgerSource
                     if (_readHiding) _historyHideReads--;
                 }
 
-                hiding = fromLedger >= readStart && _readHiding;
+                // The lanes of one read reach this fake in no fixed order: a later range's call can
+                // come before its read's first one, so it also hides while hidden reads remain.
+                hiding = fromLedger >= readStart && (_readHiding || (fromLedger > readStart && HistoryHides is not null && _historyHideReads > 0));
             }
             else
             {

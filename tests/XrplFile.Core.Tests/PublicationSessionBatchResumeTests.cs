@@ -210,8 +210,9 @@ public class PublicationSessionBatchResumeTests : IDisposable
         PublicationSession resumed = await PublicationSession.ResumeAsync(
             Factory(node, node.Payer, budgets), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options, null, Token);
 
-        // Three lagging reads, each discarded, then one that covers the writer's sequences.
-        Assert.Equal(4, node.Ledger.Passes(node.Writer.Account, first.State.StartedInLedger, callsBefore).Count);
+        // Three lagging reads, each discarded, then one that covers the writer's sequences (or, when a
+        // later range of the fourth reached the node before its first, one more).
+        Assert.InRange(node.Ledger.Passes(node.Writer.Account, first.State.StartedInLedger, callsBefore).Count, 4, 5);
 
         Assert.True(Assert.Single(budgets).PayerBudgetDrops < whole.PayerFeeDropsWorstCase);
 

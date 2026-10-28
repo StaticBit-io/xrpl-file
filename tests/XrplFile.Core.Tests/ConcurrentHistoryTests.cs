@@ -23,6 +23,9 @@ public class ConcurrentHistoryTests
 
         public TimeSpan PageDelay { get; init; }
 
+        /// <summary>A further delay before the first answer of a walk, by the walk's first ledger.</summary>
+        public Func<long, TimeSpan>? FirstAnswerDelay { get; init; }
+
         /// <summary>Called before each answer with the walk's range and the page's number; an exception it returns is thrown there.</summary>
         public Func<long, long, int, Exception?>? Fails { get; init; }
 
@@ -71,6 +74,8 @@ public class ConcurrentHistoryTests
                 {
                     if (PageDelay > TimeSpan.Zero) await Task.Delay(PageDelay, cancellationToken);
                     else await Task.Yield();
+
+                    if (page == 0 && FirstAnswerDelay?.Invoke(fromLedger) is { } late && late > TimeSpan.Zero) await Task.Delay(late, cancellationToken);
 
                     if (Fails?.Invoke(fromLedger, toLedger, page) is { } failure) throw failure;
                 }
@@ -199,10 +204,52 @@ public class ConcurrentHistoryTests
     }
 
     [Fact]
+    public async Task Ranges_answered_last_first_do_not_each_fill_the_hold()
+    {
+        // Four dense ledgers, one segment each; the node answers the last first and the first last,
+        // so each later segment has its records in hand while every segment before it has none.
+        List<LedgerTransaction> records = History(Enumerable.Range(1, 4).Select(ledger => ((long)ledger, 6_000)));
+        PagedSource source = new(records)
+        {
+            PageSize = 400,
+            FirstAnswerDelay = first => TimeSpan.FromMilliseconds(300 * (4 - Math.Min(first, 4))),
+        };
+        ConcurrentHistory history = new(source, 4);
+
+        Assert.Equal(records, await ReadAllAsync(history, 1, 4, Token));
+        Assert.InRange(history.PeakHeld, ConcurrentHistory.HeldRecords - 1, 2 * ConcurrentHistory.HeldRecords);
+    }
+
+    [Fact]
+    public async Task An_empty_stretch_after_the_records_is_crossed_in_a_few_answers()
+    {
+        List<LedgerTransaction> records = History(Enumerable.Range(1_000, 10).Select(ledger => ((long)ledger, 300)));
+        PagedSource source = new(records);
+
+        Assert.Equal(records, await ReadAllAsync(new ConcurrentHistory(source, 4), 1_000, 101_000, Token));
+
+        // How many walks depends on which lane learns first; 14 to 18 were measured, 22 to 45 when an
+        // empty answer only doubled the span. The rule itself is pinned below.
+        Assert.InRange(source.Calls.Count, 1, 30);
+    }
+
+    [Theory]
+    [InlineData(1, 1, 0, 8)]
+    [InlineData(64, 4, 0, 64)]
+    [InlineData(1, 10, 3_000, 3)]
+    [InlineData(1, 1, 20_000, 1)]
+    [InlineData(1, 4, 10, 8)]
+    [InlineData(1, long.MaxValue / 4, 0, long.MaxValue)]
+    public void An_empty_segment_widens_the_next_eightfold_and_a_full_one_sizes_it_to_about_a_thousand_records(long current, long span, long handed, long next)
+    {
+        Assert.Equal(next, ConcurrentHistory.NextSpan(current, span, handed));
+    }
+
+    [Fact]
     public async Task Ranges_are_asked_for_together_and_the_read_takes_less_than_half_as_long_as_one_walk()
     {
         List<LedgerTransaction> records = History(Enumerable.Range(1_000, 40).Select(ledger => ((long)ledger, 200)));
-        TimeSpan delay = TimeSpan.FromMilliseconds(25);
+        TimeSpan delay = TimeSpan.FromMilliseconds(40);
 
         PagedSource single = new(records) { PageDelay = delay };
         System.Diagnostics.Stopwatch walk = System.Diagnostics.Stopwatch.StartNew();

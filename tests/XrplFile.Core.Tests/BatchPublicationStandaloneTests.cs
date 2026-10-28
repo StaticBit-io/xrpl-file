@@ -540,20 +540,52 @@ public class BatchPublicationStandaloneTests : IDisposable
         }
     }
 
-    /// <summary>Forwards, and remembers how far the first history read after <see cref="StartRecording"/> reached.</summary>
+    /// <summary>
+    /// Forwards, and remembers how far the first history read after <see cref="StartRecording"/> reached.
+    /// A resume reads its range as several ledger ranges at once, so that read is the first call and
+    /// the calls for later ranges after it, up to the next call from the same first ledger.
+    /// </summary>
     private sealed class RecordingSource(ILedgerSource inner) : ILedgerSource
     {
+        private readonly Lock _gate = new();
         private bool _recording;
+        private long? _firstFrom;
+        private bool _firstOver;
+        private long _firstTo;
 
-        public long FirstHistoryReadTo { get; private set; }
+        public long FirstHistoryReadTo
+        {
+            get { lock (_gate) return _firstTo; }
+        }
 
-        public void StartRecording() => _recording = true;
+        public long LoadWarnings => inner.LoadWarnings;
+
+        public void StartRecording()
+        {
+            lock (_gate) _recording = true;
+        }
 
         public Task<LedgerTransaction?> TransactionAsync(string hash, CancellationToken cancellationToken) => inner.TransactionAsync(hash, cancellationToken);
 
         public IAsyncEnumerable<LedgerTransaction> AccountTransactionsAsync(string account, long fromLedger, long toLedger, bool forward, CancellationToken cancellationToken)
         {
-            if (_recording && FirstHistoryReadTo == 0) FirstHistoryReadTo = toLedger;
+            lock (_gate)
+            {
+                if (_recording && !_firstOver)
+                {
+                    if (_firstFrom is null)
+                    {
+                        _firstFrom = fromLedger;
+                    }
+                    else if (fromLedger == _firstFrom)
+                    {
+                        _firstOver = true;
+                    }
+
+                    if (!_firstOver && fromLedger >= _firstFrom) _firstTo = Math.Max(_firstTo, toLedger);
+                }
+            }
+
             return inner.AccountTransactionsAsync(account, fromLedger, toLedger, forward, cancellationToken);
         }
 

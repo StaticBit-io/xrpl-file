@@ -17,9 +17,9 @@ namespace XrplFile;
 /// each segment is one forward walk, and segments are handed over whole and in ledger order. The
 /// reconciliation's rules, which depend on that order, are unchanged (spec H2).
 ///
-/// Memory is bounded by <see cref="HeldRecords"/>: a lane hands a record over only while the records
-/// held by its segment and every segment before it are fewer than that, so at most twice as many are
-/// held whatever the file's size (spec H7).
+/// Memory is bounded by <see cref="HeldRecords"/>: the segment the consumer reads holds fewer than
+/// that, and the others together hand a record over only while fewer than that are held in all, so
+/// at most twice as many are held whatever the file's size (spec H7).
 ///
 /// A failure reaches the consumer in the walk's order: after every record of the segments before the
 /// one that failed and that segment's own records, as a single walk failing on the same page would
@@ -36,8 +36,9 @@ internal sealed class ConcurrentHistory
     internal const int TargetRecords = 1_000;
 
     /// <summary>
-    /// The records a lane may have waiting, counting its own segment and every one before it (spec H7):
-    /// above the 3,000 that four equal segments need ahead of the consumer, and the reader's own cache size.
+    /// The records waiting for the consumer that let a segment other than the one it reads hand over
+    /// another, and the most the one it reads may hold (spec H7): above the 3,000 that four equal
+    /// segments need ahead of the consumer, and the reader's own cache size.
     /// </summary>
     internal const int HeldRecords = 4_096;
 
@@ -130,6 +131,23 @@ internal sealed class ConcurrentHistory
             _lanes = Math.Max(1, _lanes / 2);
         }
     }
+
+    /// <summary>
+    /// The span the next segment is cut to, after one of <paramref name="span"/> ledgers finished having
+    /// handed over <paramref name="handed"/> records, with <paramref name="current"/> in force (spec H4).
+    /// </summary>
+    internal static long NextSpan(long current, long span, long handed) =>
+
+        // An empty stretch (days between two sessions, or the ledgers after the last one) is crossed in
+        // a handful of round trips rather than one per doubling; a span that lands on dense records is
+        // split for idle lanes (spec H5).
+        handed == 0
+            ? Math.Max(current, Times(span, EmptyGrowth))
+            : Math.Clamp(TargetRecords * span / handed, 1, Times(span, 2));
+
+    private const long EmptyGrowth = 8;
+
+    private static long Times(long span, long factor) => span > long.MaxValue / factor ? long.MaxValue : span * factor;
 
     private void Halve()
     {
@@ -246,6 +264,9 @@ internal sealed class ConcurrentHistory
                     {
                         _head = _head.Next;
                         if (_head is null) _tail = null;
+
+                        // The new head's lane may be waiting for room it now has (spec H7).
+                        Changed();
                     }
 
                     if (_head is null && _frontier > _toLedger) return null;
@@ -472,7 +493,12 @@ internal sealed class ConcurrentHistory
                     if (segment.Abandoned) return false;
                     if (tx.LedgerIndex > segment.Last) return false;
 
-                    if (HeldThrough(segment) < HeldRecords)
+                    // Counting only a segment's predecessors would let segments answered out of order
+                    // each fill to the bound; counting everything for the one the consumer reads could
+                    // stall it behind records it alone can release.
+                    bool room = ReferenceEquals(segment, _head) ? segment.Waiting.Count < HeldRecords : _held < HeldRecords;
+
+                    if (room)
                     {
                         segment.Waiting.Enqueue(tx);
                         segment.Handed++;
@@ -489,20 +515,6 @@ internal sealed class ConcurrentHistory
 
                 await changed.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
-        }
-
-        /// <summary>The records waiting in <paramref name="segment"/> and every segment before it.</summary>
-        private int HeldThrough(Segment segment)
-        {
-            int held = 0;
-
-            for (Segment? each = _head; each is not null; each = each.Next)
-            {
-                held += each.Waiting.Count;
-                if (ReferenceEquals(each, segment)) break;
-            }
-
-            return held;
         }
 
         /// <summary>
@@ -526,16 +538,7 @@ internal sealed class ConcurrentHistory
         }
 
         /// <summary>The span the next cut segment gets, from what a finished one held (spec H4).</summary>
-        private void Learn(Segment segment)
-        {
-            long span = segment.Last - segment.First + 1;
-
-            _span = segment.Handed == 0
-                ? Math.Max(_span, Doubled(span))
-                : Math.Clamp(TargetRecords * span / segment.Handed, 1, Doubled(span));
-        }
-
-        private static long Doubled(long span) => span > long.MaxValue / 2 ? long.MaxValue : span * 2;
+        private void Learn(Segment segment) => _span = NextSpan(_span, segment.Last - segment.First + 1, segment.Handed);
 
         /// <summary>The segments after a failed one are never delivered: they are cancelled and dropped, and nothing more is cut.</summary>
         private void AbandonAfter(Segment failed, List<CancellationTokenSource> cancels)
