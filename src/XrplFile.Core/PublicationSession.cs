@@ -74,6 +74,25 @@ public sealed class SessionOptions
     /// </summary>
     public TimeSpan HistoryLagLimit { get; init; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// How many ledger ranges of the writer's history a resume reads at once (spec H3). On a public
+    /// node nearly all of the read is waiting for each account_tx page, so ranges read together finish
+    /// sooner; the records reach the reconciliation in the same order as one walk would hand them over.
+    /// 1 reads the history as one walk. A node that warns of load, or a read that fails, halves it for
+    /// the rest of the session (spec H9). At least 1.
+    /// </summary>
+    public int HistoryLanes
+    {
+        get => _historyLanes;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+            _historyLanes = value;
+        }
+    }
+
+    private readonly int _historyLanes = 4;
+
     /// <summary>The wait between reads of the landed manifest (spec S22); a seam for tests, which must not sleep seconds.</summary>
     internal TimeSpan ManifestReadPause { get; init; } = PublicationCheck.DefaultManifestReadPause;
 }
@@ -124,6 +143,10 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
     private ISubmissionStrategy? _strategy;
     private readonly ILedgerSource _source;
+
+    /// <summary>The writer's history as a resume reads it (spec H1); what it learns about the node lasts the session.</summary>
+    private readonly ConcurrentHistory _history;
+
     private readonly IPublicationSource _file;
 
     /// <summary>The file's block hashes, streamed once at start or resume (spec S3, S7) and handed to the writer.</summary>
@@ -185,6 +208,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
     {
         _strategy = strategy;
         _source = source;
+        _history = new ConcurrentHistory(source, options.HistoryLanes);
         _file = file;
         _blockHashes = blockHashes;
         _blockHashesHex = [.. blockHashes.Select(Convert.ToHexString)];
@@ -1004,7 +1028,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
         preparation?.Report(new PublishProgress("history", 0, 0));
 
-        await foreach (LedgerTransaction tx in _source.AccountTransactionsAsync(writer, _state.StartedInLedger, to, forward: true, cancellationToken).ConfigureAwait(false))
+        await foreach (LedgerTransaction tx in _history.ReadAsync(writer, _state.StartedInLedger, to, cancellationToken).ConfigureAwait(false))
         {
             if (++read % HistoryReportEvery == 0) preparation?.Report(new PublishProgress("history", read, 0));
 
@@ -1217,7 +1241,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
         preparation?.Report(new PublishProgress("history", 0, 0));
 
-        await foreach (LedgerTransaction tx in _source.AccountTransactionsAsync(writer, _state.StartedInLedger, to, forward: true, cancellationToken).ConfigureAwait(false))
+        await foreach (LedgerTransaction tx in _history.ReadAsync(writer, _state.StartedInLedger, to, cancellationToken).ConfigureAwait(false))
         {
             if (++read % HistoryReportEvery == 0) preparation?.Report(new PublishProgress("history", read, 0));
 

@@ -88,6 +88,22 @@ public sealed class FakeLedgerSource : ILedgerSource
         set { lock (_gate) _historyHideReads = value; }
     }
 
+    /// <summary>
+    /// When set, <see cref="HistoryHideReads"/> counts reads that start at this ledger rather than
+    /// calls: a resume reads its range as several ledger ranges at once (ConcurrentHistory), and the
+    /// calls for its later ranges hide what the read's first call did, or hide when that call has not
+    /// come yet and hidden reads remain. The first read after the hidden ones may therefore be hidden
+    /// in part. Calls starting before this ledger hide nothing.
+    /// </summary>
+    public long? HistoryHideReadsFrom
+    {
+        get { lock (_gate) return _historyHideReadsFrom; }
+        set { lock (_gate) _historyHideReadsFrom = value; }
+    }
+
+    private long? _historyHideReadsFrom;
+    private bool _readHiding;
+
     /// <summary>Records each account's next sequence as of <paramref name="ledger"/>, and validates that ledger.</summary>
     /// <param name="ledger">The ledger index the sequences hold from.</param>
     /// <param name="sequences">Each account's next sequence there.</param>
@@ -248,6 +264,30 @@ public sealed class FakeLedgerSource : ILedgerSource
         get { lock (_gate) return Calls.Count; }
     }
 
+    /// <summary>
+    /// The forward reads of <paramref name="account"/>'s history from <paramref name="fromLedger"/>
+    /// among the calls after the first <paramref name="skip"/>, each as the range it covered. A resume
+    /// reads its range as several ledger ranges at once (ConcurrentHistory), so one read is the call
+    /// that starts at <paramref name="fromLedger"/> and the calls for later ranges that follow it.
+    /// </summary>
+    public IReadOnlyList<(long From, long To)> Passes(string account, long fromLedger, int skip = 0)
+    {
+        List<(long From, long To)> passes = [];
+
+        lock (_gate)
+        {
+            foreach (AccountTransactionsCall call in Calls.Skip(skip))
+            {
+                if (!string.Equals(call.Account, account, StringComparison.Ordinal) || !call.Forward || call.FromLedger < fromLedger) continue;
+
+                if (call.FromLedger == fromLedger) passes.Add((fromLedger, call.ToLedger));
+                else if (passes.Count > 0) passes[^1] = (fromLedger, Math.Max(passes[^1].To, call.ToLedger));
+            }
+        }
+
+        return passes;
+    }
+
     public FakeLedgerSource Add(LedgerTransaction tx)
     {
         lock (_gate)
@@ -360,6 +400,19 @@ public sealed class FakeLedgerSource : ILedgerSource
     /// </summary>
     public int? HistoryFailsAfter { get; set; }
 
+    /// <summary>
+    /// The walks from now on answer this many records between them, and then the walk about to hand
+    /// over the next one fails the way a dropped connection does, once: a read that asks for several
+    /// ledger ranges at once breaks part-way wherever its ranges fall.
+    /// </summary>
+    public int? HistoryReadFailsAfter
+    {
+        get { lock (_gate) return _readFailsAfter; }
+        set { lock (_gate) _readFailsAfter = value; }
+    }
+
+    private int? _readFailsAfter;
+
     /// <summary>Every record <see cref="AccountTransactionsAsync"/> has handed out, over all walks.</summary>
     public long RecordsYielded => Interlocked.Read(ref _recordsYielded);
 
@@ -405,8 +458,25 @@ public sealed class FakeLedgerSource : ILedgerSource
                 }
             }
 
-            bool hiding = HistoryHides is not null && _historyHideReads > 0;
-            if (hiding) _historyHideReads--;
+            bool hiding;
+
+            if (_historyHideReadsFrom is { } readStart)
+            {
+                if (fromLedger == readStart)
+                {
+                    _readHiding = HistoryHides is not null && _historyHideReads > 0;
+                    if (_readHiding) _historyHideReads--;
+                }
+
+                // The lanes of one read reach this fake in no fixed order: a later range's call can
+                // come before its read's first one, so it also hides while hidden reads remain.
+                hiding = fromLedger >= readStart && (_readHiding || (fromLedger > readStart && HistoryHides is not null && _historyHideReads > 0));
+            }
+            else
+            {
+                hiding = HistoryHides is not null && _historyHideReads > 0;
+                if (hiding) _historyHideReads--;
+            }
 
             IEnumerable<(LedgerTransaction Tx, int Position)> matching = _transactions
                 .Select((tx, position) => (Tx: tx, Position: position))
@@ -428,6 +498,20 @@ public sealed class FakeLedgerSource : ILedgerSource
             if (handed++ == failAfter)
             {
                 throw new XrplFileException(XrplFileError.NodeUnreachable, $"fake: the node stopped answering after {failAfter} records");
+            }
+
+            lock (_gate)
+            {
+                if (_readFailsAfter is { } left)
+                {
+                    if (left == 0)
+                    {
+                        _readFailsAfter = null;
+                        throw new XrplFileException(XrplFileError.NodeUnreachable, "fake: the node stopped answering part-way through the read");
+                    }
+
+                    _readFailsAfter = left - 1;
+                }
             }
 
             Interlocked.Increment(ref _recordsYielded);
