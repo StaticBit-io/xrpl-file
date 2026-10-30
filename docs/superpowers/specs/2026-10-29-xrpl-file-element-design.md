@@ -280,7 +280,16 @@ How bytes reach the source buffer depends on the container, detected from the le
   `moov` wherever it sits. A `moov` at the end of the file does not mean downloading the whole
   file. Seeking maps the target time to a byte offset through `moov`'s sample tables and reads
   from that block.
-- **WebM**: appended as-is. Seeking without `Cues` works only within what is buffered.
+- **WebM**: appended as-is. When the file has `Cues` (ffmpeg writes them, usually at the end),
+  the element reads the block holding them the same way it finds `moov`, and seeks through
+  them. Without `Cues`, seeking works only within what is buffered.
+
+Seeking anywhere is a first-class case, not an edge case: the owner expects to jump straight
+to the middle of a video. A seek outside the buffer drops the read-ahead queue, finds the block
+holding the keyframe at or before the target, reads it (and the next blocks concurrently), and
+playback resumes from that keyframe. The visitor waits about one block read, a few seconds on
+testnet, under the buffering overlay. Seeking back into a part already watched replays from the
+buffer while it is still held, and re-reads otherwise.
 - **Anything `MediaSource.isTypeSupported` refuses** (HEVC on browsers without it, for
   example): the download view, with a line saying this browser cannot play it here.
 
