@@ -1,0 +1,93 @@
+<style>
+  .demo { font-family: system-ui, sans-serif; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin: 16px 0 28px; }
+  .xf { position: relative; border-radius: 10px; overflow: hidden; background: #14161a; color: #e8e8ea; aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center; }
+  .xf.text { aspect-ratio: auto; height: 190px; align-items: stretch; justify-content: stretch; background: #f7f7f5; color: #222; }
+  .cap { font-size: 12px; color: #888; margin-top: 6px; }
+  .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(255,255,255,.12); }
+  .bar > i { display: block; height: 100%; background: #4da3ff; }
+  .bar.buf { height: 6px; }
+  .bar.buf > b { position: absolute; top: 0; left: 0; height: 100%; background: #fff; }
+  .load { text-align: center; font-size: 13px; line-height: 1.6; }
+  .ring { width: 38px; height: 38px; border-radius: 50%; border: 3px solid rgba(255,255,255,.15); border-top-color: #4da3ff; margin: 0 auto 10px; }
+  .big { font-size: 22px; font-weight: 600; }
+  .muted { color: #9a9ca3; }
+  .play { width: 56px; height: 56px; border-radius: 50%; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; font-size: 22px; }
+  .poster { position: absolute; inset: 0; background: linear-gradient(135deg, #3a2f5c, #c0587a 60%, #f2a65a); }
+  .img { position: absolute; inset: 0; background: radial-gradient(circle at 30% 40%, #8fd3f4, #3b6fb6 55%, #1d2b4f); }
+  .txt { padding: 14px 16px; font: 13px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow: hidden; }
+  .file { text-align: center; font-size: 13px; line-height: 1.7; }
+  .btn { display: inline-block; margin-top: 8px; padding: 6px 14px; border-radius: 6px; background: #4da3ff; color: #fff; font-weight: 600; }
+  .err { text-align: center; font-size: 13px; line-height: 1.6; padding: 0 18px; }
+  .err .big { color: #ff8a8a; }
+  .strip { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; padding: 6px 10px; background: #0d0e11; color: #9a9ca3; border-top: 1px solid #23252b; }
+  .strip .ok { color: #6fd08c; }
+  .frame { border-radius: 10px; overflow: hidden; }
+  .frame .xf { border-radius: 0; }
+  .hover { position: absolute; left: 8px; right: 8px; bottom: 10px; font-size: 11.5px; background: rgba(0,0,0,.6); border-radius: 6px; padding: 5px 8px; color: #ddd; display: flex; justify-content: space-between; }
+</style>
+
+<div class="demo">
+<h2>Блок &lt;xrpl-file&gt;: что видит посетитель</h2>
+<p class="subtitle">Сначала все состояния одного блока, как я их понял. Ниже — один вопрос про обвязку вокруг содержимого.</p>
+
+<h3>Состояния</h3>
+<div class="grid">
+  <div>
+    <div class="xf"><div class="load"><div class="ring"></div><div class="big">34%</div><div class="muted">12,4 из 36,5 МБ · проверено 4 блока из 37</div></div><div class="bar"><i style="width:34%"></i></div></div>
+    <div class="cap">1. Загрузка, ещё нечего показать. Прогресс в процентах и байтах.</div>
+  </div>
+  <div>
+    <div class="xf"><div class="poster"></div><div class="play">▶</div><div class="bar buf"><i style="width:58%"></i><b style="width:21%"></b></div></div>
+    <div class="cap">2. Видео: обложка из манифеста (если есть) и кнопка воспроизведения. Синим — загружено, белым — просмотрено. Играет, пока догружается.</div>
+  </div>
+  <div>
+    <div class="xf"><div class="img"></div></div>
+    <div class="cap">3. Картинка (PNG, JPEG, WebP, GIF, AVIF). Показывается только после проверки всех блоков. SVG — как файл, не как картинка.</div>
+  </div>
+  <div>
+    <div class="xf text"><div class="txt">Lorem ipsum notes.txt
+— первая строка
+— вторая строка, длинная, переносится по ширине блока и не вылезает за его край…
+— третья</div></div>
+    <div class="cap">4. Текст: как есть, моноширинным шрифтом, с прокруткой. HTML и Markdown — тоже как текст, без выполнения.</div>
+  </div>
+  <div>
+    <div class="xf"><div class="file"><div class="big">report.pdf</div><div class="muted">application/pdf · 2,1 МБ · testnet</div><div class="btn">Скачать</div></div></div>
+    <div class="cap">5. Тип, который блок не показывает (PDF, архив, AVI…): имя, тип, размер и кнопка скачать.</div>
+  </div>
+  <div>
+    <div class="xf"><div class="err"><div class="big">Файл не прошёл проверку</div><div class="muted">Блок 12 не совпал с отпечатком. Ничего не показано.</div></div></div>
+    <div class="cap">6. Ошибка: не найдено, узел не отвечает, файл повреждён. Коротко и по-человечески.</div>
+  </div>
+</div>
+
+<h3>Вопрос: нужна ли подпись вокруг содержимого?</h3>
+<p class="subtitle">Подпись говорит посетителю, откуда файл и что он проверен. Выберите вариант.</p>
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Только содержимое</h3>
+      <div class="xf" style="max-width:320px"><div class="img"></div></div>
+      <p>Блок выглядит как обычная картинка или видео на странице. Происхождение не видно.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Полоса под содержимым</h3>
+      <div class="frame" style="max-width:320px"><div class="xf"><div class="img"></div></div><div class="strip"><span>photo.webp · 412 КБ</span><span class="ok">✓ проверено · testnet</span></div></div>
+      <p>Всегда видны имя, размер, сеть и отметка проверки. Ссылка xrpl-file:// по нажатию.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Подпись при наведении</h3>
+      <div class="xf" style="max-width:320px"><div class="img"></div><div class="hover"><span>photo.webp · 412 КБ</span><span>✓ testnet</span></div></div>
+      <p>Чисто, пока не навели курсор. На телефоне — по касанию.</p>
+    </div>
+  </div>
+</div>
+</div>
