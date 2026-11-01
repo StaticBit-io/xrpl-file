@@ -22,6 +22,9 @@ const RATIO_CONTENT = 2;
 
 const VIEWS = ['idle', 'loading', 'image', 'video', 'text', 'download', 'error'];
 const COPIED_MS = 1500;
+// An <a download> click is handed to the browser, which may still refuse it (a sandboxed iframe
+// without allow-downloads) without telling the page, so only the picker path may claim "Saved.".
+const SAVE_STATUS = { saved: 'Saved.', started: 'Download started.' };
 
 const NOTE_TOO_LARGE = 'This picture is too large to show here.';
 const NOTE_MISMATCH = "This file's contents do not match its type, so it is offered as a download.";
@@ -678,9 +681,9 @@ export class XrplFileElement extends HTMLElement {
         onProgress: (detail) => this.#showSaving(`Saving… ${bytesOf(detail.bytesDone, detail.bytesTotal)}`),
       });
       if (signal.aborted) return;
-      this.#showSaving(result === 'saved' ? 'Saved.' : '');
-      if (result === 'saved') {
-        // Every block verified on the way to the disk.
+      this.#showSaving(SAVE_STATUS[result] ?? '');
+      if (result !== 'cancelled') {
+        // Every block verified before it was written or put in the Blob.
         this.#verified = true;
         this.#renderCaption();
       }

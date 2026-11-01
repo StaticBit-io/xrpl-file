@@ -190,7 +190,7 @@ for (const name of ['SecurityError', 'NotAllowedError'])
     const result = await saveFile({
       handle, record: recordOf(blocks), picker, saveBlob: (blob, fileName) => { received = { blob, fileName }; },
     });
-    assert.equal(result, 'saved');
+    assert.equal(result, 'started');
     assert.equal(picker.names.length, 1);
     assert.equal(received.fileName, 'vector-2500500.bin');
     assert.equal(received.blob.size, 24);
@@ -203,7 +203,7 @@ test('a picker blocked on the second ask falls back too', async () => {
   picker.rejectOnceWith(new TypeError('bad name'));
   picker.rejectOnceWith(new DOMException('', 'SecurityError'));
   let saved = false;
-  assert.equal(await saveFile({ handle: fakeHandle(blocks), record: recordOf(blocks), picker, saveBlob: () => { saved = true; } }), 'saved');
+  assert.equal(await saveFile({ handle: fakeHandle(blocks), record: recordOf(blocks), picker, saveBlob: () => { saved = true; } }), 'started');
   assert.equal(saved, true);
 });
 
@@ -272,7 +272,7 @@ test('without a picker, the blob holds exactly the file', async () => {
   const record = recordOf(blocks, { type: 'video/mp4', name: 'a/b:c.mp4' });
   let received;
   const result = await saveFile({ handle, record, picker: null, saveBlob: (blob, name) => { received = { blob, name }; } });
-  assert.equal(result, 'saved');
+  assert.equal(result, 'started');
   assert.equal(received.blob.size, record.manifest.size);
   assert.equal(received.name, 'a_b_c.mp4');
   const expected = new Uint8Array(24);

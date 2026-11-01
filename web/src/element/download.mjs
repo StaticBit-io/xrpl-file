@@ -106,7 +106,10 @@ async function collectBlob(options) {
  * up to {@link BLOB_LIMIT}; the same path takes over when the browser blocks the picker for this page
  * (a cross-origin iframe). A block that fails verification is never written, and the file under way
  * is aborted.
- * @returns 'saved', or 'cancelled' when the visitor closed the save dialog before anything was read
+ * @returns 'saved' when the picker's file was written and closed; 'started' when the Blob was handed
+ *   to the browser as a download, whose outcome the page cannot see (a sandboxed iframe without
+ *   `allow-downloads` blocks it silently); 'cancelled' when the visitor closed the save dialog before
+ *   anything was read
  */
 export async function saveFile({
   handle,
@@ -131,5 +134,5 @@ export async function saveFile({
   if (manifest.size > BLOB_LIMIT) throw elementError('TooLarge', TOO_LARGE);
   const blob = await collectBlob(options);
   saveBlob(blob, downloadName(manifest));
-  return 'saved';
+  return 'started';
 }

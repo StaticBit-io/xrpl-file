@@ -110,6 +110,11 @@ The element styles itself with constructable stylesheets, so the policy does not
 Sites that enforce Trusted Types (`require-trusted-types-for 'script'`) are not supported in this
 version: the element assigns one static template through `innerHTML`.
 
+Inside a cross-origin `<iframe>` the browser refuses the save dialog, so Download assembles the file in
+memory (up to 2 GiB) and hands it to the browser as an ordinary download instead of streaming it to
+disk. An `<iframe sandbox>` that hosts the element must include `allow-downloads`; without it the
+browser drops the download silently, and the element can only say "Download started.".
+
 `web/demo` has pages that exercise it against published testnet files: `index.html` (every state),
 `many.html` (ten elements, with counters of the connections and requests they make), `snippet.html` and
 `head.html`; `dev.html` loads the unbundled sources from `web/src` and needs no build. After a build,
