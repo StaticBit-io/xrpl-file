@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { XrplFileError } from '../src/link.mjs';
-import { elementError, messageFor, saveMessageFor, detailFor, canVerify, NO_NODE, BAD_NODE, INSECURE, NO_LINK } from '../src/element/messages.mjs';
+import { elementError, messageFor, saveMessageFor, detailFor, shortTitleFor, canVerify, NO_NODE, BAD_NODE, INSECURE, NO_LINK } from '../src/element/messages.mjs';
 
 test('every reading error has a sentence', () => {
   for (const code of ['InvalidLink', 'ManifestNotFound', 'NodeLacksHistory', 'CorruptManifest', 'ListMismatch', 'BlockMismatch', 'ChunkMissing', 'TooLarge', 'NodeUnreachable'])
@@ -84,4 +84,32 @@ test('a failed save is worded for a file that is still on screen', () => {
     assert.equal(message, 'The file could not be saved.');
     assert.ok(!/Nothing was shown/.test(message));
   }
+});
+
+test('every reading error has a short title of at most twelve characters', () => {
+  const short = (code) => shortTitleFor(new XrplFileError(code, 'x', { block: 3 }));
+  assert.equal(short('InvalidLink'), 'Bad link');
+  assert.equal(short('ManifestNotFound'), 'Not found');
+  assert.equal(short('NodeLacksHistory'), 'No history');
+  assert.equal(short('CorruptManifest'), 'Damaged');
+  assert.equal(short('ListMismatch'), 'Not verified');
+  assert.equal(short('BlockMismatch'), 'Not verified');
+  assert.equal(short('ChunkMissing'), 'Incomplete');
+  assert.equal(short('TooLarge'), 'Too large');
+  assert.equal(short('NodeUnreachable'), 'No answer');
+  for (const code of ['InvalidLink', 'ManifestNotFound', 'NodeLacksHistory', 'CorruptManifest', 'ListMismatch', 'BlockMismatch', 'ChunkMissing', 'TooLarge', 'NodeUnreachable'])
+    assert.ok(short(code).length <= 12, code);
+});
+
+test('the element sentences have their own short titles', () => {
+  assert.equal(shortTitleFor(elementError('NodeUnreachable', NO_NODE)), 'No node');
+  assert.equal(shortTitleFor(elementError('NodeUnreachable', BAD_NODE)), 'Bad node');
+  assert.equal(shortTitleFor(elementError(null, INSECURE)), 'Not secure');
+  assert.equal(shortTitleFor(elementError('InvalidLink', NO_LINK)), 'No link');
+});
+
+test('an error without a name has the short title Error', () => {
+  assert.equal(shortTitleFor(new TypeError('boom')), 'Error');
+  assert.equal(shortTitleFor(null), 'Error');
+  assert.equal(shortTitleFor(elementError(null, 'This video could not be decoded.')), 'Error');
 });

@@ -71,3 +71,42 @@ export function downloadName(manifest) {
   name = cut(name);
   return name || `xrpl-file.${extensionFor(manifest.type)}`;
 }
+
+/** "12.4 of 36.5 MB": the unit is written once when both numbers share it. */
+export function bytesOf(done, total) {
+  const [doneValue, doneUnit] = formatBytes(done).split(' ');
+  const totalText = formatBytes(total);
+  return totalText.endsWith(` ${doneUnit}`) ? `${doneValue} of ${totalText}` : `${formatBytes(done)} of ${totalText}`;
+}
+
+/**
+ * The loader's two lines. They are separate so that a narrow box can keep the bytes and drop the
+ * blocks; the blocks text carries its own separator so the two read as one line when both show.
+ */
+export function progressLines({ bytesDone, bytesTotal, blocksVerified, blocksTotal }) {
+  return {
+    bytes: bytesOf(bytesDone, bytesTotal),
+    blocks: ` · ${blocksVerified} of ${blocksTotal} blocks verified`,
+  };
+}
+
+const BADGE_MAX = 5;
+const VENDOR_PREFIX = /^(?:vnd\.|prs\.|x-|x\.)/;
+
+/**
+ * A short tag for the file type in a box too small for the name: the media subtype in capitals, such
+ * as SVG for image/svg+xml, at most five characters. The type comes from the file's manifest, so only
+ * letters and digits survive; anything that leaves nothing is FILE.
+ */
+export function typeBadge(type) {
+  const normalized = normalizeType(type);
+  const slash = normalized.indexOf('/');
+  const subtype = slash < 1 ? '' : normalized.slice(slash + 1);
+  const core = subtype.replace(VENDOR_PREFIX, '').split('+')[0].replace(/[^a-z0-9]/g, '');
+  return core ? core.slice(0, BADGE_MAX).toUpperCase() : 'FILE';
+}
+
+/** The accessible name of the download button, which in the smallest box shows only an icon. */
+export function downloadLabel(manifest) {
+  return `Download ${downloadName(manifest)}`;
+}

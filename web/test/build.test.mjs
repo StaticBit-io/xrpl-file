@@ -84,7 +84,8 @@ test('the bundle is plain ASCII, so the page encoding cannot change it', async (
   await build({ webDir, outDir: out, version: VERSION });
   const bytes = await readFile(join(out, 'xrpl-file-element.js'));
   assert.ok(bytes.every((byte) => byte < 0x80));
-  assert.ok(bytes.includes(Buffer.from('\\u2713 verified \\u00b7 ')), 'the check mark and the dot survive as escapes');
+  assert.ok(bytes.includes(Buffer.from('\\u2713 ')), 'the check mark survives as an escape');
+  assert.ok(bytes.includes(Buffer.from('verified \\u00b7 ')), 'the dot survives as an escape');
 });
 
 test('the output directory holds the four files and nothing else', async () => {

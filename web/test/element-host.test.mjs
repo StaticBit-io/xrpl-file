@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hostStyle, linkReadiness, captionState, styleSupport } from '../src/element/host.mjs';
+import { hostStyle, linkReadiness, captionState, captionParts, styleSupport } from '../src/element/host.mjs';
 
 test('the host rule has the reserved proportion and no size by default', () => {
   assert.equal(hostStyle({ width: null, height: null, ratio: '16 / 9' }),
@@ -50,4 +50,13 @@ test('a missing piece of either API means the style elements fallback', () => {
   assert.equal(styleSupport({ CSSStyleSheet: Sheet, ShadowRoot: NoAdopted }), 'fallback');
   assert.equal(styleSupport({ CSSStyleSheet: NoReplace, ShadowRoot: Shadow }), 'fallback');
   assert.equal(styleSupport({ CSSStyleSheet: Sheet, ShadowRoot: 5 }), 'fallback');
+});
+
+test('the caption side is split so a narrow tier can drop the word and keep the mark', () => {
+  assert.deepEqual(captionParts({ phase: 'image', network: 'testnet' }), { verified: true, mark: '✓ ', word: 'verified · ', network: 'testnet' });
+  assert.deepEqual(captionParts({ phase: 'loading', network: 'testnet' }), { verified: false, mark: '', word: '', network: 'testnet' });
+  for (const phase of ['idle', 'loading', 'error', 'image', 'text', 'video', 'download']) {
+    const parts = captionParts({ phase, network: 'mainnet' });
+    assert.equal(parts.mark + parts.word + parts.network, captionState({ phase, network: 'mainnet' }).text, phase);
+  }
 });

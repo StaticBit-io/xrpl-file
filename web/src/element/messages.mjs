@@ -48,6 +48,36 @@ export function messageFor(error, { playing = false } = {}) {
   }
 }
 
+const SHORT_BY_SENTENCE = new Map([
+  [NO_NODE, 'No node'],
+  [BAD_NODE, 'Bad node'],
+  [INSECURE, 'Not secure'],
+  [NO_LINK, 'No link'],
+]);
+
+/**
+ * A title of a few characters for a box too small for the sentence: the full sentence stays in the
+ * accessible text and in the tooltip. The element's own sentences are told apart by the sentence,
+ * since they share codes with reader errors (NO_NODE is a NodeUnreachable).
+ */
+export function shortTitleFor(error) {
+  const known = typeof error?.sentence === 'string' ? SHORT_BY_SENTENCE.get(error.sentence) : undefined;
+  if (known) return known;
+  if (!(error instanceof XrplFileError)) return 'Error';
+  switch (error.code) {
+    case 'InvalidLink': return 'Bad link';
+    case 'ManifestNotFound': return 'Not found';
+    case 'NodeLacksHistory': return 'No history';
+    case 'CorruptManifest': return 'Damaged';
+    case 'ListMismatch':
+    case 'BlockMismatch': return 'Not verified';
+    case 'ChunkMissing': return 'Incomplete';
+    case 'TooLarge': return 'Too large';
+    case 'NodeUnreachable': return 'No answer';
+    default: return 'Error';
+  }
+}
+
 /**
  * The status-line sentence for a save that did not finish. The file is still on screen, so the
  * view-level wording ("Nothing was shown") would be false; a block that failed verification is still

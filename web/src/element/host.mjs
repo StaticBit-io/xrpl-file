@@ -25,10 +25,20 @@ export function linkReadiness({ src, text, parsing }) {
 // The phases reached only after a read in which every block verified.
 const VERIFIED_PHASES = new Set(['image', 'text', 'video', 'download']);
 
+/**
+ * The right-hand side of the caption in three pieces: the mark, the word and the network, so that a
+ * narrower box can drop the word and the smallest keeps the mark alone. The pieces are empty until
+ * something verified was read.
+ */
+export function captionParts({ phase, network }) {
+  const verified = VERIFIED_PHASES.has(phase);
+  return { verified, mark: verified ? '✓ ' : '', word: verified ? 'verified · ' : '', network };
+}
+
 /** The right-hand side of the caption: the network, with the verified mark once something verified was read. */
 export function captionState({ phase, network }) {
-  const verified = VERIFIED_PHASES.has(phase);
-  return { verified, text: verified ? `✓ verified · ${network}` : network };
+  const { verified, mark, word } = captionParts({ phase, network });
+  return { verified, text: `${mark}${word}${network}` };
 }
 
 /**

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatBytes, extensionFor, downloadName } from '../src/element/format.mjs';
+import { formatBytes, extensionFor, downloadName, typeBadge, downloadLabel, bytesOf, progressLines } from '../src/element/format.mjs';
 
 test('a path cannot climb out of the download folder', () => {
   assert.equal(downloadName({ name: '../../evil.exe', type: 'application/octet-stream' }), '_.._evil.exe');
@@ -100,4 +100,42 @@ test('sizes use decimal units with one decimal', () => {
   assert.equal(formatBytes(12_400), '12.4 KB');
   assert.equal(formatBytes(1_600_000_000), '1.6 GB');
   assert.equal(formatBytes(1000), '1.0 KB');
+});
+
+test('the type badge is the media subtype in capitals, at most five characters', () => {
+  assert.equal(typeBadge('image/svg+xml'), 'SVG');
+  assert.equal(typeBadge('application/pdf'), 'PDF');
+  assert.equal(typeBadge('text/plain;charset=utf-8'), 'PLAIN');
+  assert.equal(typeBadge('IMAGE/PNG'), 'PNG');
+  assert.equal(typeBadge('application/octet-stream'), 'OCTET');
+  assert.equal(typeBadge('application/x-tar'), 'TAR');
+});
+
+test('a vendor subtype loses its prefix and is capped at five characters', () => {
+  const badge = typeBadge('application/vnd.ms-excel');
+  assert.equal(badge, 'MSEXC');
+  assert.ok(badge.length <= 5);
+  assert.ok(typeBadge('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').length <= 5);
+});
+
+test('a missing or odd type gives FILE', () => {
+  for (const type of [undefined, null, '', 42, 'weird', 'application/', '/png', 'a/+xml', 'x/ ..'])
+    assert.equal(typeBadge(type), 'FILE', String(type));
+});
+
+test('the download label names the file by its cleaned display name', () => {
+  assert.equal(downloadLabel({ name: 'photo.svg', type: 'image/svg+xml' }), 'Download photo.svg');
+  assert.equal(downloadLabel({ name: 'invoice‮fdp.exe', type: 'application/pdf' }), 'Download invoicefdp.exe');
+  assert.equal(downloadLabel({ name: '../../evil.exe', type: 'application/octet-stream' }), 'Download _.._evil.exe');
+  assert.equal(downloadLabel({ name: '', type: 'image/png' }), 'Download xrpl-file.png');
+});
+
+test('bytes are written once with their unit when both numbers share it', () => {
+  assert.equal(bytesOf(12_400_000, 36_500_000), '12.4 of 36.5 MB');
+  assert.equal(bytesOf(900, 36_500_000), '900 B of 36.5 MB');
+});
+
+test('the progress is two lines: the bytes, then the verified blocks', () => {
+  assert.deepEqual(progressLines({ bytesDone: 12_400_000, bytesTotal: 36_500_000, blocksVerified: 3, blocksTotal: 8 }),
+    { bytes: '12.4 of 36.5 MB', blocks: ' · 3 of 8 blocks verified' });
 });
