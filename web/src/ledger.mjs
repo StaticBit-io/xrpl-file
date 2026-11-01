@@ -51,6 +51,8 @@ export class LedgerClient {
     this.socket = null;
     this.pendingSocket = null;
     this.pendingReject = null;
+    this.connecting = null;
+    this.failures = 0;
     this.nextId = 1;
     this.pending = new Map();
     this.closed = false;
@@ -91,7 +93,9 @@ export class LedgerClient {
     if (this.pendingReject) {
       const reject = this.pendingReject;
       this.pendingReject = null;
-      reject(new XrplFileError('NodeUnreachable', `connection to ${this.endpoint} closed while it was still connecting`));
+      reject(new XrplFileError('NodeUnreachable', this.closed
+        ? 'this client has been closed'
+        : `connection to ${this.endpoint} closed while it was still connecting`));
     }
 
     for (const { reject, timer } of this.pending.values()) {
@@ -104,7 +108,20 @@ export class LedgerClient {
   async connect() {
     if (this.closed) throw new XrplFileError('NodeUnreachable', 'this client has been closed');
     if (this.socket?.readyState === WebSocket.OPEN) return;
-    await new Promise((resolve, reject) => {
+    // Concurrent first requests (a page of blocks all starting at once) must share one handshake:
+    // each would otherwise build its own socket, and every onopen overwrites this.socket, leaving
+    // the earlier ones open and unreferenced. A new attempt starts only once this one has settled.
+    if (!this.connecting) {
+      const attempt = this.handshake();
+      const done = () => { if (this.connecting === attempt) this.connecting = null; };
+      attempt.then(done, done);
+      this.connecting = attempt;
+    }
+    await this.connecting;
+  }
+
+  handshake() {
+    return new Promise((resolve, reject) => {
       const socket = new WebSocket(this.endpoint);
       this.pendingSocket = socket;
       this.pendingReject = reject;
@@ -152,14 +169,20 @@ export class LedgerClient {
   async request(command, params) {
     let lastError = null;
     for (let attempt = 0; attempt < this.endpoints.length; attempt++) {
+      const failures = this.failures;
       try {
         await this.connect();
         return await this.send(command, params);
       } catch (e) {
         if (this.closed || e.code !== 'NodeUnreachable') throw e;
         lastError = e;
-        this.disconnect();
-        this.index = (this.index + 1) % this.endpoints.length;
+        // Requests sharing one connection all see its failure; only the first may tear down and
+        // move to the next endpoint, or the rest would skip nodes and kill the retry's handshake.
+        if (this.failures === failures) {
+          this.failures++;
+          this.disconnect();
+          this.index = (this.index + 1) % this.endpoints.length;
+        }
       }
     }
     throw lastError;

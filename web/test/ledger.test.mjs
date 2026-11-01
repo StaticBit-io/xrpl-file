@@ -271,3 +271,157 @@ test('an error answer to account_tx is an unreachable node', async () => {
     client.close();
   });
 });
+
+// Connection sharing: a page of blocks starts many requests at once, before the first socket has
+// opened. They must share that one handshake instead of each building a socket of their own.
+
+/** A socket that stays CONNECTING until a test opens, fails or closes it. */
+class ManualSocket {
+  constructor(url) {
+    this.url = url;
+    this.readyState = 0;
+    this.sent = [];
+    this.closeCalls = 0;
+    ManualSocket.created.push(this);
+  }
+
+  open() {
+    this.readyState = 1;
+    this.onopen?.();
+  }
+
+  fail() {
+    this.readyState = 3;
+    this.onerror?.();
+    this.onclose?.();
+  }
+
+  hangUp() {
+    this.readyState = 3;
+    this.onclose?.();
+  }
+
+  send(frame) {
+    this.sent.push(frame);
+    const { id } = JSON.parse(frame);
+    queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id, status: 'success', result: { ok: true } }) }));
+  }
+
+  close() {
+    this.closeCalls++;
+    this.readyState = 3;
+  }
+}
+ManualSocket.OPEN = 1;
+
+async function withManual(run) {
+  const original = globalThis.WebSocket;
+  ManualSocket.created = [];
+  globalThis.WebSocket = ManualSocket;
+  try {
+    return await run();
+  } finally {
+    globalThis.WebSocket = original;
+  }
+}
+
+test('requests started before the socket opens share one WebSocket', async () => {
+  await withManual(async () => {
+    const client = new LedgerClient(['wss://example.invalid']);
+    const requests = Array.from({ length: 10 }, () => client.request('server_info', {}));
+    await turn();
+
+    assert.equal(ManualSocket.created.length, 1);
+    ManualSocket.created[0].open();
+    const answers = await Promise.all(requests);
+
+    assert.equal(ManualSocket.created.length, 1);
+    assert.equal(ManualSocket.created[0].sent.length, 10);
+    assert.ok(answers.every((answer) => answer.ok === true));
+    client.close();
+  });
+});
+
+test('close() during a shared handshake rejects every waiter and closes that one socket', async () => {
+  await withManual(async () => {
+    const client = new LedgerClient(['wss://example.invalid']);
+    const requests = Array.from({ length: 4 }, () => client.request('server_info', {}));
+    await turn();
+    const socket = ManualSocket.created[0];
+
+    client.close();
+    // A handshake that was already queued to open must not revive the closed client.
+    socket.onopen?.();
+
+    for (const request of requests) {
+      await assert.rejects(request, (e) => e.code === 'NodeUnreachable' && /has been closed/.test(e.message));
+    }
+    assert.equal(ManualSocket.created.length, 1);
+    assert.equal(socket.closeCalls, 1);
+    assert.equal(client.socket, null);
+    assert.equal(client.connecting, null);
+  });
+});
+
+test('a failed shared handshake rejects every waiter, and the next request builds a new socket', async () => {
+  await withManual(async () => {
+    const client = new LedgerClient(['wss://example.invalid']);
+    const requests = Array.from({ length: 3 }, () => client.request('server_info', {}));
+    await turn();
+    assert.equal(ManualSocket.created.length, 1);
+
+    ManualSocket.created[0].fail();
+    for (const request of requests) {
+      await assert.rejects(request, (e) => e.code === 'NodeUnreachable');
+    }
+    assert.equal(ManualSocket.created.length, 1);
+
+    const retry = client.request('server_info', {});
+    await turn();
+    assert.equal(ManualSocket.created.length, 2);
+    ManualSocket.created[1].open();
+    assert.deepEqual(await retry, { ok: true });
+    client.close();
+  });
+});
+
+test('waiters of a failed shared handshake move on together, each node tried once', async () => {
+  await withManual(async () => {
+    const client = new LedgerClient(['wss://a.invalid', 'wss://b.invalid']);
+    const requests = Array.from({ length: 3 }, () => client.request('server_info', {}));
+    await turn();
+    ManualSocket.created[0].fail();
+    await turn();
+
+    // One shared retry on the second node, not one per waiter and not a skip back to the first.
+    assert.deepEqual(ManualSocket.created.map((s) => s.url), ['wss://a.invalid', 'wss://b.invalid']);
+    ManualSocket.created[1].open();
+    const answers = await Promise.all(requests);
+
+    assert.ok(answers.every((answer) => answer.ok === true));
+    assert.equal(ManualSocket.created.length, 2);
+    client.close();
+  });
+});
+
+test('after the server closes an open socket the next request reconnects once', async () => {
+  await withManual(async () => {
+    const client = new LedgerClient(['wss://example.invalid']);
+    const first = client.request('server_info', {});
+    await turn();
+    ManualSocket.created[0].open();
+    await first;
+
+    ManualSocket.created[0].hangUp();
+    assert.equal(client.socket, null);
+
+    const again = Array.from({ length: 3 }, () => client.request('server_info', {}));
+    await turn();
+    assert.equal(ManualSocket.created.length, 2);
+    ManualSocket.created[1].open();
+    await Promise.all(again);
+
+    assert.equal(ManualSocket.created.length, 2);
+    client.close();
+  });
+});
