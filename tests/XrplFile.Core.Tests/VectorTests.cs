@@ -77,4 +77,32 @@ public class VectorTests
         Assert.Equal(vector.Ledger.Last, manifest.LastLedger);
         Assert.Equal(vector.Manifest, manifest.Encode());
     }
+
+    public static TheoryData<string> Variants => ["cover", "unknown member"];
+
+    [Theory]
+    [MemberData(nameof(Variants))]
+    public void A_manifest_variant_decodes_to_its_base_files_manifest(string note)
+    {
+        VectorManifestVariant variant = Vectors.Load().ManifestVariants.Single(v => v.Note == note);
+        Manifest baseline = Manifest.Decode(Vectors.File(variant.Of).Manifest);
+        Manifest decoded = Manifest.Decode(variant.Manifest);
+
+        Assert.Equal(variant.Cover, decoded.Cover);
+        Assert.Equal(baseline, decoded with { Cover = null });
+    }
+
+    [Theory]
+    [MemberData(nameof(Variants))]
+    public async Task A_manifest_variant_reads_the_same_bytes(string note)
+    {
+        VectorManifestVariant variant = Vectors.Load().ManifestVariants.Single(v => v.Note == note);
+        VectorFile vector = Vectors.File(variant.Of);
+        List<LedgerTransaction> ledger = [.. Vectors.Ledger(vector).Select(tx => tx.Hash == Vectors.ManifestHash
+            ? tx with { MemoDataHex = MemoLayout.Utf8Hex(variant.Manifest) } : tx)];
+
+        ReadResult read = await new XrplFileReader(new FakeLedgerSource().AddRange(ledger)).ReadAsync(Vectors.Link, TestContext.Current.CancellationToken);
+
+        Assert.Equal(vector.Sha256, Convert.ToHexString(SHA256.HashData(read.Bytes)));
+    }
 }

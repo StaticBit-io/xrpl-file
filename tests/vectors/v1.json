@@ -182,5 +182,19 @@
       ],
       "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:2500500,\u0022chunk\u0022:1000,\u0022root\u0022:\u00228632B1373C4CAE98C643C495F93B04D84035613FBBD82895B53EF47F07025347\u0022,\u0022ledgers\u0022:[1000,1026],\u0022blocks\u0022:3,\u0022lists\u0022:1,\u0022name\u0022:\u0022vector-2500500.bin\u0022}"
     }
+  ],
+  "manifestVariants": [
+    {
+      "of": 1001,
+      "note": "cover",
+      "cover": "3FA405A8301ACE34D11CF44A816080B8F0E49A48FBD048B8AEF1543A8C58BDB6",
+      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1001,\u0022chunk\u0022:1000,\u0022root\u0022:\u002253FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022cover\u0022:\u00223FA405A8301ACE34D11CF44A816080B8F0E49A48FBD048B8AEF1543A8C58BDB6\u0022,\u0022name\u0022:\u0022vector-1001.bin\u0022}"
+    },
+    {
+      "of": 1001,
+      "note": "unknown member",
+      "cover": null,
+      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1001,\u0022chunk\u0022:1000,\u0022root\u0022:\u002253FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022future\u0022:{\u0022tags\u0022:[\u0022a\u0022,1],\u0022on\u0022:true},\u0022name\u0022:\u0022vector-1001.bin\u0022}"
+    }
   ]
 }

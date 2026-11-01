@@ -12,7 +12,9 @@ public sealed record VectorLedger(long First, long Last, IReadOnlyList<long> Blo
 
 public sealed record VectorMerkle(IReadOnlyDictionary<string, string> LeafRoots, string BlockHashOfFiveChunks, string RootOverThreeEntries);
 
-public sealed record VectorSet(int Version, VectorMerkle Merkle, IReadOnlyList<VectorFile> Files);
+public sealed record VectorManifestVariant(long Of, string Note, string? Cover, string Manifest);
+
+public sealed record VectorSet(int Version, VectorMerkle Merkle, IReadOnlyList<VectorFile> Files, IReadOnlyList<VectorManifestVariant> ManifestVariants);
 
 public static class Vectors
 {

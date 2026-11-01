@@ -67,6 +67,22 @@ foreach (long size in sizes)
         blockHashes, root, new Ledger(first, last, blockLedgers, listLedger, manifestLedger), lists, manifest.Encode()));
 }
 
+// Variants of one file's manifest that a reader must decode to the same file: one carrying a
+// cover pointer and one carrying a member this version does not define.
+FileVector variantBase = files.Single(file => file.Size == 1001);
+Manifest variantManifest = Manifest.Decode(variantBase.Manifest);
+string coverHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("cover")));
+
+const string unknownMember = ",\"future\":{\"tags\":[\"a\",1],\"on\":true}";
+string withUnknownMember = variantBase.Manifest.Replace(",\"name\":", unknownMember + ",\"name\":", StringComparison.Ordinal);
+if (withUnknownMember == variantBase.Manifest) throw new InvalidOperationException("the unknown member was not inserted into the manifest");
+
+List<ManifestVariant> manifestVariants =
+[
+    new(variantBase.Size, "cover", coverHash, (variantManifest with { Cover = coverHash }).Encode()),
+    new(variantBase.Size, "unknown member", null, withUnknownMember),
+];
+
 JsonSerializerOptions options = new()
 {
     WriteIndented = true,
@@ -79,10 +95,11 @@ JsonSerializerOptions options = new()
 };
 
 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
-File.WriteAllText(output, JsonSerializer.Serialize(new VectorSet(1, merkle, files), options) + "\n");
+File.WriteAllText(output, JsonSerializer.Serialize(new VectorSet(1, merkle, files, manifestVariants), options) + "\n");
 Console.WriteLine($"wrote {files.Count} file vectors to {output}");
 
-sealed record VectorSet(int Version, Merkle Merkle, IReadOnlyList<FileVector> Files);
+sealed record VectorSet(int Version, Merkle Merkle, IReadOnlyList<FileVector> Files, IReadOnlyList<ManifestVariant> ManifestVariants);
+sealed record ManifestVariant(long Of, string Note, string? Cover, string Manifest);
 sealed record Merkle(IReadOnlyDictionary<string, string> LeafRoots, string BlockHashOfFiveChunks, string RootOverThreeEntries);
 sealed record Ledger(long First, long Last, IReadOnlyList<long> BlockLedgers, long? ListLedger, long ManifestLedger);
 sealed record FileVector(

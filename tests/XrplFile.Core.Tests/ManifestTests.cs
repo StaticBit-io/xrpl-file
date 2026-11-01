@@ -88,6 +88,64 @@ public class ManifestTests
         Assert.Throws<FormatException>(() => Manifest.Decode(json));
     }
 
+    private static readonly string CoverHash = new('C', 64);
+
+    [Fact]
+    public void A_cover_is_written_after_lists_and_before_the_name()
+    {
+        Assert.Equal(
+            "{\"v\":1,\"type\":\"image/png\",\"size\":734512,\"chunk\":1000,\"root\":\"" + Root + "\"," +
+            "\"ledgers\":[106497159,106497394],\"blocks\":1,\"lists\":0,\"cover\":\"" + CoverHash + "\",\"name\":\"cover.png\"}",
+            (Sample() with { Cover = CoverHash }).Encode());
+    }
+
+    [Fact]
+    public void A_cover_round_trips_upper_cased()
+    {
+        string json = (Sample() with { Cover = CoverHash }).Encode().Replace(CoverHash, CoverHash.ToLowerInvariant(), StringComparison.Ordinal);
+        Assert.Equal(Sample() with { Cover = CoverHash }, Manifest.Decode(json));
+    }
+
+    [Theory]
+    [InlineData("123")]
+    [InlineData("\"AB\"")]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("{}")]
+    public void A_cover_that_is_not_a_hash_reads_as_absent(string value)
+    {
+        string json = Sample().Encode().Replace(",\"name\":", ",\"cover\":" + value + ",\"name\":", StringComparison.Ordinal);
+        Assert.Equal(Sample(), Manifest.Decode(json));
+    }
+
+    [Fact]
+    public void A_cover_with_a_character_that_is_not_hex_reads_as_absent()
+    {
+        string json = Sample().Encode().Replace(",\"name\":", ",\"cover\":\"" + new string('C', 63) + "Z\",\"name\":", StringComparison.Ordinal);
+        Assert.Null(Manifest.Decode(json).Cover);
+    }
+
+    [Fact]
+    public void Members_this_version_does_not_define_are_ignored()
+    {
+        string json = Sample().Encode().Replace(",\"name\":", ",\"future\":{\"tags\":[\"a\",1],\"on\":true},\"x\":null,\"name\":", StringComparison.Ordinal);
+        Assert.Equal(Sample(), Manifest.Decode(json));
+    }
+
+    [Fact]
+    public void The_name_is_shortened_after_the_cover_is_placed()
+    {
+        string encoded = (Sample(name: new string('n', 2000)) with { Cover = CoverHash }).Encode();
+        Assert.Equal(MemoLayout.ManifestBytes, Encoding.UTF8.GetByteCount(encoded));
+        Assert.Equal(CoverHash, Manifest.Decode(encoded).Cover);
+    }
+
+    [Fact]
+    public void A_cover_that_is_not_a_hash_is_never_written()
+    {
+        Assert.Throws<InvalidOperationException>(() => (Sample() with { Cover = "AB" }).Encode());
+    }
+
     [Fact]
     public void A_consistent_manifest_has_no_inconsistency()
     {

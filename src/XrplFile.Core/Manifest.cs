@@ -16,6 +16,7 @@ namespace XrplFile;
 /// <param name="Blocks">Number of Merkle blocks.</param>
 /// <param name="Lists">Number of block-list memos; zero when there is one block.</param>
 /// <param name="Name">Optional file name.</param>
+/// <param name="Cover">Optional hash of the manifest transaction of the file's cover picture, upper-case hex (format section 4.1); null when absent or malformed.</param>
 public sealed record Manifest(
     string Type,
     long Size,
@@ -25,7 +26,8 @@ public sealed record Manifest(
     long LastLedger,
     int Blocks,
     int Lists,
-    string? Name)
+    string? Name,
+    string? Cover = null)
 {
     public const int Version = 1;
 
@@ -38,6 +40,11 @@ public sealed record Manifest(
     /// </summary>
     public string Encode()
     {
+        if (Cover is not null && !IsHash(Cover))
+        {
+            throw new InvalidOperationException("the cover is not a 64-hex transaction hash");
+        }
+
         string? name = Name;
 
         while (true)
@@ -95,7 +102,7 @@ public sealed record Manifest(
                 throw new FormatException("the manifest ledger range is not ascending");
             }
 
-            return new Manifest(type, size, chunk, rootHex.ToUpperInvariant(), first, last, blocks, lists, Text(root, "name"));
+            return new Manifest(type, size, chunk, rootHex.ToUpperInvariant(), first, last, blocks, lists, Text(root, "name"), CoverHash(root));
         }
         catch (JsonException e)
         {
@@ -142,6 +149,7 @@ public sealed record Manifest(
             writer.WriteEndArray();
             writer.WriteNumber("blocks", Blocks);
             writer.WriteNumber("lists", Lists);
+            if (Cover is not null) writer.WriteString("cover", Cover);
             if (name is not null) writer.WriteString("name", name);
             writer.WriteEndObject();
         }
@@ -159,6 +167,17 @@ public sealed record Manifest(
 
     private static string? Text(JsonElement element, string name) =>
         element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    // A cover is decoration, so a value that is not a 64-hex string reads as absent instead of
+    // failing the manifest of the file it decorates (format section 4).
+    private static string? CoverHash(JsonElement element)
+    {
+        string? text = Text(element, "cover");
+        return text is not null && IsHash(text) ? text.ToUpperInvariant() : null;
+    }
+
+    private static bool IsHash(string value) =>
+        value.Length == MerkleTree.HashBytes * 2 && value.All(Uri.IsHexDigit);
 
     private static int? Int(JsonElement element, string name) =>
         element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int number)
