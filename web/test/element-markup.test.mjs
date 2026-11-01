@@ -25,7 +25,7 @@ test('the style text keeps the site hooks and the parts the markup exposes', () 
 
 test('every tier has its pieces in the markup, hidden or shown by the styles alone', () => {
   const ids = [
-    'dlBadge', 'dlType', 'dlSize', 'dlNet',
+    'dlBadge', 'dlType', 'dlSize', 'dlNet', 'dlLabel',
     'progressBytes', 'progressBlocks',
     'msgIcon', 'msgShort', 'msgFull',
     'capMark', 'capWord', 'capNetwork', 'copyText', 'copyMark', 'copyStatus',
@@ -62,4 +62,15 @@ test('the safety net: the box clips, single lines ellipsize, flex children may s
   assert.match(STYLES, /\.view \{[^}]*overflow: hidden/);
   assert.match(STYLES, /text-overflow: ellipsis/);
   assert.match(STYLES, /\.center \{[^}]*min-width: 0/);
+});
+
+test('the download button is named by its visible word and then the file name, with no aria-label to contradict it', () => {
+  const button = TEMPLATE.match(/<button[^>]*id="dlButton"[\s\S]*?<\/button>/)[0];
+  assert.doesNotMatch(button, /aria-label/);
+  assert.match(button, /class="lbl-full">Download<\/span><span class="lbl-short">Save<\/span> <span class="sr-name" id="dlLabel">/);
+  assert.match(STYLES, /\.sr-name/);
+});
+
+test('the icon button shrinks to the box height so it cannot leave a 28 px box', () => {
+  assert.match(STYLES, /\.download \.btn \{[^}]*height: min\(26px, calc\(100cqb - 6px\)\)/);
 });

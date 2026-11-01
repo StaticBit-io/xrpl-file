@@ -40,7 +40,7 @@ export const STYLES = `
   .big { font-size: clamp(16px, 7cqi, 22px); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
   .muted { color: #9a9ca3; overflow-wrap: anywhere; font-size: clamp(11px, 4cqi, 13px); }
   .note { margin-top: 6px; font-size: clamp(11px, 3.9cqi, 12.5px); }
-  .sr { ${VISUALLY_HIDDEN} }
+  .sr, .sr-name { ${VISUALLY_HIDDEN} }
 
   .ring { width: clamp(24px, 12cqi, 38px); height: clamp(24px, 12cqi, 38px); border-radius: 50%; margin: 0 auto 10px; border: 3px solid rgba(255,255,255,.15); border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -129,7 +129,7 @@ export const STYLES = `
     /* Before the first percent there is only the status line, which this size hides: show that something is going on. */
     .loading .big:empty::before { content: "\\2026"; }
     .badge { display: inline-block; padding: 0 5px; border: 1px solid rgba(255,255,255,.35); border-radius: 4px; font-size: 11px; font-weight: 700; line-height: 1.5; letter-spacing: .04em; color: #e8e8ea; }
-    .download .btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; min-width: 24px; margin-top: 4px; padding: 0; }
+    .download .btn { display: inline-flex; align-items: center; justify-content: center; width: min(26px, calc(100cqb - 6px)); height: min(26px, calc(100cqb - 6px)); margin-top: 4px; padding: 0; }
     .download .btn .ico { display: inline-block; margin: 0; }
     .download .lbl-full { ${VISUALLY_HIDDEN} display: inline; }
     .download .lbl-short { display: none; }
@@ -197,7 +197,7 @@ export const TEMPLATE = `
       <div class="big" id="dlName"></div>
       <div class="muted" id="dlMeta"><span class="dl-type" id="dlType"></span><span id="dlSize"></span><span class="dl-net" id="dlNet"></span></div>
       <div class="muted note" id="dlNote" hidden></div>
-      <button type="button" class="btn" id="dlButton"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v11m0 0-5-5m5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl-full">Download</span><span class="lbl-short">Save</span></button>
+      <button type="button" class="btn" id="dlButton"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v11m0 0-5-5m5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl-full">Download</span><span class="lbl-short">Save</span> <span class="sr-name" id="dlLabel"></span></button>
       <div class="status muted" id="dlStatus" role="status"></div>
     </div>
   </div>

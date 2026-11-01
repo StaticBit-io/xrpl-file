@@ -589,10 +589,10 @@ export class XrplFileElement extends HTMLElement {
     p.dlNet.textContent = ` · ${this.#link.network}`;
     p.dlBadge.textContent = typeBadge(manifest.type);
     p.dlBadge.title = name;
-    // The smallest box shows an icon only, so the button is named after the file it saves.
-    const label = downloadLabel(manifest);
-    p.dlButton.setAttribute('aria-label', label);
-    p.dlButton.title = label;
+    // The button's name is its visible word ("Download", "Save" or, in the icon tier, the clipped
+    // "Download") followed by this clipped file name, so the name always starts with what is shown.
+    p.dlLabel.textContent = name;
+    p.dlButton.title = downloadLabel(manifest);
     const note = NOTES[reason] ?? null;
     p.dlNote.hidden = note === null;
     p.dlNote.textContent = note ?? '';
