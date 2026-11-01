@@ -300,6 +300,9 @@ class LinkState {
   async block(index, { priority = PRIORITY.BACKGROUND, signal, onChunk, sequential = false }) {
     if (signal?.aborted) throw abortError();
     const { record, list } = await raceAbort(this.loaded(), signal);
+    // raceAbort stops listening once the promise has settled, and this continues a few
+    // microtasks later: an abort that landed in between is still this consumer's abort.
+    if (signal?.aborted) throw abortError();
     // The last handle went while the manifest was still coming: nobody is left to read for.
     if (this.disposed) throw abortError('this file was released');
 
@@ -352,6 +355,8 @@ class LinkState {
         if (--read.live === 0) this.#abort(read);
       };
       signal?.addEventListener('abort', onAbort, { once: true });
+      // A listener added to a signal that has already aborted never fires.
+      if (signal?.aborted) { onAbort(); return; }
 
       read.promise.then(
         (bytes) => { leave(); resolve(bytes.slice()); },

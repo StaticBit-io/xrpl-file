@@ -172,6 +172,38 @@ test('a shared read is aborted only when every consumer aborted', async () => {
   assert.equal(source.calls.filter((c) => c.forward).length, 1);
 });
 
+test('an abort that lands between the awaits of block() still rejects the consumer', async () => {
+  const { h1 } = await vectorPage();
+  await h1.entries();
+  const c = new AbortController();
+  const p = h1.block(1, { signal: c.signal });
+  Promise.resolve().then(() => c.abort());
+  await assert.rejects(p, { name: 'AbortError' });
+});
+
+test('an abort in that gap releases the hold of the consumer on the shared read', async () => {
+  const { source, h1, h2 } = await vectorPage();
+  await h1.entries();
+  const c1 = new AbortController();
+  const c2 = new AbortController();
+  const p1 = h1.block(1, { signal: c1.signal });
+  Promise.resolve().then(() => c1.abort());
+  const p2 = h2.block(1, { signal: c2.signal, onChunk: () => c2.abort() });
+  await assert.rejects(p1, { name: 'AbortError' });
+  await assert.rejects(p2, { name: 'AbortError' });
+  await settle();
+  assert.ok(source.yielded < 100, `the walk went on for ${source.yielded} records`);
+});
+
+test('a consumer that joins after every other one aborted gets a fresh read', async () => {
+  const { blocks, source, h1, h2 } = await vectorPage();
+  const c = new AbortController();
+  const p1 = h1.block(1, { signal: c.signal, onChunk: () => c.abort() });
+  await assert.rejects(p1, { name: 'AbortError' });
+  assert.deepEqual(await h2.block(1, {}), blocks[1]);
+  assert.ok(source.calls.filter((call) => call.forward).length >= 2);
+});
+
 test('a read nobody waits for any more stops its walk and is not kept', async () => {
   const { blocks, source, h1, h2 } = await vectorPage();
   const c1 = new AbortController();
