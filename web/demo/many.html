@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xrpl-file element: many on one page</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 20px; max-width: 1100px; margin-inline: auto; }
+  h1 { font-size: 20px; }
+  .note { color: #888; font-size: 13px; }
+  .counters { font: 13px ui-monospace, Consolas, monospace; border: 1px solid #8884; border-radius: 6px; padding: 8px 12px; margin: 14px 0; position: sticky; top: 0; background: Canvas; z-index: 1; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px; }
+  figure { margin: 0; min-width: 0; }
+  figcaption { font: 12px ui-monospace, Consolas, monospace; color: #888; margin-top: 6px; overflow-wrap: anywhere; }
+</style>
+<script>
+// Counts what the page asks of the network. WebSocket frames are not visible in the browser's
+// network list, so the constructor and send() are wrapped before the element script runs.
+window.socketCount = 0;
+window.socketCommands = {};
+(() => {
+  const Native = window.WebSocket;
+  window.WebSocket = class extends Native {
+    constructor(...args) {
+      super(...args);
+      window.socketCount += 1;
+      renderCounters();
+    }
+  };
+  const nativeSend = Native.prototype.send;
+  Native.prototype.send = function send(data) {
+    try {
+      const command = JSON.parse(data).command;
+      if (typeof command === 'string') window.socketCommands[command] = (window.socketCommands[command] ?? 0) + 1;
+    } catch {
+      // Not a JSON request: nothing to count.
+    }
+    renderCounters();
+    return nativeSend.call(this, data);
+  };
+  function renderCounters() {
+    const target = document.getElementById('counters');
+    if (!target) return;
+    const commands = Object.entries(window.socketCommands).map(([name, count]) => `${name}: ${count}`).join(', ');
+    target.textContent = `WebSocket connections opened: ${window.socketCount}. Requests by command: ${commands || 'none yet'}.`;
+  }
+  window.renderCounters = renderCounters;
+})();
+</script>
+<script src="load.js"></script>
+</head>
+<body>
+<h1>Ten elements, one connection</h1>
+<p class="note">
+  Seven different fixtures and <code>picture</code> three times, all on the default <code>loading="lazy"</code>.
+  The elements share one connection per node set, and elements with the same link share one read,
+  so the counters below should show a single connection and one read of <code>picture</code>.
+</p>
+<div class="counters" id="counters" role="status">WebSocket connections opened: 0. Requests by command: none yet.</div>
+
+<div class="grid">
+  <figure><xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59"></xrpl-file><figcaption>picture<br>xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59</figcaption></figure>
+  <figure><xrpl-file src="xrpl-file://testnet/8C913F9B1F11133AD6D059F1A17E775A004F5B471A0A9DD2D96BF9159F597354"></xrpl-file><figcaption>picture-blocks<br>xrpl-file://testnet/8C913F9B1F11133AD6D059F1A17E775A004F5B471A0A9DD2D96BF9159F597354</figcaption></figure>
+  <figure><xrpl-file src="xrpl-file://testnet/C5E3796206EF47EEF661067D7E8FDC74E2FCEBDF839D133E2E1F364444A722EC"></xrpl-file><figcaption>text<br>xrpl-file://testnet/C5E3796206EF47EEF661067D7E8FDC74E2FCEBDF839D133E2E1F364444A722EC</figcaption></figure>
+  <figure><xrpl-file src="xrpl-file://testnet/BACE4938098AE5ECD4EF82FB18B0EACAB34441B93834FD301DD6E70CE0E3F2FB"></xrpl-file><figcaption>html<br>xrpl-file://testnet/BACE4938098AE5ECD4EF82FB18B0EACAB34441B93834FD301DD6E70CE0E3F2FB</figcaption></figure>
+  <figure><xrpl-file src="xrpl-file://testnet/01327E188DFEDB1FD579E8A87D6D2839D0E002758A3D26A14F97BEA939E0DDDD"></xrpl-file><figcaption>svg<br>xrpl-file://testnet/01327E188DFEDB1FD579E8A87D6D2839D0E002758A3D26A14F97BEA939E0DDDD</figcaption></figure>
+  <figure><xrpl-file src="xrpl-file://testnet/4113C342F5C205D7B63E0A5AFC44A36A273E22BCF8BD669F293C39EADF7E4264"></xrpl-file><figcaption>mp4-start<br>xrpl-file://testnet/4113C342F5C205D7B63E0A5AFC44A36A273E22BCF8BD669F293C39EADF7E4264</figcaption></figure>
+  <figure><xrpl-file src="xrpl-file://testnet/47C0274B0C88211B2D945C4ECCD9E2FE9CCF158B9E45323370B3A6D939FD40EB"></xrpl-file><figcaption>mp4-cover<br>xrpl-file://testnet/47C0274B0C88211B2D945C4ECCD9E2FE9CCF158B9E45323370B3A6D939FD40EB</figcaption></figure>
+  <figure><xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59"></xrpl-file><figcaption>picture (again)<br>xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59</figcaption></figure>
+  <figure><xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59"></xrpl-file><figcaption>picture (and again)<br>xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59</figcaption></figure>
+  <figure><xrpl-file src="xrpl-file://testnet/A089C73C7F353B4F59F17EC270B3E20EA4A59700E63C99EDFF9E3D1879E5E6BB"></xrpl-file><figcaption>fmp4<br>xrpl-file://testnet/A089C73C7F353B4F59F17EC270B3E20EA4A59700E63C99EDFF9E3D1879E5E6BB</figcaption></figure>
+</div>
+</body>
+</html>

@@ -20,14 +20,14 @@ and its reasoning are in [docs/superpowers/specs](docs/superpowers/specs).
 |---|---|
 | `src/XrplFile.Core` | .NET library: parse a link, read and verify a file, publish one. On top of the [`Xrpl`](https://www.nuget.org/packages/Xrpl) package |
 | `web/xrpl-file.js` | the same reading in dependency-free browser JavaScript |
+| `web/src/element` | the embeddable `<xrpl-file>` element: shows an image, text, video or a download from a link, built into one script by `cd web && npm run build` |
 | `tests/vectors/v1.json` | vectors both implementations are held to |
 | `tools/XrplFile.Vectors` | regenerates the vectors from the .NET code |
 | `app/XrplFile.App.Core` | models for the desktop application's screens — no MAUI, no UI |
 | `app/XrplFile.App` | the desktop application itself: MAUI Blazor Hybrid, Windows only so far |
 
-A command-line uploader, an HTTP gateway, a demo page and an embeddable `<xrpl-file>` element are
-planned next. The desktop application below already does the rest: publishing a file, reclaiming a
-throwaway account's reserve, and reading a link back.
+A command-line uploader and an HTTP gateway are planned next. The desktop application below already
+does the rest: publishing a file, reclaiming a throwaway account's reserve, and reading a link back.
 
 ## Reading a file (.NET)
 
@@ -53,6 +53,63 @@ const link = parseLink('xrpl-file://mainnet/…');
 const reader = new XrplFileReader(new LedgerClient(ENDPOINTS[link.network]));
 const { manifest, bytes } = await reader.read(link, ({ chunksDone, chunksTotal }) => console.log(chunksDone, chunksTotal));
 ```
+
+## Embed a file
+
+The `<xrpl-file>` element shows a file from the ledger on any web page: an image, text, a video, or a
+verified download for anything else. Build it, put the files of one version on a host, and add two lines:
+
+```html
+<script src="https://<host>/1.0.0/xrpl-file-element.js" integrity="sha384-…" crossorigin="anonymous" defer></script>
+<xrpl-file src="xrpl-file://testnet/…"></xrpl-file>
+```
+
+```bash
+cd web && npm run build
+```
+
+The build writes `web/dist/<version>/`: `xrpl-file-element.js` (one classic script that defines the
+element), `mp4box.min.js` (loaded beside it only when a plain MP4 is played), `mp4box-LICENSE.txt`, and
+`integrity.json` with the SHA-384 value of each script. The `integrity` attribute takes the value for
+`xrpl-file-element.js` from the `integrity.json` of the same version. The version is in the path, so a
+page that embeds `1.0.0` never changes under itself. The host serves both scripts with
+`Access-Control-Allow-Origin`: Subresource Integrity on a script from another origin fails without it.
+
+| Attribute | Values | Meaning |
+|---|---|---|
+| `src` | an `xrpl-file://` link | the file to show; when absent, the element's text content is the link, so `<xrpl-file>xrpl-file://…</xrpl-file>` works too |
+| `width`, `height` | a number (pixels, as on `<img>`) or a CSS length such as `100%`, `50vh`, `auto` | presentational defaults that the site's own CSS overrides; the element reserves 16:9 until it knows the real proportions |
+| `loading` | `lazy` (default), `eager`, `click` | `lazy` starts one viewport height before the element is visible, `eager` at once, `click` reads only the manifest and cover and loads the content on a click |
+| `loader` | `true` (default), `false` | `false` keeps the reserved space empty until the content is ready, for sites that draw their own placeholder |
+| `node` | a `wss://` URL | read from this node instead of the built-in ones; `ws://` is accepted only for `localhost` and `127.0.0.1`. A numeric network ID has no built-in node and needs this attribute |
+
+The inside is styled with CSS custom properties `--xrpl-file-accent`, `--xrpl-file-radius`,
+`--xrpl-file-background` and `--xrpl-file-foreground`, and with `::part(loader)`, `::part(caption)` and
+`::part(message)`. Buttons draw dark text on the accent colour, so a site that sets a dark
+`--xrpl-file-accent` should keep enough contrast. The element dispatches `xrpl-file-progress` (`detail`:
+`{ bytesDone, bytesTotal, blocksVerified, blocksTotal }`), `load` once the content is shown, and `error`
+(`detail`: `{ name, message }`).
+
+```js
+const element = document.querySelector('xrpl-file');
+element.addEventListener('xrpl-file-progress', (event) => console.log(event.detail.blocksVerified, event.detail.blocksTotal));
+element.addEventListener('error', (event) => console.warn(event.detail.name, event.detail.message));
+```
+
+The browser hashes the file only in a secure context, so the page must be served over HTTPS (or from
+`localhost`). A site with a Content Security Policy needs:
+
+- `script-src` for the origin that serves the scripts;
+- `connect-src` for the node URLs: `wss://xrplcluster.com wss://s2.ripple.com` on mainnet,
+  `wss://s.altnet.rippletest.net:51233` on testnet, or the URL given in `node`;
+- `img-src blob:` and `media-src blob:`.
+
+The element styles itself with constructable stylesheets, so the policy does not need
+`style-src 'unsafe-inline'`.
+
+`web/demo` has pages that exercise it against published testnet files: `index.html` (every state),
+`many.html` (ten elements, with counters of the connections and requests they make), `snippet.html` and
+`head.html`. After a build, `node web/demo/serve.mjs 8790` serves them at `http://127.0.0.1:8790/demo/`.
 
 ## Publishing a file (.NET)
 

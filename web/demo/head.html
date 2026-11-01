@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xrpl-file element: script in the head</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 20px; max-width: 760px; margin-inline: auto; }
+  h1 { font-size: 20px; }
+</style>
+<!-- A classic script without defer: it runs before the body is parsed, so the element is defined first. -->
+<script src="../dist/1.0.0/xrpl-file-element.js"></script>
+</head>
+<body>
+<h1>Script in the head, link as text</h1>
+<p>The element in its original form, with the link as its text content instead of a <code>src</code> attribute.</p>
+
+<xrpl-file>xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59</xrpl-file>
+</body>
+</html>

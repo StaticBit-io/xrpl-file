@@ -1,0 +1,218 @@
+<!doctype html>
+<!--
+  Demo of the <xrpl-file> element on testnet fixtures. Every link below was published once to
+  the testnet and is written into this page literally.
+
+  After a testnet reset the links are dead. To publish them again: delete run/fixtures/accounts.json,
+  run/fixtures/links.json and run/fixtures/state/, run Steps 2 and 7 of Task 4 of the plan
+  (the fixture script and the publication) again, then replace the links in index.html, many.html,
+  snippet.html and head.html with the new run/fixtures/links.json.
+
+  Build the element with `cd web && npm run build`, serve it with `node web/demo/serve.mjs 8790`
+  and open http://127.0.0.1:8790/demo/index.html.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xrpl-file element: demo</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 20px; max-width: 1100px; margin-inline: auto; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 17px; margin: 36px 0 4px; padding-top: 12px; border-top: 1px solid #8884; }
+  .note { color: #888; font-size: 13px; margin: 0 0 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px; }
+  .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 24px; }
+  .three xrpl-file { height: 180px; }
+  @media (max-width: 700px) { .three { grid-template-columns: 1fr; } }
+  figure { margin: 0; min-width: 0; }
+  figcaption { font: 12px ui-monospace, Consolas, monospace; color: #888; margin-top: 6px; overflow-wrap: anywhere; }
+  #log { font: 12px ui-monospace, Consolas, monospace; border: 1px solid #8884; border-radius: 6px; padding: 8px 12px; max-height: 320px; overflow: auto; margin: 0; list-style: none; }
+  #log li { overflow-wrap: anywhere; }
+</style>
+<script src="load.js"></script>
+</head>
+<body>
+<h1>&lt;xrpl-file&gt; demo</h1>
+<p class="note">
+  Testnet files read straight from the ledger and verified in your browser. Elements below the fold
+  start when you scroll near them (<code>loading="lazy"</code>). The log at the end lists
+  <code>load</code>, <code>error</code> and <code>xrpl-file-progress</code> for every element.
+</p>
+
+<h2 id="loading">Loading</h2>
+<p class="note"><code>loading="eager"</code>: starts at once, without waiting to come near the viewport.</p>
+<div class="grid">
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/CAE00EF2575E0F95E225C31E76C9B6F44F3ACCEDEB0A5F9EA42DCA59C651448E" loading="eager"></xrpl-file>
+    <figcaption>large, eager<br>xrpl-file://testnet/CAE00EF2575E0F95E225C31E76C9B6F44F3ACCEDEB0A5F9EA42DCA59C651448E</figcaption>
+  </figure>
+</div>
+
+<h2 id="image">Image</h2>
+<p class="note">The file downloads completely and every block is verified before it is shown.</p>
+<div class="grid">
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59"></xrpl-file>
+    <figcaption>picture<br>xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/8C913F9B1F11133AD6D059F1A17E775A004F5B471A0A9DD2D96BF9159F597354"></xrpl-file>
+    <figcaption>picture-blocks<br>xrpl-file://testnet/8C913F9B1F11133AD6D059F1A17E775A004F5B471A0A9DD2D96BF9159F597354</figcaption>
+  </figure>
+</div>
+
+<h2 id="text">Text</h2>
+<p class="note">Plain text, a large text file, and HTML shown as text, never rendered.</p>
+<div class="grid">
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/C5E3796206EF47EEF661067D7E8FDC74E2FCEBDF839D133E2E1F364444A722EC"></xrpl-file>
+    <figcaption>text<br>xrpl-file://testnet/C5E3796206EF47EEF661067D7E8FDC74E2FCEBDF839D133E2E1F364444A722EC</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/F1C980073EDE371B8F54C5D5CB81598A9787176789E1E0E67B2D18455517AB39"></xrpl-file>
+    <figcaption>text-large<br>xrpl-file://testnet/F1C980073EDE371B8F54C5D5CB81598A9787176789E1E0E67B2D18455517AB39</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/BACE4938098AE5ECD4EF82FB18B0EACAB34441B93834FD301DD6E70CE0E3F2FB"></xrpl-file>
+    <figcaption>html<br>xrpl-file://testnet/BACE4938098AE5ECD4EF82FB18B0EACAB34441B93834FD301DD6E70CE0E3F2FB</figcaption>
+  </figure>
+</div>
+
+<h2 id="download">Download</h2>
+<p class="note">Types the page does not draw itself: SVG (never inlined) and HEVC video (not playable in most browsers) offer a verified download.</p>
+<div class="grid">
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/01327E188DFEDB1FD579E8A87D6D2839D0E002758A3D26A14F97BEA939E0DDDD"></xrpl-file>
+    <figcaption>svg<br>xrpl-file://testnet/01327E188DFEDB1FD579E8A87D6D2839D0E002758A3D26A14F97BEA939E0DDDD</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/33C33A0778B044EE510E7DB723A34261448F82DEB4177C24753C6B0B3D5E9BC6"></xrpl-file>
+    <figcaption>hevc<br>xrpl-file://testnet/33C33A0778B044EE510E7DB723A34261448F82DEB4177C24753C6B0B3D5E9BC6</figcaption>
+  </figure>
+</div>
+
+<h2 id="video">Video</h2>
+<p class="note">MP4 with the index at the start or the end, fragmented MP4, WebM, one with a cover, one whose cover is broken (ignored), and the large one.</p>
+<div class="grid">
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/4113C342F5C205D7B63E0A5AFC44A36A273E22BCF8BD669F293C39EADF7E4264"></xrpl-file>
+    <figcaption>mp4-start<br>xrpl-file://testnet/4113C342F5C205D7B63E0A5AFC44A36A273E22BCF8BD669F293C39EADF7E4264</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/59E85235890FA10B3FFA76262BA5B4C37939749F3730ED6C44C1D52A53130E46"></xrpl-file>
+    <figcaption>mp4-end<br>xrpl-file://testnet/59E85235890FA10B3FFA76262BA5B4C37939749F3730ED6C44C1D52A53130E46</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/A089C73C7F353B4F59F17EC270B3E20EA4A59700E63C99EDFF9E3D1879E5E6BB"></xrpl-file>
+    <figcaption>fmp4<br>xrpl-file://testnet/A089C73C7F353B4F59F17EC270B3E20EA4A59700E63C99EDFF9E3D1879E5E6BB</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/D20B26767D517F887051E19D50CC614C4BDED378D8FA6845FCC7399AA190B20E"></xrpl-file>
+    <figcaption>webm<br>xrpl-file://testnet/D20B26767D517F887051E19D50CC614C4BDED378D8FA6845FCC7399AA190B20E</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/47C0274B0C88211B2D945C4ECCD9E2FE9CCF158B9E45323370B3A6D939FD40EB"></xrpl-file>
+    <figcaption>mp4-cover<br>xrpl-file://testnet/47C0274B0C88211B2D945C4ECCD9E2FE9CCF158B9E45323370B3A6D939FD40EB</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/340A34D57959806A1DB7AD48C68C355E16CBB137323F66306CBD65ABA49459BA"></xrpl-file>
+    <figcaption>mp4-broken-cover<br>xrpl-file://testnet/340A34D57959806A1DB7AD48C68C355E16CBB137323F66306CBD65ABA49459BA</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/CAE00EF2575E0F95E225C31E76C9B6F44F3ACCEDEB0A5F9EA42DCA59C651448E"></xrpl-file>
+    <figcaption>large<br>xrpl-file://testnet/CAE00EF2575E0F95E225C31E76C9B6F44F3ACCEDEB0A5F9EA42DCA59C651448E</figcaption>
+  </figure>
+</div>
+
+<h2 id="click">loading="click"</h2>
+<p class="note">Only the manifest and the cover are read up front; the content loads when you press the button.</p>
+<div class="grid">
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/47C0274B0C88211B2D945C4ECCD9E2FE9CCF158B9E45323370B3A6D939FD40EB" loading="click"></xrpl-file>
+    <figcaption>mp4-cover, click<br>xrpl-file://testnet/47C0274B0C88211B2D945C4ECCD9E2FE9CCF158B9E45323370B3A6D939FD40EB</figcaption>
+  </figure>
+</div>
+
+<h2 id="no-loader">loader="false"</h2>
+<p class="note">The reserved space stays empty until the content is ready, for sites that draw their own placeholder.</p>
+<div class="grid">
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59" loader="false"></xrpl-file>
+    <figcaption>picture, loader="false"<br>xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59</figcaption>
+  </figure>
+</div>
+
+<h2 id="sizing">Sizing</h2>
+<p class="note">Presentational <code>width</code> and <code>height</code> attributes, then a CSS grid of three that sizes the elements from the page's own stylesheet (180px high): picture, picture-blocks, text.</p>
+<div class="grid">
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59" width="320"></xrpl-file>
+    <figcaption>picture, width="320"<br>xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59" height="50vh"></xrpl-file>
+    <figcaption>picture, height="50vh"<br>xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59</figcaption>
+  </figure>
+</div>
+<div class="three">
+  <xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59"></xrpl-file>
+  <xrpl-file src="xrpl-file://testnet/8C913F9B1F11133AD6D059F1A17E775A004F5B471A0A9DD2D96BF9159F597354"></xrpl-file>
+  <xrpl-file src="xrpl-file://testnet/C5E3796206EF47EEF661067D7E8FDC74E2FCEBDF839D133E2E1F364444A722EC"></xrpl-file>
+</div>
+
+<h2 id="errors">Errors</h2>
+<p class="note">Each of these ends in an error state and fires <code>error</code>.</p>
+<div class="grid">
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/0000000000000000000000000000000000000000000000000000000000000000"></xrpl-file>
+    <figcaption>ManifestNotFound: a transaction that does not exist<br>xrpl-file://testnet/0000000000000000000000000000000000000000000000000000000000000000</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://21337/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59"></xrpl-file>
+    <figcaption>No built-in node: a numeric network and no node attribute<br>xrpl-file://21337/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://nowhere/x"></xrpl-file>
+    <figcaption>InvalidLink: not a link at all<br>xrpl-file://nowhere/x</figcaption>
+  </figure>
+</div>
+
+<h2 id="events">Events</h2>
+<p class="note">Newest first. Progress is one line per element, updated in place.</p>
+<ul id="log" aria-live="off"></ul>
+
+<script>
+(() => {
+  const log = document.getElementById('log');
+  const progressRows = new Map();
+
+  function label(element, index) {
+    const text = element.getAttribute('src') ?? element.textContent;
+    return `#${index + 1} ${text.replace(/^xrpl-file:\/\//, '').slice(0, 40)}`;
+  }
+
+  function add(text) {
+    const row = document.createElement('li');
+    row.textContent = text;
+    log.prepend(row);
+    return row;
+  }
+
+  document.querySelectorAll('xrpl-file').forEach((element, index) => {
+    const name = label(element, index);
+    element.addEventListener('load', () => add(`${name}: load`));
+    element.addEventListener('error', (event) => add(`${name}: error ${event.detail?.name}: ${event.detail?.message}`));
+    element.addEventListener('xrpl-file-progress', (event) => {
+      const d = event.detail;
+      const text = `${name}: progress ${d.blocksVerified}/${d.blocksTotal} blocks, ${d.bytesDone}/${d.bytesTotal} bytes`;
+      const existing = progressRows.get(element);
+      if (existing) existing.textContent = text;
+      else progressRows.set(element, add(text));
+    });
+  });
+})();
+</script>
+</body>
+</html>
