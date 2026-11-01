@@ -1,0 +1,246 @@
+import { test, after } from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import { createHash } from 'node:crypto';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { build } from '../build.mjs';
+import { ENDPOINTS } from '../src/ledger.mjs';
+
+const webDir = join(dirname(fileURLToPath(import.meta.url)), '..');
+const VERSION = '0.0.0-test';
+const PLACEHOLDER = '__MP4BOX_INTEGRITY__';
+const temps = [];
+
+async function tempDir() {
+  const dir = await mkdtemp(join(tmpdir(), 'xrpl-file-build-'));
+  temps.push(dir);
+  return dir;
+}
+
+// A copy of web/ that a test can bend: only what the build reads (src, vendor), none of node_modules.
+async function copyOfWebWith(file, text) {
+  const copy = await tempDir();
+  await cp(join(webDir, 'src'), join(copy, 'src'), { recursive: true });
+  await cp(join(webDir, 'vendor'), join(copy, 'vendor'), { recursive: true });
+  if (file) {
+    await mkdir(dirname(join(copy, file)), { recursive: true });
+    await writeFile(join(copy, file), text);
+  }
+  return copy;
+}
+
+async function copyOfWebAppending(file, text) {
+  const copy = await copyOfWebWith();
+  await writeFile(join(copy, file), (await readFile(join(copy, file), 'utf8')) + text);
+  return copy;
+}
+
+after(async () => {
+  for (const dir of temps) await rm(dir, { recursive: true, force: true });
+});
+
+// Just enough of a page for the bundle to run to the end of its top level: the element class extends
+// HTMLElement and registers itself, and nothing else is touched until an element is connected.
+function browserStubs(defined) {
+  class HTMLElement {}
+  const registry = new Map();
+  return {
+    HTMLElement,
+    customElements: {
+      get: (name) => registry.get(name),
+      define: (name, constructor) => {
+        registry.set(name, constructor);
+        defined.push(name);
+      },
+    },
+    document: { currentScript: { src: 'https://cdn.example/1.0.0/xrpl-file-element.js' }, readyState: 'complete' },
+    URL,
+    TextDecoder,
+    TextEncoder,
+    AbortController,
+    console,
+  };
+}
+
+test('the bundle is a classic script that defines the element once', async () => {
+  const out = await tempDir();
+  await build({ webDir, outDir: out, version: VERSION });
+  const code = await readFile(join(out, 'xrpl-file-element.js'), 'utf8');
+  assert.doesNotThrow(() => new vm.Script(code));
+  assert.ok(code.startsWith(`/*! xrpl-file element ${VERSION} | MIT */\n`));
+
+  const defined = [];
+  const context = vm.createContext(browserStubs(defined));
+  vm.runInContext(code, context);
+  vm.runInContext(code, context);
+  assert.deepEqual(defined, ['xrpl-file']);
+});
+
+test('the bundle is plain ASCII, so the page encoding cannot change it', async () => {
+  const out = await tempDir();
+  await build({ webDir, outDir: out, version: VERSION });
+  const bytes = await readFile(join(out, 'xrpl-file-element.js'));
+  assert.ok(bytes.every((byte) => byte < 0x80));
+  assert.ok(bytes.includes(Buffer.from('\\u2713 verified \\u00b7 ')), 'the check mark and the dot survive as escapes');
+});
+
+test('the output directory holds the four files and nothing else', async () => {
+  const out = await tempDir();
+  await build({ webDir, outDir: out, version: VERSION });
+  assert.deepEqual((await readdir(out)).sort(),
+    ['integrity.json', 'mp4box-LICENSE.txt', 'mp4box.min.js', 'xrpl-file-element.js']);
+  assert.deepEqual(await readFile(join(out, 'mp4box.min.js')), await readFile(join(webDir, 'vendor', 'mp4box-0.5.4.min.js')));
+  assert.deepEqual(await readFile(join(out, 'mp4box-LICENSE.txt')), await readFile(join(webDir, 'vendor', 'mp4box-LICENSE.txt')));
+});
+
+test("integrity.json holds the SHA-384 of both files, and the element carries mp4box's", async () => {
+  const out = await tempDir();
+  const result = await build({ webDir, outDir: out, version: VERSION });
+  const integrity = JSON.parse(await readFile(join(out, 'integrity.json'), 'utf8'));
+  assert.deepEqual(Object.keys(integrity), ['xrpl-file-element.js', 'mp4box.min.js']);
+  for (const name of ['xrpl-file-element.js', 'mp4box.min.js']) {
+    assert.equal(integrity[name], `sha384-${createHash('sha384').update(await readFile(join(out, name))).digest('base64')}`);
+  }
+  assert.deepEqual(result.integrity, integrity);
+
+  const code = await readFile(join(out, 'xrpl-file-element.js'), 'utf8');
+  assert.ok(!code.includes(PLACEHOLDER));
+  // The loader joins the element graph with the playback task; until then there is nothing to carry the hash.
+  if (code.includes('src/element/media/mp4box-loader.mjs')) assert.ok(code.includes(integrity['mp4box.min.js']));
+});
+
+test("a module holding the placeholder gets mp4box's hash, whatever reaches it", async () => {
+  const web = await copyOfWebAppending('src/element/define.mjs', "\nimport { HASH } from '../hash-fixture.mjs';\nglobalThis.__hash = HASH;\n");
+  await writeFile(join(web, 'src', 'hash-fixture.mjs'), `export const HASH = '${PLACEHOLDER}';\n`);
+  const out = await tempDir();
+  const { integrity } = await build({ webDir: web, outDir: out, version: VERSION });
+  const code = await readFile(join(out, 'xrpl-file-element.js'), 'utf8');
+  assert.ok(!code.includes(PLACEHOLDER));
+  assert.ok(code.includes(`HASH = '${integrity['mp4box.min.js']}'`));
+
+  const context = vm.createContext(browserStubs([]));
+  vm.runInContext(code, context);
+  assert.equal(context.__hash, integrity['mp4box.min.js']);
+});
+
+test('a placeholder that appears twice is refused, because a second copy would switch the check off', async () => {
+  const web = await copyOfWebAppending('src/element/define.mjs', "\nimport { HASH } from '../hash-fixture.mjs';\nglobalThis.__hash = HASH;\n");
+  await writeFile(join(web, 'src', 'hash-fixture.mjs'),
+    `export const HASH = '${PLACEHOLDER}';\nexport const UNSET = '${PLACEHOLDER}';\n`);
+  await assert.rejects(build({ webDir: web, outDir: await tempDir(), version: VERSION }), /__MP4BOX_INTEGRITY__.*2 times/);
+});
+
+test('import.meta.url becomes the script URL, and any other import.meta is refused', async () => {
+  const web = await copyOfWebAppending('src/element/define.mjs', "\nglobalThis.__where = import.meta.url;\n");
+  const out = await tempDir();
+  await build({ webDir: web, outDir: out, version: VERSION });
+  const code = await readFile(join(out, 'xrpl-file-element.js'), 'utf8');
+  assert.ok(!code.includes('import.meta'));
+  const context = vm.createContext(browserStubs([]));
+  vm.runInContext(code, context);
+  assert.equal(context.__where, 'https://cdn.example/1.0.0/xrpl-file-element.js');
+
+  const other = await copyOfWebAppending('src/element/define.mjs', "\nglobalThis.__dir = import.meta.dirname;\n");
+  await assert.rejects(build({ webDir: other, outDir: await tempDir(), version: VERSION }), /define\.mjs.*import\.meta\.dirname/);
+});
+
+test('two builds are byte for byte the same', async () => {
+  const a = await tempDir();
+  const b = await tempDir();
+  await build({ webDir, outDir: a, version: VERSION });
+  await build({ webDir, outDir: b, version: VERSION });
+  for (const name of ['xrpl-file-element.js', 'integrity.json']) {
+    assert.deepEqual(await readFile(join(a, name)), await readFile(join(b, name)));
+  }
+});
+
+test('the same build into an existing version directory is accepted', async () => {
+  const out = await tempDir();
+  await build({ webDir, outDir: out, version: VERSION });
+  await build({ webDir, outDir: out, version: VERSION });
+});
+
+test('a different build into an existing version directory is refused unless forced', async () => {
+  const out = await tempDir();
+  await build({ webDir, outDir: out, version: VERSION });
+  await writeFile(join(out, 'xrpl-file-element.js'), 'stale');
+  await assert.rejects(build({ webDir, outDir: out, version: VERSION }), /dist\/0\.0\.0-test exists with other content; raise the version in web\/package\.json, or pass --force/);
+  assert.equal(await readFile(join(out, 'xrpl-file-element.js'), 'utf8'), 'stale', 'the refusal writes nothing');
+  await build({ webDir, outDir: out, version: VERSION, force: true });
+  assert.notEqual(await readFile(join(out, 'xrpl-file-element.js'), 'utf8'), 'stale');
+});
+
+test('a bare import fails the build naming the file', async () => {
+  const web = await copyOfWebWith('src/element/define.mjs', "import x from 'lodash';\n");
+  await assert.rejects(build({ webDir: web, outDir: await tempDir(), version: VERSION }), /define\.mjs.*lodash/);
+  const named = await copyOfWebWith('src/element/define.mjs', "import { x } from 'lodash';\n");
+  await assert.rejects(build({ webDir: named, outDir: await tempDir(), version: VERSION }), /define\.mjs.*lodash/);
+});
+
+test('a dynamic import fails the build naming the file', async () => {
+  const web = await copyOfWebAppending('src/element/define.mjs', "\nconst later = () => import('./element.mjs');\n");
+  await assert.rejects(build({ webDir: web, outDir: await tempDir(), version: VERSION }), /define\.mjs.*dynamic import/);
+});
+
+test('an import cycle fails the build naming the files', async () => {
+  const web = await copyOfWebAppending('src/element/define.mjs', "\nimport { ping } from '../ping.mjs';\n");
+  await writeFile(join(web, 'src', 'ping.mjs'), "import { pong } from './pong.mjs';\nexport const ping = () => pong;\n");
+  await writeFile(join(web, 'src', 'pong.mjs'), "import { ping } from './ping.mjs';\nexport const pong = () => ping;\n");
+  await assert.rejects(build({ webDir: web, outDir: await tempDir(), version: VERSION }), /cycle.*ping\.mjs.*pong\.mjs.*ping\.mjs/);
+});
+
+test('an import or export form the bundler does not know fails the build naming the file', async () => {
+  for (const line of ["export default 1;", "export * from './hex.mjs';", "import './hex.mjs';", "import fallback from './hex.mjs';", "export { x };"]) {
+    const web = await copyOfWebAppending('src/element/define.mjs', `\n${line}\n`);
+    await assert.rejects(build({ webDir: web, outDir: await tempDir(), version: VERSION }), /define\.mjs/, line);
+  }
+});
+
+test('a name the imported module does not export fails the build', async () => {
+  const web = await copyOfWebAppending('src/element/define.mjs', "\nimport { nothingLikeThis } from '../hex.mjs';\n");
+  await assert.rejects(build({ webDir: web, outDir: await tempDir(), version: VERSION }), /define\.mjs.*nothingLikeThis/);
+});
+
+test('every import and export form the sources use reaches the bundle correctly', async () => {
+  const web = await copyOfWebAppending('src/element/define.mjs', "\nimport * as fixture from '../fixture/index.mjs';\nglobalThis.__fixture = fixture;\n");
+  await mkdir(join(web, 'src', 'fixture'));
+  await writeFile(join(web, 'src', 'fixture', 'leaf.mjs'),
+    "export function twice(n) { return n * 2; }\n" +
+    "export async function later() { return 1; }\n" +
+    "export class Box { value = 7; }\n" +
+    "export const LIMIT = 3;\n" +
+    "export let counter = 0;\n" +
+    "const hidden = 1;\n");
+  await writeFile(join(web, 'src', 'fixture', 'index.mjs'),
+    "import { twice as double, LIMIT } from './leaf.mjs';\n" +
+    "import * as leaf from './leaf.mjs';\n" +
+    "export { twice, Box as Container } from './leaf.mjs';\n" +
+    "export * as everything from './leaf.mjs';\n" +
+    "export const viaImport = double(LIMIT);\n" +
+    "export const viaNamespace = leaf.LIMIT;\n");
+  const out = await tempDir();
+  await build({ webDir: web, outDir: out, version: VERSION });
+  const context = vm.createContext(browserStubs([]));
+  vm.runInContext(await readFile(join(out, 'xrpl-file-element.js'), 'utf8'), context);
+  const fixture = context.__fixture;
+  assert.equal(fixture.viaImport, 6);
+  assert.equal(fixture.viaNamespace, 3);
+  assert.equal(fixture.twice(4), 8);
+  assert.equal(new fixture.Container().value, 7);
+  assert.equal(fixture.everything.LIMIT, 3);
+  assert.equal(typeof fixture.everything.later, 'function');
+  assert.equal(fixture.everything.counter, 0);
+  assert.equal('hidden' in fixture.everything, false);
+});
+
+test('the bundle names no host but the built-in nodes', async () => {
+  const out = await tempDir();
+  await build({ webDir, outDir: out, version: VERSION });
+  const code = await readFile(join(out, 'xrpl-file-element.js'), 'utf8');
+  const urls = code.match(/\b(?:https?|wss?):\/\/[^\s'"`)]+/g) ?? [];
+  const allowed = new Set([...Object.values(ENDPOINTS).flat(), 'http://www.w3.org/2000/svg']);
+  assert.deepEqual(urls.filter((url) => !allowed.has(url)), []);
+});
