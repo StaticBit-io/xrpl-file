@@ -44,6 +44,20 @@ export function mp4boxUrl(scriptUrl) {
   return new URL(BUNDLED_LIBRARY_NAME, url).href;
 }
 
+/**
+ * Keeps mp4box's parser complaints out of the visitor's console.
+ *
+ * mp4box logs through a global `Log` object that the script defines next to `MP4Box`, and no level
+ * of its `setLogLevel` is quieter than `error`, which is where it reports a box it could not read to
+ * the end (QuickTime's `wave` audio entries produce one per file) and then carries on. Nothing a
+ * visitor can act on, and a failure that matters reaches `onError` of the file anyway, so the method
+ * is replaced instead.
+ */
+function silence() {
+  const log = globalThis.Log;
+  if (log && typeof log.getDurationString === 'function' && typeof log.error === 'function') log.error = () => {};
+}
+
 // One script per page, however many elements ask. Keyed by URL because the page could in principle
 // hold two copies of the element at different versions, each with its own library.
 const loads = new Map();
@@ -76,6 +90,7 @@ function insertScript(src, integrity) {
       script.onload = script.onerror = null;
 
       if (loaded && typeof loaded.createFile === 'function') {
+        silence();
         resolve(loaded);
       } else {
         script.remove?.();

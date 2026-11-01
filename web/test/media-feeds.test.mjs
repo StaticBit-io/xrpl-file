@@ -666,6 +666,31 @@ test('the build placeholder occurs once in the loader, so replacing it cannot tu
   });
 });
 
+test('loadMp4Box silences the parser error log, which only complains about QuickTime layouts', async () => {
+  await withPage(async ({ scripts }) => {
+    const logged = [];
+    const warned = [];
+    const savedLog = globalThis.Log;
+    // What the script leaves behind: a global Log next to MP4Box.
+    globalThis.Log = { getDurationString: () => '', error: (...args) => logged.push(args), warn: (...args) => warned.push(args) };
+
+    try {
+      const loaded = loadRealMp4Box({ scriptUrl: 'https://cdn.example/seven/element.js' });
+      globalThis.MP4Box = { createFile: () => 'ours' };
+      scripts[0].onload();
+      await loaded;
+
+      globalThis.Log.error('BoxParser', 'a box could not be read');
+      globalThis.Log.warn('ISOFile', 'something else');
+      assert.deepEqual(logged, []);
+      assert.equal(warned.length, 1, 'only the error log is silenced');
+    } finally {
+      if (savedLog === undefined) delete globalThis.Log;
+      else globalThis.Log = savedLog;
+    }
+  });
+});
+
 test('loadMp4Box: a failed load rejects, is not remembered, and takes its script away', async () => {
   await withPage(async ({ scripts }) => {
     const url = 'https://cdn.example/three/element.js';

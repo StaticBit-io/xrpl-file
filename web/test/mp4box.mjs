@@ -32,6 +32,10 @@ function load() {
   cached = sandbox.MP4Box ?? sandbox.window.MP4Box;
   if (!cached) throw new Error('the mp4box bundle did not define MP4Box');
 
+  // Same as the element's loader: QuickTime audio entries make the parser log an error per file
+  // and carry on; it would only drown the test output.
+  sandbox.Log.error = () => {};
+
   return cached;
 }
 
