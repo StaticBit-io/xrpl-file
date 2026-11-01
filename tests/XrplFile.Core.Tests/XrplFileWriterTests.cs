@@ -332,6 +332,23 @@ public class XrplFileWriterTests
     }
 
     [Fact]
+    public async Task A_malformed_cover_is_refused_before_anything_is_submitted()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+
+        await using SequenceStrategy strategy = new(sink, Signer);
+        XrplFileWriter writer = new(strategy, ledger, new WriterOptions { Cover = "xyz" });
+
+        // Manifest.Encode refuses it, but only once every chunk has been paid for.
+        await Assert.ThrowsAsync<ArgumentException>(() => writer.PublishAsync(
+            VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "testnet", null, null, TestContext.Current.CancellationToken));
+
+        Assert.Empty(sink.Submitted);
+        Assert.Empty(sink.Events);
+    }
+
+    [Fact]
     public async Task An_unknown_network_is_refused_before_anything_is_submitted()
     {
         FakeLedgerSource ledger = new();

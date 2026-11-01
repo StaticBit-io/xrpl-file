@@ -32,8 +32,8 @@ public sealed class WriterOptions
     /// The caller must have published the cover first, from the same writer, in a ledger strictly below
     /// this file's first one, as <c>image/webp</c> or <c>image/jpeg</c> of at most 65,536 bytes. The
     /// library does not read or check that file: a cover that breaks those rules is ignored by readers,
-    /// never an error. A malformed hash makes the manifest unencodable, and the publication fails before
-    /// the manifest is sent.
+    /// never an error. A malformed hash is refused with an <see cref="ArgumentException"/> when the
+    /// publication starts, before any transaction is submitted.
     /// </para>
     /// </summary>
     public string? Cover { get; init; }
@@ -98,6 +98,13 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
         ArgumentNullException.ThrowIfNull(file);
         if (file.Length == 0) throw new ArgumentException("an empty file has no chunks and no root", nameof(file));
         if (string.IsNullOrWhiteSpace(type)) throw new ArgumentException("a manifest needs a MIME type", nameof(type));
+
+        // Manifest.Encode refuses a malformed cover too, but not until every chunk and block list has
+        // been paid for, so it is checked here with the type.
+        if (_options.Cover is not null && !Manifest.IsHash(_options.Cover))
+        {
+            throw new ArgumentException("the cover is not a 64-hex transaction hash (format 4.1)", nameof(WriterOptions.Cover));
+        }
 
         // Before anything is submitted. The link is built from this at the very end, so a network
         // the link refuses used to be discovered after a thousand paid transactions and a manifest
