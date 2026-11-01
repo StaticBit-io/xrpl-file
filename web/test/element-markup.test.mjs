@@ -42,11 +42,36 @@ test('the icons are inline and carry no data', () => {
   for (const svg of TEMPLATE.match(/<svg[\s\S]*?<\/svg>/g)) assert.match(svg, /aria-hidden="true"/);
 });
 
-test('the styles switch tiers at 240 and 120 pixels of the element own width', () => {
+test('the styles switch tiers at 240 and 120 pixels of the element own width, and under 56 of its height', () => {
   assert.match(STYLES, /container-type:\s*size/);
-  assert.match(STYLES, /@container \(max-width: 239\.98px\)/);
-  assert.match(STYLES, /@container \(max-width: 119\.98px\)/);
+  assert.match(STYLES, /@container \(width < 240px\) \{/);
+  assert.match(STYLES, /@container \(width < 120px\) or \(height < 56px\) \{/);
+  assert.match(STYLES, /@container \(height < 52px\) \{\s*\.badge \{ display: none; \}/);
+  assert.doesNotMatch(STYLES, /\.98px/);
   assert.doesNotMatch(STYLES, /--xrpl-file-(?:compact|icon|tier|breakpoint)/);
+});
+
+test('the icon tier carries what a short box needs: the compact and icon blocks come in that order', () => {
+  const compact = STYLES.indexOf('@container (width < 240px)');
+  const icon = STYLES.indexOf('@container (width < 120px) or (height < 56px)');
+  const badge = STYLES.indexOf('@container (height < 52px)');
+  assert.ok(compact > 0 && icon > compact && badge > icon, 'later blocks win the cascade');
+  const iconBlock = STYLES.slice(icon, badge);
+  for (const piece of ['.badge { display: inline-block', '.download .btn { display: inline-flex', '.error .msg-icon { display: inline', '.caption.verified .cp-mark']) assert.ok(iconBlock.includes(piece), piece);
+  assert.match(iconBlock, /\.btn:focus-visible \{ outline-offset: -2px; \}/);
+});
+
+test('every container-unit declaration in the full tier has a fixed one before it', () => {
+  const full = STYLES.slice(0, STYLES.indexOf('@container'));
+  for (const rule of full.match(/[^{}]+\{[^{}]*\}/g)) {
+    const declarations = rule.slice(rule.indexOf('{') + 1, rule.lastIndexOf('}')).split(';').map((d) => d.trim()).filter(Boolean);
+    declarations.forEach((declaration, index) => {
+      if (!/[0-9](?:cqi|cqb|cqmin)/.test(declaration)) return;
+      const property = declaration.slice(0, declaration.indexOf(':')).trim();
+      const earlier = declarations.slice(0, index).filter((d) => d.startsWith(`${property}:`) && !/cq/.test(d));
+      assert.ok(earlier.length > 0, `${property} in ${rule.trim().slice(0, 40)}`);
+    });
+  }
 });
 
 test('no text in the styles is set below 11 pixels', () => {
