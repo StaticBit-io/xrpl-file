@@ -37,7 +37,7 @@ public sealed record Manifest(
     /// the rules are. It is a repository URL and not a site because GitHub keeps redirecting a
     /// repository's address after a rename or a transfer. Readers never look at the member, so it
     /// is not a property of the record: <see cref="Decode"/> accepts any value, any JSON type, or
-    /// none, and <see cref="Encode"/> always writes this one.
+    /// none, and <see cref="Encode()"/> always writes this one.
     /// </summary>
     public const string Format = "https://github.com/StaticBit-io/xrpl-file";
 
@@ -49,7 +49,17 @@ public sealed record Manifest(
     /// measured and never give way to it; a name that does not fit is cut to the longest UTF-8 prefix that does, and dropped when
     /// not even one character fits. A file is never refused over its name.
     /// </summary>
-    public string Encode()
+    public string Encode() => Encode(includeFormat: true);
+
+    /// <summary>
+    /// The manifest as a writer emitted it before the <c>format</c> member existed: the same
+    /// members, the same name shortening, against the same budget, without that first member. Only
+    /// a resumed publication uses it, to recognise a manifest that was broadcast by an older
+    /// version of this library and so does not byte-match <see cref="Encode()"/>.
+    /// </summary>
+    internal string EncodeLegacy() => Encode(includeFormat: false);
+
+    private string Encode(bool includeFormat)
     {
         if (Cover is not null && !IsHash(Cover))
         {
@@ -60,7 +70,7 @@ public sealed record Manifest(
 
         while (true)
         {
-            string json = Serialize(name);
+            string json = Serialize(name, includeFormat);
 
             if (Encoding.UTF8.GetByteCount(json) <= MemoLayout.ManifestBytes) return json;
 
@@ -143,13 +153,13 @@ public sealed record Manifest(
         return null;
     }
 
-    private string Serialize(string? name)
+    private string Serialize(string? name, bool includeFormat)
     {
         using MemoryStream stream = new();
         using (Utf8JsonWriter writer = new(stream, new JsonWriterOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
         {
             writer.WriteStartObject();
-            writer.WriteString("format", Format);
+            if (includeFormat) writer.WriteString("format", Format);
             writer.WriteNumber("v", Version);
             writer.WriteString("type", Type);
             writer.WriteNumber("size", Size);

@@ -63,6 +63,50 @@ public class ManifestReconciliationTests : IDisposable
     }
 
     [Fact]
+    public async Task A_manifest_broadcast_before_the_format_member_existed_is_found_and_not_sent_twice()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        byte[] file = VectorStream.Bytes("b27", 2500);
+
+        await using SequenceStrategy first = new(sink, Signer, new SequenceStrategyOptions { FeeDrops = Fee });
+        PublicationSession run = await PublicationSession.StartAsync(
+            first, ledger, file, "text/plain", "f.txt", Wallet.ClassicAddress, "key-1", "testnet", Options, Token);
+        PublicationReport original = await run.RunAsync(null, Token);
+        ForgetTheEnding(run.StatePath);
+        BecomePreFormat(ledger);
+        int submitted = sink.Submitted.Count;
+
+        await using SequenceStrategy second = new(sink, Signer, new SequenceStrategyOptions { FeeDrops = Fee });
+        PublicationSession resumed = await PublicationSession.ResumeAsync(second, ledger, file, run.StatePath, Options, Token);
+        PublicationReport report = await resumed.RunAsync(null, Token);
+
+        Assert.Equal(original.ManifestHash, report.ManifestHash);
+        Assert.Equal(submitted, sink.Submitted.Count);
+        Assert.Equal(original.ManifestHash, PublicationState.Load(run.StatePath).ManifestHash);
+        Assert.Equal(1, await ManifestRecordsAsync(ledger));
+    }
+
+    /// <summary>Rewrites the landed manifest memo into the bytes an older version of the library wrote.</summary>
+    internal static void BecomePreFormat(FakeLedgerSource ledger)
+    {
+        ledger.Replace(
+            tx => MemoLayout.IsManifest(tx.MemoTypeHex),
+            tx => tx with { MemoDataHex = MemoLayout.Utf8Hex(Manifest.Decode(MemoLayout.FromHexUtf8(tx.MemoDataHex!)).EncodeLegacy()) });
+    }
+
+    internal static async Task<int> ManifestRecordsAsync(FakeLedgerSource ledger)
+    {
+        int count = 0;
+        await foreach (LedgerTransaction tx in ledger.AccountTransactionsAsync(Wallet.ClassicAddress, 0, ledger.CurrentLedger, true, Token))
+        {
+            if (tx.Succeeded && MemoLayout.IsManifest(tx.MemoTypeHex)) count++;
+        }
+
+        return count;
+    }
+
+    [Fact]
     public async Task The_ticket_path_finds_the_manifest_too()
     {
         FakeLedgerSource ledger = Node();

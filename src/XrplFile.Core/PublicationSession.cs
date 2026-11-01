@@ -1231,7 +1231,14 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
         PublicationState state = State;
         Manifest manifest = ManifestPlan.Build(state.Type, state.Name, state.Size, entries, window.First, lastLedger, listMemos.Count, state.Cover);
-        string data = ManifestPlan.Memo(manifest).MemoDataHex;
+
+        // A manifest broadcast before the format member existed was written without it, and a
+        // resumed run has to find that one rather than send a second manifest for the same file.
+        string[] data =
+        [
+            ManifestPlan.Memo(manifest).MemoDataHex,
+            MemoLayout.Utf8Hex(manifest.EncodeLegacy()),
+        ];
         BatchStrategyOptions reads = HistoryReads();
         DateTimeOffset giveUp = DateTimeOffset.UtcNow + _options.HistoryLagLimit;
 
@@ -1262,11 +1269,13 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
     /// <summary>
     /// One streaming pass for a validated, successful manifest record of the writer carrying exactly
-    /// <paramref name="manifestDataHex"/>: its hash, or null, with the sequences the writer's records
-    /// that were read took (those of a pass that stopped at a match are incomplete, and not asked for).
+    /// one of <paramref name="manifestDataHex"/> (the current encoding of the manifest and the one
+    /// written before its <c>format</c> member existed): its hash, or null, with the sequences the
+    /// writer's records that were read took (those of a pass that stopped at a match are incomplete,
+    /// and not asked for).
     /// </summary>
     private async Task<(string? Hash, SequenceRanges Sequences)> ScanForManifestAsync(
-        string writer, long to, string manifestDataHex, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
+        string writer, long to, IReadOnlyList<string> manifestDataHex, IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
     {
         SequenceRanges sequences = new();
         long read = 0;
@@ -1282,12 +1291,22 @@ public sealed class PublicationSession : IBatchFenceRecorder
             sequences.Add(tx);
 
             if (!tx.Validated || !tx.Succeeded) continue;
-            if (!MemoLayout.IsManifest(tx.MemoTypeHex) || !string.Equals(tx.MemoDataHex, manifestDataHex, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!MemoLayout.IsManifest(tx.MemoTypeHex) || !MatchesAny(tx.MemoDataHex, manifestDataHex)) continue;
 
             return (tx.Hash, sequences);
         }
 
         return (null, sequences);
+    }
+
+    private static bool MatchesAny(string? memoDataHex, IReadOnlyList<string> candidates)
+    {
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            if (string.Equals(memoDataHex, candidates[i], StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
     }
 
     public async Task<PublicationReport> RunAsync(IProgress<PublishProgress>? progress, CancellationToken cancellationToken)

@@ -336,6 +336,31 @@ public class PublicationSessionBatchResumeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_manifest_broadcast_before_the_format_member_existed_is_found_and_not_sent_twice()
+    {
+        BatchTestNode node = Funded();
+        byte[] file = VectorStream.Bytes("resume", 9_000);
+        PublicationSession first = await PublicationSession.StartAsync(
+            Factory(node, node.Payer), node.Ledger, file, "text/plain", null,
+            node.Writer.Account, "key-w", node.Payer.Account, "key-p", "testnet", Options, Token);
+        PublicationReport original = await first.RunAsync(null, Token);
+
+        PublicationState state = PublicationState.Load(first.StatePath);
+        (state with { Phase = "manifest", ManifestHash = null }).Save(first.StatePath);
+        ManifestReconciliationTests.BecomePreFormat(node.Ledger);
+        Assert.DoesNotContain("\"format\"", MemoLayout.FromHexUtf8((await node.LandedByMarkerAsync())[MemoLayout.ManifestMarkerHex].Single().MemoDataHex!), StringComparison.Ordinal);
+        int transmitted = node.Sink.Transmissions.Count;
+
+        PublicationSession resumed = await PublicationSession.ResumeAsync(
+            Factory(node, node.Payer), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", Options, null, Token);
+        PublicationReport report = await resumed.RunAsync(null, Token);
+
+        Assert.Equal(original.ManifestHash, report.ManifestHash);
+        Assert.Equal(transmitted, node.Sink.Transmissions.Count);
+        Assert.Equal(1, (await node.LandedByMarkerAsync()).Where(pair => MemoLayout.IsManifest(pair.Key)).Sum(pair => pair.Value.Count));
+    }
+
+    [Fact]
     public async Task A_one_account_run_is_not_resumed_as_a_Batch_run()
     {
         BatchTestNode node = Funded();
