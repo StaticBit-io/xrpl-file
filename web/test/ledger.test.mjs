@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseRecord, earliestAvailableLedger, LedgerClient, MAINNET_FIRST_LEDGER } from '../src/ledger.mjs';
 
@@ -422,6 +422,115 @@ test('after the server closes an open socket the next request reconnects once', 
     await Promise.all(again);
 
     assert.equal(ManualSocket.created.length, 2);
+    client.close();
+  });
+});
+
+// Inactivity timeout: the deadline is "no frame at all for the whole window", not "no answer to
+// this request", so concurrent slow pages on one shared socket do not kill each other.
+
+/** An open socket that never answers on its own; the test delivers frames. */
+class QuietSocket extends ManualSocket {
+  send(frame) {
+    this.sent.push(frame);
+  }
+
+  deliver(message) {
+    this.onmessage?.({ data: JSON.stringify(message) });
+  }
+}
+QuietSocket.OPEN = 1;
+
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+async function withQuiet(run) {
+  const original = globalThis.WebSocket;
+  ManualSocket.created = [];
+  globalThis.WebSocket = QuietSocket;
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    return await run();
+  } finally {
+    mock.timers.reset();
+    globalThis.WebSocket = original;
+  }
+}
+
+test('a slow request on a socket that keeps delivering other frames does not time out', async () => {
+  await withQuiet(async () => {
+    const client = new LedgerClient(['wss://example.invalid'], { requestTimeoutMs: 20000 });
+    const slow = client.request('account_tx', {});
+    const fast = client.request('account_tx', {});
+    await flush();
+    const socket = ManualSocket.created[0];
+    socket.open();
+    await flush();
+
+    const [slowId, fastId] = socket.sent.map((frame) => JSON.parse(frame).id);
+    let settled = false;
+    slow.then(() => { settled = true; }, () => { settled = true; });
+
+    // 30 s in total is past one window, but a frame lands every 15 s.
+    mock.timers.tick(15000);
+    socket.deliver({ id: fastId, status: 'success', result: { page: 1 } });
+    await flush();
+    mock.timers.tick(15000);
+    await flush();
+
+    assert.equal(settled, false);
+    assert.deepEqual(await fast, { page: 1 });
+
+    socket.deliver({ id: slowId, status: 'success', result: { page: 2 } });
+    assert.deepEqual(await slow, { page: 2 });
+    client.close();
+  });
+});
+
+test('a frame that answers nobody still counts as socket activity', async () => {
+  await withQuiet(async () => {
+    const client = new LedgerClient(['wss://example.invalid'], { requestTimeoutMs: 20000 });
+    const request = client.request('server_info', {});
+    await flush();
+    const socket = ManualSocket.created[0];
+    socket.open();
+    await flush();
+    let settled = false;
+    request.then(() => { settled = true; }, () => { settled = true; });
+
+    mock.timers.tick(19000);
+    socket.deliver({ type: 'ledgerClosed' });
+    mock.timers.tick(19000);
+    await flush();
+    assert.equal(settled, false);
+
+    socket.deliver({ id: JSON.parse(socket.sent[0]).id, status: 'success', result: { ok: true } });
+    assert.deepEqual(await request, { ok: true });
+    client.close();
+  });
+});
+
+test('a silent socket times out once and tears the connection down for every request', async () => {
+  await withQuiet(async () => {
+    const client = new LedgerClient(['wss://example.invalid'], { requestTimeoutMs: 20000 });
+    const first = client.request('account_tx', {});
+    const second = client.request('account_tx', {});
+    const outcomes = [first, second].map((request) => request.then(() => null, (e) => e));
+    await flush();
+    const socket = ManualSocket.created[0];
+    socket.open();
+    await flush();
+
+    mock.timers.tick(19999);
+    await flush();
+    assert.equal(client.pending.size, 2);
+    mock.timers.tick(1);
+
+    const [a, b] = await Promise.all(outcomes);
+    assert.equal(a.code, 'NodeUnreachable');
+    assert.equal(b.code, 'NodeUnreachable');
+    assert.equal(socket.closeCalls, 1);
+    assert.equal(client.pending.size, 0);
+    assert.equal(client.socket, null);
     client.close();
   });
 });

@@ -10,6 +10,8 @@ export const ENDPOINTS = {
   devnet: ['wss://s.devnet.rippletest.net:51233'],
 };
 
+// Inactivity, not a per-request budget: one page of account_tx is ~1.2 MB, so on a slow link
+// several concurrent pages legitimately take longer than this each. See LedgerClient.rearm.
 const REQUEST_TIMEOUT_MS = 20000;
 
 const text = (o, k) => (o && typeof o === 'object' && typeof o[k] === 'string' ? o[k] : null);
@@ -43,10 +45,11 @@ export function earliestAvailableLedger(result) {
 
 export class LedgerClient {
   /** @param {string[]} endpoints tried in order; each operation moves on when a node fails */
-  constructor(endpoints, { pageSize = 400 } = {}) {
+  constructor(endpoints, { pageSize = 400, requestTimeoutMs = REQUEST_TIMEOUT_MS } = {}) {
     if (!endpoints?.length) throw new Error('at least one endpoint is required');
     this.endpoints = endpoints;
     this.pageSize = pageSize;
+    this.requestTimeoutMs = requestTimeoutMs;
     this.index = 0;
     this.socket = null;
     this.pendingSocket = null;
@@ -149,11 +152,31 @@ export class LedgerClient {
       socket.onmessage = (event) => {
         // A frame that does not parse is ignored, not thrown out of the socket handler where
         // nothing catches it and the request it belonged to hangs until its own timeout.
+        // Any frame proves the socket is alive, so it pushes every pending deadline back, even
+        // when it answers a different request or does not parse.
+        this.rearm();
         let message;
         try { message = JSON.parse(event.data); } catch { return; }
         this.receive(message);
       };
     });
+  }
+
+  /** Restarts the inactivity clock of every pending request; one stalled request must not outlive a socket that keeps delivering. */
+  rearm() {
+    for (const waiting of this.pending.values()) {
+      clearTimeout(waiting.timer);
+      waiting.timer = this.startTimer(waiting.id, waiting.command);
+    }
+  }
+
+  startTimer(id, command) {
+    return setTimeout(() => {
+      const waiting = this.pending.get(id);
+      if (!waiting) return;
+      this.pending.delete(id);
+      waiting.reject(new XrplFileError('NodeUnreachable', `${this.endpoint} sent nothing for ${this.requestTimeoutMs} ms while ${command} was pending`));
+    }, this.requestTimeoutMs);
   }
 
   receive(message) {
@@ -191,17 +214,14 @@ export class LedgerClient {
   send(command, params) {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new XrplFileError('NodeUnreachable', `${this.endpoint} did not answer ${command} in ${REQUEST_TIMEOUT_MS} ms`));
-      }, REQUEST_TIMEOUT_MS);
+      const waiting = { id, command, resolve, reject, timer: this.startTimer(id, command) };
       const fail = (message) => {
         this.pending.delete(id);
-        clearTimeout(timer);
+        clearTimeout(waiting.timer);
         reject(new XrplFileError('NodeUnreachable', message));
       };
 
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, waiting);
 
       // connect() resolved, but the socket can be gone or closing by the time this runs -- a node
       // that hung up in between, or a close() from the page. Rejecting here is what lets
