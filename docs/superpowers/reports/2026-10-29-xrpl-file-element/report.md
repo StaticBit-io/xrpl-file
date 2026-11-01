@@ -102,6 +102,27 @@ pane does not run the lazy observer on load.
 threw on the non-configurable global that the mp4box script declares. Found in this run, fixed,
 and re-checked (rows 7, 8, 11).
 
+## Small sizes
+
+Added after the run, when the owner saw the download view, loader, error and caption spill out of
+100–200 px boxes. The element now lays itself out by its own width (container queries): full from
+240 px, compact from 120 to 239 px, icons under 120 px, and in any box under 56 px high (a width-independent addition to the owner's thresholds, so a short explicit `height` never clips). Checked on
+`demo/index.html#small` at f71d341 (re-checked after the review fixes) with the svg download view, `large` (loader), a bad link (error),
+`picture` (caption) and `text`, at widths 50, 100, 160 and 300 px and at 160 px with
+`height: 40px`:
+
+| Check | Verdict | Evidence |
+|---|---|---|
+| Nothing escapes the box | Pass | for all 25 elements, mid-load and loaded, no visible shadow-DOM node's bounding box extends past the host's (max 0 px; the first build had the 26 px icon button 1.9 px past a 50×28 box, fixed in `5e25bd0`) |
+| Icon tier, 50 px | Pass | download icon only; loader: percent and bar; error: warning icon; picture: ✓ badge; text scrolls |
+| Icon tier, 100 px | Pass | "SVG" badge and download icon; loader: percent and bar |
+| Compact, 160 px | Pass | name with ellipsis, size, "Save"; loader: "1%", "3.1 of 302.4 MB", bar; error: "Bad link" |
+| Full, 300 px | Pass | as before |
+| `height: 40px` | Pass | icon tier in all five views, inside the box |
+| Caption visuals on hover at small widths | Not verified | hidden pane: the opacity transition does not advance (as row 16) |
+
+Screenshots: `small-sizes-loading.jpg` (mid-load), `small-sizes-loaded.jpg`, `small-sizes-height-40.jpg`.
+
 ## Limits of this run
 
 - The browser pane stayed hidden, so the page ran as a background page: no rendering updates,
