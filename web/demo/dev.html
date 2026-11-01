@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xrpl-file element: dev page</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 20px; max-width: 1100px; margin-inline: auto; }
+  h1 { font-size: 20px; }
+  .note { color: #888; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px; margin-top: 18px; }
+  figure { margin: 0; min-width: 0; }
+  figcaption { font: 12px ui-monospace, Consolas, monospace; color: #888; margin-top: 6px; overflow-wrap: anywhere; }
+  .log { font: 12px ui-monospace, Consolas, monospace; color: #888; margin-top: 4px; min-height: 1.5em; overflow-wrap: anywhere; }
+</style>
+<script type="module" src="../src/element/define.mjs"></script>
+</head>
+<body>
+<h1>&lt;xrpl-file&gt; dev page</h1>
+<p class="note">
+  One element per key of <code>run/fixtures/links.json</code>. Query: <code>?only=&lt;key&gt;</code> shows one;
+  <code>?link=xrpl-file://…</code> shows any link, written as the element's text content
+  (add <code>&amp;as=src</code> for the <code>src</code> attribute); <code>&amp;loading=eager|lazy|click</code>,
+  <code>&amp;loader=false</code>, <code>&amp;width=…</code>, <code>&amp;height=…</code> and <code>&amp;node=…</code> are passed through.
+</p>
+<div class="grid" id="grid"></div>
+<script type="module">
+const grid = document.getElementById('grid');
+const query = new URLSearchParams(location.search);
+
+function figure(label, link, asSource) {
+  const cell = document.createElement('figure');
+  const element = document.createElement('xrpl-file');
+  if (asSource) element.setAttribute('src', link);
+  else element.textContent = link;
+  for (const name of ['loading', 'loader', 'width', 'height', 'node']) {
+    if (query.has(name)) element.setAttribute(name, query.get(name));
+  }
+
+  const log = document.createElement('div');
+  log.className = 'log';
+  const note = (text) => { log.textContent = text; };
+  element.addEventListener('load', () => note('load'));
+  element.addEventListener('error', (event) => note(`error ${event.detail.name}: ${event.detail.message}`));
+  element.addEventListener('xrpl-file-progress', (event) => {
+    const d = event.detail;
+    note(`progress ${d.blocksVerified}/${d.blocksTotal} blocks, ${d.bytesDone}/${d.bytesTotal} bytes`);
+  });
+
+  const caption = document.createElement('figcaption');
+  caption.textContent = label;
+  cell.append(element, log, caption);
+  grid.append(cell);
+}
+
+function say(text) {
+  const p = document.createElement('p');
+  p.className = 'note';
+  p.textContent = text;
+  grid.before(p);
+}
+
+async function main() {
+  if (query.has('link')) {
+    figure('?link', query.get('link'), query.get('as') === 'src');
+    return;
+  }
+
+  let links;
+  try {
+    const response = await fetch('/fixtures/links.json');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    links = await response.json();
+  } catch (e) {
+    say(`No fixture links: run/fixtures/links.json could not be read (${e.message}). Use ?link= instead.`);
+    return;
+  }
+
+  const only = query.get('only');
+  const keys = Object.keys(links).filter((key) => only === null || key === only);
+  if (keys.length === 0) say(only === null ? 'The fixture list is empty.' : `No fixture named "${only}".`);
+  for (const key of keys) figure(key, links[key], true);
+}
+
+main();
+</script>
+</body>
+</html>
