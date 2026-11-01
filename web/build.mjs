@@ -1,5 +1,5 @@
 // Builds the <xrpl-file> element into web/dist/<version>/: one classic script, the vendored mp4box
-// beside it, and the SHA-384 hashes a page puts in its `integrity` attributes.
+// (wrapped so it leaks no globals) beside it, and the SHA-384 hashes a page puts in its `integrity` attributes.
 //
 // The bundler is a module registry, not a general bundler. It handles exactly the import/export
 // forms web/src uses and fails the build on anything else, so a new form is a decision, not a
@@ -29,6 +29,28 @@ const NAMED_REEXPORT = new RegExp(`^export\\s*\\{([^}]*)\\}\\s*from\\s*${SPEC}${
 const NAMESPACE_REEXPORT = new RegExp(`^export\\s*\\*\\s*as\\s+(${NAME})\\s+from\\s*${SPEC}${END}`, 'gm');
 const DECLARATION = new RegExp(`^export\\s+(async\\s+function\\s*\\*?|function\\s*\\*?|class|const|let)\\s+(${NAME})`, 'gm');
 const LEFTOVER = /^[ \t]*(?:import|export)\b.*$/m;
+
+// The vendored script is a classic script that defines about sixteen globals (Log, DataStream, ISOFile,
+// BoxParser, MAX_SIZE, ...). Loaded as is, it would overwrite a host page's globals of those names and
+// throw a SyntaxError if the page declared one of them with a top-level let or const. So the published
+// copy runs inside a function and hands out MP4Box alone. The unbundled dev page still loads the raw
+// vendored file; that is dev only.
+const WRAPPER_HEAD = Buffer.from(['', '(function () {', ''].join('\n'), 'utf8');
+// Log is the library's own logger: the parser reports a box it cannot read to the end (QuickTime's
+// `wave` entries) through Log.error and carries on. Muting it here, where Log is in scope, keeps the
+// loader from reaching for a global the wrapper no longer leaves behind.
+const WRAPPER_TAIL = Buffer.from(['', ';Log.error = function () {};', 'globalThis.MP4Box = MP4Box;', '})();', ''].join('\n'), 'utf8');
+
+/** The vendored bytes inside the wrapper, with the vendored licence comment kept first. Works on bytes: the library is not ours to re-encode. */
+function wrapMp4box(vendored) {
+  const closing = vendored.indexOf('*/');
+  if (!vendored.subarray(0, 3).equals(Buffer.from('/*!')) || closing < 0) {
+    throw new Error(`${MP4BOX_SOURCE} must start with its licence comment (/*! ... */)`);
+  }
+
+  const end = closing + 2;
+  return Buffer.concat([vendored.subarray(0, end), WRAPPER_HEAD, vendored.subarray(end), WRAPPER_TAIL]);
+}
 
 const sri = (bytes) => `sha384-${createHash('sha384').update(bytes).digest('base64')}`;
 
@@ -206,8 +228,9 @@ async function readIfExists(file) {
 export async function build({ webDir, outDir, version, force = false }) {
   if (!VERSION_PATTERN.test(version)) throw new Error(`'${version}' is not a version the build can put in a path`);
 
-  const mp4box = await readFile(join(webDir, MP4BOX_SOURCE));
+  const mp4box = wrapMp4box(await readFile(join(webDir, MP4BOX_SOURCE)));
   const license = await readFile(join(webDir, LICENSE_SOURCE));
+  // Over the written file, not the vendored one: that is what a page's integrity attribute meets.
   const mp4boxIntegrity = sri(mp4box);
 
   const modules = await collect(webDir, ENTRY);

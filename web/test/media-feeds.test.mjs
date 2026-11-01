@@ -667,16 +667,18 @@ test('the build placeholder occurs once in the loader, so replacing it cannot tu
   });
 });
 
-test('loadMp4Box silences the parser error log, which only complains about QuickTime layouts', async () => {
+// What the raw vendored script of the unbundled dev page leaves behind: a global Log next to MP4Box.
+const DEV_SCRIPT = 'https://cdn.example/seven/src/element/media/mp4box-loader.mjs';
+
+test('loadMp4Box silences the raw dev script parser error log, which only complains about QuickTime layouts', async () => {
   await withPage(async ({ scripts }) => {
     const logged = [];
     const warned = [];
     const savedLog = globalThis.Log;
-    // What the script leaves behind: a global Log next to MP4Box.
     globalThis.Log = { getDurationString: () => '', error: (...args) => logged.push(args), warn: (...args) => warned.push(args) };
 
     try {
-      const loaded = loadRealMp4Box({ scriptUrl: 'https://cdn.example/seven/element.js' });
+      const loaded = loadRealMp4Box({ scriptUrl: DEV_SCRIPT });
       globalThis.MP4Box = { createFile: () => 'ours' };
       scripts[0].onload();
       await loaded;
@@ -685,6 +687,28 @@ test('loadMp4Box silences the parser error log, which only complains about Quick
       globalThis.Log.warn('ISOFile', 'something else');
       assert.deepEqual(logged, []);
       assert.equal(warned.length, 1, 'only the error log is silenced');
+    } finally {
+      if (savedLog === undefined) delete globalThis.Log;
+      else globalThis.Log = savedLog;
+    }
+  });
+});
+
+test('loadMp4Box leaves the host page global Log alone when the built, wrapped copy is loaded', async () => {
+  await withPage(async ({ scripts }) => {
+    const logged = [];
+    const savedLog = globalThis.Log;
+    // Looks like mp4box's Log, but the built copy mutes its own inside the wrapper: this one is the host's.
+    globalThis.Log = { getDurationString: () => '', error: (...args) => logged.push(args) };
+
+    try {
+      const loaded = loadRealMp4Box({ scriptUrl: 'https://cdn.example/eight/xrpl-file-element.js' });
+      globalThis.MP4Box = { createFile: () => 'ours' };
+      scripts[0].onload();
+      await loaded;
+
+      globalThis.Log.error('host', 'its own message');
+      assert.equal(logged.length, 1);
     } finally {
       if (savedLog === undefined) delete globalThis.Log;
       else globalThis.Log = savedLog;
@@ -753,7 +777,7 @@ function inFreshGlobal(body) {
 
 test('loadMp4Box resolves although the script\'s global MP4Box cannot be deleted', () => {
   const result = inFreshGlobal(`
-    const loading = loadMp4Box({ scriptUrl: 'https://cdn.example/a/element.js' });
+    const loading = loadMp4Box({ scriptUrl: 'https://cdn.example/a/src/element/media/mp4box-loader.mjs' });
     declare('MP4Box', ours);
     declare('Log', { getDurationString: () => '', error: () => { throw new Error('logged'); } });
     scripts[0].onload();

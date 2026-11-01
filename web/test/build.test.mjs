@@ -92,8 +92,95 @@ test('the output directory holds the four files and nothing else', async () => {
   await build({ webDir, outDir: out, version: VERSION });
   assert.deepEqual((await readdir(out)).sort(),
     ['integrity.json', 'mp4box-LICENSE.txt', 'mp4box.min.js', 'xrpl-file-element.js']);
-  assert.deepEqual(await readFile(join(out, 'mp4box.min.js')), await readFile(join(webDir, 'vendor', 'mp4box-0.5.4.min.js')));
   assert.deepEqual(await readFile(join(out, 'mp4box-LICENSE.txt')), await readFile(join(webDir, 'vendor', 'mp4box-LICENSE.txt')));
+});
+
+// Evaluates the published mp4box copy in a bare context and reports what it added to the global scope.
+async function runPublishedMp4box(file) {
+  const code = await readFile(file, 'utf8');
+  const context = vm.createContext({ console, setTimeout, clearTimeout, TextDecoder, TextEncoder });
+  const globals = () => vm.runInContext('Object.getOwnPropertyNames(globalThis)', context);
+  const before = new Set(globals());
+  vm.runInContext(code, context);
+  return { context, added: globals().filter((name) => !before.has(name)) };
+}
+
+test('the published mp4box keeps the vendored bytes verbatim inside a wrapper, licence comment first', async () => {
+  const out = await tempDir();
+  await build({ webDir, outDir: out, version: VERSION });
+  const vendored = await readFile(join(webDir, 'vendor', 'mp4box-0.5.4.min.js'));
+  const published = await readFile(join(out, 'mp4box.min.js'));
+  assert.ok(published.subarray(0, 24).toString().startsWith('/*! mp4box 19-03-2025 */'), 'the vendored licence comment is still the first thing');
+  assert.ok(published.includes(vendored.subarray(vendored.indexOf('*/') + 2)), 'everything after the comment is carried over untouched');
+  assert.ok(published.length > vendored.length);
+});
+
+test('the published mp4box adds MP4Box to the page and nothing else', async () => {
+  const out = await tempDir();
+  await build({ webDir, outDir: out, version: VERSION });
+  const { context, added } = await runPublishedMp4box(join(out, 'mp4box.min.js'));
+  assert.deepEqual(Array.from(added), ['MP4Box']);
+  assert.equal(typeof context.MP4Box.createFile, 'function');
+  assert.equal(vm.runInContext('typeof Log', context), 'undefined');
+  assert.equal(vm.runInContext('typeof ISOFile', context), 'undefined');
+  assert.equal(vm.runInContext('typeof DataStream', context), 'undefined');
+});
+
+test('the raw vendored script is what leaks, which is what the wrapper is for', async () => {
+  const { added } = await runPublishedMp4box(join(webDir, 'vendor', 'mp4box-0.5.4.min.js'));
+  for (const name of ['Log', 'DataStream', 'ISOFile', 'BoxParser', 'MP4Box']) assert.ok(added.includes(name), name);
+});
+
+test('a host page that declares the same names with let or const does not collide with the published mp4box', async () => {
+  const out = await tempDir();
+  await build({ webDir, outDir: out, version: VERSION });
+  const code = await readFile(join(out, 'mp4box.min.js'), 'utf8');
+  const context = vm.createContext({ console, setTimeout, clearTimeout, TextDecoder, TextEncoder });
+  vm.runInContext('const Log = "host"; const DataStream = "host"; let ISOFile = "host";', context);
+  assert.doesNotThrow(() => vm.runInContext(code, context));
+  assert.equal(vm.runInContext('Log', context), 'host');
+  assert.equal(typeof context.MP4Box.createFile, 'function');
+});
+
+// A moov whose only child claims to be larger than the moov: the parser logs it through Log.error and carries on.
+function brokenMoov() {
+  const box = (size, type, body = []) => {
+    const bytes = new Uint8Array(size);
+    new DataView(bytes.buffer).setUint32(0, size);
+    for (let i = 0; i < 4; i++) bytes[4 + i] = type.charCodeAt(i);
+    bytes.set(body, 8);
+    return bytes;
+  };
+  const ftyp = box(24, 'ftyp', [0x69, 0x73, 0x6f, 0x6d, 0, 0, 2, 0, 0x69, 0x73, 0x6f, 0x6d]);
+  const trak = box(16, 'trak');
+  new DataView(trak.buffer).setUint32(0, 100);
+  const moov = box(24, 'moov', trak);
+  const all = new Uint8Array(ftyp.length + moov.length);
+  all.set(ftyp);
+  all.set(moov, ftyp.length);
+  const buffer = all.buffer;
+  buffer.fileStart = 0;
+  return buffer;
+}
+
+async function consoleOutputOf(file) {
+  const heard = [];
+  const spy = { ...console, error: (...args) => heard.push(['error', ...args]), warn: (...args) => heard.push(['warn', ...args]) };
+  const context = vm.createContext({ console: spy, window: {}, setTimeout, clearTimeout, TextDecoder, TextEncoder });
+  vm.runInContext(await readFile(file, 'utf8'), context);
+  const parser = context.MP4Box.createFile();
+  parser.appendBuffer(brokenMoov());
+  parser.flush();
+  return heard;
+}
+
+test('the wrapper mutes the library log it owns', async () => {
+  const raw = await consoleOutputOf(join(webDir, 'vendor', 'mp4box-0.5.4.min.js'));
+  assert.ok(raw.some(([level, , , text]) => level === 'error' && /greater than its container size/.test(text)), 'the raw script does log this');
+
+  const out = await tempDir();
+  await build({ webDir, outDir: out, version: VERSION });
+  assert.deepEqual(await consoleOutputOf(join(out, 'mp4box.min.js')), []);
 });
 
 test("integrity.json holds the SHA-384 of both files, and the element carries mp4box's", async () => {
@@ -110,6 +197,8 @@ test("integrity.json holds the SHA-384 of both files, and the element carries mp
   assert.ok(!code.includes(PLACEHOLDER));
   assert.ok(code.includes('src/element/media/mp4box-loader.mjs'), 'the video view brings the loader into the bundle');
   assert.ok(code.includes(integrity['mp4box.min.js']));
+  const vendoredHash = `sha384-${createHash('sha384').update(await readFile(join(webDir, 'vendor', 'mp4box-0.5.4.min.js'))).digest('base64')}`;
+  assert.notEqual(integrity['mp4box.min.js'], vendoredHash, 'the hash covers the wrapped file a page actually loads');
 });
 
 test("the loader's placeholder gets mp4box's hash, and the running bundle sees it", async () => {

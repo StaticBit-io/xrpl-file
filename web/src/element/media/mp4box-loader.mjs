@@ -45,13 +45,15 @@ export function mp4boxUrl(scriptUrl) {
 }
 
 /**
- * Keeps mp4box's parser complaints out of the visitor's console.
+ * Keeps mp4box's parser complaints out of the visitor's console, for the raw vendored script of the
+ * unbundled dev page only.
  *
- * mp4box logs through a global `Log` object that the script defines next to `MP4Box`, and no level
- * of its `setLogLevel` is quieter than `error`, which is where it reports a box it could not read to
- * the end (QuickTime's `wave` audio entries produce one per file) and then carries on. Nothing a
- * visitor can act on, and a failure that matters reaches `onError` of the file anyway, so the method
- * is replaced instead.
+ * mp4box logs through a `Log` object, and no level of its `setLogLevel` is quieter than `error`, which
+ * is where it reports a box it could not read to the end (QuickTime's `wave` audio entries produce one
+ * per file) and then carries on. Nothing a visitor can act on, and a failure that matters reaches
+ * `onError` of the file anyway, so the method is replaced instead. The raw script leaves `Log` as a
+ * global; the built copy wraps the library and mutes its own `Log` inside, so there the global `Log`
+ * (if any) is the host page's and must not be touched.
  */
 function silence() {
   const log = globalThis.Log;
@@ -74,14 +76,15 @@ function insertScript(src, integrity) {
     script.crossOrigin = 'anonymous';
     if (SRI_VALUE.test(integrity ?? '')) script.integrity = integrity;
 
+    const raw = new URL(src).pathname.endsWith(DEV_LIBRARY_PATH);
     const hadOwn = Object.prototype.hasOwnProperty.call(globalThis, 'MP4Box');
     const previous = globalThis.MP4Box;
 
-    // The bundle is a classic script with a top-level `var MP4Box`, so the global it makes cannot be
-    // deleted (`delete` throws in module code), only assigned. A host page may carry its own copy,
-    // possibly another version, that its own code relies on: give theirs back by assignment. Without
-    // one, `MP4Box` stays on the page; nothing can take it off. It must never get in the way of
-    // settling the promise, hence the guards.
+    // Either script leaves a global MP4Box. A host page may carry its own copy, possibly another
+    // version, that its own code relies on: give theirs back by assignment. The raw dev script's
+    // `var MP4Box` cannot be deleted (`delete` throws in module code), only assigned, so without a host
+    // copy it stays on the page there; the built copy's assigned property is removed. It must never get
+    // in the way of settling the promise, hence the guards.
     function restore() {
       try {
         if (hadOwn) globalThis.MP4Box = previous;
@@ -96,7 +99,7 @@ function insertScript(src, integrity) {
       const loaded = globalThis.MP4Box;
       const usable = Boolean(loaded) && typeof loaded.createFile === 'function';
 
-      if (usable) silence();
+      if (usable && raw) silence();
       else script.remove?.();
       restore();
 
