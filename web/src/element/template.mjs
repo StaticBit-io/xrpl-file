@@ -2,10 +2,11 @@
 // data: names, sizes, messages and file content are put in with textContent or attributes afterwards.
 // Styles follow the approved mockup; the four --xrpl-file-* properties are the site's hooks and the
 // values after the commas are their defaults.
+//
+// The styles are text apart from the markup: a strict Content Security Policy drops <style> elements
+// that arrive as parsed markup, so the element hands them to a constructable stylesheet instead.
 
-export const TEMPLATE = `
-<style id="host"></style>
-<style>
+export const STYLES = `
   *, *::before, *::after { box-sizing: border-box; }
   [hidden] { display: none !important; }
   .frame {
@@ -60,7 +61,9 @@ export const TEMPLATE = `
   .caption .side { display: flex; align-items: center; gap: 8px; }
   .caption .ok { color: #6fd08c; }
   .caption button { padding: 1px 8px; border: 1px solid rgba(255,255,255,.4); border-radius: 4px; background: transparent; color: #ddd; font: inherit; cursor: pointer; }
-</style>
+`;
+
+export const TEMPLATE = `
 <div class="frame" id="frame">
   <div class="view idle" id="idle" hidden>
     <img class="fill dim" id="cover" alt="" hidden>

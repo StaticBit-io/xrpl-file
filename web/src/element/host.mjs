@@ -30,3 +30,16 @@ export function captionState({ phase, network }) {
   const verified = VERIFIED_PHASES.has(phase);
   return { verified, text: verified ? `✓ verified · ${network}` : network };
 }
+
+/**
+ * How the shadow root gets its styles. Constructable stylesheets are not subject to a page's
+ * `style-src` policy, which drops `<style>` elements; browsers without them (and only those) fall
+ * back to `<style>` elements.
+ * @returns 'adopted' when `adoptedStyleSheets` and `CSSStyleSheet#replaceSync` both exist, else 'fallback'
+ */
+export function styleSupport(scope = globalThis) {
+  const hasReplaceSync = typeof scope.CSSStyleSheet === 'function'
+    && typeof scope.CSSStyleSheet.prototype?.replaceSync === 'function';
+  const hasAdopted = typeof scope.ShadowRoot === 'function' && 'adoptedStyleSheets' in scope.ShadowRoot.prototype;
+  return hasReplaceSync && hasAdopted ? 'adopted' : 'fallback';
+}

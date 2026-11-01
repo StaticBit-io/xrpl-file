@@ -2,8 +2,8 @@
 // page's shared connection and showing nothing that did not verify. Decisions that need no DOM live
 // in host.mjs, load.mjs, view.mjs and attributes.mjs, where node --test pins them; this file is the
 // DOM glue and is checked in a browser.
-import { TEMPLATE } from './template.mjs';
-import { hostStyle, linkReadiness, captionState } from './host.mjs';
+import { TEMPLATE, STYLES } from './template.mjs';
+import { hostStyle, linkReadiness, captionState, styleSupport } from './host.mjs';
 import { prepare, loadWhole, progressDetail } from './load.mjs';
 import { pool, PRIORITY } from './page.mjs';
 import { saveFile } from './download.mjs';
@@ -45,6 +45,17 @@ function bytesOf(done, total) {
   return totalText.endsWith(` ${doneUnit}`) ? `${doneValue} of ${totalText}` : `${formatBytes(done)} of ${totalText}`;
 }
 
+let sharedSheet = null;
+
+/** The stylesheet every element adopts, built once from the template's style text. */
+function sharedStyles() {
+  if (sharedSheet === null) {
+    sharedSheet = new CSSStyleSheet();
+    sharedSheet.replaceSync(STYLES);
+  }
+  return sharedSheet;
+}
+
 export class XrplFileElement extends HTMLElement {
   static observedAttributes = ['src', 'width', 'height', 'loading', 'loader', 'node'];
 
@@ -75,11 +86,15 @@ export class XrplFileElement extends HTMLElement {
   #ratioStage = 0;
   #urls = [];
   #copiedTimer = 0;
+  // The element's own `:host` rule: a constructable sheet, or a <style> element where those do not exist.
+  #hostSheet = null;
+  #hostStyleElement = null;
 
   constructor() {
     super();
     const root = this.attachShadow({ mode: 'open' });
     root.innerHTML = TEMPLATE;
+    this.#adoptStyles(root);
     for (const element of root.querySelectorAll('[id]')) this.#parts[element.id] = element;
     this.#wire();
     this.#applySizing();
@@ -147,12 +162,26 @@ export class XrplFileElement extends HTMLElement {
 
   // Sizing
 
+  #adoptStyles(root) {
+    if (styleSupport() === 'adopted') {
+      this.#hostSheet = new CSSStyleSheet();
+      root.adoptedStyleSheets = [sharedStyles(), this.#hostSheet];
+      return;
+    }
+    const shared = document.createElement('style');
+    shared.textContent = STYLES;
+    this.#hostStyleElement = document.createElement('style');
+    root.prepend(shared, this.#hostStyleElement);
+  }
+
   #applySizing() {
-    this.#parts.host.textContent = hostStyle({
+    const rule = hostStyle({
       width: parseLength(this.getAttribute('width')),
       height: parseLength(this.getAttribute('height')),
       ratio: this.#ratio,
     });
+    if (this.#hostSheet !== null) this.#hostSheet.replaceSync(rule);
+    else this.#hostStyleElement.textContent = rule;
   }
 
   #setRatio(stage, width, height) {

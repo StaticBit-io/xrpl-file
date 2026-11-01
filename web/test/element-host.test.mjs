@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hostStyle, linkReadiness, captionState } from '../src/element/host.mjs';
+import { hostStyle, linkReadiness, captionState, styleSupport } from '../src/element/host.mjs';
 
 test('the host rule has the reserved proportion and no size by default', () => {
   assert.equal(hostStyle({ width: null, height: null, ratio: '16 / 9' }),
@@ -32,4 +32,22 @@ test('the caption marks verified only in the phases that follow a verified read'
   for (const phase of ['image', 'text', 'video', 'download']) {
     assert.deepEqual(captionState({ phase, network: 'testnet' }), { verified: true, text: '✓ verified · testnet' }, phase);
   }
+});
+
+test('styles are adopted where constructable stylesheets and adoptedStyleSheets both exist', () => {
+  class Sheet { replaceSync() {} }
+  class Shadow { get adoptedStyleSheets() { return []; } }
+  assert.equal(styleSupport({ CSSStyleSheet: Sheet, ShadowRoot: Shadow }), 'adopted');
+});
+
+test('a missing piece of either API means the style elements fallback', () => {
+  class Sheet { replaceSync() {} }
+  class NoReplace {}
+  class Shadow { get adoptedStyleSheets() { return []; } }
+  class NoAdopted {}
+  assert.equal(styleSupport({}), 'fallback');
+  assert.equal(styleSupport({ CSSStyleSheet: Sheet }), 'fallback');
+  assert.equal(styleSupport({ CSSStyleSheet: Sheet, ShadowRoot: NoAdopted }), 'fallback');
+  assert.equal(styleSupport({ CSSStyleSheet: NoReplace, ShadowRoot: Shadow }), 'fallback');
+  assert.equal(styleSupport({ CSSStyleSheet: Sheet, ShadowRoot: 5 }), 'fallback');
 });
