@@ -12,7 +12,7 @@ import { viewForType, magicAgrees, normalizeType } from './view.mjs';
 import { textPreview, TEXT_LIMIT } from './text.mjs';
 import { VideoView } from './video.mjs';
 import { formatBytes, downloadName } from './format.mjs';
-import { elementError, messageFor, detailFor, canVerify, INSECURE, NO_LINK } from './messages.mjs';
+import { elementError, messageFor, saveMessageFor, detailFor, canVerify, INSECURE, NO_LINK } from './messages.mjs';
 import { parseLink, formatLink } from '../link.mjs';
 
 const DEFAULT_RATIO = '16 / 9';
@@ -681,7 +681,9 @@ export class XrplFileElement extends HTMLElement {
         this.#renderCaption();
       }
     } catch (error) {
-      if (!signal.aborted && !isAbort(error)) this.#fail(error);
+      // A failed save is the save's problem: the verified file stays on screen and the reason goes
+      // to the status line. No `error` event either; that one means the file could not be shown.
+      if (!signal.aborted && !isAbort(error)) this.#showSaving(saveMessageFor(error));
     } finally {
       this.#saving = false;
       for (const button of [p.dlButton, p.textDownload]) button.disabled = false;

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { XrplFileError } from '../src/link.mjs';
-import { elementError, messageFor, detailFor, canVerify, NO_NODE, BAD_NODE, INSECURE, NO_LINK } from '../src/element/messages.mjs';
+import { elementError, messageFor, saveMessageFor, detailFor, canVerify, NO_NODE, BAD_NODE, INSECURE, NO_LINK } from '../src/element/messages.mjs';
 
 test('every reading error has a sentence', () => {
   for (const code of ['InvalidLink', 'ManifestNotFound', 'NodeLacksHistory', 'CorruptManifest', 'ListMismatch', 'BlockMismatch', 'ChunkMissing', 'TooLarge', 'NodeUnreachable'])
@@ -73,4 +73,15 @@ test('the error event of a video that was playing carries the playing sentence',
   assert.deepEqual(detailFor(error, { playing: true }).message, messageFor(error, { playing: true }));
   assert.equal(detailFor(error).message, messageFor(error));
   assert.notEqual(detailFor(error, { playing: true }).message, detailFor(error).message);
+});
+
+test('a failed save is worded for a file that is still on screen', () => {
+  assert.equal(saveMessageFor(new XrplFileError('BlockMismatch', 'x', { block: 4 })), 'Saving stopped at block 4: it did not pass verification.');
+  assert.equal(saveMessageFor(new XrplFileError('ChunkMissing', 'x', { block: 2 })), 'Saving stopped at block 2: part of it is missing from the ledger.');
+  assert.equal(saveMessageFor(new XrplFileError('NodeUnreachable', 'x')), 'The node is not answering. Try again later.');
+  assert.equal(saveMessageFor(elementError('TooLarge', 'This file is too large to save in this browser.')), 'This file is too large to save in this browser.');
+  for (const message of [saveMessageFor(new Error('disk full')), saveMessageFor(new DOMException('no', 'NotFoundError')), saveMessageFor(null)]) {
+    assert.equal(message, 'The file could not be saved.');
+    assert.ok(!/Nothing was shown/.test(message));
+  }
 });

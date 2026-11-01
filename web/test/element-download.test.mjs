@@ -173,10 +173,49 @@ test('a manifest without a name is not asked twice under the same name', async (
 test('a picker failure that is not about the name is not retried', async () => {
   const blocks = makeBlocks(1, 8);
   const picker = fakePicker();
-  const failure = new DOMException('no', 'SecurityError');
+  const failure = new DOMException('no', 'NotFoundError');
   picker.reject(failure);
   await assert.rejects(saveFile({ handle: fakeHandle(blocks), record: recordOf(blocks), picker }), (e) => e === failure);
   assert.equal(picker.names.length, 1);
+});
+
+for (const name of ['SecurityError', 'NotAllowedError'])
+  test(`a picker refused with ${name} falls back to the in-memory save`, async () => {
+    const blocks = makeBlocks(3, 8);
+    const handle = fakeHandle(blocks);
+    const picker = fakePicker();
+    picker.reject(new DOMException('cross-origin subframe', name));
+    let received;
+    const result = await saveFile({
+      handle, record: recordOf(blocks), picker, saveBlob: (blob, fileName) => { received = { blob, fileName }; },
+    });
+    assert.equal(result, 'saved');
+    assert.equal(picker.names.length, 1);
+    assert.equal(received.fileName, 'vector-2500500.bin');
+    assert.equal(received.blob.size, 24);
+    assert.deepEqual(picker.writable.calls, []);
+  });
+
+test('a picker blocked on the second ask falls back too', async () => {
+  const blocks = makeBlocks(1, 8);
+  const picker = fakePicker();
+  picker.rejectOnceWith(new TypeError('bad name'));
+  picker.rejectOnceWith(new DOMException('', 'SecurityError'));
+  let saved = false;
+  assert.equal(await saveFile({ handle: fakeHandle(blocks), record: recordOf(blocks), picker, saveBlob: () => { saved = true; } }), 'saved');
+  assert.equal(saved, true);
+});
+
+test('the fallback keeps the 2 GiB refusal, before any read', async () => {
+  const blocks = makeBlocks(1, 8);
+  const handle = fakeHandle(blocks);
+  const picker = fakePicker();
+  picker.reject(new DOMException('', 'SecurityError'));
+  await assert.rejects(
+    saveFile({ handle, record: recordOf(blocks, { size: BLOB_LIMIT + 1 }), picker, saveBlob: () => {} }),
+    (e) => e.code === 'TooLarge',
+  );
+  assert.equal(handle.reads, 0);
 });
 
 test('a cancelled save dialog reads nothing', async () => {
@@ -234,12 +273,19 @@ test('without a picker, the blob holds exactly the file', async () => {
   const result = await saveFile({ handle, record, picker: null, saveBlob: (blob, name) => { received = { blob, name }; } });
   assert.equal(result, 'saved');
   assert.equal(received.blob.size, record.manifest.size);
-  assert.equal(received.blob.type, 'video/mp4');
   assert.equal(received.name, 'a_b_c.mp4');
   const expected = new Uint8Array(24);
   blocks.forEach((block, i) => expected.set(block, i * 8));
   assert.deepEqual(new Uint8Array(await received.blob.arrayBuffer()), expected);
 });
+
+for (const type of ['text/html', 'image/svg+xml', 'application/xhtml+xml', 'video/mp4'])
+  test(`the saved blob is octet-stream whatever the manifest says (${type})`, async () => {
+    const blocks = makeBlocks(1, 8);
+    let received;
+    await saveFile({ handle: fakeHandle(blocks), record: recordOf(blocks, { type }), picker: null, saveBlob: (blob) => { received = blob; } });
+    assert.equal(received.type, 'application/octet-stream');
+  });
 
 test('without a picker, a failed block means nothing is saved', async () => {
   const blocks = makeBlocks(3, 8);

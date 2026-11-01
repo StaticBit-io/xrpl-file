@@ -28,9 +28,21 @@ function isAbort(error) {
 }
 
 /**
+ * A cross-origin iframe (Google Sites, Wix and Notion embeds) has `showSaveFilePicker` but the
+ * browser refuses it there with SecurityError; NotAllowedError is the same refusal without a user
+ * gesture. Neither says anything about the file, so the save moves to the in-memory path.
+ */
+function isPickerBlocked(error) {
+  return error?.name === 'SecurityError' || error?.name === 'NotAllowedError';
+}
+
+const PICKER_BLOCKED = Symbol('picker blocked');
+
+/**
  * Asks for a place to save. A TypeError means the platform refused the suggested name, which comes
  * from the manifest and so cannot be vetted in advance; it is asked once more under a name that is
- * ours. Returns null when the visitor closed the dialog.
+ * ours. Returns null when the visitor closed the dialog, PICKER_BLOCKED when the browser does not
+ * let this page use the picker at all.
  */
 async function pickFile(picker, manifest) {
   const name = downloadName(manifest);
@@ -39,12 +51,14 @@ async function pickFile(picker, manifest) {
     return await picker({ suggestedName: name });
   } catch (error) {
     if (isAbort(error)) return null;
+    if (isPickerBlocked(error)) return PICKER_BLOCKED;
     if (!(error instanceof TypeError) || name === fallback) throw error;
   }
   try {
     return await picker({ suggestedName: fallback });
   } catch (error) {
     if (isAbort(error)) return null;
+    if (isPickerBlocked(error)) return PICKER_BLOCKED;
     throw error;
   }
 }
@@ -73,17 +87,20 @@ async function writeToPicked(file, options) {
   }
 }
 
-async function collectBlob(options, type) {
+// The type is deliberately not the manifest's: it is attacker-chosen, and a same-origin blob: URL of
+// text/html (or svg) that gets navigated to would run script in the host page's origin.
+async function collectBlob(options) {
   const parts = [];
   await eachBlock({ ...options, sink: (bytes) => { parts.push(bytes); } });
-  return new Blob(parts, { type });
+  return new Blob(parts, { type: 'application/octet-stream' });
 }
 
 /**
  * Saves the verified bytes of a file. Where `showSaveFilePicker` exists the file is written block by
  * block as each verifies, so its size is not bounded by memory; elsewhere it is assembled as a Blob,
- * up to {@link BLOB_LIMIT}. A block that fails verification is never written, and the file under
- * way is aborted.
+ * up to {@link BLOB_LIMIT}; the same path takes over when the browser blocks the picker for this page
+ * (a cross-origin iframe). A block that fails verification is never written, and the file under way
+ * is aborted.
  * @returns 'saved', or 'cancelled' when the visitor closed the save dialog before anything was read
  */
 export async function saveFile({
@@ -100,12 +117,14 @@ export async function saveFile({
   if (typeof picker === 'function') {
     const file = await pickFile(picker, manifest);
     if (file === null) return 'cancelled';
-    await writeToPicked(file, options);
-    return 'saved';
+    if (file !== PICKER_BLOCKED) {
+      await writeToPicked(file, options);
+      return 'saved';
+    }
   }
 
   if (manifest.size > BLOB_LIMIT) throw elementError('TooLarge', TOO_LARGE);
-  const blob = await collectBlob(options, manifest.type);
+  const blob = await collectBlob(options);
   saveBlob(blob, downloadName(manifest));
   return 'saved';
 }

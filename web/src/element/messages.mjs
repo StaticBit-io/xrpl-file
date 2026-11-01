@@ -49,6 +49,24 @@ export function messageFor(error, { playing = false } = {}) {
 }
 
 /**
+ * The status-line sentence for a save that did not finish. The file is still on screen, so the
+ * view-level wording ("Nothing was shown") would be false; a block that failed verification is still
+ * named, since that is a statement about the file and not about the save.
+ */
+export function saveMessageFor(error) {
+  if (typeof error?.sentence === 'string') return error.sentence;
+  if (error instanceof XrplFileError) {
+    switch (error.code) {
+      case 'BlockMismatch': return `Saving stopped at block ${error.block}: it did not pass verification.`;
+      case 'ChunkMissing': return `Saving stopped at block ${error.block}: part of it is missing from the ledger.`;
+      case 'NodeUnreachable': return messageFor(error);
+      default: break;
+    }
+  }
+  return 'The file could not be saved.';
+}
+
+/**
  * The `detail` of the `error` event: the error name from the shared set (null when it has none) and the
  * sentence shown, which for a video that was already playing is the `playing` one.
  */
