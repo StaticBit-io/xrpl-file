@@ -12,7 +12,9 @@ transaction; the manifest names the ledger range holding the file's bytes in mem
 Merkle root to verify them. Nothing to pin, nothing to expire, and every byte checked.
 
 The format is specified in [docs/spec/xrpl-file-v1.md](docs/spec/xrpl-file-v1.md). The design
-and its reasoning are in [docs/superpowers/specs](docs/superpowers/specs).
+and its reasoning are in [docs/superpowers/specs](docs/superpowers/specs). A manifest opens with a
+`format` member holding this repository's URL, so a person who finds the JSON in an explorer can
+see what it is and where the rules are; readers never look at it.
 
 ## What is here
 

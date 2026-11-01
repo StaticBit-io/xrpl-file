@@ -72,13 +72,15 @@ to its block hash.
 `MemoData` of the manifest transaction is a JSON object, its fields in this order:
 
 ```json
-{"v":1,"type":"image/png","size":734512,"chunk":1000,
+{"format":"https://github.com/StaticBit-io/xrpl-file","v":1,
+ "type":"image/png","size":734512,"chunk":1000,
  "root":"<64 hex>","ledgers":[106497159,106497394],
  "blocks":1,"lists":0,"cover":"<64 hex>","name":"cover.png"}
 ```
 
 | Field | Required | Meaning |
 |---|---|---|
+| `format` | no | URL of the repository holding this specification; for people reading the ledger, not for readers |
 | `v` | yes | format version, `1` |
 | `type` | yes | MIME type of the file |
 | `size` | yes | file length in bytes, ≥ 1 (a zero-length file has no chunks and no root, so `blocks` = 0 would force a `lists` ≠ 0 whose list is empty, and an empty list is refused) |
@@ -91,16 +93,26 @@ to its block hash.
 | `name` | no | file name |
 
 The manifest MUST be written in a ledger after `last`. Writers SHOULD emit the fields in the
-order `v`, `type`, `size`, `chunk`, `root`, `ledgers`, `blocks`, `lists`, `cover`, `name` without
-whitespace and SHOULD shorten `name` by whole characters (never splitting a UTF-16 surrogate
-pair) until the JSON fits 995 bytes, dropping it if nothing fits. The name is shortened after
-`cover` is placed: `cover` takes 75 bytes (`,"cover":"` plus 64 hex characters plus the closing
-quote), and the 995-byte budget is unchanged. A `type` long enough that the manifest does not fit
-even without a name is a writer error, not something a reader ever sees.
+order `format`, `v`, `type`, `size`, `chunk`, `root`, `ledgers`, `blocks`, `lists`, `cover`,
+`name` without whitespace, and SHOULD emit `format` as exactly the string
+`https://github.com/StaticBit-io/xrpl-file`, first. Writers SHOULD shorten `name` by whole
+characters (never splitting a UTF-16 surrogate pair) until the JSON fits 995 bytes, dropping it if
+nothing fits. The name is shortened after `format` and `cover` are placed, and neither is ever
+dropped to make room for the name. `format` takes 53 bytes (`"format":` is 9 bytes, the quoted
+41-character URL 43, and the comma after it 1); `cover` takes 75 bytes (`,"cover":"` plus 64 hex
+characters plus the closing quote). The 995-byte budget is unchanged. A `type` long enough that the
+manifest does not fit even without a name is a writer error, not something a reader ever sees.
+
+`format` is a repository URL and not the address of a site because GitHub keeps redirecting a
+repository's URL after a rename or a transfer, so a manifest written today still leads a person to
+the specification.
 
 A reader MUST ignore manifest members it does not recognise. A writer MUST NOT emit members other
-than those this specification defines. A `cover` that is not exactly 64 hexadecimal characters
-(or not a JSON string at all) reads as absent; it is not a `CorruptManifest`.
+than those this specification defines; `format` is one of them. A reader MUST NOT require `format`
+and MUST NOT check its value: any value of any JSON type, or its absence, reads the same, and none
+of them is a `CorruptManifest`. A manifest written before `format` existed has none and stays fully
+valid; the version stays `1`. A `cover` that is not exactly 64 hexadecimal characters (or not a
+JSON string at all) reads as absent; it is not a `CorruptManifest`.
 
 A reader MUST reject a manifest:
 
@@ -350,8 +362,11 @@ implementations are held to the same known answers. The file bytes are regenerat
 block `k` of the stream is `SHA256(UTF8(seed) || k as a big-endian uint32)`, blocks concatenated
 and cut to `size`. The vectors also fix the Merkle known answers shared with the XRPL video
 platform. `manifestVariants` give manifests that must decode to the same file as the vector they
-name (`of` is that vector's `size`): one with `cover` and one with a member this version does not
-define.
+name (`of` is that vector's `size`; each also names the `name` it decodes to, which differs from
+the vector's only in the last variant): one with `cover`, one with a member this version does not
+define, one without `format` as written before the member existed, two whose `format` is a JSON
+number and an object, and one with `format`, `cover` and a long name that the writer shortened to
+fill the 995-byte budget exactly. The manifests of the file vectors begin with `format`.
 
 ## 11. NFT usage
 
