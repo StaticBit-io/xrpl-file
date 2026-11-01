@@ -11,8 +11,10 @@
 
 import { children, find, readBox } from './boxes.mjs';
 
-// A table of this many samples is already hours of media; more is a file built to exhaust memory.
-const MAX_SAMPLES = 10_000_000;
+// Samples over all tracks together. Two million is hours of video plus its audio; a moov claiming more is
+// built to exhaust memory, since a few hundred bytes of boxes can declare millions of samples (a constant-size
+// stsz has no table to run out of) and each sample costs 29 bytes of arrays.
+const MAX_SAMPLES = 2_000_000;
 
 // Bytes of a sample entry that precede its child boxes.
 const VISUAL_ENTRY_FIELDS = 78;
@@ -192,13 +194,24 @@ function aacString(bytes, esds) {
   return objectType > 0 && objectType !== 0x40 ? `mp4a.${hex(objectType)}` : 'mp4a.40.2';
 }
 
-function readStsz(view, stsz) {
+/** The sample count a track's `stsz` or `stz2` declares, read before anything is allocated for it. */
+function declaredSamples(bytes, view, trak) {
+  const stsz = find(bytes, trak, 'mdia', 'minf', 'stbl', 'stsz') ?? find(bytes, trak, 'mdia', 'minf', 'stbl', 'stz2');
+  return stsz === null ? 0 : view.getUint32(stsz.start + stsz.headerSize + 8);
+}
+
+function readStsz(view, stsz, fileSize) {
   const body = stsz.start + stsz.headerSize;
 
   if (stsz.type === 'stsz') {
     const constant = view.getUint32(body + 4);
     const count = view.getUint32(body + 8);
     if (count > MAX_SAMPLES) throw new RangeError(`a track of ${count} samples is not read`);
+
+    // A constant size needs no table bytes to back the count, so the file itself is the bound.
+    if (constant !== 0 && count * constant > fileSize) {
+      throw new RangeError(`${count} samples of ${constant} bytes do not fit in a file of ${fileSize} bytes`);
+    }
 
     const sizes = new Uint32Array(count);
     if (constant !== 0) {
@@ -278,7 +291,7 @@ function readSampleTimes(bytes, view, stbl, count) {
 }
 
 /** File offset of every sample from `stsc` (samples per chunk), `stco`/`co64` (chunk offsets) and the sizes. */
-function readOffsets(bytes, view, stbl, sizes) {
+function readOffsets(bytes, view, stbl, sizes, fileSize) {
   const stsc = find(bytes, stbl, 'stsc');
   const chunks = find(bytes, stbl, 'stco') ?? find(bytes, stbl, 'co64');
   if (stsc === null || chunks === null) throw new Error('the track has no stsc or stco box');
@@ -305,6 +318,7 @@ function readOffsets(bytes, view, stbl, sizes) {
     let at = wide ? u64(view, cbody + TABLE_HEADER + (chunk - 1) * 8) : view.getUint32(cbody + TABLE_HEADER + (chunk - 1) * 4);
 
     for (let k = 0; k < perChunk && sample < sizes.length; k++) {
+      if (at + sizes[sample] > fileSize) throw new RangeError(`sample ${sample} lies past the end of the file`);
       offsets[sample] = at;
       at += sizes[sample];
       sample++;
@@ -336,11 +350,11 @@ function readSync(bytes, view, stbl, count) {
 }
 
 /** @returns {SampleTable} */
-function readTable(bytes, view, stbl, mediaDuration) {
+function readTable(bytes, view, stbl, mediaDuration, fileSize) {
   const stsz = find(bytes, stbl, 'stsz') ?? find(bytes, stbl, 'stz2');
   if (stsz === null) throw new Error('the track has no stsz box');
 
-  const sizes = readStsz(view, stsz);
+  const sizes = readStsz(view, stsz, fileSize);
   const count = sizes.length;
   const { cts, lastDts } = readSampleTimes(bytes, view, stbl, count);
 
@@ -350,14 +364,14 @@ function readTable(bytes, view, stbl, mediaDuration) {
   return {
     count,
     cts,
-    offsets: readOffsets(bytes, view, stbl, sizes),
+    offsets: readOffsets(bytes, view, stbl, sizes, fileSize),
     sizes,
     sync: readSync(bytes, view, stbl, count),
     endTicks: count > 0 ? cts[count - 1] + lastDuration : 0,
   };
 }
 
-function readTrack(bytes, view, trak, fragmented) {
+function readTrack(bytes, view, trak, fragmented, fileSize) {
   const tkhd = find(bytes, trak, 'tkhd');
   const mdhd = find(bytes, trak, 'mdia', 'mdhd');
   const hdlr = find(bytes, trak, 'mdia', 'hdlr');
@@ -383,18 +397,22 @@ function readTrack(bytes, view, trak, fragmented) {
     codec: entry === null ? '' : readCodecs(bytes, view, entry, handler),
     width: kind === 'video' ? view.getUint32(size) / 65536 : 0,
     height: kind === 'video' ? view.getUint32(size + 4) / 65536 : 0,
-    table: fragmented ? null : readTable(bytes, view, stbl, duration),
+    table: fragmented ? null : readTable(bytes, view, stbl, duration, fileSize),
   };
 }
 
 /**
  * Reads a `moov` box.
  *
+ * An ordinary file's sample tables are bounded before they are allocated: at most 2,000,000 samples over all
+ * tracks, a constant-size `stsz` must fit in the file, and every sample must lie inside it.
+ *
  * @param {Uint8Array} moovBytes the whole box, header included (what `locateMoov` returns)
+ * @param {{ fileSize?: number }} [options] size of the whole file; callers that know it pass it, so a table cannot place samples past the end. Without it only the sample caps apply
  * @returns {Movie}
- * @throws {Error} when the bytes are not a complete `moov`, or an ordinary file's sample tables are missing or inconsistent
+ * @throws {Error} when the bytes are not a complete `moov`, or an ordinary file's sample tables are missing, inconsistent or larger than the caps allow
  */
-export function parseMovie(moovBytes) {
+export function parseMovie(moovBytes, { fileSize = Infinity } = {}) {
   const moov = readBox(moovBytes, 0);
   if (moov === null || moov.type !== 'moov') throw new Error('these bytes are not a moov box');
   if (moov.end > moovBytes.length) throw new Error('the moov box is cut short');
@@ -406,9 +424,15 @@ export function parseMovie(moovBytes) {
   const fragmented = find(moovBytes, moov, 'mvex') !== null;
   const { timescale, seconds } = readDuration(view, moovBytes, moov, mvhd);
 
-  const tracks = children(moovBytes, moov)
-    .filter((box) => box.type === 'trak')
-    .map((trak) => readTrack(moovBytes, view, trak, fragmented))
+  const traks = children(moovBytes, moov).filter((box) => box.type === 'trak');
+
+  if (!fragmented) {
+    const declared = traks.reduce((sum, trak) => sum + declaredSamples(moovBytes, view, trak), 0);
+    if (declared > MAX_SAMPLES) throw new RangeError(`${declared} samples over all tracks are not read`);
+  }
+
+  const tracks = traks
+    .map((trak) => readTrack(moovBytes, view, trak, fragmented, fileSize))
     .filter((track) => track !== null);
 
   return { timescale, duration: seconds, fragmented, tracks };

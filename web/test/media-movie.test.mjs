@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mimeFor, parseMovie, seekPoint } from '../src/element/media/movie.mjs';
-import { expected, isSampleStart, moovOf, syncSamples } from './media-helpers.mjs';
+import { ascii, expected, isSampleStart, moovOf, read, syncSamples } from './media-helpers.mjs';
 
 for (const f of ['plain-start.mp4', 'plain-end.mp4']) {
   test(`${f}: a seek lands on the keyframe at or before the target`, () => {
@@ -154,3 +154,90 @@ test('a moov of the wrong shape is refused', () => {
   assert.throws(() => parseMovie(new Uint8Array(8)), Error);
   assert.throws(() => parseMovie(moovOf('plain-start.mp4').subarray(0, 40)), Error);
 });
+
+// A hand-built moov: a few hundred bytes of boxes per track, however many samples they declare.
+function box(type, ...parts) {
+  const body = parts.map((p) => (p instanceof Uint8Array ? p : Uint8Array.from(p)));
+  const bytes = new Uint8Array(8 + body.reduce((n, p) => n + p.length, 0));
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, bytes.length);
+  bytes.set(ascii(type), 4);
+  let at = 8;
+  for (const part of body) { bytes.set(part, at); at += part.length; }
+  return bytes;
+}
+
+function words(...values) {
+  const bytes = new Uint8Array(values.length * 4);
+  values.forEach((value, i) => new DataView(bytes.buffer).setUint32(i * 4, value));
+  return bytes;
+}
+
+function hostileTrack({ id = 1, count, size, chunkOffset = 0, perChunk = count }) {
+  const zeros = (n) => new Uint8Array(n);
+  const stbl = box('stbl',
+    box('stsd', words(0, 1), box('avc1', zeros(78))),
+    box('stsz', words(0, size, count)),
+    box('stts', words(0, 1, count, 1)),
+    box('stsc', words(0, 1, 1, perChunk, 1)),
+    box('stco', words(0, 1, chunkOffset)));
+  const mdhd = words(0, 0, 0, 1000, 1000, 0);
+  const hdlr = new Uint8Array(24); hdlr.set(ascii('vide'), 8);
+  const tkhd = new Uint8Array(84); new DataView(tkhd.buffer).setUint32(12, id);
+  return box('trak', box('tkhd', tkhd), box('mdia', box('mdhd', mdhd), box('hdlr', hdlr), box('minf', stbl)));
+}
+
+function hostileMoov(...tracks) {
+  const mvhd = new Uint8Array(100); new DataView(mvhd.buffer).setUint32(12, 1000);
+  return box('moov', box('mvhd', mvhd), ...tracks);
+}
+
+function measure(action) {
+  const before = process.memoryUsage().arrayBuffers;
+  const started = performance.now();
+  try { action(); } catch (error) { return { error, ms: performance.now() - started, bytes: process.memoryUsage().arrayBuffers - before }; }
+  return { error: null, ms: performance.now() - started, bytes: process.memoryUsage().arrayBuffers - before };
+}
+
+test('the hand-built moov reads when its counts are honest', () => {
+  const movie = parseMovie(hostileMoov(hostileTrack({ count: 1000, size: 5 })), { fileSize: 10_000 });
+  assert.equal(movie.tracks[0].table.count, 1000);
+  assert.equal(movie.tracks[0].table.offsets[999], 4995);
+});
+
+test('a track declaring ten million constant-size samples is refused before anything is allocated', () => {
+  const moov = hostileMoov(hostileTrack({ count: 10_000_000, size: 5 }));
+  assert.ok(moov.length < 1000);
+  for (const options of [undefined, { fileSize: 600 }, { fileSize: 2 ** 40 }]) {
+    const { error, ms, bytes } = measure(() => parseMovie(moov, options));
+    assert.ok(error instanceof Error, JSON.stringify(options));
+    assert.ok(ms < 200 && bytes < 5_000_000, `${ms} ms, ${bytes} bytes`);
+  }
+});
+
+test('a constant-size count that the file cannot hold is refused', () => {
+  const moov = hostileMoov(hostileTrack({ count: 1_500_000, size: 1000 }));
+  const { error, ms, bytes } = measure(() => parseMovie(moov, { fileSize: 700 }));
+  assert.ok(error instanceof RangeError);
+  assert.ok(ms < 200 && bytes < 5_000_000, `${ms} ms, ${bytes} bytes`);
+});
+
+test('many tracks that are each under the cap are refused by the total', () => {
+  const tracks = [1, 2, 3, 4, 5, 6, 7, 8].map((id) => hostileTrack({ id, count: 1_500_000, size: 1 }));
+  const { error, ms, bytes } = measure(() => parseMovie(hostileMoov(...tracks), { fileSize: 2 ** 40 }));
+  assert.ok(error instanceof RangeError);
+  assert.ok(ms < 200 && bytes < 5_000_000, `${ms} ms, ${bytes} bytes`);
+});
+
+test('a sample placed past the end of the file is refused', () => {
+  assert.throws(() => parseMovie(hostileMoov(hostileTrack({ count: 10, size: 5, chunkOffset: 90 })), { fileSize: 100 }), RangeError);
+  assert.doesNotThrow(() => parseMovie(hostileMoov(hostileTrack({ count: 10, size: 5, chunkOffset: 50 })), { fileSize: 100 }));
+});
+
+for (const f of ['plain-start.mp4', 'plain-end.mp4', 'hevc.mp4']) {
+  test(`${f}: the real tables fit their own file, and not half of it`, () => {
+    const size = read(f).length;
+    assert.doesNotThrow(() => parseMovie(moovOf(f), { fileSize: size }));
+    assert.throws(() => parseMovie(moovOf(f), { fileSize: size / 2 }), RangeError);
+  });
+}
