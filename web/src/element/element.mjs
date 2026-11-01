@@ -3,7 +3,7 @@
 // in host.mjs, load.mjs, view.mjs and attributes.mjs, where node --test pins them; this file is the
 // DOM glue and is checked in a browser.
 import { TEMPLATE, STYLES } from './template.mjs';
-import { hostStyle, linkReadiness, captionState, styleSupport } from './host.mjs';
+import { hostStyle, linkReadiness, captionParts, styleSupport } from './host.mjs';
 import { prepare, loadWhole, progressDetail } from './load.mjs';
 import { pool, PRIORITY } from './page.mjs';
 import { saveFile } from './download.mjs';
@@ -12,8 +12,8 @@ import { parseLength, parseLoading, parseLoader, linkText, endpointsFor } from '
 import { viewForType, magicAgrees, normalizeType } from './view.mjs';
 import { textPreview, TEXT_LIMIT } from './text.mjs';
 import { VideoView } from './video.mjs';
-import { formatBytes, downloadName } from './format.mjs';
-import { elementError, messageFor, saveMessageFor, detailFor, canVerify, INSECURE, NO_LINK } from './messages.mjs';
+import { formatBytes, downloadName, bytesOf, progressLines, typeBadge, downloadLabel } from './format.mjs';
+import { elementError, messageFor, shortTitleFor, saveMessageFor, detailFor, canVerify, INSECURE, NO_LINK } from './messages.mjs';
 import { parseLink, formatLink } from '../link.mjs';
 
 const DEFAULT_RATIO = '16 / 9';
@@ -23,6 +23,7 @@ const RATIO_CONTENT = 2;
 
 const VIEWS = ['idle', 'loading', 'image', 'video', 'text', 'download', 'error'];
 const COPIED_MS = 1500;
+const COPY_LABEL = 'Copy link';
 // An <a download> click is handed to the browser, which may still refuse it (a sandboxed iframe
 // without allow-downloads) without telling the page, so only the picker path may claim "Saved.".
 const SAVE_STATUS = { saved: 'Saved.', started: 'Download started.' };
@@ -46,13 +47,6 @@ function isLink(text) {
   } catch {
     return false;
   }
-}
-
-/** "12.4 of 36.5 MB": the unit is written once when both numbers share it. */
-function bytesOf(done, total) {
-  const [doneValue, doneUnit] = formatBytes(done).split(' ');
-  const totalText = formatBytes(total);
-  return totalText.endsWith(` ${doneUnit}`) ? `${doneValue} of ${totalText}` : `${formatBytes(done)} of ${totalText}`;
 }
 
 let sharedSheet = null;
@@ -97,6 +91,8 @@ export class XrplFileElement extends HTMLElement {
   #ratioStage = 0;
   #urls = [];
   #copiedTimer = 0;
+  // 'Copied' or 'Copy failed' while the feedback shows, else null.
+  #copyFeedback = null;
   // The element's own `:host` rule: a constructable sheet, or a <style> element where those do not exist.
   #hostSheet = null;
   #hostStyleElement = null;
@@ -253,7 +249,8 @@ export class XrplFileElement extends HTMLElement {
     p.frame.classList.remove('video', 'tapped');
     p.overlay.hidden = true;
     p.overlayText.textContent = '';
-    p.copy.textContent = 'Copy link';
+    this.#copyFeedback = null;
+    this.#renderCopy();
     p.caption.hidden = true;
     for (const view of VIEWS) p[view].hidden = true;
   }
@@ -550,10 +547,12 @@ export class XrplFileElement extends HTMLElement {
     this.#showPhase('loading');
   }
 
-  #renderLoading(detail, percent) {
+  /** `blocks` is the second half of the line, which a narrow box leaves out. */
+  #renderLoading(detail, percent, blocks = '') {
     const p = this.#parts;
     p.percent.textContent = percent === null ? '' : `${percent}%`;
-    p.progressDetail.textContent = detail;
+    p.progressBytes.textContent = detail;
+    p.progressBlocks.textContent = blocks;
     p.barFill.style.width = `${percent ?? 0}%`;
     if (percent === null) p.loading.removeAttribute('aria-valuenow');
     else p.loading.setAttribute('aria-valuenow', String(percent));
@@ -582,8 +581,18 @@ export class XrplFileElement extends HTMLElement {
   #showDownload(record, reason) {
     const p = this.#parts;
     const { manifest } = record;
-    p.dlName.textContent = downloadName(manifest);
-    p.dlMeta.textContent = `${normalizeType(manifest.type) || 'unknown type'} · ${formatBytes(manifest.size)} · ${this.#link.network}`;
+    const name = downloadName(manifest);
+    p.dlName.textContent = name;
+    // The meta line is three pieces so that a narrow box can keep the size alone.
+    p.dlType.textContent = `${normalizeType(manifest.type) || 'unknown type'} · `;
+    p.dlSize.textContent = formatBytes(manifest.size);
+    p.dlNet.textContent = ` · ${this.#link.network}`;
+    p.dlBadge.textContent = typeBadge(manifest.type);
+    p.dlBadge.title = name;
+    // The smallest box shows an icon only, so the button is named after the file it saves.
+    const label = downloadLabel(manifest);
+    p.dlButton.setAttribute('aria-label', label);
+    p.dlButton.title = label;
     const note = NOTES[reason] ?? null;
     p.dlNote.hidden = note === null;
     p.dlNote.textContent = note ?? '';
@@ -594,7 +603,13 @@ export class XrplFileElement extends HTMLElement {
   #fail(error) {
     this.#video?.close();
     this.#video = null;
-    this.#parts.message.textContent = messageFor(error);
+    const sentence = messageFor(error);
+    const p = this.#parts;
+    // The full sentence stays in the accessible text in every size; the short title and the icon are what a narrow box shows, with the sentence as their tooltip.
+    p.msgFull.textContent = sentence;
+    p.msgShort.textContent = shortTitleFor(error);
+    p.msgShort.title = sentence;
+    p.msgIcon.title = sentence;
     // Nothing is read after a failure: the connection is the page's to close, not ours to hold.
     this.#handle?.release();
     this.#lease?.release();
@@ -629,9 +644,8 @@ export class XrplFileElement extends HTMLElement {
 
   #publish(detail) {
     const percent = detail.bytesTotal > 0 ? Math.min(100, Math.floor((detail.bytesDone / detail.bytesTotal) * 100)) : 0;
-    this.#renderLoading(
-      `${bytesOf(detail.bytesDone, detail.bytesTotal)} · ${detail.blocksVerified} of ${detail.blocksTotal} blocks verified`,
-      percent);
+    const lines = progressLines(detail);
+    this.#renderLoading(lines.bytes, percent, lines.blocks);
     this.#emit('xrpl-file-progress', progressDetail(detail));
   }
 
@@ -646,20 +660,45 @@ export class XrplFileElement extends HTMLElement {
     p.capName.textContent = manifest ? `${downloadName(manifest)} · ${formatBytes(manifest.size)}` : '';
     // The mark follows what was actually read and verified, not the view: a download view reached
     // from the manifest alone has verified nothing.
-    const state = captionState({ phase: this.#verified ? this.#phase : 'idle', network: this.#link.network });
-    p.capNet.textContent = state.text;
+    const state = captionParts({ phase: this.#verified ? this.#phase : 'idle', network: this.#link.network });
+    p.capMark.textContent = state.mark;
+    p.capWord.textContent = state.word;
+    p.capNetwork.textContent = state.network;
     p.capNet.classList.toggle('ok', state.verified);
+    // The smallest box shows the verified mark alone, so the caption says which kind it is.
+    p.caption.classList.toggle('verified', state.verified);
     p.caption.title = link;
     p.caption.hidden = false;
+    this.#renderCopy();
+  }
+
+  /**
+   * The copy button. A narrow box has no room for "Copied" next to it, so the feedback goes where a
+   * screen reader and a tooltip can reach it: the name, the title and a status region.
+   */
+  #renderCopy() {
+    const p = this.#parts;
+    const feedback = this.#copyFeedback;
+    p.copyText.textContent = feedback ?? COPY_LABEL;
+    p.copy.setAttribute('aria-label', feedback ?? COPY_LABEL);
+    p.copyStatus.textContent = feedback ?? '';
+    if (feedback !== null) p.copy.title = feedback;
+    else if (this.#link !== null) p.copy.title = formatLink(this.#link);
+    else p.copy.removeAttribute('title');
+    if (feedback === null) p.copy.removeAttribute('data-state');
+    else p.copy.dataset.state = feedback === 'Copied' ? 'copied' : 'failed';
   }
 
   async #copyLink() {
     if (this.#link === null) return;
-    const copy = this.#parts.copy;
     const done = await copyText(formatLink(this.#link), { execCopy: execCopyIn(this.shadowRoot) });
-    copy.textContent = done ? 'Copied' : 'Copy failed';
+    this.#copyFeedback = done ? 'Copied' : 'Copy failed';
+    this.#renderCopy();
     clearTimeout(this.#copiedTimer);
-    this.#copiedTimer = setTimeout(() => { copy.textContent = 'Copy link'; }, COPIED_MS);
+    this.#copiedTimer = setTimeout(() => {
+      this.#copyFeedback = null;
+      this.#renderCopy();
+    }, COPIED_MS);
   }
 
   // Download

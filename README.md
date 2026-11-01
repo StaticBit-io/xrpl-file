@@ -90,6 +90,11 @@ The inside is styled with CSS custom properties `--xrpl-file-accent`, `--xrpl-fi
 `{ bytesDone, bytesTotal, blocksVerified, blocksTotal }`), `load` once the content is shown, and `error`
 (`detail`: `{ name, message }`).
 
+The layout follows the element's own width, whatever the page's. From 240 px it is the full layout; from
+120 to 239 px a compact one (one line per text, a "Save" button, a caption of "✓ testnet" with a copy icon);
+under 120 px, or under 56 px of height, an icon one (a type badge and a download icon, a warning icon for an
+error, a small ✓ that copies the link). The full error sentence stays available to screen readers and as a tooltip in every tier.
+
 ```js
 const element = document.querySelector('xrpl-file');
 element.addEventListener('xrpl-file-progress', (event) => console.log(event.detail.blocksVerified, event.detail.blocksTotal));
