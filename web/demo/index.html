@@ -26,6 +26,8 @@
   .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 24px; }
   .three xrpl-file { height: 180px; }
   @media (max-width: 700px) { .three { grid-template-columns: 1fr; } }
+  .sizes { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px 24px; margin-bottom: 8px; }
+  h3 { font: 600 13px ui-monospace, Consolas, monospace; margin: 18px 0 8px; color: #888; }
   figure { margin: 0; min-width: 0; }
   figcaption { font: 12px ui-monospace, Consolas, monospace; color: #888; margin-top: 6px; overflow-wrap: anywhere; }
   #log { font: 12px ui-monospace, Consolas, monospace; border: 1px solid #8884; border-radius: 6px; padding: 8px 12px; max-height: 320px; overflow: auto; margin: 0; list-style: none; }
@@ -178,6 +180,124 @@
     <figcaption>InvalidLink: not a link at all<br>xrpl-file://nowhere/x</figcaption>
   </figure>
 </div>
+
+<h2 id="small">Small sizes</h2>
+<p class="note">The element lays itself out by its own width: from 240px as usual, from 120px to 239px in a compact form (one line per text, a short button, a one-line caption), under 120px as icons. The rows below set <code>width</code> to 50, 100, 160 and 300px; the last one also sets a 40px height from the page's own style. Hover a box to see its caption.</p>
+  <h3>width="50"</h3>
+  <div class="sizes">
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/01327E188DFEDB1FD579E8A87D6D2839D0E002758A3D26A14F97BEA939E0DDDD" width="50"></xrpl-file>
+      <figcaption>svg (download view)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/CAE00EF2575E0F95E225C31E76C9B6F44F3ACCEDEB0A5F9EA42DCA59C651448E" loading="eager" width="50"></xrpl-file>
+      <figcaption>large, eager (loader)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://nowhere/x" width="50"></xrpl-file>
+      <figcaption>bad link (error)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59" width="50"></xrpl-file>
+      <figcaption>picture (image, caption on hover)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/C5E3796206EF47EEF661067D7E8FDC74E2FCEBDF839D133E2E1F364444A722EC" width="50"></xrpl-file>
+      <figcaption>text</figcaption>
+    </figure>
+  </div>
+  <h3>width="100"</h3>
+  <div class="sizes">
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/01327E188DFEDB1FD579E8A87D6D2839D0E002758A3D26A14F97BEA939E0DDDD" width="100"></xrpl-file>
+      <figcaption>svg (download view)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/CAE00EF2575E0F95E225C31E76C9B6F44F3ACCEDEB0A5F9EA42DCA59C651448E" loading="eager" width="100"></xrpl-file>
+      <figcaption>large, eager (loader)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://nowhere/x" width="100"></xrpl-file>
+      <figcaption>bad link (error)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59" width="100"></xrpl-file>
+      <figcaption>picture (image, caption on hover)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/C5E3796206EF47EEF661067D7E8FDC74E2FCEBDF839D133E2E1F364444A722EC" width="100"></xrpl-file>
+      <figcaption>text</figcaption>
+    </figure>
+  </div>
+  <h3>width="160"</h3>
+  <div class="sizes">
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/01327E188DFEDB1FD579E8A87D6D2839D0E002758A3D26A14F97BEA939E0DDDD" width="160"></xrpl-file>
+      <figcaption>svg (download view)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/CAE00EF2575E0F95E225C31E76C9B6F44F3ACCEDEB0A5F9EA42DCA59C651448E" loading="eager" width="160"></xrpl-file>
+      <figcaption>large, eager (loader)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://nowhere/x" width="160"></xrpl-file>
+      <figcaption>bad link (error)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59" width="160"></xrpl-file>
+      <figcaption>picture (image, caption on hover)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/C5E3796206EF47EEF661067D7E8FDC74E2FCEBDF839D133E2E1F364444A722EC" width="160"></xrpl-file>
+      <figcaption>text</figcaption>
+    </figure>
+  </div>
+  <h3>width="300"</h3>
+  <div class="sizes">
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/01327E188DFEDB1FD579E8A87D6D2839D0E002758A3D26A14F97BEA939E0DDDD" width="300"></xrpl-file>
+      <figcaption>svg (download view)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/CAE00EF2575E0F95E225C31E76C9B6F44F3ACCEDEB0A5F9EA42DCA59C651448E" loading="eager" width="300"></xrpl-file>
+      <figcaption>large, eager (loader)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://nowhere/x" width="300"></xrpl-file>
+      <figcaption>bad link (error)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59" width="300"></xrpl-file>
+      <figcaption>picture (image, caption on hover)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/C5E3796206EF47EEF661067D7E8FDC74E2FCEBDF839D133E2E1F364444A722EC" width="300"></xrpl-file>
+      <figcaption>text</figcaption>
+    </figure>
+  </div>
+  <h3>width="160", style="height:40px"</h3>
+  <div class="sizes">
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/01327E188DFEDB1FD579E8A87D6D2839D0E002758A3D26A14F97BEA939E0DDDD" width="160" style="height:40px"></xrpl-file>
+      <figcaption>svg (download view)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/CAE00EF2575E0F95E225C31E76C9B6F44F3ACCEDEB0A5F9EA42DCA59C651448E" loading="eager" width="160" style="height:40px"></xrpl-file>
+      <figcaption>large, eager (loader)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://nowhere/x" width="160" style="height:40px"></xrpl-file>
+      <figcaption>bad link (error)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59" width="160" style="height:40px"></xrpl-file>
+      <figcaption>picture (image, caption on hover)</figcaption>
+    </figure>
+    <figure>
+      <xrpl-file src="xrpl-file://testnet/C5E3796206EF47EEF661067D7E8FDC74E2FCEBDF839D133E2E1F364444A722EC" width="160" style="height:40px"></xrpl-file>
+      <figcaption>text</figcaption>
+    </figure>
+  </div>
 
 <h2 id="events">Events</h2>
 <p class="note">Newest first. Progress is one line per element, updated in place.</p>
