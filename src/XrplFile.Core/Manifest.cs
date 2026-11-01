@@ -149,7 +149,7 @@ public sealed record Manifest(
             writer.WriteEndArray();
             writer.WriteNumber("blocks", Blocks);
             writer.WriteNumber("lists", Lists);
-            if (Cover is not null) writer.WriteString("cover", Cover);
+            if (Cover is not null) writer.WriteString("cover", Cover.ToUpperInvariant());
             if (name is not null) writer.WriteString("name", name);
             writer.WriteEndObject();
         }

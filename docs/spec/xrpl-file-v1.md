@@ -126,18 +126,27 @@ ignores it (section 4).
 
 A writer that sets `cover` MUST first publish the cover as a complete xrpl-file file:
 
-- written by the same account as the file it decorates;
-- with the cover's manifest validated in a ledger strictly below the decorated file's
-  `ledgers[0]`, so the cover's chunks never fall inside the decorated file's chunk range;
-- with `type` `image/webp` or `image/jpeg`, `size` at most 65,536 bytes, and therefore one block
-  and `lists` = 0.
+- the `Account` of the cover's manifest transaction is the `Account` of the decorated file's
+  manifest transaction (the same writer);
+- the ledger in which the cover's manifest transaction was validated is strictly below
+  `ledgers[0]` of the decorated file's manifest, so the cover's chunks never fall inside the
+  decorated file's chunk range;
+- the cover's manifest has `type` `image/webp` or `image/jpeg`, `size` at most 65,536 bytes, and
+  therefore one block and `lists` = 0.
 
-A reader that wants the cover fetches the manifest named by `cover` and reads it as an ordinary
-file (section 6), plus these checks:
+The hash in `cover` names a manifest transaction on the same network as the decorated file; a
+reader looks it up there. A reader accepts the 64 hexadecimal digits in either case; a writer
+writes them in upper case, the canonical form of a transaction hash (section 1).
 
-- the cover manifest's `Account` equals the decorated manifest's `Account`;
-- the cover manifest's ledger is below the decorated manifest's `ledgers[0]`;
-- `type`, `size` and `blocks` are within the limits above (`lists` = 0 follows from one block);
+A reader that wants the cover fetches the manifest transaction named by `cover` and reads it as an
+ordinary file (section 6), plus these checks:
+
+- the `Account` of the cover's manifest transaction equals the `Account` of the decorated file's
+  manifest transaction;
+- the ledger in which the cover's manifest transaction was validated is strictly below
+  `ledgers[0]` of the decorated file's manifest;
+- `type`, `size` and `blocks` of the cover's manifest are within the limits above (`lists` = 0
+  follows from one block);
 - the bytes start with the magic of the declared type: `RIFF....WEBP` for WebP (`RIFF`, any four
   bytes, `WEBP`), `FF D8` for JPEG.
 

@@ -112,10 +112,21 @@ public class ManifestTests
     [InlineData("null")]
     [InlineData("[]")]
     [InlineData("{}")]
+    [InlineData("\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\"")]   // 63 hex
+    [InlineData("\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\"")]  // 65 hex
     public void A_cover_that_is_not_a_hash_reads_as_absent(string value)
     {
         string json = Sample().Encode().Replace(",\"name\":", ",\"cover\":" + value + ",\"name\":", StringComparison.Ordinal);
         Assert.Equal(Sample(), Manifest.Decode(json));
+    }
+
+    [Fact]
+    public void A_lower_case_cover_is_written_upper_case()
+    {
+        string encoded = (Sample() with { Cover = CoverHash.ToLowerInvariant() }).Encode();
+
+        Assert.Contains("\"cover\":\"" + CoverHash + "\"", encoded, StringComparison.Ordinal);
+        Assert.Equal(CoverHash, Manifest.Decode(encoded).Cover);
     }
 
     [Fact]
