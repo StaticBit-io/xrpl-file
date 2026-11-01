@@ -11,6 +11,7 @@
       "tests\\XrplFile.MemoryProbe\\XrplFile.MemoryProbe.csproj",
       "tests\\XrplFile.ResumeMemoryProbe\\XrplFile.ResumeMemoryProbe.csproj",
       "tests\\XrplFile.TestSupport\\XrplFile.TestSupport.csproj",
+      "tools\\XrplFile.Fixtures\\XrplFile.Fixtures.csproj",
       "tools\\XrplFile.KeyBench\\XrplFile.KeyBench.csproj",
       "tools\\XrplFile.Vectors\\XrplFile.Vectors.csproj"
     ]

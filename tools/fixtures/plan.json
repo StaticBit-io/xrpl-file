@@ -1,0 +1,130 @@
+[
+  {
+    "key": "cover",
+    "file": "cover.webp",
+    "type": "image/webp",
+    "name": "cover.webp",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "cover-b",
+    "file": "cover-b.webp",
+    "type": "image/webp",
+    "name": "cover-b.webp",
+    "writer": "b",
+    "cover": null
+  },
+  {
+    "key": "picture",
+    "file": "picture.webp",
+    "type": "image/webp",
+    "name": "picture.webp",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "picture-blocks",
+    "file": "picture-blocks.png",
+    "type": "image/png",
+    "name": "picture-blocks.png",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "text",
+    "file": "text-cyrillic.txt",
+    "type": "text/plain",
+    "name": "text-cyrillic.txt",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "text-large",
+    "file": "text-large.txt",
+    "type": "text/plain",
+    "name": "text-large.txt",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "html",
+    "file": "page.html",
+    "type": "text/html",
+    "name": "page.html",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "svg",
+    "file": "drawing.svg",
+    "type": "image/svg+xml",
+    "name": "drawing.svg",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "mp4-start",
+    "file": "plain-start.mp4",
+    "type": "video/mp4",
+    "name": "plain-start.mp4",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "mp4-end",
+    "file": "plain-end.mp4",
+    "type": "video/mp4",
+    "name": "plain-end.mp4",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "fmp4",
+    "file": "fragmented.mp4",
+    "type": "video/mp4",
+    "name": "fragmented.mp4",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "webm",
+    "file": "clip.webm",
+    "type": "video/webm",
+    "name": "clip.webm",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "mp4-cover",
+    "file": "plain-end.mp4",
+    "type": "video/mp4",
+    "name": "plain-end.mp4",
+    "writer": "a",
+    "cover": "cover"
+  },
+  {
+    "key": "mp4-broken-cover",
+    "file": "plain-end.mp4",
+    "type": "video/mp4",
+    "name": "plain-end.mp4",
+    "writer": "a",
+    "cover": "cover-b"
+  },
+  {
+    "key": "hevc",
+    "file": "hevc.mp4",
+    "type": "video/mp4",
+    "name": "hevc.mp4",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "large",
+    "file": "large-end.mp4",
+    "type": "video/mp4",
+    "name": "large-end.mp4",
+    "writer": "a",
+    "cover": null
+  }
+]

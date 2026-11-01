@@ -1,3 +1,10 @@
 * text=auto eol=lf
 *.bin binary
 *.bat text eol=crlf
+*.mp4 binary
+*.webm binary
+*.webp binary
+*.png binary
+*.jpg binary
+# Vendored bundles are kept byte for byte: a page pins them with an SRI hash.
+web/vendor/*.js binary

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>XrplFile.Fixtures</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- README, "Collector settings for hosts": each account_tx page is a large-object-heap frame. -->
+    <RuntimeHostConfigurationOption Include="System.GC.LOHThreshold" Value="4194304" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\XrplFile.Core\XrplFile.Core.csproj" />
+  </ItemGroup>
+</Project>

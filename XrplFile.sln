@@ -35,6 +35,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XrplFile.MemoryProbe", "tes
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XrplFile.ResumeMemoryProbe", "tests\XrplFile.ResumeMemoryProbe\XrplFile.ResumeMemoryProbe.csproj", "{1F590FB7-FC7C-4B65-A772-803A47870025}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XrplFile.Fixtures", "tools\XrplFile.Fixtures\XrplFile.Fixtures.csproj", "{F4211C14-EC13-4C65-95C6-06E9C89CB1F9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -189,6 +191,18 @@ Global
 		{1F590FB7-FC7C-4B65-A772-803A47870025}.Release|x64.Build.0 = Release|Any CPU
 		{1F590FB7-FC7C-4B65-A772-803A47870025}.Release|x86.ActiveCfg = Release|Any CPU
 		{1F590FB7-FC7C-4B65-A772-803A47870025}.Release|x86.Build.0 = Release|Any CPU
+		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9}.Debug|x64.Build.0 = Debug|Any CPU
+		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9}.Debug|x86.Build.0 = Debug|Any CPU
+		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9}.Release|x64.ActiveCfg = Release|Any CPU
+		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9}.Release|x64.Build.0 = Release|Any CPU
+		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9}.Release|x86.ActiveCfg = Release|Any CPU
+		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -206,5 +220,6 @@ Global
 		{C4DCDC0F-4FC9-4A2C-9AB2-79F1D6658156} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{C3F96E33-924F-4733-A27D-3C112F24F8BB} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{1F590FB7-FC7C-4B65-A772-803A47870025} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal
