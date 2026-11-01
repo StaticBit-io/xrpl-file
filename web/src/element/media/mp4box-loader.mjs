@@ -5,10 +5,14 @@
 // Fetching it from the element's origin, with a Subresource Integrity hash the build writes in, means
 // the page trusts nothing new: whoever can swap the library can already swap the element.
 
-/** The build replaces this literal with the `sha384-...` hash of the mp4box file it publishes. */
+/**
+ * The build replaces this literal, and every other copy of it in the bundle, with the `sha384-...` hash
+ * of the mp4box file it publishes. It must stay the only copy: a second one would become the hash too.
+ */
 export const MP4BOX_INTEGRITY = '__MP4BOX_INTEGRITY__';
 
-const PLACEHOLDER = '__MP4BOX_INTEGRITY__';
+// What an integrity value looks like once the build has written it in; anything else is the placeholder.
+const SRI_VALUE = /^sha(256|384|512)-/;
 
 // The unbundled demo page imports this module straight from `src/`; the library sits in `vendor/`
 // there, under its versioned name, not next to the module.
@@ -54,7 +58,7 @@ function insertScript(src, integrity) {
     script.async = true;
     // Needed for the integrity check to apply to a script from another origin (a CDN).
     script.crossOrigin = 'anonymous';
-    if (integrity && integrity !== PLACEHOLDER) script.integrity = integrity;
+    if (SRI_VALUE.test(integrity ?? '')) script.integrity = integrity;
 
     const hadOwn = Object.prototype.hasOwnProperty.call(globalThis, 'MP4Box');
     const previous = globalThis.MP4Box;

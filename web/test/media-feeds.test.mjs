@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { children, find, topLevelBoxes } from '../src/element/media/boxes.mjs';
 import { MP4BOX_INTEGRITY, loadMp4Box as loadRealMp4Box, mp4boxUrl } from '../src/element/media/mp4box-loader.mjs';
@@ -562,6 +563,22 @@ test('loadMp4Box: the build placeholder is not sent as an integrity value, and a
 
     assert.equal(await loaded, ours);
     assert.equal(Object.hasOwn(globalThis, 'MP4Box'), false);
+  });
+});
+
+test('the build placeholder occurs once in the loader, so replacing it cannot turn the check off', async () => {
+  const source = readFileSync(new URL('../src/element/media/mp4box-loader.mjs', import.meta.url), 'utf8');
+  assert.equal(source.split(MP4BOX_INTEGRITY).length - 1, 1);
+
+  // Once the build has written a real hash into the export, it is still passed on.
+  await withPage(async ({ scripts }) => {
+    const hash = 'sha384-' + 'A'.repeat(64);
+    const loaded = loadRealMp4Box({ scriptUrl: 'https://cdn.example/six/element.js', integrity: hash });
+    assert.equal(scripts[0].integrity, hash);
+
+    globalThis.MP4Box = { createFile: () => 'ours' };
+    scripts[0].onload();
+    await loaded;
   });
 });
 
