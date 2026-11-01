@@ -107,9 +107,13 @@ The browser hashes the file only in a secure context, so the page must be served
 The element styles itself with constructable stylesheets, so the policy does not need
 `style-src 'unsafe-inline'`.
 
+Sites that enforce Trusted Types (`require-trusted-types-for 'script'`) are not supported in this
+version: the element assigns one static template through `innerHTML`.
+
 `web/demo` has pages that exercise it against published testnet files: `index.html` (every state),
 `many.html` (ten elements, with counters of the connections and requests they make), `snippet.html` and
-`head.html`. After a build, `node web/demo/serve.mjs 8790` serves them at `http://127.0.0.1:8790/demo/`.
+`head.html`; `dev.html` loads the unbundled sources from `web/src` and needs no build. After a build,
+`node web/demo/serve.mjs 8790` serves them, starting at `http://127.0.0.1:8790/demo/index.html`.
 
 ## Publishing a file (.NET)
 

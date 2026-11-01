@@ -84,6 +84,14 @@ test('a cover is written after lists and before the name, and decodes upper-case
   assert.equal(decodeManifest(json.replace(COVER, COVER.toLowerCase())).cover, COVER);
 });
 
+test('a cover is written upper-case whatever case it was given in', () => {
+  const lower = 'abcdef0123456789'.repeat(4);
+  const json = encodeManifest({ ...sample(), cover: lower });
+  assert.ok(json.includes(`"cover":"${lower.toUpperCase()}"`));
+  assert.ok(!json.includes(lower));
+  assert.equal(decodeManifest(json).cover, lower.toUpperCase());
+});
+
 test('a cover that is not 64 hex characters reads as absent', () => {
   for (const value of ['123', '"AB"', 'null', '[]', '{}', `"${'C'.repeat(63)}Z"`]) {
     const json = encodeManifest(sample()).replace(',"name":', `,"cover":${value},"name":`);

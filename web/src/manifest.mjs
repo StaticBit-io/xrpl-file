@@ -6,7 +6,8 @@ const byteLength = (text) => new TextEncoder().encode(text).length;
 
 function serialize(m, name) {
   const fields = { v: MANIFEST_VERSION, type: m.type, size: m.size, chunk: m.chunk, root: m.root, ledgers: [m.firstLedger, m.lastLedger], blocks: m.blocks, lists: m.lists };
-  if (m.cover != null) fields.cover = m.cover;
+  // Format section 4.1: a writer writes the hash upper-case, as the .NET side does; readers accept either.
+  if (m.cover != null) fields.cover = m.cover.toUpperCase();
   if (name != null) fields.name = name;
   return JSON.stringify(fields);
 }
