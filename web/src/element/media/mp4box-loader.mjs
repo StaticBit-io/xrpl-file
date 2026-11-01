@@ -77,31 +77,37 @@ function insertScript(src, integrity) {
     const hadOwn = Object.prototype.hasOwnProperty.call(globalThis, 'MP4Box');
     const previous = globalThis.MP4Box;
 
-    // The bundle assigns `MP4Box` on the global object. A host page may carry its own copy, possibly
-    // another version, that its own code relies on: take ours and give theirs back.
+    // The bundle is a classic script with a top-level `var MP4Box`, so the global it makes cannot be
+    // deleted (`delete` throws in module code), only assigned. A host page may carry its own copy,
+    // possibly another version, that its own code relies on: give theirs back by assignment. Without
+    // one, `MP4Box` stays on the page; nothing can take it off. It must never get in the way of
+    // settling the promise, hence the guards.
     function restore() {
-      if (hadOwn) globalThis.MP4Box = previous;
-      else delete globalThis.MP4Box;
+      try {
+        if (hadOwn) globalThis.MP4Box = previous;
+        else Reflect.deleteProperty(globalThis, 'MP4Box');
+      } catch {
+        // A host's read-only MP4Box is theirs to keep; ours is already in hand.
+      }
     }
 
     script.onload = () => {
-      const loaded = globalThis.MP4Box;
-      restore();
       script.onload = script.onerror = null;
+      const loaded = globalThis.MP4Box;
+      const usable = Boolean(loaded) && typeof loaded.createFile === 'function';
 
-      if (loaded && typeof loaded.createFile === 'function') {
-        silence();
-        resolve(loaded);
-      } else {
-        script.remove?.();
-        reject(new Error('the mp4box script loaded but did not define MP4Box'));
-      }
+      if (usable) silence();
+      else script.remove?.();
+      restore();
+
+      if (usable) resolve(loaded);
+      else reject(new Error('the mp4box script loaded but did not define MP4Box'));
     };
 
     script.onerror = () => {
-      restore();
       script.onload = script.onerror = null;
       script.remove?.();
+      restore();
       reject(new Error(`the mp4box script could not be loaded from ${src}`));
     };
 

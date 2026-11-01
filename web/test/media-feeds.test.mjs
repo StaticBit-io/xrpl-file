@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { children, find, topLevelBoxes } from '../src/element/media/boxes.mjs';
@@ -727,4 +728,65 @@ test('loadMp4Box outside a page rejects instead of throwing', async () => {
   } finally {
     if (saved !== undefined) globalThis.document = saved;
   }
+});
+
+const loaderUrl = new URL('../src/element/media/mp4box-loader.mjs', import.meta.url).href;
+
+/**
+ * Runs a page script in a fresh node process and returns what it printed as JSON. A classic script's
+ * top-level `var MP4Box` makes a global property that can neither be deleted nor be left behind by a
+ * test, so these cases each get their own global object.
+ */
+function inFreshGlobal(body) {
+  const code = `
+    import { loadMp4Box } from ${JSON.stringify(loaderUrl)};
+    const scripts = [];
+    globalThis.document = { head: { append: (script) => scripts.push(script) }, createElement: () => ({ remove() {} }) };
+    const ours = { createFile: () => 'ours' };
+    // What a classic script's top-level var does to the global object.
+    const declare = (name, value) => Object.defineProperty(globalThis, name, { value, writable: true, configurable: false, enumerable: true });
+    ${body}
+  `;
+  const out = execFileSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8' });
+  return JSON.parse(out);
+}
+
+test('loadMp4Box resolves although the script\'s global MP4Box cannot be deleted', () => {
+  const result = inFreshGlobal(`
+    const loading = loadMp4Box({ scriptUrl: 'https://cdn.example/a/element.js' });
+    declare('MP4Box', ours);
+    declare('Log', { getDurationString: () => '', error: () => { throw new Error('logged'); } });
+    scripts[0].onload();
+    const got = await loading;
+    globalThis.Log.error();
+    console.log(JSON.stringify({ resolved: got === ours, silenced: true }));
+  `);
+
+  assert.deepEqual(result, { resolved: true, silenced: true });
+});
+
+test('loadMp4Box puts a host page\'s MP4Box back when that global cannot be deleted either', () => {
+  const result = inFreshGlobal(`
+    const host = { createFile: () => 'host' };
+    declare('MP4Box', host);
+    const loading = loadMp4Box({ scriptUrl: 'https://cdn.example/b/element.js' });
+    globalThis.MP4Box = ours;
+    scripts[0].onload();
+    const got = await loading;
+    console.log(JSON.stringify({ resolved: got === ours, hostBack: globalThis.MP4Box === host }));
+  `);
+
+  assert.deepEqual(result, { resolved: true, hostBack: true });
+});
+
+test('loadMp4Box still rejects when the load fails and the host\'s MP4Box is read-only', () => {
+  const result = inFreshGlobal(`
+    Object.defineProperty(globalThis, 'MP4Box', { value: { createFile: () => 'host' }, writable: false, configurable: false });
+    const loading = loadMp4Box({ scriptUrl: 'https://cdn.example/c/element.js' });
+    scripts[0].onerror();
+    const message = await loading.then(() => 'resolved', (error) => error.message);
+    console.log(JSON.stringify({ message }));
+  `);
+
+  assert.match(result.message, /could not be loaded/);
 });
