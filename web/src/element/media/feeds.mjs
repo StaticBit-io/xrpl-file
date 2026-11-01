@@ -16,7 +16,7 @@
 import { locateMoov, readBox, topLevelBoxes } from './boxes.mjs';
 import { mimeFor, parseMovie } from './movie.mjs';
 import { groupAt, parseSidx } from './sidx.mjs';
-import { cueAt, locateCues, parseCues, parseWebmHead, webmMime } from './webm.mjs';
+import { cueAt, locateCues, orderClusterBlocks, parseCues, parseWebmHead, readTopLevel, webmMime } from './webm.mjs';
 
 /**
  * @typedef {object} Segment
@@ -160,6 +160,146 @@ function seconds(value) {
 }
 
 /**
+ * The `media` of a WebM feed: whole Clusters with their blocks in timecode order.
+ *
+ * Media Source takes a Cluster only when its block timecodes never go backwards, and a muxed VP9 and
+ * Opus file's do (see `orderClusterBlocks`). A Cluster is re-ordered once the blocks that hold it have
+ * verified, so a Cluster that runs past the block in hand is carried to the next `media` call, and
+ * what is appended is a list of complete Clusters. The carried bytes are one Cluster at most
+ * (`MAX_CLUSTER_BYTES`): `readTopLevel` refuses a larger claim, and an element that is not a Cluster
+ * is discarded as it goes by instead of being kept.
+ *
+ * Elements between and after the Clusters (Cues, Tags, Void) are dropped, not appended: Media Source
+ * ignores them, the Cues are already read for seeking, and dropping them keeps every segment a Cluster.
+ *
+ * A read that does not continue the previous one (the first of a generation, a seek, a retry) starts
+ * afresh; so does `reset`, which `seekTo` calls. The player only reads in file order inside a
+ * generation, and the offset check keeps a stale tail from ever being glued to bytes it did not precede.
+ */
+function webmMedia({ blockBytes, lastBlock }) {
+  let buffer = EMPTY;
+  let length = 0;
+  let discard = 0;
+  let next = -1;
+  let hint = { need: 0, resume: 0 };
+  let closed = false;
+
+  function reset() {
+    buffer = EMPTY;
+    length = 0;
+    discard = 0;
+    next = -1;
+    hint = { need: 0, resume: 0 };
+  }
+
+  function append(bytes) {
+    if (length + bytes.length > buffer.length) {
+      const grown = new Uint8Array(Math.max(length + bytes.length, buffer.length * 2));
+      grown.set(buffer.subarray(0, length));
+      buffer = grown;
+    }
+
+    buffer.set(bytes, length);
+    length += bytes.length;
+  }
+
+  /** Keeps `data[at..]`, which is a view of the carried buffer or of the block just read. */
+  function carry(data, at, owned) {
+    const rest = data.length - at;
+    if (rest === 0) {
+      buffer = EMPTY;
+      length = 0;
+      return;
+    }
+
+    if (owned) {
+      if (at > 0) buffer.copyWithin(0, at, data.length);
+    } else {
+      buffer = new Uint8Array(rest);
+      buffer.set(data.subarray(at));
+    }
+    length = rest;
+  }
+
+  function cut(data, at) {
+    let offset = at;
+    if (discard > 0) {
+      const dropped = Math.min(discard, data.length);
+      discard -= dropped;
+      offset += dropped;
+    }
+    return offset;
+  }
+
+  function cluster(data, from, top, owned) {
+    // Bytes of the carried buffer are overwritten by the next read, so a Cluster leaves it as a copy.
+    const bytes = owned ? data.slice(from, top.end) : data.subarray(from, top.end);
+    return { track: 0, bytes: top.truncated ? bytes : orderClusterBlocks(bytes) };
+  }
+
+  async function media(block, bytes, from = block * blockBytes) {
+    if (closed) return [];
+
+    const blockStart = block * blockBytes;
+    const start = Math.min(Math.max(from, blockStart), blockStart + bytes.length);
+    const fresh = bytes.subarray(start - blockStart);
+    if (start !== next) reset();
+    next = start + fresh.length;
+
+    const last = block >= lastBlock;
+    const owned = length > 0;
+    if (owned) {
+      append(fresh);
+      if (!last && length < hint.need) return [];
+    }
+
+    const data = owned ? buffer.subarray(0, length) : fresh;
+    const segments = [];
+
+    try {
+      let at = cut(data, 0);
+      let resume = owned ? hint.resume : 0;
+
+      while (at < data.length) {
+        const top = readTopLevel(data, at, last, resume);
+        resume = 0;
+
+        if (top.kind === 'more') {
+          hint = { need: top.need - at, resume: top.resume };
+          break;
+        }
+
+        if (top.kind === 'skip') {
+          discard = Math.max(top.end - data.length, 0);
+          at = Math.min(top.end, data.length);
+        } else {
+          segments.push(cluster(data, at, top, owned));
+          at = top.end;
+        }
+      }
+
+      carry(data, at, owned);
+    } catch (error) {
+      reset();
+      throw error;
+    }
+
+    if (length === 0) hint = { need: 0, resume: 0 };
+    if (last) reset();
+    return segments;
+  }
+
+  return {
+    media,
+    reset,
+    close() {
+      closed = true;
+      reset();
+    },
+  };
+}
+
+/**
  * The `sidx` after `moov`: where it ends, the bytes from the end of `moov` to there (padding boxes
  * included, so they can join the initialization segment), and its groups with file offsets.
  */
@@ -235,6 +375,7 @@ async function openWebm({ source, blockBytes, size }) {
 
   const initBytes = first.subarray(0, head.initEnd);
   const answer = seekAnswer(source, blockBytes, size);
+  const clusters = webmMedia({ blockBytes, lastBlock: source.total - 1 });
 
   return {
     kind: 'webm',
@@ -247,6 +388,9 @@ async function openWebm({ source, blockBytes, size }) {
     },
 
     async seekTo(target) {
+      // A new generation begins at a Cluster, so what was carried from the last one is of no use.
+      clusters.reset();
+
       const t = seconds(target);
       if (t === 0) return answer(head.initEnd, 0);
       if (cues.length === 0) return null;
@@ -256,8 +400,8 @@ async function openWebm({ source, blockBytes, size }) {
       return cue.time > t ? answer(head.initEnd, 0) : answer(cue.offset, cue.time);
     },
 
-    media: passThrough(blockBytes),
-    close() {},
+    media: clusters.media,
+    close: clusters.close,
   };
 }
 

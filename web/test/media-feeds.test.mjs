@@ -7,7 +7,7 @@ import { MP4BOX_INTEGRITY, loadMp4Box as loadRealMp4Box, mp4boxUrl } from '../sr
 import { openFeed } from '../src/element/media/feeds.mjs';
 import { parseMovie, seekPoint } from '../src/element/media/movie.mjs';
 import { parseWebmHead } from '../src/element/media/webm.mjs';
-import { ascii, moovOf, read } from './media-helpers.mjs';
+import { ascii, blocksInOrder, moovOf, read, webmClusters } from './media-helpers.mjs';
 import { loadMp4Box, mp4box } from './mp4box.mjs';
 
 const BLOCK = 4096;
@@ -789,4 +789,180 @@ test('loadMp4Box still rejects when the load fails and the host\'s MP4Box is rea
   `);
 
   assert.match(result.message, /could not be loaded/);
+});
+
+// WebM: whole Clusters, in block order
+
+const CLUSTER_ID = [0x1f, 0x43, 0xb6, 0x75];
+
+function startsWithCluster(bytes) {
+  return CLUSTER_ID.every((byte, i) => bytes[i] === byte);
+}
+
+/** What the feed makes of the file read from `target` to its last block: the segments of every `media` call, in order. */
+async function playCalls(feed, source, target) {
+  const calls = [];
+  for (let block = target.block; block < source.blocks; block++) {
+    const from = block === target.block ? target.offset : undefined;
+    calls.push(await feed.media(block, source.block(block), from));
+  }
+  return calls;
+}
+
+function sorted(bytes) {
+  return [...bytes].sort((a, b) => a - b);
+}
+
+for (const name of ['clip.webm', 'clip-inverted.webm', 'clip-live.webm']) {
+  test(`WebM feed over ${name}: only whole Clusters, tails carried between blocks, every Cluster in block order`, async () => {
+    const source = blocksOf(read(name));
+    const feed = await open('webm', source);
+    const raw = webmClusters(source.bytes);
+
+    const calls = await playCalls(feed, source, await feed.seekTo(0));
+    const segments = calls.flat();
+
+    assert.ok(segments.every((segment) => segment.track === 0 && startsWithCluster(segment.bytes)));
+    assert.ok(segments.every((segment) => blocksInOrder(segment.bytes)));
+    assert.equal(segments.length, raw.length);
+
+    // A Cluster is several blocks long: most calls give nothing, and a Cluster appears in the call that holds its last byte.
+    assert.ok(calls.some((segmentsOfCall) => segmentsOfCall.length === 0), 'a block that ends inside a Cluster gives nothing yet');
+    assert.equal(segments.reduce((sum, segment) => sum + segment.bytes.length, 0), raw.reduce((sum, cluster) => sum + cluster.length, 0));
+
+    // Same bytes as the file's Clusters, only the order of children can differ.
+    segments.forEach((segment, i) => {
+      assert.equal(segment.bytes.length, raw[i].length);
+      assert.deepEqual(sorted(segment.bytes), sorted(raw[i]));
+    });
+  });
+}
+
+test('WebM feed: the inversion of a muxed VP9 and Opus file is in the raw Clusters and not in what the feed hands over', async () => {
+  const source = blocksOf(read('clip-inverted.webm'));
+  const raw = webmClusters(source.bytes);
+  assert.ok(raw.some((cluster) => !blocksInOrder(cluster)));
+
+  const feed = await open('webm', source);
+  const segments = (await playCalls(feed, source, await feed.seekTo(0))).flat();
+
+  assert.ok(segments.length > 0);
+  assert.ok(segments.every((segment) => blocksInOrder(segment.bytes)));
+});
+
+test('WebM feed: the segments do not depend on how the file is cut into blocks', async () => {
+  const bytes = read('clip-inverted.webm');
+  const reference = await (async () => {
+    const source = blocksOf(bytes, 1 << 20);
+    const feed = await open('webm', source);
+    return (await playCalls(feed, source, await feed.seekTo(0))).flat().map((segment) => [...segment.bytes]);
+  })();
+
+  for (const blockBytes of [700, 1000, 4096, 10_000]) {
+    const source = blocksOf(bytes, blockBytes);
+    const feed = await open('webm', source);
+    const segments = (await playCalls(feed, source, await feed.seekTo(0))).flat().map((segment) => [...segment.bytes]);
+    assert.deepEqual(segments, reference, `block size ${blockBytes}`);
+  }
+});
+
+test('WebM feed: an unknown-size Cluster is handed over once the next one starts, and the last one with the last block', async () => {
+  const source = blocksOf(read('clip-live.webm'));
+  const feed = await open('webm', source);
+  const raw = webmClusters(source.bytes);
+  const offsetOf = (cluster) => cluster.byteOffset - source.bytes.byteOffset;
+
+  const calls = await playCalls(feed, source, await feed.seekTo(0));
+  const callOf = (segmentIndex) => calls.findIndex((_, i) => calls.slice(0, i + 1).flat().length > segmentIndex);
+
+  for (let i = 0; i < raw.length - 1; i++) {
+    // The header of the next Cluster (an ID and a size, 12 bytes at most) is what closes this one.
+    const nextStart = offsetOf(raw[i + 1]);
+    assert.ok(callOf(i) >= Math.floor(nextStart / BLOCK) && callOf(i) <= Math.floor((nextStart + 11) / BLOCK), 'Cluster ' + i);
+  }
+
+  assert.equal(callOf(raw.length - 1), calls.length - 1);
+  assert.equal(calls.flat().length, raw.length);
+});
+
+test('WebM feed: a seek drops the carried tail, and the next Cluster read starts at the offset the seek gave', async () => {
+  const source = blocksOf(read('clip.webm'));
+  const feed = await open('webm', source);
+  const raw = webmClusters(source.bytes);
+
+  const start = await feed.seekTo(0);
+  let carried = false;
+  for (let block = start.block; block < source.blocks && !carried; block++) {
+    carried = (await feed.media(block, source.block(block), block === start.block ? start.offset : undefined)).length === 0;
+  }
+  assert.ok(carried, 'a block ended inside a Cluster, leaving a tail');
+
+  const target = await feed.seekTo(2.5);
+  const [first] = await feed.media(target.block, source.block(target.block), target.offset);
+  const rest = (await playCalls(feed, source, { block: target.block + 1, offset: undefined })).flat();
+  const segments = first ? [first, ...rest] : rest;
+
+  const wanted = raw.filter((cluster) => cluster.byteOffset - source.bytes.byteOffset >= target.offset);
+  assert.ok(wanted.length > 0 && wanted.length < raw.length);
+  assert.ok(segments.every((segment) => startsWithCluster(segment.bytes)));
+  assert.equal(segments.length, wanted.length);
+  assert.equal(segments[0].bytes.length, wanted[0].length);
+});
+
+test('WebM feed: a read that does not continue the last one starts afresh, whatever the seek said', async () => {
+  const source = blocksOf(read('clip.webm'));
+  const feed = await open('webm', source);
+  const raw = webmClusters(source.bytes);
+  const startOffset = (cluster) => cluster.byteOffset - source.bytes.byteOffset;
+
+  const start = await feed.seekTo(0);
+  await feed.media(start.block, source.block(start.block), start.offset);
+
+  // Block 0 handed over again from the first Cluster: nothing of the earlier tail may stand in front of it.
+  const again = (await playCalls(feed, source, start)).flat();
+  assert.equal(again.length, raw.length);
+  assert.equal(startOffset(raw[0]), start.offset);
+  assert.ok(again.every((segment) => startsWithCluster(segment.bytes)));
+});
+
+test('WebM feed: a Cluster that claims more than a Cluster can hold is refused with a clear error', async () => {
+  const original = read('clip.webm');
+  const head = parseWebmHead(original);
+  const hostile = new Uint8Array(head.initEnd + 64);
+  hostile.set(original.subarray(0, head.initEnd));
+  // A Cluster of 2^32 bytes.
+  hostile.set([0x1f, 0x43, 0xb6, 0x75, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0xe7, 0x81, 0x00], head.initEnd);
+
+  const source = blocksOf(hostile);
+  const feed = await open('webm', source);
+  const start = await feed.seekTo(0);
+
+  await assert.rejects(() => feed.media(start.block, source.block(start.block), start.offset), /Cluster/);
+});
+
+test('WebM feed: elements between and after the Clusters (Cues, Void) are not appended', async () => {
+  const source = blocksOf(read('clip.webm'));
+  const head = parseWebmHead(source.head);
+  assert.ok(head.cuesOffset > head.initEnd, 'the Cues element follows the Clusters');
+
+  const feed = await open('webm', source);
+  const segments = (await playCalls(feed, source, await feed.seekTo(0))).flat();
+  const raw = webmClusters(source.bytes);
+
+  assert.equal(segments.reduce((sum, segment) => sum + segment.bytes.length, 0), raw.reduce((sum, cluster) => sum + cluster.length, 0));
+  assert.ok(source.bytes.length - head.initEnd > raw.reduce((sum, cluster) => sum + cluster.length, 0));
+});
+
+test('WebM feed: the first read of a generation can begin inside a block', async () => {
+  const source = blocksOf(read('clip.webm'));
+  const feed = await open('webm', source);
+  const raw = webmClusters(source.bytes);
+
+  const target = await feed.seekTo(2.5);
+  assert.notEqual(target.offset % BLOCK, 0, 'the fixture has a Cluster that starts inside a block');
+  const segments = (await playCalls(feed, source, target)).flat();
+
+  assert.ok(segments.length >= 1);
+  assert.ok(segments.length < raw.length);
+  assert.ok(segments.every((segment) => startsWithCluster(segment.bytes)));
 });

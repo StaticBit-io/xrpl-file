@@ -43,6 +43,13 @@ webm_inputs=(-f lavfi -i "testsrc2=size=160x90:rate=10" -itsoffset 0.007 -f lavf
 # Written to a pipe the muxer cannot seek back in: no Cues, and the Segment and Clusters keep unknown sizes.
 "${ff[@]}" "${webm_inputs[@]}" "${webm[@]}" -f webm pipe:1 > "$here/clip-live.webm"
 
+# The muxer as most files meet it: no delay on the audio input. Opus blocks are stored shifted back by the
+# codec delay, so inside a Cluster an audio block (101 ms) stands ahead of a video block (100 ms) that an
+# earlier packet time would put first. Media Source refuses such a Cluster; the feed re-orders it. The
+# tests read the raw Clusters of this file to prove the inversion is really there.
+inverted_inputs=(-f lavfi -i "testsrc2=size=160x90:rate=30" -f lavfi -i "sine=frequency=440:sample_rate=48000" -t 2)
+"${ff[@]}" "${inverted_inputs[@]}" -c:v libvpx-vp9 -g 30 -b:v 100k -pix_fmt yuv420p -c:a libopus -b:a 32k "$here/clip-inverted.webm"
+
 node "$root/tools/fixtures/fragment.mjs" "$remux" "$here/plain-start.mp4" "$here/fragmented-sidx.mp4"
 
 # File offsets of the video keyframes, which the movie tests compare the parsed sample tables against.
@@ -61,7 +68,7 @@ keyframes() {
     "$(keyframes "$here/plain-start.mp4")" "$(keyframes "$here/plain-end.mp4")"
 } > "$here/expected.json"
 
-for f in plain-start.mp4 plain-end.mp4 timecode.mov fragmented.mp4 fragmented-sidx.mp4 hevc.mp4 clip.webm clip-live.webm expected.json; do
+for f in plain-start.mp4 plain-end.mp4 timecode.mov fragmented.mp4 fragmented-sidx.mp4 hevc.mp4 clip.webm clip-live.webm clip-inverted.webm expected.json; do
   size="$(stat -c %s "$here/$f")"
   [ "$size" -lt 200000 ] || { echo "$f is $size bytes, over the 200 KB budget" >&2; exit 1; }
   echo "$f  $size bytes"

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cueAt, locateCues, parseCues, parseWebmHead, webmMime } from '../src/element/media/webm.mjs';
-import { read, reader } from './media-helpers.mjs';
+import { cueAt, locateCues, orderClusterBlocks, parseCues, parseWebmHead, readTopLevel, webmMime } from '../src/element/media/webm.mjs';
+import { blocksInOrder, clusterBlocks, read, reader, webmClusters } from './media-helpers.mjs';
 
 function hex4(bytes, at) {
   return [...bytes.subarray(at, at + 4)].map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
@@ -321,4 +321,179 @@ test('parseCues refuses bytes that are not a complete Cues element', () => {
   assert.throws(() => parseCues(concat(idBytes(0x1c53bb6b), new Uint8Array([0xff])), 0, 1_000_000), Error);
   const lying = concat(idBytes(0x1c53bb6b), sizeOf(8), idBytes(0xbb), sizeOf(100), new Uint8Array(6));
   assert.throws(() => parseCues(lying, 0, 1_000_000), Error);
+});
+
+// Block ordering inside a Cluster
+
+const UNKNOWN_SIZE_BYTES = new Uint8Array([0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+
+function int16(value) {
+  return new Uint8Array([(value >> 8) & 0xff, value & 0xff]);
+}
+
+/** A SimpleBlock of `track` at the relative `timecode`; the payload makes each block distinct. */
+function simpleBlock(track, timecode, payload) {
+  return element(0xa3, new Uint8Array([0x80 | track]), int16(timecode), new Uint8Array([0x80]), new Uint8Array(payload));
+}
+
+function blockGroup(track, timecode, payload) {
+  const block = element(0xa1, new Uint8Array([0x80 | track]), int16(timecode), new Uint8Array([0x00]), new Uint8Array(payload));
+  return element(0xa0, block, uint(0x9b, 20));
+}
+
+function cluster(...children) {
+  return element(0x1f43b675, uint(0xe7, 1000), ...children);
+}
+
+function unknownSizeCluster(...children) {
+  return concat(idBytes(0x1f43b675), UNKNOWN_SIZE_BYTES, uint(0xe7, 1000), ...children);
+}
+
+test('orderClusterBlocks sorts an inverted pair, keeps the length and the bytes of every child', () => {
+  const video67 = simpleBlock(1, 67, [1, 1, 1]);
+  const audio68 = simpleBlock(2, 68, [2, 2]);
+  const input = cluster(simpleBlock(1, 0, [9]), audio68, video67, simpleBlock(2, 88, [3]));
+
+  const output = orderClusterBlocks(input);
+
+  assert.notStrictEqual(output, input);
+  assert.equal(output.length, input.length);
+  assert.deepEqual(clusterBlocks(output).map((b) => b.timecode), [0, 67, 68, 88]);
+  assert.deepEqual(clusterBlocks(output).map((b) => b.track), [1, 1, 2, 2]);
+  assert.deepEqual(output, cluster(simpleBlock(1, 0, [9]), video67, audio68, simpleBlock(2, 88, [3])));
+});
+
+test('orderClusterBlocks gives back the very same object for a Cluster that is already in order', () => {
+  const input = cluster(simpleBlock(1, 0, [1]), simpleBlock(2, 0, [2]), simpleBlock(1, 33, [3]));
+  assert.strictEqual(orderClusterBlocks(input), input);
+});
+
+test('orderClusterBlocks is stable: equal timecodes keep their file order, across tracks', () => {
+  const input = cluster(simpleBlock(2, 50, [1]), simpleBlock(1, 50, [2]), simpleBlock(2, 10, [3]), simpleBlock(1, 50, [4]));
+  const output = orderClusterBlocks(input);
+
+  assert.deepEqual(clusterBlocks(output), [
+    { track: 2, timecode: 10 },
+    { track: 2, timecode: 50 },
+    { track: 1, timecode: 50 },
+    { track: 1, timecode: 50 },
+  ]);
+  assert.deepEqual(output, cluster(simpleBlock(2, 10, [3]), simpleBlock(2, 50, [1]), simpleBlock(1, 50, [2]), simpleBlock(1, 50, [4])));
+});
+
+test('orderClusterBlocks orders a BlockGroup by the timecode of its Block, and moves it whole', () => {
+  const group = blockGroup(1, 40, [7, 7, 7, 7]);
+  const input = cluster(simpleBlock(2, 60, [1]), group, simpleBlock(2, 20, [2]));
+  const output = orderClusterBlocks(input);
+
+  assert.deepEqual(clusterBlocks(output).map((b) => b.timecode), [20, 40, 60]);
+  assert.deepEqual(output, cluster(simpleBlock(2, 20, [2]), group, simpleBlock(2, 60, [1])));
+});
+
+test('orderClusterBlocks reads the timecode as signed 16 bits and the track number as a variable-length integer', () => {
+  const wideTrack = element(0xa3, new Uint8Array([0x40, 0x05]), int16(-3), new Uint8Array([0x80]), new Uint8Array([5]));
+  const input = cluster(simpleBlock(1, 5, [1]), wideTrack);
+
+  assert.deepEqual(orderClusterBlocks(input), cluster(wideTrack, simpleBlock(1, 5, [1])));
+});
+
+test('orderClusterBlocks keeps Timecode, Position, PrevSize and Void ahead of the blocks, in their own order', () => {
+  const position = uint(0xa7, 1234);
+  const prevSize = uint(0xab, 99);
+  const filler = element(0xec, new Uint8Array(5));
+  const input = element(
+    0x1f43b675,
+    uint(0xe7, 1000), position,
+    simpleBlock(1, 90, [1]),
+    prevSize,
+    simpleBlock(2, 30, [2]),
+    filler,
+  );
+  const output = orderClusterBlocks(input);
+
+  assert.deepEqual(output, element(0x1f43b675, uint(0xe7, 1000), position, prevSize, filler, simpleBlock(2, 30, [2]), simpleBlock(1, 90, [1])));
+  assert.equal(output.length, input.length);
+});
+
+test('orderClusterBlocks accepts an unknown-size Cluster and keeps its size field as it was', () => {
+  const input = unknownSizeCluster(simpleBlock(2, 68, [2]), simpleBlock(1, 67, [1]));
+  const output = orderClusterBlocks(input);
+
+  assert.equal(output.length, input.length);
+  assert.deepEqual(output.subarray(0, 12), input.subarray(0, 12));
+  assert.deepEqual(output, unknownSizeCluster(simpleBlock(1, 67, [1]), simpleBlock(2, 68, [2])));
+
+  const ordered = unknownSizeCluster(simpleBlock(1, 67, [1]), simpleBlock(2, 68, [2]));
+  assert.strictEqual(orderClusterBlocks(ordered), ordered);
+});
+
+test('orderClusterBlocks refuses what is not exactly one Cluster', () => {
+  assert.throws(() => orderClusterBlocks(element(0xec, new Uint8Array(3))), RangeError);
+  assert.throws(() => orderClusterBlocks(cluster(simpleBlock(1, 0, [1])).subarray(0, 12)), RangeError);
+  assert.throws(() => orderClusterBlocks(concat(cluster(simpleBlock(1, 0, [1])), new Uint8Array([0xec, 0x80]))), RangeError);
+  // A block too short to hold a track number and a timecode.
+  assert.throws(() => orderClusterBlocks(cluster(element(0xa3, new Uint8Array([0x81, 0x00])))), RangeError);
+  // A BlockGroup without a Block.
+  assert.throws(() => orderClusterBlocks(cluster(element(0xa0, uint(0x9b, 1)))), RangeError);
+  // A top-level element where the children of an unknown-size Cluster should be.
+  assert.throws(() => orderClusterBlocks(unknownSizeCluster(simpleBlock(1, 0, [1]), element(0x1c53bb6b))), RangeError);
+});
+
+test('orderClusterBlocks puts the blocks of a real muxed file in order and leaves the bytes alone', () => {
+  const clusters = webmClusters(read('clip-inverted.webm'));
+  assert.ok(clusters.some((c) => !blocksInOrder(c)), 'the fixture has an inversion');
+
+  for (const original of clusters) {
+    const ordered = orderClusterBlocks(original);
+    assert.equal(ordered.length, original.length);
+    assert.ok(blocksInOrder(ordered));
+    assert.deepEqual([...ordered].sort(), [...original].sort());
+  }
+});
+
+// Where a top-level element ends, for the feed
+
+test('readTopLevel: a complete known-size Cluster, an element to skip, and what needs more bytes', () => {
+  const whole = cluster(simpleBlock(1, 0, [1, 2, 3]));
+  const withCues = concat(whole, element(0x1c53bb6b, new Uint8Array(4)));
+
+  assert.deepEqual(readTopLevel(withCues, 0, false), { kind: 'cluster', end: whole.length });
+  assert.deepEqual(readTopLevel(withCues, whole.length, false), { kind: 'skip', end: withCues.length });
+
+  assert.deepEqual(readTopLevel(whole.subarray(0, whole.length - 1), 0, false), { kind: 'more', need: whole.length, resume: 0 });
+  assert.equal(readTopLevel(whole.subarray(0, 3), 0, false).kind, 'more');
+  assert.deepEqual(readTopLevel(whole.subarray(0, whole.length - 1), 0, true), { kind: 'cluster', end: whole.length - 1, truncated: true });
+  assert.deepEqual(readTopLevel(whole.subarray(0, 3), 0, true), { kind: 'skip', end: 3 });
+});
+
+test('readTopLevel: an unknown-size Cluster ends at the next top-level ID, or at the end of the data only when that is the end of the file', () => {
+  const open = unknownSizeCluster(simpleBlock(1, 0, [1]), simpleBlock(2, 5, [2]));
+  const next = cluster(simpleBlock(1, 40, [3]));
+
+  assert.deepEqual(readTopLevel(concat(open, next), 0, false), { kind: 'cluster', end: open.length });
+  assert.deepEqual(readTopLevel(open, 0, true), { kind: 'cluster', end: open.length });
+
+  const waiting = readTopLevel(open, 0, false);
+  assert.equal(waiting.kind, 'more');
+  assert.ok(waiting.need > open.length);
+
+  // A scan that resumes where the last one stopped finds the same end.
+  const grown = concat(open, next);
+  assert.deepEqual(readTopLevel(grown, 0, false, waiting.resume), { kind: 'cluster', end: open.length });
+
+  // A block cut short at the end of the data is not part of the Cluster yet, and at the end of the file it is dropped.
+  const cut = concat(open, simpleBlock(1, 90, [4, 4, 4, 4]).subarray(0, 5));
+  assert.equal(readTopLevel(cut, 0, false).kind, 'more');
+  assert.deepEqual(readTopLevel(cut, 0, true), { kind: 'cluster', end: open.length });
+});
+
+test('readTopLevel refuses an element of unknown size that is not a Cluster, and a Cluster claiming more than any real one', () => {
+  assert.throws(() => readTopLevel(concat(idBytes(0x1c53bb6b), UNKNOWN_SIZE_BYTES), 0, false), RangeError);
+  assert.throws(() => readTopLevel(concat(idBytes(0x1f43b675), sizeOf(64 * 1024 * 1024)), 0, false), RangeError);
+});
+
+test('readTopLevel stops an unknown-size Cluster that keeps growing past what a Cluster can hold', () => {
+  const grown = new Uint8Array(32 * 1024 * 1024 + 64);
+  grown.set(concat(idBytes(0x1f43b675), UNKNOWN_SIZE_BYTES));
+  assert.throws(() => readTopLevel(grown, 0, false), /Cluster/);
 });

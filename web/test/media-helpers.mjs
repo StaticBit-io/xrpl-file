@@ -46,3 +46,87 @@ export function syncSamples(track) {
 export function isSampleStart(movie, offset) {
   return movie.tracks.some((track) => track.table?.offsets.includes(offset));
 }
+
+const WEBM_TOP_LEVEL = new Set([0x18538067, 0x114d9b74, 0x1549a966, 0x1654ae6b, 0x1f43b675, 0x1c53bb6b, 0x1043a770, 0x1254c367, 0x1941a469]);
+
+/** An EBML ID (marker kept) or size (marker stripped; null when all ones) at `at`, written independently of src/. */
+function vint(bytes, at, keepMarker) {
+  const first = bytes[at];
+  let length = 1;
+  while (length <= 8 && !(first & (0x80 >> (length - 1)))) length++;
+  let value = keepMarker ? first : first & (0xff >> length);
+  let ones = (first & (0xff >> length)) === 0xff >> length;
+  for (let i = 1; i < length; i++) {
+    value = value * 256 + bytes[at + i];
+    if (bytes[at + i] !== 0xff) ones = false;
+  }
+  return { value: !keepMarker && ones ? null : value, length };
+}
+
+/** The top-level elements of a WebM file from its first Cluster: `{ id, start, end }`; an unknown-size Cluster ends at the next top-level ID. */
+export function webmTopLevel(bytes) {
+  let at = 0;
+  const out = [];
+  while (at < bytes.length) {
+    const id = vint(bytes, at, true);
+    const size = vint(bytes, at + id.length, false);
+    const dataStart = at + id.length + size.length;
+    if (id.value === 0x18538067) {
+      at = dataStart;
+      continue;
+    }
+
+    let end = size.value === null ? bytes.length : dataStart + size.value;
+    if (size.value === null) {
+      for (let c = dataStart; c < bytes.length; ) {
+        const childId = vint(bytes, c, true);
+        if (WEBM_TOP_LEVEL.has(childId.value)) { end = c; break; }
+        const childSize = vint(bytes, c + childId.length, false);
+        c += childId.length + childSize.length + childSize.value;
+      }
+    }
+    out.push({ id: id.value, start: at, dataStart, end });
+    at = end;
+  }
+  return out;
+}
+
+/** The Clusters of a whole WebM file, as byte slices in file order. */
+export function webmClusters(bytes) {
+  return webmTopLevel(bytes).filter((element) => element.id === 0x1f43b675).map((element) => bytes.subarray(element.start, element.end));
+}
+
+/** `{ track, timecode }` of every SimpleBlock and BlockGroup block of one Cluster, in file order, read independently of src/. */
+export function clusterBlocks(cluster) {
+  const id = vint(cluster, 0, true);
+  const size = vint(cluster, id.length, false);
+  const out = [];
+  const timecodeOf = (dataStart) => {
+    const track = vint(cluster, dataStart, false);
+    const at = dataStart + track.length;
+    return { track: track.value, timecode: ((cluster[at] << 8) | cluster[at + 1]) << 16 >> 16 };
+  };
+
+  for (let c = id.length + size.length; c < cluster.length; ) {
+    const childId = vint(cluster, c, true);
+    const childSize = vint(cluster, c + childId.length, false);
+    const dataStart = c + childId.length + childSize.length;
+    if (childId.value === 0xa3) out.push(timecodeOf(dataStart));
+    if (childId.value === 0xa0) {
+      for (let g = dataStart; g < dataStart + childSize.value; ) {
+        const gId = vint(cluster, g, true);
+        const gSize = vint(cluster, g + gId.length, false);
+        if (gId.value === 0xa1) out.push(timecodeOf(g + gId.length + gSize.length));
+        g += gId.length + gSize.length + gSize.value;
+      }
+    }
+    c = dataStart + childSize.value;
+  }
+  return out;
+}
+
+/** True when no block of the Cluster is earlier than the one before it, whatever the track. */
+export function blocksInOrder(cluster) {
+  const timecodes = clusterBlocks(cluster).map((block) => block.timecode);
+  return timecodes.every((value, i) => i === 0 || value >= timecodes[i - 1]);
+}

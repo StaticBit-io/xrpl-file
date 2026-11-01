@@ -19,6 +19,9 @@ const ID_INFO = 0x1549a966;
 const ID_TRACKS = 0x1654ae6b;
 const ID_CLUSTER = 0x1f43b675;
 const ID_CUES = 0x1c53bb6b;
+const ID_CHAPTERS = 0x1043a770;
+const ID_TAGS = 0x1254c367;
+const ID_ATTACHMENTS = 0x1941a469;
 
 const ID_SEEK = 0x4dbb;
 const ID_SEEK_ID = 0x53ab;
@@ -34,6 +37,12 @@ const ID_CUE_POINT = 0xbb;
 const ID_CUE_TIME = 0xb3;
 const ID_CUE_TRACK_POSITIONS = 0xb7;
 const ID_CUE_CLUSTER_POSITION = 0xf1;
+const ID_SIMPLE_BLOCK = 0xa3;
+const ID_BLOCK_GROUP = 0xa0;
+const ID_BLOCK = 0xa1;
+
+/** What can follow a Cluster in a Segment: the end of an unknown-size Cluster is the first of these. */
+const SEGMENT_CHILDREN = new Set([ID_EBML, ID_SEGMENT, ID_SEEK_HEAD, ID_INFO, ID_TRACKS, ID_CLUSTER, ID_CUES, ID_CHAPTERS, ID_TAGS, ID_ATTACHMENTS]);
 
 const CUES_ID_BYTES = [0x1c, 0x53, 0xbb, 0x6b];
 
@@ -57,6 +66,13 @@ const MAX_CUES_BYTES = 16 * 1024 * 1024;
 
 const MAX_CODEC_LENGTH = 64;
 
+/**
+ * The most one Cluster may hold. ffmpeg closes a Cluster at 5 MB and mkvmerge at about the same, so a
+ * claim past this is a corrupt or hostile size; it is also what bounds the bytes a reader keeps while
+ * it waits for a Cluster to end.
+ */
+export const MAX_CLUSTER_BYTES = 32 * 1024 * 1024;
+
 const CODEC_STRINGS = new Map([
   ['V_VP9', 'vp9'],
   ['V_VP8', 'vp8'],
@@ -65,7 +81,10 @@ const CODEC_STRINGS = new Map([
 ]);
 
 function truncated(at) {
-  return new RangeError(`the WebM bytes end inside the element at byte ${at}`);
+  const error = new RangeError(`the WebM bytes end inside the element at byte ${at}`);
+  // A streaming reader tells "more bytes will fix this" from "these bytes are wrong".
+  error.truncated = true;
+  return error;
 }
 
 /** An element ID, marker bits kept. @returns {{ value: number, length: number }} */
@@ -441,4 +460,149 @@ export function cueAt(cues, seconds) {
  */
 export function webmMime(head) {
   return head.codecs.length === 0 ? 'video/webm' : `video/webm; codecs="${head.codecs.join(',')}"`;
+}
+
+/** The relative timecode (signed 16 bits) of a SimpleBlock or Block: it follows the track number, a variable-length integer. */
+function blockTimecode(bytes, block) {
+  const first = block.size === 0 ? 0 : bytes[block.dataStart];
+  const trackLength = first === 0 ? 0 : Math.clz32(first) - 23;
+  if (trackLength === 0 || block.size < trackLength + 3) {
+    throw new RangeError(`the block at byte ${block.start} is too short to hold a timecode`);
+  }
+
+  const at = block.dataStart + trackLength;
+  return (((bytes[at] << 8) | bytes[at + 1]) << 16) >> 16;
+}
+
+/** The timecode a child of a Cluster sorts by, or null for a child that is not a block. */
+function sortKey(bytes, child) {
+  if (child.id === ID_SIMPLE_BLOCK) return blockTimecode(bytes, child);
+  if (child.id !== ID_BLOCK_GROUP) return null;
+
+  const block = childrenOf(bytes, child.dataStart, child.end).find((inner) => inner.id === ID_BLOCK);
+  if (block === undefined) throw new RangeError(`the BlockGroup at byte ${child.start} has no Block`);
+  return blockTimecode(bytes, block);
+}
+
+/**
+ * Puts the blocks of one Cluster in timecode order.
+ *
+ * Chromium's Media Source parser refuses a Cluster whose block timecodes go backwards, whatever the
+ * track ("Got a block with a timecode before the previous block"). ffmpeg's Matroska muxer interleaves
+ * by packet time but stores an Opus block shifted back by the codec delay, so a muxed VP9 and Opus
+ * file has an audio block at 68 ms ahead of a video block at 67 ms. The file is valid and a plain
+ * `<video>` plays it; only the parser of Media Source needs the order.
+ *
+ * Children other than SimpleBlock and BlockGroup (Timecode, Position, PrevSize, Void) stay ahead of
+ * the blocks in their own order. Every child is copied byte for byte, so the Cluster has the length
+ * it had, and an unknown-size Cluster keeps its all-ones size. Equal timecodes keep their file order.
+ *
+ * @param {Uint8Array} cluster exactly one Cluster element, header included; an unknown-size Cluster runs to the end of these bytes
+ * @returns {Uint8Array} `cluster` itself when its blocks are in order, else a new array of the same length
+ * @throws {RangeError} when the bytes are not one complete Cluster or a block in it is malformed
+ */
+export function orderClusterBlocks(cluster) {
+  const header = readHeader(cluster, 0, cluster.length);
+  if (header.id !== ID_CLUSTER) throw new RangeError('these bytes are not a Cluster element');
+
+  if (header.size !== UNKNOWN_SIZE) {
+    if (header.end > cluster.length) throw truncated(0);
+    if (header.end < cluster.length) throw new RangeError('bytes follow the Cluster element');
+  }
+
+  const others = [];
+  const blocks = [];
+  for (const child of childrenOf(cluster, header.dataStart, cluster.length)) {
+    if (header.size === UNKNOWN_SIZE && SEGMENT_CHILDREN.has(child.id)) {
+      throw new RangeError(`the element at byte ${child.start} ends the Cluster, which was given as one`);
+    }
+
+    const key = sortKey(cluster, child);
+    if (key === null) others.push(child);
+    else blocks.push({ key, index: blocks.length, child });
+  }
+
+  if (blocks.every((block, i) => i === 0 || block.key >= blocks[i - 1].key)) return cluster;
+
+  blocks.sort((a, b) => a.key - b.key || a.index - b.index);
+
+  const out = new Uint8Array(cluster.length);
+  out.set(cluster.subarray(0, header.dataStart));
+  let at = header.dataStart;
+  for (const child of [...others, ...blocks.map((block) => block.child)]) {
+    out.set(cluster.subarray(child.start, child.end), at);
+    at += child.end - child.start;
+  }
+
+  return out;
+}
+
+/**
+ * @typedef {object} TopLevel
+ * @property {'cluster' | 'skip' | 'more'} kind
+ * @property {number} [end]  `cluster`, `skip`: absolute offset where the element ends; for `skip` it can lie past the data, which is how far to discard
+ * @property {boolean} [truncated]  `cluster`: the data ended inside a known-size Cluster and this is all of it
+ * @property {number} [need]  `more`: the data must be at least this long before asking again
+ * @property {number} [resume]  `more`: pass it back as `resume`, with the same `at`, to carry on where this scan stopped
+ */
+
+/**
+ * Where the element at `at` ends, for reading a Segment's children as the bytes arrive.
+ *
+ * Only a Cluster is returned as `cluster`; every other element (Cues, Tags, Void) is `skip`. A Cluster
+ * is complete when its size says so or, with no size, when the next element of the Segment starts: an
+ * unknown-size Cluster is never complete while more bytes may come. `final` says they will not, which
+ * ends it at the end of the data and drops a block that is cut short there.
+ *
+ * @param {Uint8Array} bytes
+ * @param {number} at the first header byte of the element
+ * @param {boolean} final these bytes are the end of the file
+ * @param {number} [resume] the `resume` of an earlier `more` for this `at`, to skip the children already seen
+ * @returns {TopLevel}
+ * @throws {RangeError} when the bytes are not an element, an element other than a Cluster has no size, or a Cluster is larger than MAX_CLUSTER_BYTES
+ */
+export function readTopLevel(bytes, at, final, resume = 0) {
+  let header;
+  try {
+    header = readHeader(bytes, at, bytes.length);
+  } catch (error) {
+    if (!error?.truncated) throw error;
+    return final ? { kind: 'skip', end: bytes.length } : { kind: 'more', need: bytes.length + 1, resume: 0 };
+  }
+
+  if (header.id !== ID_CLUSTER) {
+    if (header.size === UNKNOWN_SIZE) {
+      throw new RangeError(`the element at byte ${at} has no size, which only a Segment or Cluster may`);
+    }
+    return { kind: 'skip', end: header.end };
+  }
+
+  if (header.size !== UNKNOWN_SIZE) {
+    if (header.size > MAX_CLUSTER_BYTES) throw new RangeError(`the Cluster at byte ${at} claims ${header.size} bytes`);
+    if (header.end <= bytes.length) return { kind: 'cluster', end: header.end };
+    return final ? { kind: 'cluster', end: bytes.length, truncated: true } : { kind: 'more', need: header.end, resume: 0 };
+  }
+
+  // No size: the children are walked until one belongs to the Segment, so the Cluster is as long as its children are.
+  if (bytes.length - at > MAX_CLUSTER_BYTES) throw new RangeError(`the Cluster at byte ${at} runs past ${MAX_CLUSTER_BYTES} bytes`);
+
+  let child = Math.max(at + resume, header.dataStart);
+  while (child < bytes.length) {
+    let element;
+    try {
+      element = readHeader(bytes, child, bytes.length);
+    } catch (error) {
+      if (!error?.truncated) throw error;
+      break;
+    }
+
+    if (SEGMENT_CHILDREN.has(element.id)) return { kind: 'cluster', end: child };
+    if (element.size === UNKNOWN_SIZE) {
+      throw new RangeError(`the element at byte ${child} has no size, which only a Segment or Cluster may`);
+    }
+    if (element.end > bytes.length) break;
+    child = element.end;
+  }
+
+  return final ? { kind: 'cluster', end: child } : { kind: 'more', need: bytes.length + 1, resume: child - at };
 }
