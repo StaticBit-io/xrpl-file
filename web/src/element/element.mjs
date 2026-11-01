@@ -27,7 +27,11 @@ const NOTE_TOO_LARGE = 'This picture is too large to show here.';
 const NOTE_MISMATCH = "This file's contents do not match its type, so it is offered as a download.";
 const NOTE_UNDECODABLE = 'This browser cannot show this picture.';
 const NOTE_UNPLAYABLE = 'This browser cannot play this video here.';
-const NOTES = { 'too-large': NOTE_TOO_LARGE, mismatch: NOTE_MISMATCH, undecodable: NOTE_UNDECODABLE, unplayable: NOTE_UNPLAYABLE };
+// mp4box.js is fetched from the script's own origin; a host that serves the script without CORS headers breaks only that fetch.
+const NOTE_PLAYER = 'The video player could not be loaded from this site.';
+const NOTES = {
+  'too-large': NOTE_TOO_LARGE, mismatch: NOTE_MISMATCH, undecodable: NOTE_UNDECODABLE, unplayable: NOTE_UNPLAYABLE, player: NOTE_PLAYER,
+};
 
 const isAbort = (error) => error?.name === 'AbortError';
 

@@ -16,21 +16,26 @@ import {
 } from './media/playback.mjs';
 import { PRIORITY } from './page.mjs';
 import { progressDetail } from './load.mjs';
-import { messageFor } from './messages.mjs';
+import { messageFor, elementError } from './messages.mjs';
 import { downloadName } from './format.mjs';
 
 const HAVE_CURRENT_DATA = 2;
 const HAVE_FUTURE_DATA = 3;
 // How close to the end of a range the playhead can be and still be playing from it.
 const EDGE = 0.05;
-// A buffer that holds the timeline in one piece, give or take this much at the ends, may be closed.
-const WHOLE_TOLERANCE = 0.5;
+// How far short of the duration the last buffered range may end and still count as reaching it:
+// the tracks of a file seldom end on exactly the same instant.
+const END_TOLERANCE = 0.5;
 const SAFETY_TICK_MS = 1000;
 
 const RETRYING = 'The node is not answering. Retrying…';
 const BUFFERING = 'Buffering…';
+const DECODE_FAILED = 'This browser could not decode this video.';
 
 const isAbort = (error) => error?.name === 'AbortError';
+
+/** mp4box.js could not be fetched or did not pass its integrity check: the host's fault, not the browser's or the file's. */
+class PlayerLoadError extends Error {}
 
 /** The URL mp4box.js is looked up next to: the bundle's own, or on the unbundled dev page the loader module's. */
 function mp4boxScriptUrl() {
@@ -133,10 +138,18 @@ export class VideoView {
     this.#onLoad = onLoad;
     this.#onSize = onSize ?? (() => {});
     this.#onStatus = onStatus ?? (() => {});
+    const load = deps.loadMp4Box ?? (() => loadMp4Box({ scriptUrl: mp4boxScriptUrl() }));
     this.#deps = {
       openFeed: deps.openFeed ?? openFeed,
       Streamer: deps.Streamer ?? Streamer,
-      loadMp4Box: deps.loadMp4Box ?? (() => loadMp4Box({ scriptUrl: mp4boxScriptUrl() })),
+      // Silent on purpose: the visitor gets a sentence in the download view, not a console error.
+      loadMp4Box: async () => {
+        try {
+          return await load();
+        } catch (error) {
+          throw new PlayerLoadError('the video player could not be loaded', { cause: error });
+        }
+      },
     };
   }
 
@@ -175,7 +188,7 @@ export class VideoView {
       // The reader's own errors say what is wrong with the file or the node. Anything else is a container
       // that cannot be read as a video, or the player library that could not be loaded.
       if (isAbort(error) || error?.name === 'XrplFileError') throw error;
-      return { view: 'download', reason: 'unplayable' };
+      return { view: 'download', reason: error instanceof PlayerLoadError ? 'player' : 'unplayable' };
     }
     if (this.#closed) { feed.close(); return { view: 'closed' }; }
     this.#feed = feed;
@@ -368,7 +381,7 @@ export class VideoView {
 
           if (segments.length > 0) this.#firstMedia = true;
           this.#advanceWriteHead();
-          if (block === this.#lastBlock) await this.#endIfWhole();
+          if (block === this.#lastBlock) await this.#endIfComplete();
         } catch (error) {
           if (stale()) return;
           // A browser that rejects the stream before showing anything cannot play this file here.
@@ -390,13 +403,18 @@ export class VideoView {
     if (range !== null) this.#writeHead = Math.max(this.#writeHead, range[1]);
   }
 
-  /** Only a buffer holding the whole timeline in one piece may end the stream: ending over a hole would cut the duration at it. */
-  async #endIfWhole() {
-    const ranges = this.#streamer.buffered();
+  /**
+   * The last block of the generation is in: nothing more can come after it, so the stream ends however
+   * many holes lie before it (a forward seek leaves one, and a browser evicts the start of a long file by
+   * itself). Without the end the player sits on the last frame with a spinner and never reaches `ended`.
+   * Ending does not cut the duration: the last range is the one the last block was appended to. A hole
+   * the visitor later seeks back into is fine too: the next append re-opens an ended source.
+   */
+  async #endIfComplete() {
+    const last = this.#streamer.buffered().at(-1);
+    if (last === undefined) return;
     const duration = this.#feed.duration;
-    const whole = ranges.length === 1 && ranges[0][0] <= WHOLE_TOLERANCE
-      && (!(duration > 0) || ranges[0][1] >= duration - WHOLE_TOLERANCE);
-    if (whole) await this.#streamer.end();
+    if (!(duration > 0) || last[1] >= duration - END_TOLERANCE) await this.#streamer.end();
   }
 
   #fail(block, generation, error) {
@@ -505,7 +523,8 @@ export class VideoView {
     on('seeking', this.#onSeeking);
     on('error', () => {
       if (!this.#hasFrame) { this.#giveUp(); return; }
-      this.#fatal = new Error('the browser could not play this video');
+      // Not a section 8 error, so the event's name stays null; the sentence is specific instead of generic.
+      this.#fatal = elementError(null, DECODE_FAILED);
       this.#refresh();
     });
     for (const type of ['loadeddata', 'canplay', 'playing', 'seeked', 'timeupdate', 'waiting', 'stalled', 'pause', 'ended']) {

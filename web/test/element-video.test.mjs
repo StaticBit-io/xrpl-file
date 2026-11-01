@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { VideoView } from '../src/element/video.mjs';
 import { StreamerError } from '../src/element/media/mse.mjs';
 import { XrplFileError } from '../src/link.mjs';
-import { messageFor } from '../src/element/messages.mjs';
+import { messageFor, detailFor } from '../src/element/messages.mjs';
 import { PRIORITY } from '../src/element/page.mjs';
 
 const BLOCK = 1000;
@@ -140,6 +140,10 @@ class FakeStreamer {
   appended = [];
   aborts = 0;
   ends = 0;
+  // MSE: endOfStream() makes the source 'ended', and the next append re-opens it.
+  readyState = 'open';
+  reopens = 0;
+  appendsAfterEnd = [];
   closed = false;
   static initialStreaming = true;
   static initialFailure = null;
@@ -163,6 +167,11 @@ class FakeStreamer {
 
   async append(track, bytes) {
     if (this.failure !== null && (bytes[0] !== INIT || this.failure.initToo)) throw this.failure.error;
+    if (this.readyState === 'ended') {
+      this.readyState = 'open';
+      this.reopens++;
+      this.appendsAfterEnd.push([...bytes]);
+    }
     this.appended.push([...bytes]);
     if (bytes[0] === INIT) return;
     this.ranges.push([bytes[0], bytes[1]]);
@@ -180,7 +189,11 @@ class FakeStreamer {
 
   buffered() { return this.ranges.map((range) => [...range]); }
 
-  async end() { this.ends++; }
+  async end() {
+    if (this.readyState !== 'open') return;
+    this.readyState = 'ended';
+    this.ends++;
+  }
 
   close() { this.closed = true; }
 }
@@ -523,6 +536,48 @@ test('a feed that cannot read the container is a download, a node error is not s
   assert.equal(await run(missing), missing);
 });
 
+test('a player library that cannot be loaded gets its own download reason and says nothing to the console', async () => {
+  const handle = new FakeHandle();
+  const noise = [];
+  mock.method(console, 'error', (...args) => noise.push(args));
+  mock.method(console, 'warn', (...args) => noise.push(args));
+  const view = new VideoView({
+    root: fakeRoot(), handle, priority: () => PRIORITY.NOW, onProgress() {}, onError() {}, onLoad() {},
+    record: { manifest: { type: 'video/mp4', size: BLOCK * BLOCKS, blocks: BLOCKS, chunk: 100 } },
+    deps: {
+      openFeed: async ({ loadMp4Box }) => { await loadMp4Box(); throw new Error('unreachable'); },
+      loadMp4Box: async () => { throw new Error('the mp4box script could not be loaded from https://x.invalid/mp4box.min.js'); },
+      Streamer: FakeStreamer,
+    },
+  });
+  try {
+    const start = view.start();
+    await until(() => handle.pending(0).length === 1, 'the head read');
+    handle.pending(0)[0].resolve();
+    assert.deepEqual(await start, { view: 'download', reason: 'player' });
+    assert.deepEqual(noise, []);
+  } finally { view.close(); mock.restoreAll(); }
+});
+
+test('a player that loads but then fails to parse the file stays "unplayable"', async () => {
+  const handle = new FakeHandle();
+  const view = new VideoView({
+    root: fakeRoot(), handle, priority: () => PRIORITY.NOW, onProgress() {}, onError() {}, onLoad() {},
+    record: { manifest: { type: 'video/mp4', size: BLOCK * BLOCKS, blocks: BLOCKS, chunk: 100 } },
+    deps: {
+      openFeed: async ({ loadMp4Box }) => { await loadMp4Box(); throw new RangeError('damaged moov'); },
+      loadMp4Box: async () => ({}),
+      Streamer: FakeStreamer,
+    },
+  });
+  try {
+    const start = view.start();
+    await until(() => handle.pending(0).length === 1, 'the head read');
+    handle.pending(0)[0].resolve();
+    assert.deepEqual(await start, { view: 'download', reason: 'unplayable' });
+  } finally { view.close(); }
+});
+
 test('progress counts each verified block once, whatever re-reads follow', async () => {
   const t = setup();
   try {
@@ -538,7 +593,7 @@ test('progress counts each verified block once, whatever re-reads follow', async
   } finally { t.view.close(); }
 });
 
-test('the last block ends the stream only when the buffer holds the whole timeline', async () => {
+test('after a forward seek the last block still ends the stream, hole or not', async () => {
   const t = setup();
   try {
     await started(t);
@@ -546,9 +601,62 @@ test('the last block ends the stream only when the buffer holds the whole timeli
     t.video().play();
     t.video().seek(115);
     await settle(t, 11);
-    await flush();
-    assert.equal(t.streamer().ends, 0, 'a hole before the last block: ending the stream would cut the duration there');
-    assert.deepEqual(t.streamer().buffered(), [[0, 10], [110, 120]]);
+    await until(() => t.streamer().ends === 1, 'the end of the stream');
+    assert.deepEqual(t.streamer().buffered(), [[0, 10], [110, 120]], 'the hole before the last block is still there');
+    assert.equal(t.streamer().readyState, 'ended');
+  } finally { t.view.close(); }
+});
+
+test('a buffer whose start the browser evicted still ends at the last block', async () => {
+  const t = setup();
+  try {
+    await started(t);
+    await settle(t, 0);
+    t.video().play();
+    t.video().seek(115);
+    // Chromium drops the start of a long file by itself; nothing before the playhead is left.
+    t.streamer().ranges = [];
+    await settle(t, 11);
+    await until(() => t.streamer().ends === 1, 'the end of the stream');
+  } finally { t.view.close(); }
+});
+
+test('a last range that stops short of the duration does not end the stream', async () => {
+  const t = setup();
+  try {
+    t.feed.duration = 125;
+    await started(t);
+    await settle(t, 0);
+    t.video().play();
+    t.video().seek(115);
+    await settle(t, 11);
+    await flush(); await flush();
+    assert.equal(t.streamer().ends, 0, 'the file says it is longer than what arrived');
+  } finally { t.view.close(); }
+});
+
+test('seeking back into a hole after the stream ended reads and appends again, re-opening the source', async () => {
+  const t = setup();
+  try {
+    await started(t);
+    await settle(t, 0);
+    t.video().play();
+    t.video().seek(115);
+    await settle(t, 11);
+    await until(() => t.streamer().ends === 1, 'the end of the stream');
+    const readsBefore = t.handle.calls.length;
+    const abortsBefore = t.streamer().aborts;
+
+    t.video().seeking = false;
+    t.video().seek(55);
+    await settle(t, 5);
+
+    assert.ok(t.handle.calls.length > readsBefore, 'the hole is read again');
+    assert.ok(t.streamer().aborts > abortsBefore, 'the seek asked the streamer to reset');
+    assert.equal(t.streamer().reopens, 1, 'the append re-opened the ended source');
+    assert.deepEqual(t.streamer().appendsAfterEnd[0], [50, 60]);
+    assert.ok(t.streamer().buffered().some(([from, to]) => from <= 50 && to >= 60));
+    assert.equal(t.streamer().readyState, 'open');
   } finally { t.view.close(); }
 });
 
@@ -833,5 +941,7 @@ test('after a frame has been shown the video element failing is the error path',
     assert.deepEqual(t.log.downloads, []);
     assert.equal(t.log.errors.length, 1);
     assert.deepEqual(t.log.errors[0].state, { playing: true });
+    assert.equal(t.root.overlayText.textContent, 'This browser could not decode this video.');
+    assert.deepEqual(detailFor(t.log.errors[0].error, { playing: true }), { name: null, message: 'This browser could not decode this video.' });
   } finally { t.view.close(); }
 });

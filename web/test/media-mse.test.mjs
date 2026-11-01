@@ -23,8 +23,17 @@ class FakeSourceBuffer extends EventTarget {
     return { length: this.ranges.length, start: (i) => this.ranges[i][0], end: (i) => this.ranges[i][1] };
   }
 
+  // MSE: appending to (or removing from) a buffer of an ended source re-opens it first.
+  reopenParent() {
+    if (this.parent?.readyState !== 'ended') return;
+    this.parent.readyState = 'open';
+    this.parent.reopened++;
+    queueMicrotask(() => this.parent.dispatchEvent(new Event('sourceopen')));
+  }
+
   appendBuffer(bytes) {
     if (this.updating) throw new DOMException('still updating', 'InvalidStateError');
+    this.reopenParent();
     if (this.quotaFailures > 0) { this.quotaFailures--; throw new DOMException('full', 'QuotaExceededError'); }
     const failing = this.decodeFailures > 0;
     if (failing) this.decodeFailures--;
@@ -41,6 +50,7 @@ class FakeSourceBuffer extends EventTarget {
   }
 
   remove(from, to) {
+    this.reopenParent();
     this.removes.push([from, to]);
     const kept = [];
     for (const [start, end] of this.ranges) {
@@ -52,7 +62,11 @@ class FakeSourceBuffer extends EventTarget {
     setImmediate(() => this.dispatchEvent(new Event('updateend')));
   }
 
-  abort() { this.aborts++; }
+  // MSE: abort() throws unless the parent source is open.
+  abort() {
+    if (this.parent && this.parent.readyState !== 'open') throw new DOMException('not open', 'InvalidStateError');
+    this.aborts++;
+  }
 }
 
 class FakeMediaSource extends EventTarget {
@@ -64,6 +78,7 @@ class FakeMediaSource extends EventTarget {
   buffers = [];
   log = [];
   ended = 0;
+  reopened = 0;
   #duration = NaN;
 
   get duration() { return this.#duration; }
@@ -72,6 +87,7 @@ class FakeMediaSource extends EventTarget {
   addSourceBuffer(mime) {
     const buffer = new FakeSourceBuffer();
     buffer.mime = mime;
+    buffer.parent = this;
     this.buffers.push(buffer);
     this.log.push(['buffer', mime]);
     return buffer;
@@ -273,6 +289,48 @@ test('abort waits for the appends before it and resets every parser', async () =
   source.readyState = 'ended';
   await streamer.abort();
   assert.equal(videoBuffer.aborts, 1, 'not allowed once the stream has ended');
+});
+
+test('a segment appended after the stream ended re-opens the source, and a later end closes it again', async () => {
+  install();
+  const video = fakeVideo();
+  const streamer = new Streamer(video, [VIDEO], 120);
+  await streamer.open();
+  const source = sources.get(video.attributes.src);
+  const [buffer] = source.buffers;
+
+  await streamer.append(1, new Uint8Array([110, 120]));
+  await streamer.end();
+  assert.equal(source.readyState, 'ended');
+
+  // A seek back into the hole: the parser is clean after a finished last segment, so abort() is skipped
+  // rather than thrown, and the append itself is what re-opens the source.
+  await streamer.abort();
+  assert.equal(buffer.aborts, 0);
+  await streamer.append(1, new Uint8Array([50, 60]));
+  assert.equal(source.reopened, 1);
+  assert.equal(source.readyState, 'open');
+  assert.deepEqual(streamer.buffered().sort((a, b) => a[0] - b[0]), [[50, 60], [110, 120]]);
+
+  await streamer.end();
+  assert.equal(source.ended, 2);
+  assert.equal(source.readyState, 'ended');
+});
+
+test('the quota drop on an ended stream re-opens it too', async () => {
+  install();
+  const video = fakeVideo();
+  const streamer = new Streamer(video, [VIDEO], 400);
+  await streamer.open();
+  const source = sources.get(video.attributes.src);
+  const [buffer] = source.buffers;
+  buffer.ranges = [[0, 10], [390, 400]];
+  video.currentTime = 395;
+  await streamer.end();
+  buffer.quotaFailures = 1;
+  await streamer.append(1, new Uint8Array([380, 390]));
+  assert.equal(source.reopened, 1);
+  assert.deepEqual(buffer.removes, [[0, 10]]);
 });
 
 test('what can be played is what every track holds', async () => {
