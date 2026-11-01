@@ -2,10 +2,18 @@ import { MANIFEST_BYTES, CHUNK_BYTES, blockCount, chunkCount } from './tree.mjs'
 
 export const MANIFEST_VERSION = 1;
 
+/**
+ * The manifest's first member, `format`: the URL of the repository that holds the specification,
+ * so a person who finds the JSON in an explorer learns what it is. A repository URL and not a
+ * site because GitHub keeps redirecting a repository's address after a rename or a transfer.
+ * Readers never look at it: decodeManifest accepts any value, any JSON type, or none.
+ */
+export const MANIFEST_FORMAT = 'https://github.com/StaticBit-io/xrpl-file';
+
 const byteLength = (text) => new TextEncoder().encode(text).length;
 
 function serialize(m, name) {
-  const fields = { v: MANIFEST_VERSION, type: m.type, size: m.size, chunk: m.chunk, root: m.root, ledgers: [m.firstLedger, m.lastLedger], blocks: m.blocks, lists: m.lists };
+  const fields = { format: MANIFEST_FORMAT, v: MANIFEST_VERSION, type: m.type, size: m.size, chunk: m.chunk, root: m.root, ledgers: [m.firstLedger, m.lastLedger], blocks: m.blocks, lists: m.lists };
   // Format section 4.1: a writer writes the hash upper-case, as the .NET side does; readers accept either.
   if (m.cover != null) fields.cover = m.cover.toUpperCase();
   if (name != null) fields.name = name;
@@ -23,8 +31,8 @@ const isHash64 = (v) => typeof v === 'string' && /^[0-9a-fA-F]{64}$/.test(v);
 
 export function encodeManifest(m) {
   if (m.cover != null && !isHash64(m.cover)) throw new Error('the cover is not 64 hex characters');
-  // The cover is placed before the name is measured, so a long name gives way to it and not the
-  // other way round.
+  // The format and the cover are placed before the name is measured, so a long name gives way to
+  // them and not the other way round.
   let name = m.name ?? null;
   for (;;) {
     const json = serialize(m, name);

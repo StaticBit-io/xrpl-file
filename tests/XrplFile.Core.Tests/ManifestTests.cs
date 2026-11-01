@@ -7,6 +7,8 @@ public class ManifestTests
 {
     private static readonly string Root = new('A', 64);
 
+    private const string FormatUrl = "https://github.com/StaticBit-io/xrpl-file";
+
     private static Manifest Sample(string? name = "cover.png") =>
         new("image/png", 734512, 1000, Root, 106497159, 106497394, 1, 0, name);
 
@@ -14,7 +16,7 @@ public class ManifestTests
     public void Encode_writes_the_fields_in_the_documented_order()
     {
         Assert.Equal(
-            "{\"v\":1,\"type\":\"image/png\",\"size\":734512,\"chunk\":1000,\"root\":\"" + Root + "\"," +
+            "{\"format\":\"" + FormatUrl + "\",\"v\":1,\"type\":\"image/png\",\"size\":734512,\"chunk\":1000,\"root\":\"" + Root + "\"," +
             "\"ledgers\":[106497159,106497394],\"blocks\":1,\"lists\":0,\"name\":\"cover.png\"}",
             Sample().Encode());
     }
@@ -94,7 +96,7 @@ public class ManifestTests
     public void A_cover_is_written_after_lists_and_before_the_name()
     {
         Assert.Equal(
-            "{\"v\":1,\"type\":\"image/png\",\"size\":734512,\"chunk\":1000,\"root\":\"" + Root + "\"," +
+            "{\"format\":\"" + FormatUrl + "\",\"v\":1,\"type\":\"image/png\",\"size\":734512,\"chunk\":1000,\"root\":\"" + Root + "\"," +
             "\"ledgers\":[106497159,106497394],\"blocks\":1,\"lists\":0,\"cover\":\"" + CoverHash + "\",\"name\":\"cover.png\"}",
             (Sample() with { Cover = CoverHash }).Encode());
     }
@@ -155,6 +157,75 @@ public class ManifestTests
     public void A_cover_that_is_not_a_hash_is_never_written()
     {
         Assert.Throws<InvalidOperationException>(() => (Sample() with { Cover = "AB" }).Encode());
+    }
+
+    [Fact]
+    public void The_format_is_the_repository_url_of_the_specification()
+    {
+        Assert.Equal(FormatUrl, Manifest.Format);
+    }
+
+    [Fact]
+    public void The_format_is_the_first_member_and_costs_53_bytes()
+    {
+        string encoded = Sample().Encode();
+        string withoutFormat = encoded.Replace("\"format\":\"" + FormatUrl + "\",", string.Empty, StringComparison.Ordinal);
+
+        Assert.StartsWith("{\"format\":\"" + FormatUrl + "\",\"v\":1,", encoded, StringComparison.Ordinal);
+        Assert.StartsWith("{\"v\":1,", withoutFormat, StringComparison.Ordinal);
+        Assert.Equal(53, Encoding.UTF8.GetByteCount(encoded) - Encoding.UTF8.GetByteCount(withoutFormat));
+    }
+
+    [Fact]
+    public void A_manifest_without_a_format_is_the_one_written_before_the_member_existed()
+    {
+        string json = Sample().Encode().Replace("\"format\":\"" + FormatUrl + "\",", string.Empty, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("\"format\"", json, StringComparison.Ordinal);
+        Assert.Equal(Sample(), Manifest.Decode(json));
+    }
+
+    [Theory]
+    [InlineData("\"https://example.com/other\"")]
+    [InlineData("\"\"")]
+    [InlineData("123")]
+    [InlineData("true")]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("[\"https://github.com/StaticBit-io/xrpl-file\"]")]
+    [InlineData("{}")]
+    [InlineData("{\"url\":\"https://github.com/StaticBit-io/xrpl-file\"}")]
+    public void A_reader_does_not_look_at_the_format_whatever_it_holds(string value)
+    {
+        string json = Sample().Encode().Replace("\"" + FormatUrl + "\"", value, StringComparison.Ordinal);
+
+        Assert.Contains("\"format\":" + value, json, StringComparison.Ordinal);
+        Assert.Equal(Sample(), Manifest.Decode(json));
+    }
+
+    [Fact]
+    public void A_format_that_comes_last_or_twice_still_reads()
+    {
+        string last = Sample().Encode().Replace("\"format\":\"" + FormatUrl + "\",", string.Empty, StringComparison.Ordinal).Replace("}", ",\"format\":7}", StringComparison.Ordinal);
+
+        Assert.Equal(Sample(), Manifest.Decode(last));
+    }
+
+    [Fact]
+    public void The_name_is_shortened_after_the_format_and_the_cover_are_placed()
+    {
+        string encoded = (Sample(name: new string('n', 2000)) with { Cover = CoverHash }).Encode();
+        Manifest decoded = Manifest.Decode(encoded);
+
+        Assert.Equal(MemoLayout.ManifestBytes, Encoding.UTF8.GetByteCount(encoded));
+        Assert.StartsWith("{\"format\":\"" + FormatUrl + "\",", encoded, StringComparison.Ordinal);
+        Assert.Contains("\"cover\":\"" + CoverHash + "\"", encoded, StringComparison.Ordinal);
+        Assert.Equal(CoverHash, decoded.Cover);
+
+        // 995 - the fixed members with format and cover and no name - the ,"name":"" frame.
+        string withoutName = (Sample(name: null) with { Cover = CoverHash }).Encode();
+        int room = MemoLayout.ManifestBytes - Encoding.UTF8.GetByteCount(withoutName) - ",\"name\":\"\"".Length;
+        Assert.Equal(room, decoded.Name!.Length);
     }
 
     [Fact]

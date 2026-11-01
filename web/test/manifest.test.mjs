@@ -1,15 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { encodeManifest, decodeManifest, inconsistency } from '../src/manifest.mjs';
+import { encodeManifest, decodeManifest, inconsistency, MANIFEST_FORMAT } from '../src/manifest.mjs';
 import { MANIFEST_BYTES } from '../src/tree.mjs';
 
 const ROOT = 'A'.repeat(64);
+const FORMAT_URL = 'https://github.com/StaticBit-io/xrpl-file';
 const sample = (name = 'cover.png') => ({ type: 'image/png', size: 734512, chunk: 1000, root: ROOT, firstLedger: 106497159, lastLedger: 106497394, blocks: 1, lists: 0, cover: null, name });
 
 test('encode writes the fields in the documented order', () => {
   assert.equal(
     encodeManifest(sample()),
-    `{"v":1,"type":"image/png","size":734512,"chunk":1000,"root":"${ROOT}","ledgers":[106497159,106497394],"blocks":1,"lists":0,"name":"cover.png"}`,
+    `{"format":"${FORMAT_URL}","v":1,"type":"image/png","size":734512,"chunk":1000,"root":"${ROOT}","ledgers":[106497159,106497394],"blocks":1,"lists":0,"name":"cover.png"}`,
   );
   assert.ok(!encodeManifest(sample(null)).includes('"name"'));
 });
@@ -80,6 +81,7 @@ const COVER = 'C'.repeat(64);
 
 test('a cover is written after lists and before the name, and decodes upper-cased', () => {
   const json = encodeManifest({ ...sample(), cover: COVER });
+  assert.ok(json.startsWith(`{"format":"${FORMAT_URL}","v":1,`));
   assert.ok(json.endsWith(`"lists":0,"cover":"${COVER}","name":"cover.png"}`));
   assert.equal(decodeManifest(json.replace(COVER, COVER.toLowerCase())).cover, COVER);
 });
@@ -112,4 +114,46 @@ test('the name is shortened after the cover is placed', () => {
 
 test('a malformed cover is never written', () => {
   assert.throws(() => encodeManifest({ ...sample(), cover: 'AB' }));
+});
+
+const withoutFormat = (json) => json.replace(`"format":"${FORMAT_URL}",`, '');
+
+test('the format is the repository url of the specification', () => {
+  assert.equal(MANIFEST_FORMAT, FORMAT_URL);
+});
+
+test('the format is the first member and costs 53 bytes', () => {
+  const json = encodeManifest(sample());
+  assert.ok(json.startsWith(`{"format":"${FORMAT_URL}","v":1,`));
+  assert.ok(withoutFormat(json).startsWith('{"v":1,'));
+  const bytes = (text) => new TextEncoder().encode(text).length;
+  assert.equal(bytes(json) - bytes(withoutFormat(json)), 53);
+});
+
+test('a manifest without a format is the one written before the member existed', () => {
+  const json = withoutFormat(encodeManifest(sample()));
+  assert.ok(!json.includes('"format"'));
+  assert.deepEqual(decodeManifest(json), sample());
+});
+
+test('a reader does not look at the format, whatever it holds', () => {
+  for (const value of ['"https://example.com/other"', '""', '123', 'true', 'null', '[]', `["${FORMAT_URL}"]`, '{}', `{"url":"${FORMAT_URL}"}`]) {
+    const json = encodeManifest(sample()).replace(`"${FORMAT_URL}"`, value);
+    assert.ok(json.includes(`"format":${value}`), value);
+    assert.deepEqual(decodeManifest(json), sample(), value);
+  }
+  assert.deepEqual(decodeManifest(withoutFormat(encodeManifest(sample())).replace('}', ',"format":7}')), sample());
+});
+
+test('the name is shortened after the format and the cover are placed', () => {
+  const json = encodeManifest({ ...sample('n'.repeat(2000)), cover: COVER });
+  const bytes = (text) => new TextEncoder().encode(text).length;
+  assert.equal(bytes(json), MANIFEST_BYTES);
+  assert.ok(json.startsWith(`{"format":"${FORMAT_URL}",`));
+  assert.ok(json.includes(`"cover":"${COVER}"`));
+  const decoded = decodeManifest(json);
+  assert.equal(decoded.cover, COVER);
+  // 995 less the members with format and cover and no name, less the ,"name":"" frame.
+  const room = MANIFEST_BYTES - bytes(encodeManifest({ ...sample(null), cover: COVER })) - ',"name":""'.length;
+  assert.equal(decoded.name.length, room);
 });

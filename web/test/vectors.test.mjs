@@ -5,8 +5,8 @@ import { loadVectors, vectorLedger, FakeSource, LINK, MANIFEST_HASH } from './ve
 import { XrplFileReader } from '../src/reader.mjs';
 import { parseLink } from '../src/link.mjs';
 import { vectorBytes } from '../src/vector-stream.mjs';
-import { split, blockHash, rootHex, blockCount, encodeEntries, BLOCK_CHUNKS } from '../src/tree.mjs';
-import { decodeManifest, encodeManifest, inconsistency } from '../src/manifest.mjs';
+import { split, blockHash, rootHex, blockCount, encodeEntries, BLOCK_CHUNKS, MANIFEST_BYTES } from '../src/tree.mjs';
+import { decodeManifest, encodeManifest, inconsistency, MANIFEST_FORMAT } from '../src/manifest.mjs';
 import { hex, utf8Hex } from '../src/hex.mjs';
 
 test('the stream is sha256 counter mode over the seed', async () => {
@@ -46,7 +46,23 @@ test('every file vector is reproduced by the library', async () => {
   }
 });
 
-test('every manifest variant decodes as its base vector with the cover it names, and reads', async () => {
+test('every file vector starts its manifest with the format', async () => {
+  const set = await loadVectors();
+  for (const vector of set.files) {
+    assert.ok(vector.manifest.startsWith(`{"format":"${MANIFEST_FORMAT}","v":1,`), vector.seed);
+  }
+});
+
+test('the long-name variant fills the manifest budget exactly and keeps the format and the cover', async () => {
+  const set = await loadVectors();
+  const variant = set.manifestVariants.find((v) => v.note === 'format, cover and a long name');
+  assert.ok(variant);
+  assert.equal(new TextEncoder().encode(variant.manifest).length, MANIFEST_BYTES);
+  assert.ok(variant.manifest.startsWith(`{"format":"${MANIFEST_FORMAT}",`));
+  assert.equal(encodeManifest(decodeManifest(variant.manifest)), variant.manifest);
+});
+
+test('every manifest variant decodes as its base vector with the cover and name it names, and reads', async () => {
   const set = await loadVectors();
   assert.ok(set.manifestVariants.length > 0);
 
@@ -54,7 +70,9 @@ test('every manifest variant decodes as its base vector with the cover it names,
     const vector = set.files.find((f) => f.size === variant.of);
     const decoded = decodeManifest(variant.manifest);
     assert.equal(decoded.cover, variant.cover, variant.note);
-    assert.deepEqual({ ...decoded, cover: null }, { ...decodeManifest(vector.manifest), cover: null }, variant.note);
+    assert.equal(decoded.name, variant.name, variant.note);
+    const base = decodeManifest(vector.manifest);
+    assert.deepEqual({ ...decoded, cover: null, name: base.name }, { ...base, cover: null }, variant.note);
 
     const ledger = await vectorLedger(vector);
     ledger.find((tx) => tx.hash === MANIFEST_HASH).memoDataHex = utf8Hex(variant.manifest);

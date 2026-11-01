@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from '../build.mjs';
 import { ENDPOINTS } from '../src/ledger.mjs';
+import { MANIFEST_FORMAT } from '../src/manifest.mjs';
 
 const webDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 const VERSION = '0.0.0-test';
@@ -328,6 +329,7 @@ test('the bundle names no host but the built-in nodes', async () => {
   await build({ webDir, outDir: out, version: VERSION });
   const code = await readFile(join(out, 'xrpl-file-element.js'), 'utf8');
   const urls = code.match(/\b(?:https?|wss?):\/\/[^\s'"`)]+/g) ?? [];
-  const allowed = new Set([...Object.values(ENDPOINTS).flat(), 'http://www.w3.org/2000/svg']);
+  // MANIFEST_FORMAT is text a writer puts into a manifest for people to read; nothing fetches it.
+  const allowed = new Set([...Object.values(ENDPOINTS).flat(), 'http://www.w3.org/2000/svg', MANIFEST_FORMAT]);
   assert.deepEqual(urls.filter((url) => !allowed.has(url)), []);
 });

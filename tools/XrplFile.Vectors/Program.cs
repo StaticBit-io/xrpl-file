@@ -68,19 +68,44 @@ foreach (long size in sizes)
 }
 
 // Variants of one file's manifest that a reader must decode to the same file: one carrying a
-// cover pointer and one carrying a member this version does not define.
+// cover pointer, one carrying a member this version does not define, those written before the
+// format member existed or with a format of the wrong type, and one whose long name the writer
+// shortened to fit beside the format and the cover. Each names the name it decodes to.
 FileVector variantBase = files.Single(file => file.Size == 1001);
 Manifest variantManifest = Manifest.Decode(variantBase.Manifest);
 string coverHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("cover")));
+string formatMember = $"\"format\":\"{Manifest.Format}\",";
+
+static string Replaced(string manifest, string from, string to)
+{
+    string replaced = manifest.Replace(from, to, StringComparison.Ordinal);
+    if (replaced == manifest) throw new InvalidOperationException($"'{from}' was not found in the manifest");
+    return replaced;
+}
 
 const string unknownMember = ",\"future\":{\"tags\":[\"a\",1],\"on\":true}";
-string withUnknownMember = variantBase.Manifest.Replace(",\"name\":", unknownMember + ",\"name\":", StringComparison.Ordinal);
-if (withUnknownMember == variantBase.Manifest) throw new InvalidOperationException("the unknown member was not inserted into the manifest");
+string withUnknownMember = Replaced(variantBase.Manifest, ",\"name\":", unknownMember + ",\"name\":");
+string withoutFormat = Replaced(variantBase.Manifest, formatMember, string.Empty);
+string formatAsNumber = Replaced(variantBase.Manifest, formatMember, "\"format\":7,");
+string formatAsObject = Replaced(variantBase.Manifest, formatMember, "\"format\":{\"url\":\"" + Manifest.Format + "\"},");
 
+string longName = string.Concat(Enumerable.Repeat("vector-long-name-", 100));
+string shortened = (variantManifest with { Cover = coverHash, Name = longName }).Encode();
+string shortenedName = Manifest.Decode(shortened).Name ?? throw new InvalidOperationException("the long name was dropped");
+if (Encoding.UTF8.GetByteCount(shortened) != MemoLayout.ManifestBytes || shortenedName.Length >= longName.Length)
+{
+    throw new InvalidOperationException("the long-name variant does not fill the manifest budget exactly");
+}
+
+string baseName = variantManifest.Name ?? throw new InvalidOperationException("the base vector has no name");
 List<ManifestVariant> manifestVariants =
 [
-    new(variantBase.Size, "cover", coverHash, (variantManifest with { Cover = coverHash }).Encode()),
-    new(variantBase.Size, "unknown member", null, withUnknownMember),
+    new(variantBase.Size, "cover", coverHash, baseName, (variantManifest with { Cover = coverHash }).Encode()),
+    new(variantBase.Size, "unknown member", null, baseName, withUnknownMember),
+    new(variantBase.Size, "no format", null, baseName, withoutFormat),
+    new(variantBase.Size, "format is a number", null, baseName, formatAsNumber),
+    new(variantBase.Size, "format is an object", null, baseName, formatAsObject),
+    new(variantBase.Size, "format, cover and a long name", coverHash, shortenedName, shortened),
 ];
 
 JsonSerializerOptions options = new()
@@ -99,7 +124,7 @@ File.WriteAllText(output, JsonSerializer.Serialize(new VectorSet(1, merkle, file
 Console.WriteLine($"wrote {files.Count} file vectors to {output}");
 
 sealed record VectorSet(int Version, Merkle Merkle, IReadOnlyList<FileVector> Files, IReadOnlyList<ManifestVariant> ManifestVariants);
-sealed record ManifestVariant(long Of, string Note, string? Cover, string Manifest);
+sealed record ManifestVariant(long Of, string Note, string? Cover, string Name, string Manifest);
 sealed record Merkle(IReadOnlyDictionary<string, string> LeafRoots, string BlockHashOfFiveChunks, string RootOverThreeEntries);
 sealed record Ledger(long First, long Last, IReadOnlyList<long> BlockLedgers, long? ListLedger, long ManifestLedger);
 sealed record FileVector(

@@ -32,7 +32,7 @@
         "manifestLedger": 1001
       },
       "lists": [],
-      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1,\u0022chunk\u0022:1000,\u0022root\u0022:\u0022905240728323DEA0E4E49776D3483A2E7E8479F60ACF23A6E6002EC87886CBE8\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1.bin\u0022}"
+      "manifest": "{\u0022format\u0022:\u0022https://github.com/StaticBit-io/xrpl-file\u0022,\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1,\u0022chunk\u0022:1000,\u0022root\u0022:\u0022905240728323DEA0E4E49776D3483A2E7E8479F60ACF23A6E6002EC87886CBE8\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1.bin\u0022}"
     },
     {
       "seed": "xrpl-file/v1/999",
@@ -55,7 +55,7 @@
         "manifestLedger": 1001
       },
       "lists": [],
-      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:999,\u0022chunk\u0022:1000,\u0022root\u0022:\u002217E8837E234DEC26FD4B95953AE30AF3CE6DF8AE9E0589DC8E25F9B825C0EA7D\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-999.bin\u0022}"
+      "manifest": "{\u0022format\u0022:\u0022https://github.com/StaticBit-io/xrpl-file\u0022,\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:999,\u0022chunk\u0022:1000,\u0022root\u0022:\u002217E8837E234DEC26FD4B95953AE30AF3CE6DF8AE9E0589DC8E25F9B825C0EA7D\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-999.bin\u0022}"
     },
     {
       "seed": "xrpl-file/v1/1000",
@@ -78,7 +78,7 @@
         "manifestLedger": 1001
       },
       "lists": [],
-      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1000,\u0022chunk\u0022:1000,\u0022root\u0022:\u0022F43C86808435B85C269C0B5B8478F03331D0EE66F231012AAFEB1F0A664FE8DD\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1000.bin\u0022}"
+      "manifest": "{\u0022format\u0022:\u0022https://github.com/StaticBit-io/xrpl-file\u0022,\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1000,\u0022chunk\u0022:1000,\u0022root\u0022:\u0022F43C86808435B85C269C0B5B8478F03331D0EE66F231012AAFEB1F0A664FE8DD\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1000.bin\u0022}"
     },
     {
       "seed": "xrpl-file/v1/1001",
@@ -101,7 +101,7 @@
         "manifestLedger": 1001
       },
       "lists": [],
-      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1001,\u0022chunk\u0022:1000,\u0022root\u0022:\u002253FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1001.bin\u0022}"
+      "manifest": "{\u0022format\u0022:\u0022https://github.com/StaticBit-io/xrpl-file\u0022,\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1001,\u0022chunk\u0022:1000,\u0022root\u0022:\u002253FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1001.bin\u0022}"
     },
     {
       "seed": "xrpl-file/v1/1024000",
@@ -124,7 +124,7 @@
         "manifestLedger": 1011
       },
       "lists": [],
-      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1024000,\u0022chunk\u0022:1000,\u0022root\u0022:\u0022A8A13640CF174D659F75919886A6B4A6F1BA37694DBF33780D8CE8684246B60B\u0022,\u0022ledgers\u0022:[1000,1010],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1024000.bin\u0022}"
+      "manifest": "{\u0022format\u0022:\u0022https://github.com/StaticBit-io/xrpl-file\u0022,\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1024000,\u0022chunk\u0022:1000,\u0022root\u0022:\u0022A8A13640CF174D659F75919886A6B4A6F1BA37694DBF33780D8CE8684246B60B\u0022,\u0022ledgers\u0022:[1000,1010],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1024000.bin\u0022}"
     },
     {
       "seed": "xrpl-file/v1/1024001",
@@ -151,7 +151,7 @@
       "lists": [
         "[{\u0022i\u0022:0,\u0022h\u0022:\u002257ED8C63E3B0CDEC9F8207B1163F06AAF0205CDEA95CB31C728D36193CE6BA1F\u0022,\u0022l\u0022:1000},{\u0022i\u0022:1,\u0022h\u0022:\u0022FEE1814D14723B1DF8BDF4FD9F01717F842289BB76BF75645B81448D483CBE2C\u0022,\u0022l\u0022:1010}]"
       ],
-      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1024001,\u0022chunk\u0022:1000,\u0022root\u0022:\u00226808AD2DACDB735FE913EECB42DE7C06D51BE6AE15E64113CF9AEE6549F4C385\u0022,\u0022ledgers\u0022:[1000,1011],\u0022blocks\u0022:2,\u0022lists\u0022:1,\u0022name\u0022:\u0022vector-1024001.bin\u0022}"
+      "manifest": "{\u0022format\u0022:\u0022https://github.com/StaticBit-io/xrpl-file\u0022,\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1024001,\u0022chunk\u0022:1000,\u0022root\u0022:\u00226808AD2DACDB735FE913EECB42DE7C06D51BE6AE15E64113CF9AEE6549F4C385\u0022,\u0022ledgers\u0022:[1000,1011],\u0022blocks\u0022:2,\u0022lists\u0022:1,\u0022name\u0022:\u0022vector-1024001.bin\u0022}"
     },
     {
       "seed": "xrpl-file/v1/2500500",
@@ -180,7 +180,7 @@
       "lists": [
         "[{\u0022i\u0022:0,\u0022h\u0022:\u002273F40634EC0772ED56730C6F3619242B7D927113EBF8EC4E4345856401BA8DBE\u0022,\u0022l\u0022:1000},{\u0022i\u0022:1,\u0022h\u0022:\u00229E030438487E9EF29F8A7314EAEF4CFB9B504C8FBA052EF9CEE2DE3544EDD21D\u0022,\u0022l\u0022:1010},{\u0022i\u0022:2,\u0022h\u0022:\u00224CEFFD9B096211AF42B59BE71C4798ECA43349D0DFB039FFB518A0204C28BBC3\u0022,\u0022l\u0022:1020}]"
       ],
-      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:2500500,\u0022chunk\u0022:1000,\u0022root\u0022:\u00228632B1373C4CAE98C643C495F93B04D84035613FBBD82895B53EF47F07025347\u0022,\u0022ledgers\u0022:[1000,1026],\u0022blocks\u0022:3,\u0022lists\u0022:1,\u0022name\u0022:\u0022vector-2500500.bin\u0022}"
+      "manifest": "{\u0022format\u0022:\u0022https://github.com/StaticBit-io/xrpl-file\u0022,\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:2500500,\u0022chunk\u0022:1000,\u0022root\u0022:\u00228632B1373C4CAE98C643C495F93B04D84035613FBBD82895B53EF47F07025347\u0022,\u0022ledgers\u0022:[1000,1026],\u0022blocks\u0022:3,\u0022lists\u0022:1,\u0022name\u0022:\u0022vector-2500500.bin\u0022}"
     }
   ],
   "manifestVariants": [
@@ -188,13 +188,43 @@
       "of": 1001,
       "note": "cover",
       "cover": "3FA405A8301ACE34D11CF44A816080B8F0E49A48FBD048B8AEF1543A8C58BDB6",
-      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1001,\u0022chunk\u0022:1000,\u0022root\u0022:\u002253FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022cover\u0022:\u00223FA405A8301ACE34D11CF44A816080B8F0E49A48FBD048B8AEF1543A8C58BDB6\u0022,\u0022name\u0022:\u0022vector-1001.bin\u0022}"
+      "name": "vector-1001.bin",
+      "manifest": "{\u0022format\u0022:\u0022https://github.com/StaticBit-io/xrpl-file\u0022,\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1001,\u0022chunk\u0022:1000,\u0022root\u0022:\u002253FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022cover\u0022:\u00223FA405A8301ACE34D11CF44A816080B8F0E49A48FBD048B8AEF1543A8C58BDB6\u0022,\u0022name\u0022:\u0022vector-1001.bin\u0022}"
     },
     {
       "of": 1001,
       "note": "unknown member",
       "cover": null,
-      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1001,\u0022chunk\u0022:1000,\u0022root\u0022:\u002253FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022future\u0022:{\u0022tags\u0022:[\u0022a\u0022,1],\u0022on\u0022:true},\u0022name\u0022:\u0022vector-1001.bin\u0022}"
+      "name": "vector-1001.bin",
+      "manifest": "{\u0022format\u0022:\u0022https://github.com/StaticBit-io/xrpl-file\u0022,\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1001,\u0022chunk\u0022:1000,\u0022root\u0022:\u002253FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022future\u0022:{\u0022tags\u0022:[\u0022a\u0022,1],\u0022on\u0022:true},\u0022name\u0022:\u0022vector-1001.bin\u0022}"
+    },
+    {
+      "of": 1001,
+      "note": "no format",
+      "cover": null,
+      "name": "vector-1001.bin",
+      "manifest": "{\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1001,\u0022chunk\u0022:1000,\u0022root\u0022:\u002253FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1001.bin\u0022}"
+    },
+    {
+      "of": 1001,
+      "note": "format is a number",
+      "cover": null,
+      "name": "vector-1001.bin",
+      "manifest": "{\u0022format\u0022:7,\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1001,\u0022chunk\u0022:1000,\u0022root\u0022:\u002253FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1001.bin\u0022}"
+    },
+    {
+      "of": 1001,
+      "note": "format is an object",
+      "cover": null,
+      "name": "vector-1001.bin",
+      "manifest": "{\u0022format\u0022:{\u0022url\u0022:\u0022https://github.com/StaticBit-io/xrpl-file\u0022},\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1001,\u0022chunk\u0022:1000,\u0022root\u0022:\u002253FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022name\u0022:\u0022vector-1001.bin\u0022}"
+    },
+    {
+      "of": 1001,
+      "note": "format, cover and a long name",
+      "cover": "3FA405A8301ACE34D11CF44A816080B8F0E49A48FBD048B8AEF1543A8C58BDB6",
+      "name": "vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long",
+      "manifest": "{\u0022format\u0022:\u0022https://github.com/StaticBit-io/xrpl-file\u0022,\u0022v\u0022:1,\u0022type\u0022:\u0022application/octet-stream\u0022,\u0022size\u0022:1001,\u0022chunk\u0022:1000,\u0022root\u0022:\u002253FE70256CD8D7B7B4B739846BB6E910B629C2FDF9E2649258EA134A1B90B727\u0022,\u0022ledgers\u0022:[1000,1000],\u0022blocks\u0022:1,\u0022lists\u0022:0,\u0022cover\u0022:\u00223FA405A8301ACE34D11CF44A816080B8F0E49A48FBD048B8AEF1543A8C58BDB6\u0022,\u0022name\u0022:\u0022vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long-name-vector-long\u0022}"
     }
   ]
 }

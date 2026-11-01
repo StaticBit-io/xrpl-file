@@ -31,11 +31,22 @@ public sealed record Manifest(
 {
     public const int Version = 1;
 
+    /// <summary>
+    /// The value of the manifest's first member, <c>format</c>: the URL of the repository that holds
+    /// the specification, so a person who finds the JSON in an explorer learns what it is and where
+    /// the rules are. It is a repository URL and not a site because GitHub keeps redirecting a
+    /// repository's address after a rename or a transfer. Readers never look at the member, so it
+    /// is not a property of the record: <see cref="Decode"/> accepts any value, any JSON type, or
+    /// none, and <see cref="Encode"/> always writes this one.
+    /// </summary>
+    public const string Format = "https://github.com/StaticBit-io/xrpl-file";
+
     public long ChunkCount => FileTree.ChunkCount(Size, Chunk);
 
     /// <summary>
-    /// The manifest as JSON that fits its memo. Every field but the name is fixed in size; a
-    /// name that does not fit is cut to the longest UTF-8 prefix that does, and dropped when
+    /// The manifest as JSON that fits its memo. Every field but the name is fixed in size, the
+    /// <c>format</c> and <c>cover</c> members included, which are placed before the name is
+    /// measured and never give way to it; a name that does not fit is cut to the longest UTF-8 prefix that does, and dropped when
     /// not even one character fits. A file is never refused over its name.
     /// </summary>
     public string Encode()
@@ -138,6 +149,7 @@ public sealed record Manifest(
         using (Utf8JsonWriter writer = new(stream, new JsonWriterOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
         {
             writer.WriteStartObject();
+            writer.WriteString("format", Format);
             writer.WriteNumber("v", Version);
             writer.WriteString("type", Type);
             writer.WriteNumber("size", Size);

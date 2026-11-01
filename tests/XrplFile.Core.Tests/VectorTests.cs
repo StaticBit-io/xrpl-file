@@ -78,7 +78,8 @@ public class VectorTests
         Assert.Equal(vector.Manifest, manifest.Encode());
     }
 
-    public static TheoryData<string> Variants => ["cover", "unknown member"];
+    public static TheoryData<string> Variants =>
+        ["cover", "unknown member", "no format", "format is a number", "format is an object", "format, cover and a long name"];
 
     [Theory]
     [MemberData(nameof(Variants))]
@@ -89,7 +90,21 @@ public class VectorTests
         Manifest decoded = Manifest.Decode(variant.Manifest);
 
         Assert.Equal(variant.Cover, decoded.Cover);
-        Assert.Equal(baseline, decoded with { Cover = null });
+        Assert.Equal(variant.Name, decoded.Name);
+        Assert.Equal(baseline, decoded with { Cover = null, Name = baseline.Name });
+    }
+
+    [Fact]
+    public void The_file_vectors_start_with_the_format_and_the_long_name_variant_fills_the_budget()
+    {
+        VectorSet set = Vectors.Load();
+
+        Assert.All(set.Files, file => Assert.StartsWith("{\"format\":\"" + Manifest.Format + "\",\"v\":1,", file.Manifest, StringComparison.Ordinal));
+
+        VectorManifestVariant longName = set.ManifestVariants.Single(v => v.Note == "format, cover and a long name");
+        Assert.Equal(MemoLayout.ManifestBytes, Encoding.UTF8.GetByteCount(longName.Manifest));
+        Assert.StartsWith("{\"format\":", longName.Manifest, StringComparison.Ordinal);
+        Assert.Equal(longName.Manifest, Manifest.Decode(longName.Manifest).Encode());
     }
 
     [Theory]
