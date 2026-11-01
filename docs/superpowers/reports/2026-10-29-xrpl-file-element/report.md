@@ -18,7 +18,7 @@ Spec: `docs/superpowers/specs/2026-10-29-xrpl-file-element-design.md`.
 ## Fixtures
 
 Published to testnet by `tools/XrplFile.Fixtures` from the owner's two source files. The
-`webm` fixture was re-published once, after its encoding changed (see row 10).
+`webm` fixture was re-published twice, after its encoding changed (see row 10).
 
 | Key | Link |
 |---|---|
@@ -33,7 +33,7 @@ Published to testnet by `tools/XrplFile.Fixtures` from the owner's two source fi
 | mp4-start | `xrpl-file://testnet/4113C342F5C205D7B63E0A5AFC44A36A273E22BCF8BD669F293C39EADF7E4264` |
 | mp4-end | `xrpl-file://testnet/59E85235890FA10B3FFA76262BA5B4C37939749F3730ED6C44C1D52A53130E46` |
 | fmp4 | `xrpl-file://testnet/A089C73C7F353B4F59F17EC270B3E20EA4A59700E63C99EDFF9E3D1879E5E6BB` |
-| webm | `xrpl-file://testnet/665BEA8E838E98920CA49E09E99AB973A640C2C717F419819A68F7AD110FFD9F` |
+| webm | `xrpl-file://testnet/CE45643F1A200CD7DA42D9D1A0EBDBE55489D10B1256383E7D695EFFAF3BF7B5` |
 | mp4-cover | `xrpl-file://testnet/47C0274B0C88211B2D945C4ECCD9E2FE9CCF158B9E45323370B3A6D939FD40EB` |
 | mp4-broken-cover | `xrpl-file://testnet/340A34D57959806A1DB7AD48C68C355E16CBB137323F66306CBD65ABA49459BA` |
 | hevc | `xrpl-file://testnet/33C33A0778B044EE510E7DB723A34261448F82DEB4177C24753C6B0B3D5E9BC6` |
@@ -52,7 +52,7 @@ Published to testnet by `tools/XrplFile.Fixtures` from the owner's two source fi
 | 7 | `mp4-start` | Pass | plays while loading; `mp4box.min.js` requested once, from `127.0.0.1:8790/dist/1.0.0/` |
 | 8 | `mp4-end` | Pass | progress shows block 0, then the `moov` block (8), then blocks 1–7 |
 | 9 | `fmp4` | Pass | plays; `mp4box` script never requested (only the loader module on the unbundled page) |
-| 10 | `webm` | Fail (environment) | see "Fails" |
+| 10 | `webm` | Pass (after fixes) | plays while loading; seek to 0:45 through Cues resumes and keeps playing. Failed twice before: see "Fails" |
 | 11 | Seeking | Pass | `fmp4` to 0:40: 0.27 s; `mp4-end` to 0:45 outside the buffer: 4.1 s, keeps playing; `large` to 3/4: 4.7 s under "Buffering…"; back into watched time: 82 ms, no new reads. `webm` see 10 |
 | 12 | `large` jump to 3/4 at 0:04 | Pass | resumed at 23:56; 12.6 MB of 302.4 MB read in total |
 | 13 | Rapid scrubbing on `large` | Pass | five seeks in 2 s (5:00, 15:00, 10:00, 20:00, 7:30): resumed at 7:30; no buffered range for the intermediate targets; 0 corrupted frames |
@@ -76,8 +76,7 @@ pane does not run the lazy observer on load.
 
 ## Fails
 
-**Row 10, `webm`.** Two defects were found and fixed during this run, and one environment
-limit remains:
+**Row 10, `webm`.** Failed twice before it passed:
 
 1. ffmpeg stores Opus block timecodes shifted by the track's `CodecDelay` (pts 61 ms is
    written as 68 ms) but interleaves by pts, so inside a Cluster an audio block at 68 ms
@@ -89,9 +88,12 @@ limit remains:
 2. After the fix MSE accepts the stream (0–8 s buffered, first frame shown, `load`), then
    reports `PIPELINE_ERROR_DECODE: video decode error!`. Plain `<video>` playback of the same
    verified bytes, without MSE, fails the same way after two frames; ffmpeg decodes the
-   file without errors; the 160×90 VP9 test clips play. This Chromium cannot decode this
-   1080×1920 VP9 stream. Reproduce: open `/demo/dev.html?only=webm&loading=eager`.
-   Unresolved here; worth a check in desktop Chrome and Firefox.
+   file without errors. The owner saw the same in desktop Chrome and Opera. Cause: the
+   source is full-range `yuvj420p`, and VP9 tagged full range decodes two frames in Chromium
+   and then fails; every full-range variant (720p, landscape, no audio, no row-mt) failed,
+   the same clip converted to TV range played. `tools/fixtures/make-media.sh` now encodes the
+   WebM in TV range, and the `webm` fixture was re-published. The element shows "This
+   browser could not decode this video." for such a stream, which is accurate.
 
 **Row 21** failed before `57a045c` (8 WebSockets) and passes after it.
 
