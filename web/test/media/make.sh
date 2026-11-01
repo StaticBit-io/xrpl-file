@@ -33,10 +33,15 @@ avc=(-c:v libx264 -g 10 -keyint_min 10 -sc_threshold 0 -pix_fmt yuv420p -flags:v
 "${ff[@]}" "${inputs[@]}" -c:v libx265 -tag:v hvc1 -g 10 -keyint_min 10 -pix_fmt yuv420p -x265-params log-level=error \
   -c:a aac -b:a 32k "$here/hevc.mp4"
 
+# ffmpeg's Opus encoder starts its first packet at -0.007 s (pre-skip), and Chrome's Media Source parser
+# rejects such a WebM (CHUNK_DEMUXER_ERROR_APPEND_FAILED, "a block with a timecode before the previous
+# block"). -avoid_negative_ts make_zero does not shift a WebM; delaying the audio input by a little more
+# than the pre-skip does, and leaves the video at 0.
 webm=(-c:v libvpx-vp9 -g 10 -b:v 100k -pix_fmt yuv420p -c:a libopus -b:a 32k)
-"${ff[@]}" "${inputs[@]}" "${webm[@]}" "$here/clip.webm"
+webm_inputs=(-f lavfi -i "testsrc2=size=160x90:rate=10" -itsoffset 0.007 -f lavfi -i "sine=frequency=440:sample_rate=48000" -t 4)
+"${ff[@]}" "${webm_inputs[@]}" "${webm[@]}" "$here/clip.webm"
 # Written to a pipe the muxer cannot seek back in: no Cues, and the Segment and Clusters keep unknown sizes.
-"${ff[@]}" "${inputs[@]}" "${webm[@]}" -f webm pipe:1 > "$here/clip-live.webm"
+"${ff[@]}" "${webm_inputs[@]}" "${webm[@]}" -f webm pipe:1 > "$here/clip-live.webm"
 
 node "$root/tools/fixtures/fragment.mjs" "$remux" "$here/plain-start.mp4" "$here/fragmented-sidx.mp4"
 

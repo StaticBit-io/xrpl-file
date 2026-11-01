@@ -155,7 +155,12 @@ case "$list" in
   *) fail fragmented.mp4 "expected ftyp moov sidx moof ..., got ${list:0:60}" ;;
 esac
 
-"${ffmpeg_quiet[@]}" -i "$src/en-back.mp4" -c:v libvpx-vp9 -b:v 1M -g 60 -row-mt 1 -c:a libopus -b:a 96k "$out/clip.webm"
+# The Opus encoder starts its first packet at -0.007 s (pre-skip), and Chrome's Media Source parser rejects such a
+# WebM ("a block with a timecode before the previous block"). -avoid_negative_ts make_zero does not shift a WebM;
+# taking the audio from a second input delayed by a little more than the pre-skip does, and leaves the video at 0.
+"${ffmpeg_quiet[@]}" -i "$src/en-back.mp4" -itsoffset 0.007 -i "$src/en-back.mp4" -map 0:v:0 -map 1:a:0   -c:v libvpx-vp9 -b:v 1M -g 60 -row-mt 1 -c:a libopus -b:a 96k "$out/clip.webm"
+negative="$(ffprobe -v error -show_entries packet=pts_time -of csv=p=0 "$out/clip.webm" | awk -F, '$1 < 0' | wc -l)"
+[ "$negative" -eq 0 ] || fail clip.webm "$negative packets start before 0, which Chrome's MSE refuses"
 check_size clip.webm 0 -
 
 "${ffmpeg_quiet[@]}" -i "$src/en-back.mp4" -c:v libx265 -crf 28 -tag:v hvc1 -c:a copy -movflags +faststart "$out/hevc.mp4"

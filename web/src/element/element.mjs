@@ -433,6 +433,7 @@ export class XrplFileElement extends HTMLElement {
       onSize: (kind, width, height) => this.#setRatio(kind === 'cover' ? RATIO_COVER : RATIO_CONTENT, width, height),
       onStatus: (text) => this.#renderLoading(text ?? 'Reading the file description…', null),
       onError: (error, state) => this.#videoFailed(error, state),
+      onDownload: (reason) => this.#videoUnplayable(record, reason),
       onLoad: () => {
         // The first frame came out of verified blocks only.
         this.#verified = true;
@@ -444,14 +445,16 @@ export class XrplFileElement extends HTMLElement {
 
     const outcome = await view.start();
     if (signal.aborted || this.#video !== view) return;
-    if (outcome.view === 'download') {
-      view.close();
-      this.#video = null;
-      this.#parts.frame.classList.remove('video');
-      this.#showDownload(record, outcome.reason);
-      return;
-    }
+    if (outcome.view === 'download') { this.#videoUnplayable(record, outcome.reason); return; }
     this.#showPhase('video');
+  }
+
+  /** The file is offered as a download: the browser cannot play it here. */
+  #videoUnplayable(record, reason) {
+    this.#video?.close();
+    this.#video = null;
+    this.#parts.frame.classList.remove('video');
+    this.#showDownload(record, reason);
   }
 
   /** A video that was already on screen keeps showing what it has, with the error at the gap; before that it is the error view. */

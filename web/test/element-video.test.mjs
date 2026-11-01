@@ -142,7 +142,9 @@ class FakeStreamer {
   ends = 0;
   closed = false;
   static initialStreaming = true;
+  static initialFailure = null;
   streaming = FakeStreamer.initialStreaming;
+  failure = FakeStreamer.initialFailure;
   ranges = [];
   #callbacks = [];
 
@@ -160,6 +162,7 @@ class FakeStreamer {
   setStreaming(value) { this.streaming = value; for (const callback of this.#callbacks) callback(value); }
 
   async append(track, bytes) {
+    if (this.failure !== null && (bytes[0] !== INIT || this.failure.initToo)) throw this.failure.error;
     this.appended.push([...bytes]);
     if (bytes[0] === INIT) return;
     this.ranges.push([bytes[0], bytes[1]]);
@@ -187,10 +190,11 @@ function setup({ cover = null, openFeed } = {}) {
   const handle = new FakeHandle();
   handle.coverValue = cover;
   const feed = new FakeFeed();
-  const log = { progress: [], errors: [], loads: 0, sizes: [], statuses: [] };
+  const log = { progress: [], errors: [], loads: 0, sizes: [], statuses: [], downloads: [] };
   const view = new VideoView({
     root,
     handle,
+    onDownload: (reason) => log.downloads.push(reason),
     record: { manifest: { type: 'video/mp4', size: BLOCK * BLOCKS - 100, blocks: BLOCKS, chunk: 100, name: 'clip.mp4' } },
     priority: () => PRIORITY.NOW,
     onProgress: (detail, kind) => log.progress.push({ detail, kind }),
@@ -748,5 +752,86 @@ test('blocks queued for the buffer when a seek comes are not handed to the feed 
     for (let i = 0; i < 5; i++) await flush();
     assert.deepEqual(asked, [1], 'only the call that was already under way; blocks 2 and 3 never reach the feed');
     releaseSeek();
+  } finally { t.view.close(); }
+});
+
+const rejected = () => new StreamerError('the decoder rejected these bytes: the segment is damaged or out of order');
+
+test('a stream the browser rejects before any frame is shown becomes the download view, with no error', async () => {
+  const t = setup();
+  try {
+    await started(t);
+    t.streamer().failure = { error: rejected() };
+    await settle(t, 0);
+    await flush();
+    assert.deepEqual(t.log.downloads, ['unplayable']);
+    assert.equal(t.log.errors.length, 0);
+    assert.equal(t.root.overlayText.textContent !== 'Playback stopped at block 0: it did not pass verification.', true);
+    // Nothing more is read for a file that cannot be played.
+    const reads = t.handle.indexes().length;
+    t.video().play();
+    for (let i = 0; i < 5; i++) await flush();
+    assert.equal(t.handle.indexes().length, reads);
+  } finally { t.view.close(); }
+});
+
+test('the video element failing before any frame is the download view too', async () => {
+  const t = setup();
+  try {
+    await started(t);
+    t.video().fire('error');
+    assert.deepEqual(t.log.downloads, ['unplayable']);
+    t.video().fire('error');
+    assert.deepEqual(t.log.downloads, ['unplayable'], 'said once');
+    assert.equal(t.log.errors.length, 0);
+  } finally { t.view.close(); }
+});
+
+test('an init segment the browser rejects ends start with the download outcome', async () => {
+  FakeStreamer.initialFailure = { error: rejected(), initToo: true };
+  const t = setup();
+  try {
+    const start = t.view.start();
+    await until(() => t.handle.pending(0).length === 1, 'the head read');
+    t.handle.pending(0)[0].resolve();
+    assert.deepEqual(await start, { view: 'download', reason: 'unplayable' });
+  } finally { FakeStreamer.initialFailure = null; t.view.close(); }
+});
+
+test('after a frame has been shown a rejected append is the error path, not a download', async () => {
+  const t = setup();
+  try {
+    await started(t);
+    await settle(t, 0);
+    t.video().readyState = 4;
+    t.video().fire('loadeddata');
+    t.video().play();
+    await until(() => t.handle.indexes().length === 5, 'reads ahead');
+    t.streamer().failure = { error: rejected() };
+    await settle(t, 1);
+    await flush();
+    assert.deepEqual(t.log.downloads, []);
+
+    // The playhead reaches the gap the failed block left.
+    t.video().currentTime = 10;
+    t.video().readyState = 1;
+    t.video().fire('waiting');
+    assert.equal(t.log.errors.length, 1);
+    assert.deepEqual(t.log.errors[0].state, { playing: true });
+    assert.equal(t.root.overlay.flags.failed, true);
+  } finally { t.view.close(); }
+});
+
+test('after a frame has been shown the video element failing is the error path', async () => {
+  const t = setup();
+  try {
+    await started(t);
+    await settle(t, 0);
+    t.video().readyState = 4;
+    t.video().fire('loadeddata');
+    t.video().fire('error');
+    assert.deepEqual(t.log.downloads, []);
+    assert.equal(t.log.errors.length, 1);
+    assert.deepEqual(t.log.errors[0].state, { playing: true });
   } finally { t.view.close(); }
 });

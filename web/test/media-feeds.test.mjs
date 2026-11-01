@@ -467,7 +467,7 @@ test('WebM with Cues seeks to a cluster; without Cues it does not', async () => 
 
   assert.equal(withCues.kind, 'webm');
   assert.equal(withCues.seekable, true);
-  assert.equal(withCues.duration, 4.008);
+  assert.equal(withCues.duration, 4.015);
   assert.deepEqual(withCues.tracks, [{ id: 0, mime: 'video/webm; codecs="vp9,opus"' }]);
 
   const target = await withCues.seekTo(2.5);

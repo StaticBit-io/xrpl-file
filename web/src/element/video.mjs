@@ -59,6 +59,7 @@ export class VideoView {
   #deps;
   #onProgress;
   #onError;
+  #onDownload;
   #onLoad;
   #onSize;
   #onStatus;
@@ -95,6 +96,7 @@ export class VideoView {
   #failure = null;
   #fatal = null;
   #errorReported = false;
+  #gaveUp = false;
   #statusShown = false;
 
   #verified = new Map();
@@ -113,12 +115,13 @@ export class VideoView {
    * @param {() => number} options.priority a PRIORITY value for the element as it is now: NOW when visible
    * @param {(detail: object, kind: { block: boolean }) => void} options.onProgress every newly verified block of this file
    * @param {(error: Error, state: { playing: boolean }) => void} options.onError a block failed and playback stands at the gap, or the browser's decoder gave up; `playing` is whether a frame was already shown
+   * @param {(reason: string) => void} [options.onDownload] the browser rejected the stream before any frame was shown: the file is for download instead (`unplayable`)
    * @param {() => void} options.onLoad the first frame is on screen
    * @param {(kind: 'cover' | 'content', width: number, height: number) => void} [options.onSize] natural proportions, for the host's ratio
    * @param {(text: string | null) => void} [options.onStatus] a line for the loading view while nothing is on screen yet; null restores its own
    * @param {object} [options.deps] test seams: `openFeed`, `Streamer`, `loadMp4Box`
    */
-  constructor({ root, handle, record, cover, priority, onProgress, onError, onLoad, onSize, onStatus, deps = {} }) {
+  constructor({ root, handle, record, cover, priority, onProgress, onError, onDownload, onLoad, onSize, onStatus, deps = {} }) {
     this.#root = root;
     this.#handle = handle;
     this.#record = record;
@@ -126,6 +129,7 @@ export class VideoView {
     this.#priority = priority;
     this.#onProgress = onProgress;
     this.#onError = onError;
+    this.#onDownload = onDownload ?? (() => {});
     this.#onLoad = onLoad;
     this.#onSize = onSize ?? (() => {});
     this.#onStatus = onStatus ?? (() => {});
@@ -191,8 +195,16 @@ export class VideoView {
     this.#ra = new ReadAhead({ blocks: manifest.blocks });
     const first = await feed.seekTo(0);
     if (first === null) throw new Error('the feed cannot start at the beginning of the file');
-    for (const segment of await feed.init()) await this.#streamer.append(segment.track, segment.bytes);
+    try {
+      for (const segment of await feed.init()) await this.#streamer.append(segment.track, segment.bytes);
+    } catch (error) {
+      if (this.#closed) return { view: 'closed' };
+      // The browser took the tracks (isTypeSupported said so) but not these bytes.
+      if (error instanceof StreamerError) return { view: 'download', reason: 'unplayable' };
+      throw error;
+    }
     if (this.#closed) return { view: 'closed' };
+    if (this.#gaveUp) return { view: 'download', reason: 'unplayable' };
 
     this.#ra.restart(first.block, first.offset);
     this.#writeHead = 0;
@@ -286,7 +298,7 @@ export class VideoView {
 
   /** Starts the reads the state asks for, and shows what is going on. */
   #pump() {
-    if (this.#closed || !this.#ready) return;
+    if (this.#closed || !this.#ready || this.#gaveUp) return;
     // While blocks are still going into the buffer the buffer does not say how far ahead it is: the next
     // round (the append calls it when it ends) decides with the true figure and reads no more than 30 s ahead.
     if (this.#seekPending || this.#pendingAppends > 0) { this.#refresh(); return; }
@@ -359,6 +371,8 @@ export class VideoView {
           if (block === this.#lastBlock) await this.#endIfWhole();
         } catch (error) {
           if (stale()) return;
+          // A browser that rejects the stream before showing anything cannot play this file here.
+          if (error instanceof StreamerError && !this.#hasFrame) { this.#giveUp(); return; }
           this.#appendHalted = true;
           this.#fail(block, generation, error);
           return;
@@ -490,6 +504,7 @@ export class VideoView {
     on('play', () => { this.#started = true; this.#pump(); });
     on('seeking', this.#onSeeking);
     on('error', () => {
+      if (!this.#hasFrame) { this.#giveUp(); return; }
       this.#fatal = new Error('the browser could not play this video');
       this.#refresh();
     });
@@ -517,6 +532,16 @@ export class VideoView {
     } catch {
       // A cover that cannot be read or shown never fails the video it decorates.
     }
+  }
+
+  /**
+   * The browser refused the stream before anything was shown: not a failure of the file, so no error. Before
+   * `start` has finished it answers with the download outcome; after, through `onDownload`.
+   */
+  #giveUp() {
+    if (this.#gaveUp || this.#closed) return;
+    this.#gaveUp = true;
+    if (this.#ready) this.#onDownload('unplayable');
   }
 
   // The overlay
