@@ -23,7 +23,10 @@ const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
 const MAX_NAME = 200;
 // Past this the "extension" is just a long tail of the name, not something worth protecting from the cut.
 const MAX_EXTENSION = 32;
-const CONTROL = /[\u0000-\u001f\u007f]/g;
+// C0 and C1 controls, line/paragraph separators and every format character (\p{Cf}: bidi overrides
+// and isolates, zero-width characters, tags). A right-to-left override turns "invoice<RLO>fdp.exe"
+// into a name that reads "invoiceexe.pdf", so none of these reach a caption or a save dialog.
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\p{Zl}\p{Zp}\p{Cf}]/gu;
 const FORBIDDEN = /[/\\:*?"<>|]/g;
 const EDGE = /^[ .]+|[ .]+$/g;
 const DEVICE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
@@ -56,7 +59,9 @@ function cut(name) {
 
 /**
  * The file name to save under. The manifest name is attacker-chosen, so it is reduced to one safe path
- * segment: no separators or reserved characters, no leading dots, no Windows device names.
+ * segment: no separators or reserved characters, no leading dots, no Windows device names, no invisible
+ * or direction-changing characters. The element shows this same string, so the visible name cannot be
+ * spoofed either.
  */
 export function downloadName(manifest) {
   let name = typeof manifest.name === 'string' ? manifest.name : '';

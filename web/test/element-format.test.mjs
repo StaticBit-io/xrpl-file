@@ -16,6 +16,37 @@ test('control characters are dropped and a device name is defused', () => {
   assert.equal(downloadName({ name: 'a\u007fb.txt', type: 'text/plain' }), 'ab.txt');
 });
 
+test('a right-to-left override cannot disguise an extension', () => {
+  assert.equal(downloadName({ name: 'invoice‮fdp.exe', type: 'application/pdf' }), 'invoicefdp.exe');
+});
+
+for (const [label, code] of [
+  ['LRM', 0x200e], ['RLM', 0x200f], ['ALM', 0x061c],
+  ['LRE', 0x202a], ['RLE', 0x202b], ['PDF', 0x202c], ['LRO', 0x202d], ['RLO', 0x202e],
+  ['LRI', 0x2066], ['RLI', 0x2067], ['FSI', 0x2068], ['PDI', 0x2069],
+  ['ZWSP', 0x200b], ['BOM', 0xfeff], ['soft hyphen', 0x00ad], ['LS', 0x2028], ['PS', 0x2029],
+  ['C1 start', 0x0080], ['C1 NEL', 0x0085], ['C1 end', 0x009f],
+])
+  test(`U+${code.toString(16).toUpperCase().padStart(4, '0')} (${label}) is stripped from the name`, () => {
+    assert.equal(downloadName({ name: `a${String.fromCodePoint(code)}b.txt`, type: 'text/plain' }), 'ab.txt');
+  });
+
+test('a name made only of invisible characters falls back', () => {
+  assert.equal(downloadName({ name: '‮‏', type: 'text/plain' }), 'xrpl-file.txt');
+});
+
+test('a device name hidden behind a format character is still defused', () => {
+  assert.equal(downloadName({ name: 'c​on.txt', type: 'text/plain' }), '_con.txt');
+});
+
+test('markup in a name stays inert text', () => {
+  assert.equal(downloadName({ name: '<img src=x onerror=alert(1)>', type: 'text/plain' }), '_img src=x onerror=alert(1)_');
+});
+
+test('"con:" loses its colon and is no longer a device name', () => {
+  assert.equal(downloadName({ name: 'con:', type: 'text/plain' }), 'con_');
+});
+
 for (const [name, out] of [
   ['NUL', '_NUL'],
   ['com1.log', '_com1.log'],
