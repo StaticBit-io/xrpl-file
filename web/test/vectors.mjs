@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { vectorBytes } from '../src/vector-stream.mjs';
-import { split, chunkMarkerHex, listMarkerHex, MANIFEST_MARKER_HEX, JSON_FORMAT_HEX } from '../src/tree.mjs';
+import { split, blockHash, chunkMarkerHex, listMarkerHex, MANIFEST_MARKER_HEX, JSON_FORMAT_HEX, CHUNK_BYTES } from '../src/tree.mjs';
+import { encodeManifest } from '../src/manifest.mjs';
 import { hex, utf8Hex } from '../src/hex.mjs';
 import { XrplFileError } from '../src/link.mjs';
 
@@ -98,6 +99,7 @@ export class FakeSource {
     // two pages does, once. A failure only at the start of a walk cannot reach a reader that
     // carries a walk over from one block to the next.
     this.failAfter = null;
+    this.transactionCalls = 0;
   }
 
   get accountTransactionsCalls() {
@@ -105,6 +107,7 @@ export class FakeSource {
   }
 
   async transaction(hash) {
+    this.transactionCalls++;
     return this.transactions.find((tx) => tx.hash.toUpperCase() === hash.toUpperCase()) ?? null;
   }
 
@@ -128,4 +131,38 @@ export class FakeSource {
   async earliestLedger() {
     return this.earliest;
   }
+}
+
+/**
+ * A file of one block, laid out the way a writer publishes it: every chunk in `firstLedger`, the
+ * manifest one ledger later. The manifest's hash is labelHash(label).
+ */
+export async function smallFileLedger({ label, bytes, type, writer = WRITER, firstLedger, cover = null }) {
+  const chunks = split(bytes, CHUNK_BYTES);
+  const root = hex(await blockHash(chunks));
+  const transactions = chunks.map((chunk, i) => ({
+    hash: labelHash(`${label}:chunk:${i}`),
+    ledgerIndex: firstLedger,
+    account: writer,
+    succeeded: true,
+    validated: true,
+    memoTypeHex: chunkMarkerHex(i),
+    memoDataHex: hex(chunk),
+    memoFormatHex: null,
+  }));
+  const manifest = encodeManifest({
+    type, size: bytes.length, chunk: CHUNK_BYTES, root, firstLedger, lastLedger: firstLedger,
+    blocks: 1, lists: 0, cover, name: null,
+  });
+  transactions.push({
+    hash: labelHash(label),
+    ledgerIndex: firstLedger + 1,
+    account: writer,
+    succeeded: true,
+    validated: true,
+    memoTypeHex: MANIFEST_MARKER_HEX,
+    memoDataHex: utf8Hex(manifest),
+    memoFormatHex: JSON_FORMAT_HEX,
+  });
+  return { transactions, hash: labelHash(label) };
 }

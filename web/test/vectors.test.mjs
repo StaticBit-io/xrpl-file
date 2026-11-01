@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { loadVectors } from './vectors.mjs';
+import { loadVectors, vectorLedger, FakeSource, LINK, MANIFEST_HASH } from './vectors.mjs';
+import { XrplFileReader } from '../src/reader.mjs';
+import { parseLink } from '../src/link.mjs';
 import { vectorBytes } from '../src/vector-stream.mjs';
 import { split, blockHash, rootHex, blockCount, encodeEntries, BLOCK_CHUNKS } from '../src/tree.mjs';
 import { decodeManifest, encodeManifest, inconsistency } from '../src/manifest.mjs';
-import { hex } from '../src/hex.mjs';
+import { hex, utf8Hex } from '../src/hex.mjs';
 
 test('the stream is sha256 counter mode over the seed', async () => {
   const block0 = createHash('sha256').update(Buffer.concat([Buffer.from('s'), Buffer.from([0, 0, 0, 0])])).digest();
@@ -41,5 +43,22 @@ test('every file vector is reproduced by the library', async () => {
     assert.equal(inconsistency(manifest), null);
     assert.equal(manifest.root, vector.root);
     assert.equal(encodeManifest(manifest), vector.manifest);
+  }
+});
+
+test('every manifest variant decodes as its base vector with the cover it names, and reads', async () => {
+  const set = await loadVectors();
+  assert.ok(set.manifestVariants.length > 0);
+
+  for (const variant of set.manifestVariants) {
+    const vector = set.files.find((f) => f.size === variant.of);
+    const decoded = decodeManifest(variant.manifest);
+    assert.equal(decoded.cover, variant.cover, variant.note);
+    assert.deepEqual({ ...decoded, cover: null }, { ...decodeManifest(vector.manifest), cover: null }, variant.note);
+
+    const ledger = await vectorLedger(vector);
+    ledger.find((tx) => tx.hash === MANIFEST_HASH).memoDataHex = utf8Hex(variant.manifest);
+    const result = await new XrplFileReader(new FakeSource(ledger)).read(parseLink(LINK));
+    assert.equal(createHash('sha256').update(result.bytes).digest('hex').toUpperCase(), vector.sha256, variant.note);
   }
 });

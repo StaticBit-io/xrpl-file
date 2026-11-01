@@ -4,6 +4,7 @@ import { BLOCK_CHUNKS, isManifest, chunkIndexOf, listIndexOf, decodeEntries, roo
 import { decodeManifest, inconsistency } from './manifest.mjs';
 import { hex, unhex, hexUtf8 } from './hex.mjs';
 import { ForwardHistory, DEFAULT_MAX_RECORDS } from './history.mjs';
+import { COVER_MAX_BYTES, coverProblem, coverMagicAgrees } from './cover.mjs';
 
 /**
  * Reads a file out of the ledger and verifies every byte against the manifest's root — the
@@ -81,6 +82,32 @@ export class XrplFileReader {
     if (manifest.lastLedger >= tx.ledgerIndex) throw new XrplFileError('CorruptManifest', `the manifest in ${link.txHash} names a ledger range that ends after the manifest itself`);
 
     return { manifest, writer: tx.account, ledgerIndex: tx.ledgerIndex, txHash: tx.hash };
+  }
+
+  /**
+   * The cover the manifest names, read and checked by section 4.1, or null. A cover that is
+   * missing, fails a check or cannot be read is the same as no cover: it is never an error of the
+   * file it decorates, so every failure here is swallowed.
+   */
+  async readCover(record) {
+    const coverHash = record.manifest.cover;
+    if (coverHash === null) return null;
+
+    try {
+      // A reader of its own: this one's forward history belongs to the file's blocks, and a
+      // cover's walk over a lower ledger range would throw it away. Its manifest() is also never
+      // asked for the cover's own cover, so that field is not followed.
+      const coverReader = new XrplFileReader(this.source, { maxBytes: COVER_MAX_BYTES });
+      const coverRecord = await coverReader.manifest({ txHash: coverHash });
+      if (coverProblem(coverRecord, record) !== null) return null;
+
+      const manifest = coverRecord.manifest;
+      const bytes = await coverReader.block(coverRecord, { i: 0, h: manifest.root, l: manifest.firstLedger });
+      if (!coverMagicAgrees(manifest.type, bytes)) return null;
+      return { bytes, type: manifest.type, txHash: coverRecord.txHash };
+    } catch {
+      return null;
+    }
   }
 
   async blockList(record) {

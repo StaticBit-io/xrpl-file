@@ -4,7 +4,7 @@ import { encodeManifest, decodeManifest, inconsistency } from '../src/manifest.m
 import { MANIFEST_BYTES } from '../src/tree.mjs';
 
 const ROOT = 'A'.repeat(64);
-const sample = (name = 'cover.png') => ({ type: 'image/png', size: 734512, chunk: 1000, root: ROOT, firstLedger: 106497159, lastLedger: 106497394, blocks: 1, lists: 0, name });
+const sample = (name = 'cover.png') => ({ type: 'image/png', size: 734512, chunk: 1000, root: ROOT, firstLedger: 106497159, lastLedger: 106497394, blocks: 1, lists: 0, cover: null, name });
 
 test('encode writes the fields in the documented order', () => {
   assert.equal(
@@ -74,4 +74,34 @@ test('a count wider than the type the .NET reader gives it is not a count', () =
     assert.throws(() => decodeManifest(bad), bad);
   }
   assert.equal(decodeManifest(json({ blocks: 2, lists: 2147483647 })).lists, 2147483647);
+});
+
+const COVER = 'C'.repeat(64);
+
+test('a cover is written after lists and before the name, and decodes upper-cased', () => {
+  const json = encodeManifest({ ...sample(), cover: COVER });
+  assert.ok(json.endsWith(`"lists":0,"cover":"${COVER}","name":"cover.png"}`));
+  assert.equal(decodeManifest(json.replace(COVER, COVER.toLowerCase())).cover, COVER);
+});
+
+test('a cover that is not 64 hex characters reads as absent', () => {
+  for (const value of ['123', '"AB"', 'null', '[]', '{}', `"${'C'.repeat(63)}Z"`]) {
+    const json = encodeManifest(sample()).replace(',"name":', `,"cover":${value},"name":`);
+    assert.deepEqual(decodeManifest(json), sample(), value);
+  }
+});
+
+test('members this version does not define are ignored', () => {
+  const json = encodeManifest(sample()).replace(',"name":', ',"future":{"tags":["a",1],"on":true},"x":null,"name":');
+  assert.deepEqual(decodeManifest(json), sample());
+});
+
+test('the name is shortened after the cover is placed', () => {
+  const json = encodeManifest({ ...sample('n'.repeat(2000)), cover: COVER });
+  assert.equal(new TextEncoder().encode(json).length, MANIFEST_BYTES);
+  assert.equal(decodeManifest(json).cover, COVER);
+});
+
+test('a malformed cover is never written', () => {
+  assert.throws(() => encodeManifest({ ...sample(), cover: 'AB' }));
 });

@@ -6,6 +6,7 @@ const byteLength = (text) => new TextEncoder().encode(text).length;
 
 function serialize(m, name) {
   const fields = { v: MANIFEST_VERSION, type: m.type, size: m.size, chunk: m.chunk, root: m.root, ledgers: [m.firstLedger, m.lastLedger], blocks: m.blocks, lists: m.lists };
+  if (m.cover != null) fields.cover = m.cover;
   if (name != null) fields.name = name;
   return JSON.stringify(fields);
 }
@@ -17,7 +18,12 @@ function shortenByOneCharacter(value) {
   return points.join('');
 }
 
+const isHash64 = (v) => typeof v === 'string' && /^[0-9a-fA-F]{64}$/.test(v);
+
 export function encodeManifest(m) {
+  if (m.cover != null && !isHash64(m.cover)) throw new Error('the cover is not 64 hex characters');
+  // The cover is placed before the name is measured, so a long name gives way to it and not the
+  // other way round.
   let name = m.name ?? null;
   for (;;) {
     const json = serialize(m, name);
@@ -54,7 +60,8 @@ export function decodeManifest(json) {
   if (!isInt(firstLedger) || !isInt(lastLedger) || firstLedger <= 0 || lastLedger < firstLedger) throw new Error('the manifest ledger range is not ascending');
   return {
     type: m.type, size: m.size, chunk: m.chunk, root: m.root.toUpperCase(), firstLedger, lastLedger,
-    blocks: m.blocks, lists: m.lists, name: typeof m.name === 'string' ? m.name : null,
+    blocks: m.blocks, lists: m.lists, cover: isHash64(m.cover) ? m.cover.toUpperCase() : null,
+    name: typeof m.name === 'string' ? m.name : null,
   };
 }
 
