@@ -7,6 +7,7 @@ import { hostStyle, linkReadiness, captionState, styleSupport } from './host.mjs
 import { prepare, loadWhole, progressDetail } from './load.mjs';
 import { pool, PRIORITY } from './page.mjs';
 import { saveFile } from './download.mjs';
+import { copyText, execCopyIn } from './clipboard.mjs';
 import { parseLength, parseLoading, parseLoader, linkText, endpointsFor } from './attributes.mjs';
 import { viewForType, magicAgrees, normalizeType } from './view.mjs';
 import { textPreview, TEXT_LIMIT } from './text.mjs';
@@ -655,11 +656,7 @@ export class XrplFileElement extends HTMLElement {
   async #copyLink() {
     if (this.#link === null) return;
     const copy = this.#parts.copy;
-    let done = false;
-    try {
-      await navigator.clipboard.writeText(formatLink(this.#link));
-      done = true;
-    } catch { /* clipboard access can be refused; the label says so */ }
+    const done = await copyText(formatLink(this.#link), { execCopy: execCopyIn(this.shadowRoot) });
     copy.textContent = done ? 'Copied' : 'Copy failed';
     clearTimeout(this.#copiedTimer);
     this.#copiedTimer = setTimeout(() => { copy.textContent = 'Copy link'; }, COPIED_MS);

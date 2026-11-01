@@ -113,7 +113,9 @@ version: the element assigns one static template through `innerHTML`.
 Inside a cross-origin `<iframe>` the browser refuses the save dialog, so Download assembles the file in
 memory (up to 2 GiB) and hands it to the browser as an ordinary download instead of streaming it to
 disk. An `<iframe sandbox>` that hosts the element must include `allow-downloads`; without it the
-browser drops the download silently, and the element can only say "Download started.".
+browser drops the download silently, and the element can only say "Download started.". Copy link
+works there too: where the Clipboard API is refused it falls back to `execCommand('copy')`, so
+`allow="clipboard-write"` on the iframe is optional.
 
 `web/demo` has pages that exercise it against published testnet files: `index.html` (every state),
 `many.html` (ten elements, with counters of the connections and requests they make), `snippet.html` and
