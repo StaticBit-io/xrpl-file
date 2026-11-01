@@ -68,6 +68,7 @@ test('blocks are written in order and the file is closed', async () => {
   assert.equal(await saveFile({ handle, record: recordOf(blocks), picker }), 'saved');
   assert.deepEqual(picker.writable.calls, ['write:0', 'write:1', 'write:2', 'close']);
   assert.equal(picker.options.suggestedName, 'vector-2500500.bin');
+  assert.equal(picker.options.startIn, 'downloads');
   assert.deepEqual(picker.writable.chunks, blocks);
 });
 

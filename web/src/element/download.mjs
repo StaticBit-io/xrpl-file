@@ -38,6 +38,11 @@ function isPickerBlocked(error) {
 
 const PICKER_BLOCKED = Symbol('picker blocked');
 
+// Without startIn Chromium opens the picker in Documents, which OneDrive folder backup redirects to
+// the cloud; the Windows dialog then hangs enumerating it while Ctrl+S, which starts in Downloads,
+// works. Starting where the browser's own downloads go avoids that and is where visitors look.
+const START_IN = 'downloads';
+
 /**
  * Asks for a place to save. A TypeError means the platform refused the suggested name, which comes
  * from the manifest and so cannot be vetted in advance; it is asked once more under a name that is
@@ -48,14 +53,14 @@ async function pickFile(picker, manifest) {
   const name = downloadName(manifest);
   const fallback = `xrpl-file.${extensionFor(manifest.type)}`;
   try {
-    return await picker({ suggestedName: name });
+    return await picker({ suggestedName: name, startIn: START_IN });
   } catch (error) {
     if (isAbort(error)) return null;
     if (isPickerBlocked(error)) return PICKER_BLOCKED;
     if (!(error instanceof TypeError) || name === fallback) throw error;
   }
   try {
-    return await picker({ suggestedName: fallback });
+    return await picker({ suggestedName: fallback, startIn: START_IN });
   } catch (error) {
     if (isAbort(error)) return null;
     if (isPickerBlocked(error)) return PICKER_BLOCKED;
