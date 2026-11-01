@@ -6,11 +6,13 @@
   const script = document.createElement('script');
   script.src = `${base}xrpl-file-element.js`;
   script.crossOrigin = 'anonymous';
-  try {
-    const hashes = await (await fetch(`${base}integrity.json`)).json();
-    script.integrity = hashes['xrpl-file-element.js'];
-  } catch (error) {
-    console.warn('integrity.json could not be read; loading the element without a check:', error);
+  // fetch resolves on a 404, so a missing build must be caught by status, not by a throw.
+  const response = await fetch(`${base}integrity.json`).catch(() => null);
+  if (!response?.ok) {
+    console.error(`${base} is not built: run \`cd web && node build.mjs\` and reload.`);
+    return;
   }
+  const hash = (await response.json())['xrpl-file-element.js'];
+  if (typeof hash === 'string') script.integrity = hash;
   document.head.append(script);
 })();
