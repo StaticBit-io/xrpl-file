@@ -273,11 +273,19 @@ function mp4boxFailure(what, error) {
   return new Error(`mp4box could not ${what}: ${error?.message ?? error}`);
 }
 
-/** The codec of an mp4box track as a safe MIME parameter value, or null for tracks MSE does not take. */
-function trackMime(track) {
+/**
+ * The codec of an mp4box track as a safe MIME parameter value, or null for tracks MSE does not take.
+ *
+ * mp4box gives a bare `mp4a` for an audio entry in QuickTime's layout, where the `esds` sits inside a
+ * `wave` box it does not read; the codec movie.mjs read from the same entry (`mp4a.40.2`) is used then.
+ */
+function trackMime(track, parsedCodec) {
   if (track.type !== 'video' && track.type !== 'audio') return null;
 
-  const codec = String(track.codec ?? '').replace(/[^A-Za-z0-9._-]/g, '');
+  let raw = String(track.codec ?? '');
+  if (!raw.includes('.') && parsedCodec?.startsWith(`${raw}.`)) raw = parsedCodec;
+
+  const codec = raw.replace(/[^A-Za-z0-9._-]/g, '');
   return codec === '' ? null : `${track.type}/mp4; codecs="${codec}"`;
 }
 
@@ -300,7 +308,7 @@ function moovPosition(block0, moov) {
  * and the `mdat` header, without which mp4box cannot skip over the media data to a `moov` at the end)
  * and the `moov`.
  */
-function startSession(MP4Box, block0, moov) {
+function startSession(MP4Box, block0, moov, codecs) {
   const file = MP4Box.createFile();
   const session = { file, info: null, tracks: [], init: [], pending: [], error: null, flushed: false };
 
@@ -312,7 +320,7 @@ function startSession(MP4Box, block0, moov) {
     session.info = info;
 
     for (const track of info.tracks) {
-      const mime = trackMime(track);
+      const mime = trackMime(track, codecs.get(track.id));
       if (mime === null) continue;
 
       session.tracks.push({ id: track.id, mime });
@@ -347,6 +355,31 @@ function startSession(MP4Box, block0, moov) {
   return session;
 }
 
+/**
+ * Where to read from to play from `t`: mp4box's `ISOFile.seek(t, true)`, restricted to the tracks that
+ * are segmented. `seek` itself takes the least offset and time over every `trak`, so a `tmcd` timecode
+ * or `gpmd` metadata track (one early sample) would answer every seek with the start of the file.
+ * The steps are those of `seek`: a track the time is past the end of is left out, the rest answer
+ * through `seekTrack`, and the offset moves to the end of data already buffered.
+ */
+function seekPosition(session, t) {
+  const { file } = session;
+  let offset = Infinity;
+  let time = Infinity;
+
+  for (const { id } of session.tracks) {
+    const trak = file.getTrackById(id);
+    if (t > file.getTrackDuration(trak)) continue;
+
+    const found = file.seekTrack(t, true, trak);
+    offset = Math.min(offset, found.offset);
+    time = Math.min(time, found.time);
+  }
+
+  if (offset === Infinity) throw new Error('mp4box found no sample to start from');
+  return { offset: file.stream.getEndFilePositionAfter(offset), time };
+}
+
 async function openPlain({ source, located, movie, blockBytes, size, loadMp4Box }) {
   if (typeof loadMp4Box !== 'function') throw new TypeError('opening a plain MP4 needs loadMp4Box');
 
@@ -355,13 +388,14 @@ async function openPlain({ source, located, movie, blockBytes, size, loadMp4Box 
 
   // Parsed once here for the track list and the initialization segments; the first seek starts from
   // this same instance, later ones from a new one.
-  let spare = startSession(MP4Box, block0, located);
+  const codecs = new Map(movie.tracks.map((track) => [track.id, track.codec]));
+  let spare = startSession(MP4Box, block0, located, codecs);
   const { tracks, init } = spare;
   let current = null;
   let closed = false;
 
-  // Time past the end of every track makes mp4box answer with no position at all.
-  const reach = Math.max(0, ...movie.tracks.filter((t) => t.table !== null && t.timescale > 0).map((t) => t.table.endTicks / t.timescale));
+  // Time past the end of every segmented track leaves nothing to start from.
+  const reach = Math.max(0, ...movie.tracks.filter((t) => t.kind !== 'other' && t.table !== null && t.timescale > 0).map((t) => t.table.endTicks / t.timescale));
   const answer = seekAnswer(source, blockBytes, size);
   const lastBlock = source.total - 1;
 
@@ -378,14 +412,14 @@ async function openPlain({ source, located, movie, blockBytes, size, loadMp4Box 
     async seekTo(target) {
       if (closed) return null;
 
-      const session = spare ?? startSession(MP4Box, block0, located);
+      const session = spare ?? startSession(MP4Box, block0, located, codecs);
       spare = null;
       current?.file.stop?.();
       current = null;
 
       let position;
       try {
-        position = session.file.seek(Math.min(seconds(target), reach), true);
+        position = seekPosition(session, Math.min(seconds(target), reach));
         session.file.start();
       } catch (error) {
         throw mp4boxFailure('seek', error);

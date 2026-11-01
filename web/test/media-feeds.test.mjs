@@ -77,8 +77,9 @@ function boxAt(bytes, offset) {
   return ascii(bytes.subarray(offset + 4, offset + 8));
 }
 
+/** Samples of the tracks a player segments: a timecode or metadata track is not part of the count. */
 function samplesInTables(movie) {
-  return movie.tracks.reduce((sum, track) => sum + track.table.count, 0);
+  return movie.tracks.filter((track) => track.kind !== 'other').reduce((sum, track) => sum + track.table.count, 0);
 }
 
 /** Every block from the seek answer on, through `media`, as the player does. */
@@ -168,24 +169,107 @@ for (const name of ['plain-start.mp4', 'plain-end.mp4']) {
   });
 }
 
-test('seekPoint agrees with mp4box on where to read from', async () => {
-  // plain-start.mp4 with only bytes [0, end of moov): the media data is not buffered, so mp4box's
-  // adjustment of the answer to the end of data it already holds does not apply.
-  const bytes = read('plain-start.mp4');
-  const moov = topLevelBoxes(bytes).find((box) => box.type === 'moov');
-  const movie = parseMovie(bytes.subarray(moov.start, moov.end), { fileSize: bytes.length });
-
+/** An mp4box `ISOFile` that holds the movie header of a file and none of its media data. */
+function mp4boxOver(bytes, moovEnd) {
   const file = mp4box().createFile();
-  let ready = false;
-  file.onReady = () => { ready = true; };
-  const copy = bytes.slice(0, moov.end).buffer;
+  let tracks = null;
+  file.onReady = (info) => { tracks = info.tracks; };
+  const copy = bytes.slice(0, moovEnd).buffer;
   copy.fileStart = 0;
   file.appendBuffer(copy);
-  assert.ok(ready);
+  assert.ok(tracks, 'mp4box read the movie header');
 
-  for (const t of [0, 0.4, 1.3, 2.5, 2.95, 3.9, 4]) {
-    // Spread: the library's objects come from another realm, which deepEqual tells apart.
-    assert.deepEqual(seekPoint(movie, t), { ...file.seek(t, true) }, `at ${t} s`);
+  return { file, tracks };
+}
+
+/**
+ * The rule the player needs, written against mp4box's own `seekTrack`: the least offset and time
+ * over the video and audio tracks that reach `t`. (`ISOFile.seek` does the same over every track.)
+ */
+function playedTracksSeek({ file, tracks }, t) {
+  let offset = Infinity;
+  let time = Infinity;
+  for (const info of tracks.filter((track) => track.type === 'video' || track.type === 'audio')) {
+    const trak = file.getTrackById(info.id);
+    if (t > file.getTrackDuration(trak)) continue;
+    const found = file.seekTrack(t, true, trak);
+    offset = Math.min(offset, found.offset);
+    time = Math.min(time, found.time);
+  }
+  return { offset, time };
+}
+
+for (const name of ['plain-start.mp4', 'plain-end.mp4', 'timecode.mov']) {
+  test(`${name}: seekPoint agrees with mp4box's seekTrack over the video and audio tracks`, () => {
+    // Only the movie header is given to mp4box, and seekTrack does not look at buffers at all.
+    const bytes = read(name);
+    const moov = topLevelBoxes(bytes).find((box) => box.type === 'moov');
+    const movie = parseMovie(bytes.subarray(moov.start, moov.end), { fileSize: bytes.length });
+    const over = mp4boxOver(bytes, moov.end);
+
+    for (const t of [0, 0.4, 1.3, 2.5, 2.95, 3.5, 3.9, 4]) {
+      assert.deepEqual(seekPoint(movie, t), playedTracksSeek(over, t), `at ${t} s`);
+    }
+  });
+}
+
+test('mp4box own seek counts a timecode track, which is why the feed does not use it', () => {
+  const bytes = read('timecode.mov');
+  const moov = topLevelBoxes(bytes).find((box) => box.type === 'moov');
+  const over = mp4boxOver(bytes, moov.end);
+
+  assert.ok(over.tracks.some((track) => track.type !== 'video' && track.type !== 'audio'));
+
+  // What seek() does before it looks at buffers: the least offset over every track.
+  const every = over.tracks.map((info) => over.file.seekTrack(3.5, true, over.file.getTrackById(info.id)).offset);
+  assert.ok(Math.min(...every) < 100);
+  assert.ok(playedTracksSeek(over, 3.5).offset > 40000);
+});
+
+test('a timecode track does not pull a seek back to the start of the file', async () => {
+  const source = blocksOf(read('timecode.mov'));
+  const movie = parseMovie(moovOf('timecode.mov'), { fileSize: source.size });
+  const feed = await open('iso', source);
+
+  assert.equal(feed.tracks.length, 2);
+  assert.deepEqual(feed.tracks.map((t) => t.mime).sort(), ['audio/mp4; codecs="mp4a.40.2"', 'video/mp4; codecs="avc1.64000a"']);
+
+  const point = seekPoint(movie, 3.5);
+  assert.ok(point.offset > source.size * 0.6, `seekPoint reads from ${point.offset} of ${source.size}`);
+  assert.ok(point.time > 3 && point.time <= 3.5);
+
+  const target = await feed.seekTo(3.5);
+  assert.ok(target.block >= 9 && target.block > 1, `seekTo starts at block ${target.block}`);
+  assert.equal(target.offset, point.offset);
+  assert.equal(target.time, point.time);
+
+  const segments = await playFrom(feed, source, target);
+  // A decode time: the keyframe's composition time (3.2) less the two frames of B-frame delay.
+  assert.ok(tfdtSeconds(segments.find((s) => s.track === 1), 10240) > 2.5);
+  assert.equal(await (async () => countSamples(await playFrom(feed, source, await feed.seekTo(0))))(), samplesInTables(movie));
+});
+
+test('after a seek into the middle, every track gets exactly the samples from its starting sample on', async () => {
+  const source = blocksOf(read('plain-start.mp4'));
+  const movie = parseMovie(moovOf('plain-start.mp4'), { fileSize: source.size });
+  const feed = await open('iso', source);
+
+  const t = 2.5;
+  const target = await feed.seekTo(t);
+  const segments = await playFrom(feed, source, target);
+
+  for (const track of movie.tracks) {
+    const { table } = track;
+    // The scan seekPoint documents: in decode order up to the first sample past t, the last sync sample before it.
+    let from = 0;
+    for (let i = 0; i < table.count; i++) {
+      if (i > 0 && table.cts[i] > t * track.timescale) break;
+      if (table.sync === null || table.sync[i] === 1) from = i;
+    }
+
+    const own = segments.filter((segment) => segment.track === track.id);
+    assert.equal(countSamples(own), table.count - from, `track ${track.id}`);
+    assert.ok(from > 0);
   }
 });
 

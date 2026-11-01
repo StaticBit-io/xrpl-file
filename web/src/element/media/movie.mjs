@@ -442,7 +442,9 @@ export function parseMovie(moovBytes, { fileSize = Infinity } = {}) {
  * Where to start reading an ordinary file to play from `seconds`: mp4box.js 0.5.4's
  * `ISOFile.prototype.seek(seconds, true)` over the parsed tables.
  *
- * Per track whose end (last composition time plus last duration) is not before `seconds`: the samples
+ * Per video or audio track (the tracks a player segments; a timecode or metadata track is not looked at,
+ * or its one early sample would pull every answer to the start of the file) whose end (last composition
+ * time plus last duration) is not before `seconds`: the samples
  * are scanned in decode order up to the first whose composition time is past `seconds` (the first
  * sample is never tested), and the last sync sample seen is the one chosen; a track without `stss`
  * counts every sample as sync. The result is the least offset and the least composition time over
@@ -459,6 +461,7 @@ export function seekPoint(movie, seconds) {
 
   for (const track of movie.tracks) {
     const table = track.table;
+    if (track.kind === 'other') continue;
     if (table === null || table.count === 0 || !(track.timescale > 0)) continue;
     if (seconds > table.endTicks / track.timescale) continue;
 

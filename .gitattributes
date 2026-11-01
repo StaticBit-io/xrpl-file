@@ -2,6 +2,7 @@
 *.bin binary
 *.bat text eol=crlf
 *.mp4 binary
+*.mov binary
 *.webm binary
 *.webp binary
 *.png binary

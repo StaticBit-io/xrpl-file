@@ -26,6 +26,8 @@ avc=(-c:v libx264 -g 10 -keyint_min 10 -sc_threshold 0 -pix_fmt yuv420p -flags:v
 
 "${ff[@]}" "${inputs[@]}" "${avc[@]}" -movflags +faststart "$here/plain-start.mp4"
 "${ff[@]}" "${inputs[@]}" "${avc[@]}" "$here/plain-end.mp4"
+# A QuickTime file with a tmcd timecode track: one sample, near the start of the media data, that a seek must not be pulled to.
+"${ff[@]}" "${inputs[@]}" "${avc[@]}" -timecode 00:00:00:00 -f mov "$here/timecode.mov"
 "${ff[@]}" "${inputs[@]}" "${avc[@]}" -movflags +frag_keyframe+empty_moov+default_base_moof "$here/fragmented.mp4"
 
 "${ff[@]}" "${inputs[@]}" -c:v libx265 -tag:v hvc1 -g 10 -keyint_min 10 -pix_fmt yuv420p -x265-params log-level=error \
@@ -54,7 +56,7 @@ keyframes() {
     "$(keyframes "$here/plain-start.mp4")" "$(keyframes "$here/plain-end.mp4")"
 } > "$here/expected.json"
 
-for f in plain-start.mp4 plain-end.mp4 fragmented.mp4 fragmented-sidx.mp4 hevc.mp4 clip.webm clip-live.webm expected.json; do
+for f in plain-start.mp4 plain-end.mp4 timecode.mov fragmented.mp4 fragmented-sidx.mp4 hevc.mp4 clip.webm clip-live.webm expected.json; do
   size="$(stat -c %s "$here/$f")"
   [ "$size" -lt 200000 ] || { echo "$f is $size bytes, over the 200 KB budget" >&2; exit 1; }
   echo "$f  $size bytes"
