@@ -48,10 +48,13 @@ export function messageFor(error, { playing = false } = {}) {
   }
 }
 
-/** The `detail` of the `error` event: the error name from the shared set (null when it has none) and the sentence shown. */
-export function detailFor(error) {
+/**
+ * The `detail` of the `error` event: the error name from the shared set (null when it has none) and the
+ * sentence shown, which for a video that was already playing is the `playing` one.
+ */
+export function detailFor(error, { playing = false } = {}) {
   const name = error instanceof XrplFileError ? (error.code ?? null) : null;
-  return { name, message: messageFor(error) };
+  return { name, message: messageFor(error, { playing }) };
 }
 
 /** Hash checks need SubtleCrypto, which browsers expose to secure contexts only. */

@@ -38,6 +38,15 @@ export const STYLES = `
   button:focus-visible, pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .status { margin-top: 6px; min-height: 1.6em; font-size: 12.5px; }
 
+  .player video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; pointer-events: none; }
+  .overlay.failed { background: rgba(0,0,0,.72); }
+  .overlay.failed .ring, .overlay.failed .bar { display: none; }
+  .overlay.failed .overlay-text { color: #ff8a8a; font-size: 14px; }
+  .overlay .bar > i { width: 30%; animation: slide 1.2s ease-in-out infinite; }
+  @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+  @media (prefers-reduced-motion: reduce) { .overlay .bar > i { animation: none; width: 100%; opacity: 0.5; } }
+
   .idle .scrim { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,.65), rgba(0,0,0,.15)); }
   .error .message { color: #ff8a8a; font-size: 14px; padding: 0 18px; max-width: 100%; overflow-wrap: anywhere; }
 
@@ -84,6 +93,15 @@ export const TEMPLATE = `
   </div>
   <div class="view image" id="image" hidden>
     <img class="fill" id="img" alt="">
+  </div>
+  <div class="view player" id="video" hidden>
+    <div class="overlay" id="overlay" part="loader" hidden>
+      <div class="center">
+        <div class="ring" aria-hidden="true"></div>
+        <div class="muted overlay-text" id="overlayText" role="status"></div>
+      </div>
+      <div class="bar" aria-hidden="true"><i></i></div>
+    </div>
   </div>
   <div class="view text" id="text" hidden>
     <div class="textbar" id="textBar" hidden>

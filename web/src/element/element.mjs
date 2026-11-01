@@ -10,6 +10,7 @@ import { saveFile } from './download.mjs';
 import { parseLength, parseLoading, parseLoader, linkText, endpointsFor } from './attributes.mjs';
 import { viewForType, magicAgrees, normalizeType } from './view.mjs';
 import { textPreview, TEXT_LIMIT } from './text.mjs';
+import { VideoView } from './video.mjs';
 import { formatBytes, downloadName } from './format.mjs';
 import { elementError, messageFor, detailFor, canVerify, INSECURE, NO_LINK } from './messages.mjs';
 import { parseLink, formatLink } from '../link.mjs';
@@ -19,13 +20,14 @@ const DEFAULT_RATIO = '16 / 9';
 const RATIO_COVER = 1;
 const RATIO_CONTENT = 2;
 
-const VIEWS = ['idle', 'loading', 'image', 'text', 'download', 'error'];
+const VIEWS = ['idle', 'loading', 'image', 'video', 'text', 'download', 'error'];
 const COPIED_MS = 1500;
 
 const NOTE_TOO_LARGE = 'This picture is too large to show here.';
 const NOTE_MISMATCH = "This file's contents do not match its type, so it is offered as a download.";
 const NOTE_UNDECODABLE = 'This browser cannot show this picture.';
-const NOTES = { 'too-large': NOTE_TOO_LARGE, mismatch: NOTE_MISMATCH, undecodable: NOTE_UNDECODABLE };
+const NOTE_UNPLAYABLE = 'This browser cannot play this video here.';
+const NOTES = { 'too-large': NOTE_TOO_LARGE, mismatch: NOTE_MISMATCH, undecodable: NOTE_UNDECODABLE, unplayable: NOTE_UNPLAYABLE };
 
 const isAbort = (error) => error?.name === 'AbortError';
 
@@ -77,6 +79,7 @@ export class XrplFileElement extends HTMLElement {
   #lease = null;
   #handle = null;
   #record = null;
+  #video = null;
 
   #phase = 'idle';
   #verified = false;
@@ -208,7 +211,10 @@ export class XrplFileElement extends HTMLElement {
     this.#lastBytes = 0;
     clearTimeout(this.#copiedTimer);
 
-    // FileHandle#release does not cancel the handle's own readers; the abort above did.
+    // The view's reads go first: FileHandle#release does not cancel a handle's own readers, the abort above
+    // did for the element's and this does for the player's.
+    this.#video?.close();
+    this.#video = null;
     this.#handle?.release();
     this.#lease?.release();
     this.#handle = null;
@@ -237,6 +243,8 @@ export class XrplFileElement extends HTMLElement {
     p.dlNote.hidden = true;
     for (const status of [p.dlStatus, p.textStatus]) status.textContent = '';
     p.frame.classList.remove('video', 'tapped');
+    p.overlay.hidden = true;
+    p.overlayText.textContent = '';
     p.copy.textContent = 'Copy link';
     p.caption.hidden = true;
     for (const view of VIEWS) p[view].hidden = true;
@@ -382,7 +390,7 @@ export class XrplFileElement extends HTMLElement {
       this.#parts.frame.classList.toggle('video', view === 'video');
       if (view === 'image') await this.#loadImage(record, signal);
       else if (view === 'text') await this.#loadText(record, signal);
-      // Video joins this branch's neighbours when the player lands; until then it is a file.
+      else if (view === 'video') await this.#loadVideo(record, signal);
       else this.#showDownload(record, reason);
     } catch (error) {
       if (!signal.aborted) this.#fail(error);
@@ -413,6 +421,43 @@ export class XrplFileElement extends HTMLElement {
     this.#parts.img.alt = downloadName(manifest);
     this.#showPhase('image');
     this.#emit('load');
+  }
+
+  async #loadVideo(record, signal) {
+    const view = new VideoView({
+      root: this.#parts.video,
+      handle: this.#handle,
+      record,
+      priority: this.#priority,
+      onProgress: (detail, kind) => this.#report(detail, kind),
+      onSize: (kind, width, height) => this.#setRatio(kind === 'cover' ? RATIO_COVER : RATIO_CONTENT, width, height),
+      onStatus: (text) => this.#renderLoading(text ?? 'Reading the file description…', null),
+      onError: (error, state) => this.#videoFailed(error, state),
+      onLoad: () => {
+        // The first frame came out of verified blocks only.
+        this.#verified = true;
+        this.#renderCaption();
+        this.#emit('load');
+      },
+    });
+    this.#video = view;
+
+    const outcome = await view.start();
+    if (signal.aborted || this.#video !== view) return;
+    if (outcome.view === 'download') {
+      view.close();
+      this.#video = null;
+      this.#parts.frame.classList.remove('video');
+      this.#showDownload(record, outcome.reason);
+      return;
+    }
+    this.#showPhase('video');
+  }
+
+  /** A video that was already on screen keeps showing what it has, with the error at the gap; before that it is the error view. */
+  #videoFailed(error, { playing }) {
+    if (!playing) { this.#fail(error); return; }
+    this.#emit('error', detailFor(error, { playing: true }));
   }
 
   async #readHead(record, signal) {
@@ -536,6 +581,8 @@ export class XrplFileElement extends HTMLElement {
   }
 
   #fail(error) {
+    this.#video?.close();
+    this.#video = null;
     this.#parts.message.textContent = messageFor(error);
     // Nothing is read after a failure: the connection is the page's to close, not ours to hold.
     this.#handle?.release();

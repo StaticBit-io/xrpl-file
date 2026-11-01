@@ -65,3 +65,12 @@ test('verification needs a secure context and SubtleCrypto', () => {
   assert.equal(canVerify({ isSecureContext: true, crypto: {} }), false);
   assert.equal(canVerify({ isSecureContext: true }), false);
 });
+
+test('the error event of a video that was playing carries the playing sentence', () => {
+  const error = new XrplFileError('BlockMismatch', 'x', { block: 4 });
+  assert.deepEqual(detailFor(error, { playing: true }),
+    { name: 'BlockMismatch', message: 'Playback stopped at block 4: it did not pass verification.' });
+  assert.deepEqual(detailFor(error, { playing: true }).message, messageFor(error, { playing: true }));
+  assert.equal(detailFor(error).message, messageFor(error));
+  assert.notEqual(detailFor(error, { playing: true }).message, detailFor(error).message);
+});

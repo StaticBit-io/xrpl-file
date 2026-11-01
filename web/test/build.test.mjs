@@ -108,18 +108,17 @@ test("integrity.json holds the SHA-384 of both files, and the element carries mp
 
   const code = await readFile(join(out, 'xrpl-file-element.js'), 'utf8');
   assert.ok(!code.includes(PLACEHOLDER));
-  // The loader joins the element graph with the playback task; until then there is nothing to carry the hash.
-  if (code.includes('src/element/media/mp4box-loader.mjs')) assert.ok(code.includes(integrity['mp4box.min.js']));
+  assert.ok(code.includes('src/element/media/mp4box-loader.mjs'), 'the video view brings the loader into the bundle');
+  assert.ok(code.includes(integrity['mp4box.min.js']));
 });
 
-test("a module holding the placeholder gets mp4box's hash, whatever reaches it", async () => {
-  const web = await copyOfWebAppending('src/element/define.mjs', "\nimport { HASH } from '../hash-fixture.mjs';\nglobalThis.__hash = HASH;\n");
-  await writeFile(join(web, 'src', 'hash-fixture.mjs'), `export const HASH = '${PLACEHOLDER}';\n`);
+test("the loader's placeholder gets mp4box's hash, and the running bundle sees it", async () => {
+  const web = await copyOfWebAppending('src/element/media/mp4box-loader.mjs', '\nglobalThis.__hash = MP4BOX_INTEGRITY;\n');
   const out = await tempDir();
   const { integrity } = await build({ webDir: web, outDir: out, version: VERSION });
   const code = await readFile(join(out, 'xrpl-file-element.js'), 'utf8');
   assert.ok(!code.includes(PLACEHOLDER));
-  assert.ok(code.includes(`HASH = '${integrity['mp4box.min.js']}'`));
+  assert.ok(code.includes(`MP4BOX_INTEGRITY = '${integrity['mp4box.min.js']}'`));
 
   const context = vm.createContext(browserStubs([]));
   vm.runInContext(code, context);
@@ -127,9 +126,7 @@ test("a module holding the placeholder gets mp4box's hash, whatever reaches it",
 });
 
 test('a placeholder that appears twice is refused, because a second copy would switch the check off', async () => {
-  const web = await copyOfWebAppending('src/element/define.mjs', "\nimport { HASH } from '../hash-fixture.mjs';\nglobalThis.__hash = HASH;\n");
-  await writeFile(join(web, 'src', 'hash-fixture.mjs'),
-    `export const HASH = '${PLACEHOLDER}';\nexport const UNSET = '${PLACEHOLDER}';\n`);
+  const web = await copyOfWebAppending('src/element/media/mp4box-loader.mjs', `\nexport const UNSET = '${PLACEHOLDER}';\n`);
   await assert.rejects(build({ webDir: web, outDir: await tempDir(), version: VERSION }), /__MP4BOX_INTEGRITY__.*2 times/);
 });
 
