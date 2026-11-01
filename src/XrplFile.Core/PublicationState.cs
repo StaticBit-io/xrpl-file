@@ -56,6 +56,13 @@ namespace XrplFile;
 /// How long the sessions before this one worked, in whole seconds, as the application measured it.
 /// The library carries it and never reads it. Absent until a session that sent something has ended.
 /// </param>
+/// <param name="Cover">
+/// The hash of the manifest transaction of the file's cover picture (format 4.1), upper-case hex, or
+/// absent for none. The run writes it into its manifest, and a resume looks for a manifest carrying
+/// exactly it (spec B27). An application built before this field existed ignores it when it resumes
+/// such a run: it looks for a manifest without a cover and sends a second one. That limit is accepted
+/// rather than closed with a state version, because only the fixture tool sets a cover so far.
+/// </param>
 public sealed record PublicationState(
     int Version,
     string Network,
@@ -77,7 +84,8 @@ public sealed record PublicationState(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] uint? StartSequence = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ManifestStatus = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Failure = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WorkedSeconds = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WorkedSeconds = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Cover = null)
 {
     /// <summary>
     /// Sequence and ticket runs. 2 since <see cref="Root"/> became something a run records at its start rather than at its

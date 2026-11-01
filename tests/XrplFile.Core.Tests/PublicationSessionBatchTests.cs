@@ -91,6 +91,31 @@ public class PublicationSessionBatchTests : IDisposable
     }
 
     [Fact]
+    public async Task A_cover_from_the_options_is_in_the_state_and_the_landed_manifest()
+    {
+        BatchTestNode node = Funded();
+        string cover = Vectors.Hash("cover");
+        SessionOptions options = new() { StateDirectory = _stateDirectory, FencePoll = TimeSpan.FromMilliseconds(1), Cover = cover.ToLowerInvariant() };
+        PublicationSession session = await StartAsync(node, VectorStream.Bytes("cover", 20_000), options);
+
+        PublicationReport report = await session.RunAsync(null, Token);
+
+        Assert.Equal(cover, report.Manifest.Cover);
+        Assert.Equal(cover, (await new XrplFileReader(node.Ledger).ManifestAsync(report.Link, Token)).Manifest.Cover);
+        Assert.Equal(cover, PublicationState.Load(session.StatePath).Cover);
+    }
+
+    [Fact]
+    public async Task A_cover_that_is_not_a_hash_is_refused_before_any_state_exists()
+    {
+        BatchTestNode node = Funded();
+        SessionOptions options = new() { StateDirectory = _stateDirectory, FencePoll = TimeSpan.FromMilliseconds(1), Cover = "xyz" };
+
+        await Assert.ThrowsAsync<ArgumentException>(() => StartAsync(node, VectorStream.Bytes("cover", 20_000), options));
+        Assert.Empty(Directory.EnumerateFiles(_stateDirectory));
+    }
+
+    [Fact]
     public async Task A_batch_run_publishes_a_file_that_reads_back_and_reports_what_the_payer_paid()
     {
         BatchTestNode node = Funded();

@@ -25,6 +25,19 @@ public sealed class WriterOptions
     /// <summary>Read everything back through the reader before writing the manifest. On by default; the format does not require it.</summary>
     public bool ReadBack { get; init; } = true;
 
+    /// <summary>
+    /// The hash of the manifest transaction of this file's cover picture (format 4.1), 64 hex digits in
+    /// either case; the manifest carries it upper-case. Null writes no <c>cover</c>.
+    /// <para>
+    /// The caller must have published the cover first, from the same writer, in a ledger strictly below
+    /// this file's first one, as <c>image/webp</c> or <c>image/jpeg</c> of at most 65,536 bytes. The
+    /// library does not read or check that file: a cover that breaks those rules is ignored by readers,
+    /// never an error. A malformed hash makes the manifest unencodable, and the publication fails before
+    /// the manifest is sent.
+    /// </para>
+    /// </summary>
+    public string? Cover { get; init; }
+
     /// <summary>The wait between reads of the landed manifest (spec S22); a seam for tests, which must not sleep seconds.</summary>
     internal TimeSpan ManifestReadPause { get; init; } = PublicationCheck.DefaultManifestReadPause;
 }
@@ -195,7 +208,7 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
             lastLedger = Math.Max(lastLedger, await PublishListsAsync(listMemos, alreadyLanded, progress, cancellationToken).ConfigureAwait(false));
         }
 
-        Manifest manifest = ManifestPlan.Build(type, name, file.Length, entries, window.First, lastLedger, listMemos.Count);
+        Manifest manifest = ManifestPlan.Build(type, name, file.Length, entries, window.First, lastLedger, listMemos.Count, _options.Cover);
 
         PublicationCheck.RequireReachable(entries, landing, manifest);
 

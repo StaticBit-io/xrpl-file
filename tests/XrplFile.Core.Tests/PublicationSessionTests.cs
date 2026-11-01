@@ -97,6 +97,25 @@ public class PublicationSessionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_sequence_run_writes_the_cover_too()
+    {
+        FakeLedgerSource ledger = Node();
+        FakeLedgerSink sink = new(ledger);
+        await using SequenceStrategy strategy = new(sink, Signer, StrategyOptions);
+        string cover = Vectors.Hash("cover");
+        SessionOptions options = new() { StateDirectory = _stateDirectory, TicketsPerBatch = 100, Cover = cover.ToLowerInvariant() };
+
+        PublicationSession session = await PublicationSession.StartAsync(
+            strategy, ledger, VectorStream.Bytes("s", 2500), "text/plain", null, Wallet.ClassicAddress, "key-1", "testnet",
+            options, TestContext.Current.CancellationToken);
+        PublicationReport report = await session.RunAsync(null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(cover, report.Manifest.Cover);
+        Assert.Equal(cover, (await new XrplFileReader(ledger).ManifestAsync(report.Link, TestContext.Current.CancellationToken)).Manifest.Cover);
+        Assert.Equal(cover, PublicationState.Load(session.StatePath).Cover);
+    }
+
+    [Fact]
     public async Task A_run_that_costs_more_than_the_budget_never_starts()
     {
         FakeLedgerSource ledger = Node();

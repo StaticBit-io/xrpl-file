@@ -42,6 +42,23 @@ public class XrplFileWriterTests
         Assert.Equal(5015, read.Blocks[1].FirstLedger);
     }
 
+    [Fact]
+    public async Task A_writer_with_a_cover_writes_it_into_the_manifest()
+    {
+        FakeLedgerSource ledger = new();
+        FakeLedgerSink sink = new(ledger);
+        string cover = Vectors.Hash("cover");
+
+        await using SequenceStrategy strategy = new(sink, Signer);
+        XrplFileWriter writer = new(strategy, ledger, new WriterOptions { Cover = cover });
+
+        PublishResult result = await writer.PublishAsync(
+            VectorStream.Bytes("s", 1500), "text/plain", "s.txt", Wallet.ClassicAddress, "testnet", null, null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(cover, result.Manifest.Cover);
+        Assert.Equal(cover, (await new XrplFileReader(ledger).ManifestAsync(result.Link, TestContext.Current.CancellationToken)).Manifest.Cover);
+    }
+
     /// <summary>
     /// The writer adapts a strategy's per-memo count into its own stage report, and that adapter
     /// must run on the strategy's thread rather than posting to the thread pool. A caller passes

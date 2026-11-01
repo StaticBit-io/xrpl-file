@@ -29,6 +29,18 @@ public class PublicationStateTests : IDisposable
     private void WriteJson(string name, string json) => File.WriteAllText(PathOf(name), json);
 
     [Fact]
+    public void A_cover_round_trips_and_an_absent_one_is_not_written()
+    {
+        string cover = Vectors.Hash("cover");
+        (Version2(PublicationState.SequenceStrategyName) with { Cover = cover }).Save(PathOf("with-cover.json"));
+        Version2(PublicationState.SequenceStrategyName).Save(PathOf("without-cover.json"));
+
+        Assert.Equal(cover, PublicationState.Load(PathOf("with-cover.json")).Cover);
+        Assert.Null(PublicationState.Load(PathOf("without-cover.json")).Cover);
+        Assert.DoesNotContain("\"Cover\"", File.ReadAllText(PathOf("without-cover.json")), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_version_2_state_keeps_its_strategy_and_writes_no_empty_new_fields()
     {
         Version2(PublicationState.TicketStrategyName).Save(PathOf("v2.json"));

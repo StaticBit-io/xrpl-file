@@ -37,8 +37,8 @@ internal static class ManifestPlan
                 new MemoSubmission(MemoLayout.ListMarkerHex(j), MemoLayout.Utf8Hex(payload), MemoLayout.JsonFormatHex))];
 
     public static Manifest Build(
-        string type, string? name, long size, IReadOnlyList<BlockEntry> entries, long firstLedger, long lastLedger, int lists) =>
-        new(type, size, MemoLayout.ChunkBytes, FileTree.RootHex(entries), firstLedger, lastLedger, entries.Count, lists, name);
+        string type, string? name, long size, IReadOnlyList<BlockEntry> entries, long firstLedger, long lastLedger, int lists, string? cover) =>
+        new(type, size, MemoLayout.ChunkBytes, FileTree.RootHex(entries), firstLedger, lastLedger, entries.Count, lists, name, cover);
 
     public static MemoSubmission Memo(Manifest manifest) =>
         new(MemoLayout.ManifestMarkerHex, MemoLayout.Utf8Hex(manifest.Encode()), MemoLayout.JsonFormatHex);

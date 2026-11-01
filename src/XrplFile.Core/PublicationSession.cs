@@ -49,6 +49,18 @@ public sealed class SessionOptions
     /// </summary>
     public ResumeApproval? ApproveResume { get; init; }
 
+    /// <summary>
+    /// The hash of the manifest transaction of the file's cover picture (format 4.1), 64 hex digits in
+    /// either case; it is stored and written upper-case. Null publishes no cover.
+    /// <para>
+    /// The caller must have published the cover first, from the same writer, in a ledger strictly below
+    /// the file's first one, as <c>image/webp</c> or <c>image/jpeg</c> of at most 65,536 bytes. The
+    /// library does not read or check that file; a start refuses only a malformed hash, with an
+    /// <see cref="ArgumentException"/>, before any state exists.
+    /// </para>
+    /// </summary>
+    public string? Cover { get; init; }
+
     public int TicketsPerBatch { get; init; } = 100;
 
     public bool ReadBack { get; init; } = true;
@@ -284,7 +296,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         IProgress<PublishProgress>? preparation, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(strategyFactory);
-        ArgumentNullException.ThrowIfNull(options);
+        string? cover = RequireCover(options);
         RequirePublishable(file);
         RequireNameableAccount(writer);
         ArgumentException.ThrowIfNullOrWhiteSpace(payerKeyReference);
@@ -312,7 +324,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
             PublicationState.BatchVersion, network, writer, keyReference, type, name,
             file.Length, MemoLayout.ChunkBytes, FileTree.RootHexOf(blocks), startedIn, Phase: Stages[0],
             Strategy: PublicationState.BatchStrategyName, SourcePath: options.SourcePath,
-            Payer: payer, PayerKeyReference: payerKeyReference, Fence: 0, StartSequence: started.SequenceOf(writer));
+            Payer: payer, PayerKeyReference: payerKeyReference, Fence: 0, StartSequence: started.SequenceOf(writer), Cover: cover);
 
         string path = NewStatePath(options, startedIn, writer);
         PublicationSession session = new(null, source, file, blocks, state, path, options, 0, 0, mintsAtStart: 0);
@@ -336,6 +348,25 @@ public sealed class PublicationSession : IBatchFenceRecorder
     /// <summary>The root a source will publish under, in one streaming pass (spec S3, S7).</summary>
     public static async Task<string> RootOfAsync(IPublicationSource file, IProgress<long>? progress, CancellationToken cancellationToken) =>
         FileTree.RootHexOf(await FileTree.BlockHashesAsync(file, progress, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// The cover as it is stored: upper-case, the canonical form of a transaction hash. A malformed one is
+    /// refused before the estimate and before any state exists; whether it names a usable picture is not
+    /// asked, as the library never reads it (format 4.1).
+    /// </summary>
+    private static string? RequireCover(SessionOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (options.Cover is null) return null;
+
+        if (!Manifest.IsHash(options.Cover))
+        {
+            throw new ArgumentException("the cover is not a 64-hex transaction hash (format 4.1)", nameof(options));
+        }
+
+        return options.Cover.ToUpperInvariant();
+    }
 
     /// <summary>An empty file has no root, and a file above <see cref="MaxPublicationBytes"/> is refused before anything is read (spec 4.1).</summary>
     private static void RequirePublishable(IPublicationSource file)
@@ -515,6 +546,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         CancellationToken cancellationToken)
     {
         RequireNotBatch(strategy);
+        string? cover = RequireCover(options);
         RequirePublishable(file);
 
         // The writer becomes part of a file name below, so it is checked before anything at all
@@ -566,7 +598,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         PublicationState state = new(
             PublicationState.CurrentVersion, network, writer, keyReference, type, name,
             file.Length, MemoLayout.ChunkBytes, root, startedIn, Phase: Stages[0],
-            Strategy: StrategyName(strategy), SourcePath: options.SourcePath);
+            Strategy: StrategyName(strategy), SourcePath: options.SourcePath, Cover: cover);
 
         // One run, one file, and no two runs share one. Two publications from one account inside
         // one ledger — four seconds, ordinary in a batch loop — would otherwise agree on a name,
@@ -1198,7 +1230,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
         }
 
         PublicationState state = State;
-        Manifest manifest = ManifestPlan.Build(state.Type, state.Name, state.Size, entries, window.First, lastLedger, listMemos.Count);
+        Manifest manifest = ManifestPlan.Build(state.Type, state.Name, state.Size, entries, window.First, lastLedger, listMemos.Count, state.Cover);
         string data = ManifestPlan.Memo(manifest).MemoDataHex;
         BatchStrategyOptions reads = HistoryReads();
         DateTimeOffset giveUp = DateTimeOffset.UtcNow + _options.HistoryLagLimit;
@@ -1294,7 +1326,7 @@ public sealed class PublicationSession : IBatchFenceRecorder
 
             PublicationState started = State;
 
-            XrplFileWriter writer = new(Strategy, _source, new WriterOptions { ReadBack = _options.ReadBack, ManifestReadPause = _options.ManifestReadPause });
+            XrplFileWriter writer = new(Strategy, _source, new WriterOptions { ReadBack = _options.ReadBack, ManifestReadPause = _options.ManifestReadPause, Cover = started.Cover });
 
             PublishResult result;
 

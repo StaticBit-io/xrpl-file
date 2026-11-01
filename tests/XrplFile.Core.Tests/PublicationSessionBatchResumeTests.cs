@@ -313,6 +313,29 @@ public class PublicationSessionBatchResumeTests : IDisposable
     }
 
     [Fact]
+    public async Task A_resume_after_the_manifest_landed_finds_it_with_its_cover()
+    {
+        BatchTestNode node = Funded();
+        byte[] file = VectorStream.Bytes("resume", 9_000);
+        SessionOptions options = new() { StateDirectory = _stateDirectory, FencePoll = TimeSpan.FromMilliseconds(1), Cover = Vectors.Hash("cover") };
+        PublicationSession first = await PublicationSession.StartAsync(
+            Factory(node, node.Payer), node.Ledger, file, "text/plain", null,
+            node.Writer.Account, "key-w", node.Payer.Account, "key-p", "testnet", options, Token);
+        PublicationReport original = await first.RunAsync(null, Token);
+
+        // A crash between the manifest validating and "done" being written.
+        PublicationState state = PublicationState.Load(first.StatePath);
+        (state with { Phase = "manifest", ManifestHash = null }).Save(first.StatePath);
+
+        PublicationSession resumed = await PublicationSession.ResumeAsync(
+            Factory(node, node.Payer), node.Ledger, file, first.StatePath, node.Payer.Account, "key-p", options, null, Token);
+        PublicationReport report = await resumed.RunAsync(null, Token);
+
+        Assert.Equal(original.ManifestHash, report.ManifestHash);
+        Assert.Equal(1, (await node.LandedByMarkerAsync()).Where(pair => MemoLayout.IsManifest(pair.Key)).Sum(pair => pair.Value.Count));
+    }
+
+    [Fact]
     public async Task A_one_account_run_is_not_resumed_as_a_Batch_run()
     {
         BatchTestNode node = Funded();

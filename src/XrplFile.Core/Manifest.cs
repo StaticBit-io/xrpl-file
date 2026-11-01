@@ -176,7 +176,7 @@ public sealed record Manifest(
         return text is not null && IsHash(text) ? text.ToUpperInvariant() : null;
     }
 
-    private static bool IsHash(string value) =>
+    internal static bool IsHash(string value) =>
         value.Length == MerkleTree.HashBytes * 2 && value.All(Uri.IsHexDigit);
 
     private static int? Int(JsonElement element, string name) =>
