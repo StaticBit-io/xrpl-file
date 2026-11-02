@@ -49,6 +49,7 @@ public partial class App : Application
 		window.Destroying += OnWindowDestroying;
 
 #if WINDOWS
+		AttachWindowIcon(window);
 		AttachClosingConfirmation(window);
 #endif
 
@@ -57,6 +58,22 @@ public partial class App : Application
 	}
 
 #if WINDOWS
+	/// <summary>
+	/// Gives the window the application icon. An unpackaged build has no manifest to take it from:
+	/// Resizetizer writes <c>appicon.ico</c> next to the executable, but nothing hands it to the
+	/// window, so the title bar, the taskbar and Alt+Tab show the generic Windows placeholder.
+	/// </summary>
+	private static void AttachWindowIcon(Window window)
+	{
+		window.HandlerChanged += (_, _) =>
+		{
+			if (window.Handler?.PlatformView is not Microsoft.UI.Xaml.Window platformWindow) return;
+
+			string iconPath = Path.Combine(AppContext.BaseDirectory, "appicon.ico");
+			if (File.Exists(iconPath)) platformWindow.AppWindow.SetIcon(iconPath);
+		};
+	}
+
 	/// <summary>
 	/// Asks before closing over a running publication. Wired separately from
 	/// <see cref="OnWindowDestroying"/> because only WinUI's own <c>AppWindow.Closing</c> can refuse
