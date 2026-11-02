@@ -23,9 +23,17 @@ export class XrplFileReader {
     this.history = new ForwardHistory(source, historyCacheRecords);
   }
 
-  async read(link, onProgress = () => {}) {
+  /**
+   * `hooks` lets a caller watch the read as it happens: onManifest(manifest) once the manifest is
+   * decoded and checked, onChunk({ index, bytes }) for each accepted chunk with its absolute index,
+   * onBlockVerified({ block, firstChunk, lastChunk }) once a block's hash has matched. A chunk is
+   * reported before its block is verified, so a caller drawing chunks as they arrive must treat them
+   * as unverified until the block's event.
+   */
+  async read(link, onProgress = () => {}, hooks = {}) {
     const record = await this.manifest(link);
     const manifest = record.manifest;
+    hooks.onManifest?.(manifest);
 
     if (manifest.size > this.maxBytes) {
       throw new XrplFileError('TooLarge', `the file is ${manifest.size} bytes and this reader stops at ${this.maxBytes}`);
@@ -40,7 +48,10 @@ export class XrplFileReader {
     let chunksDone = 0;
 
     for (const block of blocks) {
-      const content = await this.block(record, block, () => onProgress({ chunksDone: ++chunksDone, chunksTotal }));
+      const content = await this.block(record, block, (chunk) => {
+        onProgress({ chunksDone: ++chunksDone, chunksTotal });
+        hooks.onChunk?.(chunk);
+      }, hooks.onBlockVerified);
       bytes.set(content, at);
       at += content.length;
     }
@@ -171,7 +182,7 @@ export class XrplFileReader {
     return entries;
   }
 
-  async block(record, entry, onChunk = () => {}) {
+  async block(record, entry, onChunk = () => {}, onVerified = () => {}) {
     const manifest = record.manifest;
     const firstChunk = entry.i * BLOCK_CHUNKS;
     const lastChunk = Math.min(firstChunk + BLOCK_CHUNKS, chunkCount(manifest.size, manifest.chunk)) - 1;
@@ -195,7 +206,7 @@ export class XrplFileReader {
       if (decoded.length > manifest.chunk) continue;
 
       chunks[slot] = decoded;
-      onChunk();
+      onChunk({ index, bytes: decoded });
       if (++found === count) break;
     }
 
@@ -219,6 +230,8 @@ export class XrplFileReader {
 
     const h = hex(await blockHash(chunks));
     if (h !== entry.h) throw new XrplFileError('BlockMismatch', `block ${entry.i} hashes to ${h}, the list says ${entry.h}`, { block: entry.i });
+
+    onVerified({ block: entry.i, firstChunk, lastChunk });
 
     const bytes = new Uint8Array(total);
     let at = 0;
