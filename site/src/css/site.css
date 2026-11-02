@@ -373,7 +373,8 @@
   position: absolute;
   left: var(--space-3);
   bottom: var(--space-3);
-  width: min(11rem, 46%);
+  /* A share of the cloud, not a fixed size: at 11rem the card covered a third of a narrow cloud. */
+  width: clamp(6.5rem, 26%, 11rem);
   padding: var(--space-2);
   border: var(--rule-hair) solid var(--rule-2);
   background: var(--scrim);
