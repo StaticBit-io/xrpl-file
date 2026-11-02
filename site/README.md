@@ -131,7 +131,7 @@ which imports the other two. A page's own CSS styles only with the tokens. Colou
 `:root[data-theme="dark"]` (also the default without the attribute: the first visit is dark whatever
 the OS prefers) and `:root[data-theme="light"]`: `--paper`, `--paper-2`, `--paper-3`, `--ink`,
 `--ink-2`, `--ink-muted`, `--rule`, `--rule-2`, `--rule-soft`, `--accent`, `--accent-hi`,
-`--accent-ink`, `--focus`, `--error` and the mosaic's `--cell`, `--cell-lit`, `--cell-verified`.
+`--accent-ink`, `--focus`, `--error` and the drawings' `--cell`, `--cell-lit`, `--cell-verified`, plus the hero cloud's `--point-lo`, `--point-mid`, `--point-hi`.
 The lime accent (moss in light) marks only what is primary or verified. The theme switch is named for
 the theme it turns on ("Light theme") and is pressed while that theme is on; the choice is kept in
 `localStorage` under `xf-theme`, and a blocked storage leaves the page dark with a working switch.
@@ -168,32 +168,47 @@ is out of date.
 
 ## The hero file and its durability
 
-The home page's chunk mosaic reads a real file from the XRP Ledger. Until mainnet, that is the
-testnet fixture picture `xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59`
-(1600 x 1600 WebP, 178,448 bytes). A testnet reset, or public nodes without its history, breaks it:
-the mosaic then shows the cells it received and a quiet message. That is accepted at launch; to
-bring the hero back, re-publish the fixture and swap the constant.
+The home page's hero is a point cloud driven by the real read of a file from the XRP Ledger. Until
+mainnet, that is the transparent StaticBit logo on the testnet,
+`xrpl-file://testnet/2AEB485BB0FAECA2DF4B60F196D5199042288FEB124ED8D95F4313CF06200DB4`
+(`staticbit-logo.png`, image/png, 1422 x 1231, 122,958 bytes, 123 chunks, 1 block). Each chunk the
+reader accepts becomes a cube, the block's cubes turn lime when its hash matches, and when everything is
+verified a small `<xrpl-file>` card shows the file beside the cloud. The card reads the file a second
+time through the element (the file is small, and the element's own checks are the ones the file page
+shows).
 
-1. Re-publish. The fixture tool publishes the plan in `tools/fixtures/plan.json` to the testnet
-   only, with faucet-funded throwaway accounts. Its working folder (`run/fixtures`) is git-ignored
-   and holds `links.json` (key to link), `accounts.json` (the throwaway keys, never printed and
-   never committed) and `state/<key>/` (resume state). The hero is the `picture` entry. The source
-   media (`picture.webp`) is produced by `tools/fixtures/make-media.sh`.
-   - In `run/fixtures/links.json` delete the `picture` line, and delete `run/fixtures/state/picture/`
-     (a finished state would be reused and give the old link back).
+What is real and what is drawn: the chunk count, the ledger range, each chunk's bytes (they place the
+points inside its cube) and the 84 bytes of the link come from the read. Which ledger holds which chunk
+is not reported by the reader, so the cubes are spread evenly over as many ledger pads as the manifest's
+ledger range names (at most ten); the note under the cloud says so.
+
+A testnet reset, or public nodes without the file's history, breaks it: the cloud then keeps the cubes
+it received and shows a quiet message. That is accepted at launch; to bring the hero back, re-publish
+the file and swap the constant.
+
+1. Re-publish. The fixture tool publishes a plan to the testnet only, with faucet-funded throwaway
+   accounts. Its working folder (`run/fixtures`) is git-ignored and holds `links.json` (key to link),
+   `accounts.json` (the throwaway keys, never printed and never committed), `media/` (the source files,
+   `staticbit-logo.png` among them) and `state/<key>/` (resume state). The hero is the `logo` entry of
+   the one-entry plan `run/fixtures/plan-logo.json`:
+   ```json
+   [{"key":"logo","file":"staticbit-logo.png","type":"image/png","name":"staticbit-logo.png","writer":"a","cover":null}]
+   ```
+   - In `run/fixtures/links.json` delete the `logo` line, and delete `run/fixtures/state/logo/` (a
+     finished state would be reused and give the old link back).
    - Run, from the repository root:
      ```bash
-     dotnet run --project tools/XrplFile.Fixtures -- tools/fixtures/plan.json run/fixtures/media run/fixtures
+     dotnet run --project tools/XrplFile.Fixtures -- run/fixtures/plan-logo.json run/fixtures/media run/fixtures
      ```
-     Entries that already have a link are skipped, so only `picture` is published. A stopped run is
+     Entries that already have a link are skipped, so only `logo` is published. A stopped run is
      resumed by running the same command again.
-   - The new link is the `picture` value in `run/fixtures/links.json`.
-2. Swap the constant: set `HERO_LINK` in `site/src/js/config.mjs` to that link. `HERO_ASPECT` stays
-   `1` while the picture is square.
+   - The new link is the `logo` value in `run/fixtures/links.json`.
+2. Swap the constants: set `HERO_LINK` in `site/src/js/config.mjs` to that link, and `HERO_ASPECT` to
+   the picture's width / height (`1422 / 1231` for the logo).
 3. Check the link in a browser at `/testnet/<HASH>`, then rebuild and redeploy the site.
 
-After the first mainnet publication, `HERO_LINK` becomes the link of a real mainnet picture; the
-steps above no longer apply.
+After the first mainnet publication, `HERO_LINK` becomes the link of a real mainnet file; the steps
+above no longer apply.
 
 ## The price table
 

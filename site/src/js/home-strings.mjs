@@ -1,4 +1,4 @@
-// The words the home page's scripts put on the page: the mosaic's status lines, the "Check a link"
+// The words the home page's scripts put on the page: the hero's status lines, callouts, the "Check a link"
 // errors, the price table and the copy button. The page's own prose is in index.html and ru/index.html.
 // Every function here is called with whatever the page has and must not throw.
 
@@ -29,30 +29,41 @@ function ledgerRange(first, last, word) {
 }
 
 /** `network` is the hero file's network, e.g. "testnet": the caption names where the file was read. */
-export function mosaicStrings(lang, network) {
+export function cloudStrings(lang, network) {
   if (lang === 'ru') {
     const ledgers = { one: 'версия реестра', many: 'версии реестра' };
+    const chunksOf = (count) => ruCount(count, 'фрагмент', 'фрагмента', 'фрагментов');
     return {
       label: (phase, { chunks }) => {
-        const count = chunks === null ? '' : `, ${ruCount(chunks, 'фрагмент', 'фрагмента', 'фрагментов')}`;
+        const count = chunks === null ? '' : `, ${chunksOf(chunks)}`;
         return {
-          reading: `Картинка, которую читают из реестра${count}`,
-          developing: `Картинка проверена и появляется${count}`,
-          done: `Картинка, прочитанная из реестра и проверенная${count}`,
-          failed: 'Картинку сейчас не удалось прочитать из реестра',
+          reading: `Облако точек: участок XRP Ledger. Фрагменты файла появляются в нём кубами по мере чтения${count}`,
+          developing: `Облако точек: участок XRP Ledger. Все блоки проверяются${count}`,
+          done: `Облако точек: участок XRP Ledger. Файл прочитан из реестра и проверен${count}`,
+          failed: 'Файл сейчас не удалось прочитать из реестра',
         }[phase];
       },
       caption: ({ chunks, firstLedger, lastLedger }) =>
-        `проверено в ${NETWORK_SHORT.ru[network] ?? network} · ${ruCount(chunks, 'фрагмент', 'фрагмента', 'фрагментов')} · ${ledgerRange(firstLedger, lastLedger, ledgers)}`,
+        `прочитано из ${NETWORK_SHORT.ru[network] ?? network} · ${chunksOf(chunks)} · ${ledgerRange(firstLedger, lastLedger, ledgers)}`,
       failed: (code) => {
         if (code === 'NodeUnreachable' || code === 'Stalled') return 'Узел XRP Ledger не ответил. Обновите страницу, чтобы попробовать ещё раз.';
-        if (code === 'BlockMismatch' || code === 'DecodeFailed') return 'Картинка не прошла проверку, поэтому не показана.';
+        if (code === 'BlockMismatch' || code === 'DecodeFailed') return 'Файл не прошёл проверку, поэтому не показан.';
         if (['NodeLacksHistory', 'ManifestNotFound', 'ChunkMissing', 'Incomplete'].includes(code)) {
-          return 'Эта картинка сейчас недоступна в реестре.';
+          return 'Этот файл сейчас недоступен в реестре.';
         }
-        return 'Картинку сейчас не удалось прочитать.';
+        return 'Файл сейчас не удалось прочитать.';
       },
       fileLinkLabel: 'Страница файла',
+      verified: 'проверено',
+      note: 'Каждый куб — один фрагмент файла, прочитанный из реестра. Как фрагменты распределены по версиям реестра, нарисовано, а не измерено.',
+      fileCallout: (chunks) => {
+        const [value, ...unit] = chunksOf(chunks).split(' ');
+        return { caption: 'Файл', value, unit: unit.join(' ') };
+      },
+      linkCallout: (bytes) => {
+        const [value, ...unit] = ruCount(bytes, 'байт', 'байта', 'байт').split(' ');
+        return { caption: 'Ссылка — хэш манифеста', value, unit: unit.join(' ') };
+      },
     };
   }
   const ledgers = { one: 'ledger', many: 'ledgers' };
@@ -60,23 +71,27 @@ export function mosaicStrings(lang, network) {
     label: (phase, { chunks }) => {
       const count = chunks === null ? '' : `, ${enChunks(chunks)}`;
       return {
-        reading: `A picture being read from the ledger${count}`,
-        developing: `The picture is verified and appearing${count}`,
-        done: `The picture, read from the ledger and verified${count}`,
-        failed: 'The picture could not be read from the ledger just now',
+        reading: `Point cloud of a stretch of the XRP Ledger. The file's chunks appear in it as cubes while they are read${count}`,
+        developing: `Point cloud of a stretch of the XRP Ledger. Every block is being checked${count}`,
+        done: `Point cloud of a stretch of the XRP Ledger. The file is read from the ledger and checked${count}`,
+        failed: 'The file could not be read from the ledger just now',
       }[phase];
     },
     caption: ({ chunks, firstLedger, lastLedger }) =>
-      `verified on ${network} · ${enChunks(chunks)} · ${ledgerRange(firstLedger, lastLedger, ledgers)}`,
+      `read from ${network} · ${enChunks(chunks)} · ${ledgerRange(firstLedger, lastLedger, ledgers)}`,
     failed: (code) => {
       if (code === 'NodeUnreachable' || code === 'Stalled') return 'The XRP Ledger node did not answer. Reload the page to try again.';
-      if (code === 'BlockMismatch' || code === 'DecodeFailed') return 'The picture did not pass the check, so it is not shown.';
+      if (code === 'BlockMismatch' || code === 'DecodeFailed') return 'The file did not pass the check, so it is not shown.';
       if (['NodeLacksHistory', 'ManifestNotFound', 'ChunkMissing', 'Incomplete'].includes(code)) {
-        return 'This picture is not available from the ledger right now.';
+        return 'This file is not available from the ledger right now.';
       }
-      return 'The picture could not be read just now.';
+      return 'The file could not be read just now.';
     },
     fileLinkLabel: 'Open the file page',
+    verified: 'verified',
+    note: 'Each cube is one chunk of the file, read from the ledger. How the chunks are spread over the ledgers is drawn, not measured.',
+    fileCallout: (chunks) => ({ caption: 'The file', value: String(chunks), unit: chunks === 1 ? 'chunk' : 'chunks' }),
+    linkCallout: (bytes) => ({ caption: "The link, the manifest's hash", value: String(bytes), unit: bytes === 1 ? 'byte' : 'bytes' }),
   };
 }
 

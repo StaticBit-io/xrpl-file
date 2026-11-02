@@ -10,10 +10,22 @@ const pages = {
 
 const ids = (html) => [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]).sort();
 
-test('config holds the hero file, its aspect and an unset publisher URL', () => {
-  assert.equal(HERO_LINK, 'xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59');
-  assert.equal(HERO_ASPECT, 1);
+test('config holds the hero file (the transparent StaticBit logo), its aspect and an unset publisher URL', () => {
+  assert.equal(HERO_LINK, 'xrpl-file://testnet/2AEB485BB0FAECA2DF4B60F196D5199042288FEB124ED8D95F4313CF06200DB4');
+  assert.equal(HERO_ASPECT, 1422 / 1231);
   assert.equal(PUBLISHER_URL, null);
+});
+
+test('the hero markup has what the point cloud draws into, in both languages', () => {
+  for (const html of Object.values(pages)) {
+    for (const id of ['hero-cloud', 'co-file', 'co-link', 'hero-card', 'hero-caption', 'hero-note']) {
+      assert.ok(html.includes(`id="${id}"`), `#${id}`);
+    }
+    assert.match(html, /<canvas id="hero-cloud" class="cloud" role="img" aria-label="[^"]{20,}"><\/canvas>/);
+    assert.match(html, /<div id="hero-card" class="hero-card" hidden><\/div>/, 'the card is hidden until the read is verified');
+    assert.ok(html.includes('aria-hidden="true"></div>'), 'callouts are decoration for the label and the caption');
+    assert.ok(!html.includes('hero-mosaic'));
+  }
 });
 
 test('both home pages carry the same structure, in their own language', () => {

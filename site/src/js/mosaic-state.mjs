@@ -1,6 +1,7 @@
-// The chunk mosaic's state and the rules that move it. Pure: no DOM, no timers, no reader. The clock is
-// an argument, so "no chunk for 20 s" is testable without waiting. mosaic.mjs wires these to the real
-// reader and to a canvas.
+// The hero read's state and the rules that move it. Pure: no DOM, no timers, no reader. The clock is
+// an argument, so "no chunk for 20 s" is testable without waiting. hero-read.mjs wires these to the real
+// reader; cloud.mjs draws what they say. The grid, tone and turn-over helpers date from the flat chunk
+// mosaic the point cloud replaced; nothing draws them now.
 //
 // A cell is 'empty' until its chunk arrives, 'lit' from then on, and 'verified' once the block that
 // holds it has matched its hash. A chunk is reported before its block verifies, so lit never means

@@ -11,6 +11,9 @@
      verified cell, the focus ring. It is never a heading and never a fill larger than a pill;
    - --cell, --cell-lit and --cell-verified are the chunk mosaic's three states: the unread cell is an
      outline, the lit cell a pale-steel (dark: ink-toned) fill, the verified cell the accent;
+   - --point-lo, --point-mid and --point-hi colour the hero's point cloud from ground to the top of the
+     stacks: pale steel up to near-white in dark, and inverted in light so height still reads as density
+     of ink. They are decoration drawn from real data; the information is also in text;
    - --rule meets 3:1 and is for control borders and cell outlines; --rule-soft and --rule-2 are
      decorative hairlines and corner ticks that carry no information and are exempt from the 3:1 rule. */
 
@@ -109,6 +112,9 @@
   --cell: oklch(0.5 0.03 240);
   --cell-lit: oklch(0.7 0.04 232);
   --cell-verified: var(--accent);
+  --point-lo: oklch(0.34 0.02 238);
+  --point-mid: oklch(0.58 0.03 236);
+  --point-hi: oklch(0.9 0.02 232);
   --error: oklch(0.72 0.15 27);
   --scrim: oklch(0.135 0.012 235 / 0.82);
 }
@@ -131,6 +137,9 @@
   --cell: oklch(0.57 0.02 240);
   --cell-lit: oklch(0.4 0.03 240);
   --cell-verified: var(--accent);
+  --point-lo: oklch(0.78 0.02 240);
+  --point-mid: oklch(0.55 0.03 238);
+  --point-hi: oklch(0.26 0.03 240);
   --error: oklch(0.48 0.17 27);
   --scrim: oklch(0.945 0.006 235 / 0.82);
 }

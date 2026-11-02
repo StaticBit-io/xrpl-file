@@ -36,7 +36,7 @@ Result: every required pair passes.
 | Focus ring on the hovered or pressed control | `--focus` #265c00 | `--paper-3` #d1d9dd | 5.60:1 | 3:1 | pass |
 | Control border (theme switch, buttons, link field) | `--rule` #76828b | `--paper` #e9edf0 | 3.34:1 | 3:1 | pass |
 | Control border on raised surface (link field) | `--rule` #76828b | `--paper-2` #dee4e7 | 3.05:1 | 3:1 | pass |
-| Verified check mark (mosaic caption) | `--accent` #336f00 | `--paper-2` #dee4e7 | 4.81:1 | 3:1 | pass |
+| Verified check mark (hero card) | `--accent` #336f00 | `--paper-2` #dee4e7 | 4.81:1 | 3:1 | pass |
 | Unread cell outline | `--cell` #6d7982 | `--paper-2` #dee4e7 | 3.46:1 | 3:1 | pass |
 | Lit cell | `--cell-lit` #394a56 | `--paper-2` #dee4e7 | 7.12:1 | 3:1 | pass |
 | Verified cell | `--cell-verified` #336f00 | `--paper-2` #dee4e7 | 4.81:1 | 3:1 | pass |
@@ -68,7 +68,7 @@ Result: every required pair passes.
 | Focus ring on the hovered or pressed control | `--focus` #bcf053 | `--paper-3` #111a1f | 13.25:1 | 3:1 | pass |
 | Control border (theme switch, buttons, link field) | `--rule` #67747c | `--paper` #04090c | 4.14:1 | 3:1 | pass |
 | Control border on raised surface (link field) | `--rule` #67747c | `--paper-2` #091015 | 3.95:1 | 3:1 | pass |
-| Verified check mark (mosaic caption) | `--accent` #bcf053 | `--paper-2` #091015 | 14.31:1 | 3:1 | pass |
+| Verified check mark (hero card) | `--accent` #bcf053 | `--paper-2` #091015 | 14.31:1 | 3:1 | pass |
 | Unread cell outline | `--cell` #546673 | `--paper-2` #091015 | 3.20:1 | 3:1 | pass |
 | Lit cell | `--cell-lit` #86a3b3 | `--paper-2` #091015 | 7.21:1 | 3:1 | pass |
 | Verified cell | `--cell-verified` #bcf053 | `--paper-2` #091015 | 14.31:1 | 3:1 | pass |

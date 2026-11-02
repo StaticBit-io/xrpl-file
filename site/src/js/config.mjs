@@ -1,10 +1,10 @@
 // The few values the site's owner changes by hand. site/README.md says when and how.
 
-/** The file the hero mosaic reads. After the first mainnet publication: a real NFT picture there. */
-export const HERO_LINK = 'xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59';
+/** The file the hero reads: the StaticBit logo (PNG, transparent). After the first mainnet publication: a real mainnet file there. */
+export const HERO_LINK = 'xrpl-file://testnet/2AEB485BB0FAECA2DF4B60F196D5199042288FEB124ED8D95F4313CF06200DB4';
 
-/** Picture width / height. The manifest carries no dimensions, so it lives next to the link. */
-export const HERO_ASPECT = 1;
+/** Picture width / height (1422 x 1231). The manifest carries no dimensions, so it lives next to the link. */
+export const HERO_ASPECT = 1422 / 1231;
 
 /** The publisher's GitHub Releases URL. Null keeps the download button visible, disabled and marked "soon". */
 export const PUBLISHER_URL = null;

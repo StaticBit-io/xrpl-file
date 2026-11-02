@@ -58,7 +58,7 @@ const SITE_PAIRS = [
   ['ui', 'Focus ring on the hovered or pressed control', 'focus', 'paper-3', UI],
   ['ui', 'Control border (theme switch, buttons, link field)', 'rule', 'paper', UI],
   ['ui', 'Control border on raised surface (link field)', 'rule', 'paper-2', UI],
-  ['ui', 'Verified check mark (mosaic caption)', 'accent', 'paper-2', UI],
+  ['ui', 'Verified check mark (hero card)', 'accent', 'paper-2', UI],
   ['ui', 'Unread cell outline', 'cell', 'paper-2', UI],
   ['ui', 'Lit cell', 'cell-lit', 'paper-2', UI],
   ['ui', 'Verified cell', 'cell-verified', 'paper-2', UI],

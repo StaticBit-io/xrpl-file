@@ -1,10 +1,10 @@
-// Wires the home page: the hero mosaic, the "Check a link" field, the publisher button, the price
+// Wires the home page: the hero point cloud, the "Check a link" field, the publisher button, the price
 // table and the snippet's copy button. The page's prose is plain HTML; this adds what needs data or script.
 import { HERO_ASPECT, HERO_LINK, PUBLISHER_URL } from './config.mjs';
 import { initCheckLink } from './check-link.mjs';
 import { initCopyButton } from './copy-button.mjs';
-import { CHECK_LINK_STRINGS, COPY_STRINGS, PRICE_STRINGS, mosaicStrings } from './home-strings.mjs';
-import { mountMosaic } from './mosaic.mjs';
+import { CHECK_LINK_STRINGS, COPY_STRINGS, PRICE_STRINGS, cloudStrings } from './home-strings.mjs';
+import { mountCloud } from './cloud.mjs';
 import { formatDate, formatXrp, priceRows, reserveSummary } from './price.mjs';
 import { pathFromLink } from './route.mjs';
 
@@ -22,13 +22,21 @@ function element(document, tag, text, className) {
 }
 
 function initHero(document, lang) {
-  const canvas = document.getElementById('hero-mosaic');
+  const canvas = document.getElementById('hero-cloud');
   const caption = document.getElementById('hero-caption');
   if (!canvas || !caption) return;
   // The caption names the network the file was read from; it is derived from the same constant the
-  // mosaic reads, never written twice.
+  // cloud reads, never written twice.
   const network = pathFromLink(HERO_LINK)?.split('/')[1] ?? '';
-  mountMosaic(canvas, { link: HERO_LINK, aspect: HERO_ASPECT, caption, strings: mosaicStrings(lang, network) });
+  mountCloud(canvas, {
+    link: HERO_LINK,
+    aspect: HERO_ASPECT,
+    caption,
+    note: document.getElementById('hero-note'),
+    callouts: { file: document.getElementById('co-file'), link: document.getElementById('co-link') },
+    card: document.getElementById('hero-card'),
+    strings: cloudStrings(lang, network),
+  });
 }
 
 function initPublisher(document) {

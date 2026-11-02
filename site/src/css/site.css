@@ -1,7 +1,7 @@
 /* Hallmark · shape: Stat-Led (the spec's fixed section order) · genre: modern-minimal · theme: Vantage (by request) · job: try · draw: restyle of the built site, sketch 256282
- * hero: Split, head and the check field left, the file's own chunk mosaic in a ticked frame right · nav: wordmark left, language and theme switches right · footer: three short groups on a hairline · imagery: none, the file itself as a mosaic of its chunks · signature: the chunk mosaic, 179 cells of real bytes developing into the verified picture (the point cloud replaces it in the hero later) · vantage: object/steel
+ * hero: Split, head and the check field left, the file's own point cloud in a ticked frame right · nav: wordmark left, language and theme switches right · footer: three short groups on a hairline · imagery: none, the file itself as a cube of real bytes per chunk · signature: the point cloud, 123 chunks of the logo file read from the ledger, lime where verified · vantage: object/steel
  * axes: dark/grotesk-sans/chromatic-lime · posture: restrained · contrast: pass · fold: pass · copy: verbatim (settled by the owner and the copy audit) · v2.0.0 */
-/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V3 · weakest: V, the hero is still the chunk mosaic and the section order is fixed by the spec; each section takes a different Vantage device (ruled faults, section cut steps, a ruled price table, a split statement, ruled links) */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V3 · weakest: V, the section order is fixed by the spec; each section takes a different Vantage device (ruled faults, section cut steps, a ruled price table, a split statement, ruled links) */
 @import url("./tokens.css");
 @import url("./base.css");
 
@@ -230,60 +230,152 @@
   }
 }
 
-/* The chunk mosaic and the line under it. The canvas takes its width from its box and its height from
-   the aspect ratio mountMosaic sets; the caption keeps its line free from the start so the result
-   does not move the page. */
-.mosaic {
+/* The hero: the point cloud in a ticked frame, two callouts that follow the scene, the verified file
+   as a small card, and the lines under the frame. The canvas takes its width from its box; the card and
+   the callouts are placed over it and never move the page. */
+.hero-cloud {
+  overflow: clip;
+  background: var(--paper);
+}
+
+.cloud {
   display: block;
   width: 100%;
   height: auto;
+  aspect-ratio: 1;
 }
 
-.mosaic-caption {
+@media (min-width: 40rem) {
+  .cloud {
+    aspect-ratio: 6 / 5;
+  }
+}
+
+.callout {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: var(--space-1) var(--space-3);
+  background: var(--scrim);
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform;
+}
+
+.callout.on {
+  opacity: 1;
+}
+
+.callout strong {
+  display: block;
+  color: var(--ink);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.callout[data-state="verified"] strong {
+  color: var(--accent);
+}
+
+.callout .u {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-body);
+  color: var(--ink-muted);
+}
+
+/* The file is transparent: the card is a hairline frame on a scrim of the paper (a deliberate Vantage
+   frame, like the callouts), so the mark sits on the ground it was drawn for in both themes. */
+.hero-card {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-3);
+  width: min(11rem, 46%);
+  padding: var(--space-2);
+  border: var(--rule-hair) solid var(--rule-2);
+  background: var(--scrim);
+}
+
+/* The logo's pale facets all but vanish on the light ground, so there the frame takes the step darker
+   paper of the quiet bands: still the site's own ground, not a box of another colour. */
+:root[data-theme="light"] .hero-card {
+  background: var(--paper-3);
+}
+
+.hero-card xrpl-file {
+  display: block;
+  width: 100%;
+  --xrpl-file-background: transparent;
+  --xrpl-file-radius: 0;
+}
+
+.hero-card__line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-1) var(--space-5);
+  justify-content: space-between;
+  gap: 0 var(--space-3);
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.hero-card__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--accent);
+}
+
+.hero-card__check {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.hero-card__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+}
+
+/* On a phone the card would cover the stacks, so it sits under the cloud, inside the same frame. */
+@media (max-width: 39.99rem) {
+  .hero-card {
+    position: static;
+    width: auto;
+    margin: var(--space-3);
+    display: grid;
+    grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .hero-card__line {
+    flex-direction: column;
+    align-items: flex-start;
+    margin-top: 0;
+    gap: var(--space-1);
+  }
+}
+
+.cloud-caption {
   min-height: calc(var(--text-sm) * var(--leading-body) + var(--space-3));
   padding-top: var(--space-3);
   color: var(--ink-muted);
   font-size: var(--text-sm);
 }
 
-.mosaic-caption__status {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.mosaic-caption[data-phase="done"] .mosaic-caption__status {
-  color: var(--ink);
-}
-
-.mosaic-caption__check,
-.mosaic-caption__mark {
-  flex: none;
-  width: 1em;
-  height: 1em;
-  fill: none;
-}
-
-.mosaic-caption__check {
-  stroke: var(--accent);
-  stroke-width: 2;
-}
-
-/* The failure state reuses the unread cell: an outline, nothing filled. */
-.mosaic-caption__mark {
-  stroke: var(--rule);
-  stroke-width: 1.5;
-}
-
-.mosaic-caption__link {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--target);
-  margin-block: calc(var(--space-3) * -1);
+.cloud-note {
+  margin-top: var(--space-1);
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
 }
 
 /* Home page: bands of ground, every second one a step lighter, each opened by a head of a statement
@@ -337,7 +429,7 @@
 
 @media (min-width: 56rem) {
   .hero {
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
     padding-block-start: var(--space-7);
   }
 }
@@ -361,10 +453,7 @@
 .hero__figure {
   margin: 0;
   width: 100%;
-  max-width: 36rem;
-  justify-self: center;
-  padding: var(--space-5);
-  background: var(--paper-2);
+  min-width: 0;
 }
 
 .button {
