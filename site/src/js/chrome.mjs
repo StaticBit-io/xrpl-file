@@ -44,7 +44,9 @@ function initLanguage(document, location, storage, navigatorLanguage) {
   const refresh = () => {
     markCurrentLanguage(document, lang);
     for (const link of document.querySelectorAll('[data-lang-link]')) {
-      link.setAttribute('href', equivalentPath(location.pathname, link.dataset.langLink));
+      // A stored-language page has one URL for both languages (the file page, its address-error view, the 404).
+      const href = fromStorage ? location.pathname : equivalentPath(location.pathname, link.dataset.langLink);
+      link.setAttribute('href', href);
     }
   };
 

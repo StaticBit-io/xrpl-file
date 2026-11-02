@@ -307,12 +307,22 @@ test('a save that throws at once is handled', async () => {
   assert.equal(doc.nodes['file-download'].disabled, false);
 });
 
-test('once the element reports an error the Download button stays disabled', () => {
+test('a playback error after load leaves Download enabled and save() is still called', async () => {
+  const { doc } = open(CANONICAL);
+  const button = doc.nodes['file-download'];
+  doc.file.load(DETAIL);
+  doc.file.fail();
+  assert.equal(button.disabled, false, 'the verified file can still be saved');
+  button.click();
+  await settle();
+  assert.equal(doc.file.saves, 1);
+  assert.equal(doc.nodes['file-status'].textContent, 'Saved.');
+});
+
+test('an error before any load keeps Download disabled', () => {
   const { doc } = open(CANONICAL);
   doc.file.fail();
   assert.equal(doc.nodes['file-download'].disabled, true);
-  doc.file.load(DETAIL);
-  assert.equal(doc.nodes['file-download'].disabled, true, 'a failed file is not made downloadable by a late load');
 });
 
 test('a lower-case path is replaced by the canonical one', () => {

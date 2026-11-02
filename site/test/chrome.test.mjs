@@ -144,6 +144,16 @@ test('language links point at equivalentPath', () => {
   initChrome({ document: doc, location: { pathname: path }, storage: memoryStorage() });
   assert.equal(en.getAttribute('href'), path);
   assert.equal(ru.getAttribute('href'), path, 'a file page has one URL for both languages');
+
+  // The address-error view and the 404 are stored-language pages at any path; no link may become /ru/<path>.
+  for (const other of ['/testnet/xyz', '/nope', '/file']) {
+    const page = fakeDocument({ langSource: 'storage' });
+    const pageEn = langLink(page, 'en');
+    const pageRu = langLink(page, 'ru');
+    initChrome({ document: page, location: { pathname: other }, storage: memoryStorage() });
+    assert.equal(pageEn.getAttribute('href'), other, `en link on ${other}`);
+    assert.equal(pageRu.getAttribute('href'), other, `ru link on ${other}`);
+  }
 });
 
 test('the current language link is marked and the other is not', () => {

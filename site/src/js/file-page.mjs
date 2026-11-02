@@ -123,9 +123,8 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
   const linkText = doc.getElementById('file-link');
   const details = doc.getElementById('file-details');
 
-  // What the page knows about the file: nothing until the element's `load`, and nothing more once it fails.
+  // What the page knows about the file: nothing until the element's `load`.
   let detail = null;
-  let failed = false;
   let saving = false;
   let result = null;
 
@@ -167,7 +166,7 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
   };
 
   const syncButton = () => {
-    button.disabled = detail === null || failed || saving;
+    button.disabled = detail === null || saving;
   };
 
   element.addEventListener('load', (event) => {
@@ -175,10 +174,8 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
     render();
     syncButton();
   });
-  element.addEventListener('error', () => {
-    failed = true;
-    syncButton();
-  });
+  // There is no `error` listener on purpose: the element also reports a video its browser cannot
+  // play, while the verified file can still be saved. A save the element refuses is worded below.
 
   button.addEventListener('click', async () => {
     if (button.disabled) return;
@@ -209,7 +206,6 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
   });
   return { view: 'file', element };
 }
-
 
 /**
  * Wires the 404 page: the words, the way home and the "Check a link" field.
