@@ -132,7 +132,9 @@ which imports the other two. A page's own CSS styles only with the tokens. Colou
 the OS prefers) and `:root[data-theme="light"]`: `--paper`, `--paper-2`, `--paper-3`, `--ink`,
 `--ink-2`, `--ink-muted`, `--rule`, `--rule-2`, `--rule-soft`, `--accent`, `--accent-hi`,
 `--accent-ink`, `--focus`, `--error` and the drawings' `--cell`, `--cell-lit`, `--cell-verified`, plus the hero cloud's `--point-lo`, `--point-mid`, `--point-hi`.
-The lime accent (moss in light) marks only what is primary or verified. The theme switch is named for
+The lime accent (moss in light) marks only what is primary or verified. The embedded `<xrpl-file>` takes the
+page accent for its frame in both themes (moss in light) and `--overlay-accent` (a lime) for its dark
+overlay, through `--xrpl-file-accent` and `--xrpl-file-overlay-accent` in `base.css`. The theme switch is named for
 the theme it turns on ("Light theme") and is pressed while that theme is on; the choice is kept in
 `localStorage` under `xf-theme`, and a blocked storage leaves the page dark with a working switch.
 Text is Geologica for everything, self-hosted in `src/fonts/` (variable woff2, latin and cyrillic
@@ -178,9 +180,12 @@ time through the element (the file is small, and the element's own checks are th
 shows).
 
 What is real and what is drawn: the chunk count, the ledger range, each chunk's bytes (they place the
-points inside its cube) and the 84 bytes of the link come from the read. Which ledger holds which chunk
-is not reported by the reader, so the cubes are spread evenly over as many ledger pads as the manifest's
-ledger range names (at most ten); the note under the cloud says so.
+points inside its cube), the ledger of every chunk's transaction (the reader reports it with the chunk,
+and the cube stands on the pad of that ledger) and the 84 bytes of the link come from the read. With
+more ledgers than ten, a pad stands for a run of neighbouring ledgers and the note under the cloud
+says how many. Drawn: a cube's place within its pad (slots fill in arrival order), the relief of the
+ground and the gap before the manifest's cube (the reader does not report the manifest's own ledger).
+The animation stops when the read is done or has failed.
 
 A testnet reset, or public nodes without the file's history, breaks it: the cloud then keeps the cubes
 it received and shows a quiet message. That is accepted at launch; to bring the hero back, re-publish

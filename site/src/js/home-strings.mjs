@@ -55,7 +55,11 @@ export function cloudStrings(lang, network) {
       },
       fileLinkLabel: 'Страница файла',
       verified: 'проверено',
-      note: 'Каждый куб — один фрагмент файла, прочитанный из реестра. Как фрагменты распределены по версиям реестра, нарисовано, а не измерено.',
+      // Real: the version of the ledger each chunk was written in. Drawn: the place inside it, the
+      // surface and the gap before the manifest's cube.
+      note: ({ ledgers: span, ledgersPerPad, capped }) => (capped
+        ? `Каждый куб — один фрагмент файла, он стоит на своей версии реестра; файл занимает ${ruCount(span, 'версию реестра', 'версии реестра', 'версий реестра')}, поэтому каждая полоса поверхности охватывает до ${ledgersPerPad} из них. Нарисованы, а не измерены: место куба внутри полосы, поверхность и расстояние до куба манифеста.`
+        : 'Каждый куб — один фрагмент файла, он стоит на той версии реестра, в которой фрагмент записан. Нарисованы, а не измерены: место куба внутри версии, поверхность и расстояние до куба манифеста.'),
       fileCallout: (chunks) => {
         const [value, ...unit] = chunksOf(chunks).split(' ');
         return { caption: 'Файл', value, unit: unit.join(' ') };
@@ -89,7 +93,9 @@ export function cloudStrings(lang, network) {
     },
     fileLinkLabel: 'Open the file page',
     verified: 'verified',
-    note: 'Each cube is one chunk of the file, read from the ledger. How the chunks are spread over the ledgers is drawn, not measured.',
+    note: ({ ledgers: span, ledgersPerPad, capped }) => (capped
+      ? `Each cube is one chunk of the file, standing on the ledger it was written in; the file spans ${span} ledgers, so each strip of ground covers up to ${ledgersPerPad} of them. Drawn, not measured: the cube's place within its strip, the ground and the gap before the manifest's cube.`
+      : "Each cube is one chunk of the file, standing on the ledger it was written in. Drawn, not measured: the cube's place within its ledger, the ground and the gap before the manifest's cube."),
     fileCallout: (chunks) => ({ caption: 'The file', value: String(chunks), unit: chunks === 1 ? 'chunk' : 'chunks' }),
     linkCallout: (bytes) => ({ caption: "The link, the manifest's hash", value: String(bytes), unit: bytes === 1 ? 'byte' : 'bytes' }),
   };

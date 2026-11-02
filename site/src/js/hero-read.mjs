@@ -66,7 +66,7 @@ function defaultCreateReader(parsed) {
  * @param {object} options
  * @param {string|{network: string, txHash: string}} options.link `xrpl-file://...` text or a parsed link
  * @param {object} [options.listener] optional callbacks, each called with one object:
- *   onManifest({ manifest, chunks, time }), onChunk({ index, bytes, time }),
+ *   onManifest({ manifest, chunks, time }), onChunk({ index, bytes, ledger, time }),
  *   onBlockVerified({ firstChunk, lastChunk, time }), onDeveloping({ time }), onDone({ time }),
  *   onFailed({ error }); every phase change also calls onPhase(phase)
  * @param {() => number} [options.developDelay] milliseconds from the last block's verification to
@@ -142,6 +142,7 @@ export function startHeroRead(options, env = {}) {
 
   const hooks = {
     onManifest(received) {
+      if (settled) return;
       if (state.phase !== 'reading' || manifest !== null) return;
       manifest = received;
       const chunks = Math.ceil(received.size / received.chunk);
@@ -149,14 +150,16 @@ export function startHeroRead(options, env = {}) {
       listener.onManifest?.({ manifest: received, chunks, time: now() });
     },
     onChunk(chunk) {
+      if (settled) return;
       if (state.phase !== 'reading' || manifest === null) return;
       const time = now();
       const next = chunkArrived(state, chunk, time);
       if (next === state) return;
       state = next;
-      listener.onChunk?.({ index: chunk.index, bytes: chunk.bytes, time });
+      listener.onChunk?.({ index: chunk.index, bytes: chunk.bytes, ledger: chunk.ledger, time });
     },
     onBlockVerified({ firstChunk, lastChunk }) {
+      if (settled) return;
       if (state.phase !== 'reading' || manifest === null) return;
       state = blockVerified(state, { firstChunk, lastChunk });
       listener.onBlockVerified?.({ firstChunk, lastChunk: Math.min(lastChunk, state.chunks - 1), time: now() });

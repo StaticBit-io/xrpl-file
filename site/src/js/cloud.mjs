@@ -1,7 +1,8 @@
 // The hero: a point cloud of a stretch of the XRP Ledger seen from above at an oblique angle, driven by
 // the real read of the hero file. Ledgers are pads of ground; each chunk of the file is a small cube
-// standing on one of them, its inside scattered by that chunk's own bytes; the manifest is one cube a
-// few ledgers later. Nothing is drawn ahead of the read: a cube appears when its chunk arrives, turns
+// standing on the pad of the ledger its chunk was written in (the reader reports it), its inside scattered
+// by that chunk's own bytes; the manifest is one cube a few ledgers later. Nothing is drawn ahead of the
+// read: a cube appears, on its own ledger, when its chunk arrives, turns
 // lime (moss in the light theme) only when the sweep passes it after its block was verified, and the
 // small <xrpl-file> card with its "verified" line appears only when every block has been verified.
 //
@@ -16,7 +17,6 @@ import {
   PAD_COUNT,
   cloudTimings,
   createTimeline,
-  cubeCornerPoints,
   cubeEdgePoints,
   frameFor,
   groundPoints,
@@ -24,11 +24,12 @@ import {
 } from './cloud-scene.mjs';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const MAX_DPR = 2;
+// The point buffer is uploaded whole on every frame, so it is rendered at no more than 1.5 device pixels
+// per CSS pixel (about 56% of the bytes of 2): points are one or two pixels wide and stay crisp.
+const MAX_DPR = 1.5;
 // While the scene sways, a frame every ~33 ms is smooth enough and halves the cost.
 const FRAME_MS = 33;
 const FAILED_ALPHA = 0.6;
-const GHOST_ALPHA = 0.3;
 const SWEEP_REACH = 0.05;
 const ELEMENT_SCRIPT = '/element/1.1.0/xrpl-file-element.js';
 
@@ -42,7 +43,6 @@ const FALLBACK_COLOURS = {
 };
 
 const EDGES = cubeEdgePoints(4);
-const CORNERS = cubeCornerPoints();
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 
@@ -53,7 +53,7 @@ const DEFAULT_STRINGS = {
   failed: () => 'The file could not be read from the ledger just now.',
   fileLinkLabel: 'Open the file page',
   verified: 'verified',
-  note: 'The ledger spread is drawn, not measured.',
+  note: () => 'Each cube stands on the ledger its chunk was written in. The ground is drawn.',
   fileCallout: (chunks) => ({ caption: 'The file', value: String(chunks), unit: 'chunks' }),
   linkCallout: (bytes) => ({ caption: 'The link, the manifest hash', value: String(bytes), unit: 'bytes' }),
 };
@@ -116,15 +116,17 @@ function defaultLoadElement(doc) {
  *   defaults to whether this browser session has already seen the hero (sessionStorage `xf-mosaic-seen`)
  * @param {HTMLElement} [options.caption] role="status", a polite live region: empty while reading, then
  *   the line for a finished read or the quiet failure message. It carries data-phase.
- * @param {HTMLElement} [options.note] gets the sentence saying what is drawn rather than measured
+ * @param {HTMLElement} [options.note] gets the sentence saying what is real and what is drawn; written
+ *   at once and again when the manifest names the ledger range
  * @param {{ file: HTMLElement, link: HTMLElement }} [options.callouts] the two figures with leaders;
  *   each is filled and shown when its data exists
  * @param {HTMLElement} [options.card] holds the verified file and its line; hidden until every block
  *   has been verified
  * @param {object} [options.strings] all visible and spoken text, supplied by the caller (see
  *   DEFAULT_STRINGS for the shape): label(phase, { chunks }), caption({ chunks, firstLedger,
- *   lastLedger }), failed(code), fileLinkLabel, verified, note, fileCallout(chunks) and
- *   linkCallout(bytes), each callout giving { caption, value, unit }
+ *   lastLedger }), failed(code), fileLinkLabel, verified, note({ ledgers, ledgersPerPad, capped }) (a
+ *   string also works; ledgers is null before the manifest), fileCallout(chunks) and linkCallout(bytes),
+ *   each callout giving { caption, value, unit }
  * @param {object} [env] seams for tests; defaults are the browser's own
  * @returns {{ done: Promise<void>, destroy: () => void, readonly phase: string }} `done` settles, and
  *   never rejects, once the read is done or failed; `destroy()` stops everything and abandons the read.
@@ -171,6 +173,8 @@ export function mountCloud(canvas, options, env = {}) {
   let frameId = null;
   let lastFrameAt = -Infinity;
   let animatedUntil = 0;
+  // The sway stops where it is when the read ends (done or failed): nothing then asks for a frame.
+  let swayEnd = Infinity;
   // The camera frame: the whole stretch the scene can use until the manifest names the ledgers, then
   // eased to the ground the file and the manifest actually occupy.
   let frameFrom = FRAME_SPAN;
@@ -190,7 +194,10 @@ export function mountCloud(canvas, options, env = {}) {
     caption.setAttribute('role', 'status');
     caption.setAttribute('aria-live', 'polite');
   }
-  if (note) note.textContent = strings.note;
+  function writeNote(detail) {
+    if (note) note.textContent = typeof strings.note === 'function' ? strings.note(detail) : strings.note;
+  }
+  writeNote({ ledgers: null, ledgersPerPad: null, capped: false });
 
   function readColours() {
     const style = view.getComputedStyle(doc.documentElement);
@@ -228,7 +235,7 @@ export function mountCloud(canvas, options, env = {}) {
   function camera(time) {
     const width = canvas.width;
     const height = canvas.height;
-    const yaw = -0.5 + (reducedMotion || phase === 'failed' ? 0 : 0.22 * Math.sin(time / 9000));
+    const yaw = -0.5 + (reducedMotion ? 0 : 0.22 * Math.sin(Math.min(time, swayEnd) / 9000));
     const elevation = 0.62;
     const [frameLeft, frameRight] = currentFrame(time);
     const spanUnits = frameRight - frameLeft;
@@ -330,13 +337,10 @@ export function mountCloud(canvas, options, env = {}) {
     for (let i = 0; i < ground.length; i += 4) plot(cam, sweepX, ground[i], ground[i + 1], ground[i + 2], ground[i + 3], 0, 0, 0);
 
     if (layout !== null) {
-      for (let k = 0; k < layout.cubes.length; k += 1) {
-        const cube = layout.cubes[k];
+      for (let k = 0; k < layout.chunks; k += 1) {
+        const cube = timeline.cube(k);
+        if (cube === null) continue;
         const visual = timeline.visual(k, time);
-        if (!visual.shown) {
-          plotCube(cam, sweepX, cube, CORNERS, 0, 0.2, GHOST_ALPHA);
-          continue;
-        }
         const tone = 0.55 + 0.45 * visual.lit;
         plotCube(cam, sweepX, cube, EDGES, visual.lime, tone, 0.8 * visual.lit);
         const inside = timeline.inside(k);
@@ -397,10 +401,10 @@ export function mountCloud(canvas, options, env = {}) {
     if (!context || !image || canvas.width === 0 || canvas.height === 0) return false;
     const cam = drawScene(time);
     if (layout !== null && callouts) {
-      placeCallout(callouts.file, 'file', layout.anchors.file, 1, 'left', cam);
+      placeCallout(callouts.file, 'file', timeline.fileAnchor(), 1, 'left', cam);
       placeCallout(callouts.link, 'link', layout.anchors.manifest, 0, 'right', cam);
     }
-    const swaying = !reducedMotion && phase !== 'failed';
+    const swaying = !reducedMotion && time < swayEnd;
     return swaying || time < animatedUntil;
   }
 
@@ -503,13 +507,15 @@ export function mountCloud(canvas, options, env = {}) {
     onPhase(next) {
       phase = next;
       if (next === 'failed') failedAlpha = FAILED_ALPHA;
+      if ((next === 'done' || next === 'failed') && swayEnd === Infinity) swayEnd = now();
       setLabel();
     },
     onManifest({ manifest: received, chunks, time }) {
       manifest = received;
       chunkCount = chunks;
       const ledgers = received.lastLedger - received.firstLedger + 1;
-      layout = layoutCloud({ chunks, ledgers });
+      layout = layoutCloud({ chunks, ledgers, firstLedger: received.firstLedger });
+      writeNote({ ledgers: layout.ledgers, ledgersPerPad: layout.ledgersPerPad, capped: layout.capped });
       timeline = createTimeline({ layout, timings });
       timeline.showManifest(time);
       frameFrom = currentFrame(time);
@@ -522,8 +528,8 @@ export function mountCloud(canvas, options, env = {}) {
       setLabel();
       requestDraw();
     },
-    onChunk({ index, bytes, time }) {
-      timeline?.chunkArrived(index, bytes, time);
+    onChunk({ index, bytes, ledger, time }) {
+      timeline?.chunkArrived(index, bytes, time, ledger);
       animatedUntil = Math.max(animatedUntil, time + timings.lit);
       requestDraw();
     },
@@ -570,8 +576,8 @@ export function mountCloud(canvas, options, env = {}) {
   themeObserver?.observe(doc.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   // A cloud nobody can see is not worth its frames; the read and its clocks run regardless.
   const visibilityObserver = typeof IntersectionObserver === 'function'
-    ? new IntersectionObserver(([entry]) => {
-      onScreen = entry.isIntersecting;
+    ? new IntersectionObserver((entries) => {
+      onScreen = entries.at(-1).isIntersecting;
       if (onScreen) requestDraw();
     })
     : null;

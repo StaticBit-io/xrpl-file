@@ -85,3 +85,23 @@ test('no visible home copy talks about the test network being reset', () => {
     assert.ok(!/reset from time to time|test network|сбрасыва|тестовая сеть/i.test(html));
   }
 });
+
+test('the hero note says what is read and what is drawn, in both languages, and says so when pads group ledgers', async () => {
+  const { cloudStrings } = await import('../src/js/home-strings.mjs');
+  const exact = { ledgers: 8, ledgersPerPad: 1, capped: false };
+  const grouped = { ledgers: 340, ledgersPerPad: 34, capped: true };
+  for (const lang of ['en', 'ru']) {
+    const note = cloudStrings(lang, 'testnet').note;
+    const before = note({ ledgers: null, ledgersPerPad: null, capped: false });
+    assert.equal(typeof before, 'string');
+    assert.equal(note(exact), before, 'with one ledger per pad the note needs no numbers');
+    const text = note(grouped);
+    assert.notEqual(text, before);
+    assert.match(text, /340/);
+    assert.match(text, /34/);
+    assert.doesNotMatch(before, /\d/);
+    assert.doesNotMatch(`${before} ${text}`, /undefined|NaN|\{|\}/);
+  }
+  assert.match(cloudStrings('en', 'testnet').note(exact), /the ledger it was written in/);
+  assert.match(cloudStrings('ru', 'testnet').note(exact), /Нарисованы, а не измерены/);
+});

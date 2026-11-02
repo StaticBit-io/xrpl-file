@@ -7,35 +7,96 @@ import {
   groundPoints,
   frameFor,
   layoutCloud,
+  padOfLedger,
   scatterPoints,
 } from '../src/js/cloud-scene.mjs';
 
-const REAL = { chunks: 123, ledgers: 8 };
+const FIRST = 100;
+// 123 chunks over 8 ledgers, like the hero file: 16 chunks on each of the first seven ledgers, 11 on the last.
+const REAL = { chunks: 123, ledgers: 8, firstLedger: FIRST };
+const ledgerOf = (index) => FIRST + Math.min(7, Math.floor(index / 16));
 
-test('every chunk gets one cube, ledger by ledger in chunk order, none on top of another', () => {
+function arrive(tl, indices, time = 1000) {
+  for (const i of indices) tl.chunkArrived(i, chunkBytes(i), time, ledgerOf(i));
+}
+const all = Array.from({ length: 123 }, (_, i) => i);
+const placeKey = (c) => [c.x, c.y, c.z].map((v) => v.toFixed(5)).join(',');
+
+test('a cube stands on the pad of the ledger its chunk was written in, never on another', () => {
   const layout = layoutCloud(REAL);
-  assert.equal(layout.cubes.length, 123);
-  for (let i = 1; i < layout.cubes.length; i += 1) {
-    assert.ok(layout.cubes[i].pad >= layout.cubes[i - 1].pad, `chunk ${i} stands on an earlier ledger than chunk ${i - 1}`);
+  const tl = createTimeline({ layout, timings: TIMINGS });
+  arrive(tl, all);
+  for (const i of all) {
+    assert.equal(tl.cube(i).pad, layout.filePadFirst + (ledgerOf(i) - FIRST), `chunk ${i}`);
   }
-  const places = new Set(layout.cubes.map((c) => [c.x, c.y, c.z].map((v) => v.toFixed(5)).join(',')));
-  assert.equal(places.size, 123);
 });
 
-test('the file stands on as many pads as the manifest names ledgers, spread evenly', () => {
+test('a chunk that arrives out of order still stands on its own ledger', () => {
   const layout = layoutCloud(REAL);
-  assert.equal(layout.filePads, 8);
-  const perPad = new Array(8).fill(0);
-  for (const cube of layout.cubes) perPad[cube.pad - layout.filePadFirst] += 1;
-  assert.equal(perPad.reduce((a, b) => a + b, 0), 123);
-  assert.ok(Math.max(...perPad) - Math.min(...perPad) <= 1, `uneven: ${perPad}`);
+  const tl = createTimeline({ layout, timings: TIMINGS });
+  arrive(tl, [100, 3, 60]);
+  assert.equal(tl.cube(100).pad, layout.filePadFirst + 6);
+  assert.equal(tl.cube(3).pad, layout.filePadFirst);
+  assert.equal(tl.cube(60).pad, layout.filePadFirst + 3);
 });
 
-test('the pad count follows the ledger range but never exceeds the chunks or the cap', () => {
-  assert.equal(layoutCloud({ chunks: 123, ledgers: 1 }).filePads, 1);
-  assert.equal(layoutCloud({ chunks: 123, ledgers: 500 }).filePads, MAX_FILE_PADS);
-  assert.equal(layoutCloud({ chunks: 3, ledgers: 9 }).filePads, 3);
-  assert.equal(layoutCloud({ chunks: 1, ledgers: 1 }).cubes.length, 1);
+test('no two cubes share a place, and none leaves the file span', () => {
+  const layout = layoutCloud(REAL);
+  const tl = createTimeline({ layout, timings: TIMINGS });
+  arrive(tl, all);
+  assert.equal(new Set(all.map((i) => placeKey(tl.cube(i)))).size, 123);
+  for (const i of all) {
+    const cube = tl.cube(i);
+    assert.ok(cube.x >= layout.fileSpan[0] && cube.x + layout.cube <= layout.fileSpan[1] + 1e-9);
+  }
+});
+
+test('a cube has no place until its chunk has arrived', () => {
+  const tl = createTimeline({ layout: layoutCloud(REAL), timings: TIMINGS });
+  assert.equal(tl.cube(0), null);
+  arrive(tl, [0]);
+  assert.notEqual(tl.cube(0), null);
+  assert.equal(tl.cube(1), null);
+});
+
+test('the file stands on as many pads as the manifest names ledgers, up to the cap', () => {
+  assert.equal(layoutCloud(REAL).filePads, 8);
+  assert.equal(layoutCloud({ chunks: 123, ledgers: 1, firstLedger: FIRST }).filePads, 1);
+  assert.equal(layoutCloud({ chunks: 123, ledgers: 500, firstLedger: FIRST }).filePads, MAX_FILE_PADS);
+  assert.equal(layoutCloud({ chunks: 3, ledgers: 9, firstLedger: FIRST }).filePads, 9, 'a pad is a ledger, whether or not it holds a chunk');
+});
+
+test('the layout says whether pads are ledgers or groups of ledgers', () => {
+  const exact = layoutCloud(REAL);
+  assert.equal(exact.capped, false);
+  assert.equal(exact.ledgersPerPad, 1);
+  assert.equal(exact.ledgers, 8);
+  const capped = layoutCloud({ chunks: 500, ledgers: 340, firstLedger: FIRST });
+  assert.equal(capped.capped, true);
+  assert.equal(capped.filePads, MAX_FILE_PADS);
+  assert.equal(capped.ledgersPerPad, 34);
+  assert.equal(capped.ledgers, 340);
+});
+
+test('when pads are capped, neighbouring ledgers share a pad in order, and every ledger has one', () => {
+  const layout = layoutCloud({ chunks: 500, ledgers: 340, firstLedger: FIRST });
+  let previous = 0;
+  const seen = new Set();
+  for (let ledger = FIRST; ledger < FIRST + 340; ledger += 1) {
+    const pad = padOfLedger(layout, ledger);
+    assert.ok(pad >= previous && pad < layout.filePads, `ledger ${ledger}`);
+    previous = pad;
+    seen.add(pad);
+  }
+  assert.equal(seen.size, MAX_FILE_PADS);
+  assert.equal(padOfLedger(layout, FIRST), 0);
+  assert.equal(padOfLedger(layout, FIRST + 339), MAX_FILE_PADS - 1);
+});
+
+test('a ledger outside the manifest range lands on the nearest end pad', () => {
+  const layout = layoutCloud(REAL);
+  assert.equal(padOfLedger(layout, FIRST - 5), 0);
+  assert.equal(padOfLedger(layout, FIRST + 99), 7);
 });
 
 test('the manifest stands a few ledgers after the file, on its own pad', () => {
@@ -44,43 +105,43 @@ test('the manifest stands a few ledgers after the file, on its own pad', () => {
   const gap = layout.manifestPad - lastFilePad;
   assert.ok(gap >= 2 && gap <= 4, `gap ${gap}`);
   assert.ok(layout.manifestPad < layout.padCount);
-  assert.ok(layout.manifest.x > layout.cubes.at(-1).x);
+  assert.ok(layout.manifest.x > layout.fileSpan[1] - 1e-9);
 });
 
-test('the file span covers every cube and the callout anchor stands above the tallest stack', () => {
-  const layout = layoutCloud(REAL);
-  for (const cube of layout.cubes) assert.ok(cube.x >= layout.fileSpan[0] && cube.x <= layout.fileSpan[1]);
-  const tallest = Math.max(...layout.cubes.map((c) => c.y + layout.cube));
-  assert.ok(layout.anchors.file[1] >= tallest);
-  assert.ok(layout.anchors.manifest[1] > layout.manifest.y);
+test('the file callout stands above the tallest stack so far, and over the file before any cube', () => {
+  const tl = createTimeline({ layout: layoutCloud(REAL), timings: TIMINGS });
+  const empty = tl.fileAnchor();
+  assert.ok(empty[0] > layoutCloud(REAL).fileSpan[0] && empty[0] < layoutCloud(REAL).fileSpan[1]);
+  arrive(tl, all);
+  const anchor = tl.fileAnchor();
+  const tallest = Math.max(...all.map((i) => tl.cube(i).y + layoutCloud(REAL).cube));
+  assert.ok(anchor[1] >= tallest);
 });
 
 test('a file read from few ledgers stays inside the frame: towers get deeper layers, not more height', () => {
-  const layout = layoutCloud({ chunks: 123, ledgers: 2 });
-  assert.equal(layout.filePads, 2);
-  for (const pad of new Set(layout.cubes.map((c) => c.pad))) {
-    const layers = new Set(layout.cubes.filter((c) => c.pad === pad).map((c) => c.y.toFixed(5)));
+  const layout = layoutCloud({ chunks: 123, ledgers: 2, firstLedger: FIRST });
+  const tl = createTimeline({ layout, timings: TIMINGS });
+  all.forEach((i) => tl.chunkArrived(i, chunkBytes(i), 1000, FIRST + (i < 62 ? 0 : 1)));
+  for (const pad of new Set(all.map((i) => tl.cube(i).pad))) {
+    const layers = new Set(all.filter((i) => tl.cube(i).pad === pad).map((i) => tl.cube(i).y.toFixed(5)));
     assert.ok(layers.size <= 12, `pad ${pad}: ${layers.size} layers`);
   }
-  assert.ok(layout.top < 0.5, `top ${layout.top}`);
-  const places = new Set(layout.cubes.map((c) => [c.x, c.y, c.z].map((v) => v.toFixed(5)).join(',')));
-  assert.equal(places.size, 123, 'no two cubes share a place');
-  for (const cube of layout.cubes) assert.ok(cube.x >= layout.fileSpan[0] && cube.x + layout.cube <= layout.fileSpan[1] + 1e-9);
+  assert.equal(new Set(all.map((i) => placeKey(tl.cube(i)))).size, 123, 'no two cubes share a place');
 });
 
 test('the ground and the camera frame do not depend on how many ledgers the file spans', () => {
-  assert.equal(layoutCloud({ chunks: 123, ledgers: 2 }).padCount, layoutCloud({ chunks: 123, ledgers: 8 }).padCount);
+  assert.equal(layoutCloud({ chunks: 123, ledgers: 2, firstLedger: FIRST }).padCount, layoutCloud({ chunks: 123, ledgers: 8, firstLedger: FIRST }).padCount);
 });
 
 test('the camera frame holds the file and the manifest, and is never tighter than the minimum', () => {
   for (const ledgers of [1, 2, 8, 10]) {
-    const layout = layoutCloud({ chunks: 123, ledgers });
+    const layout = layoutCloud({ chunks: 123, ledgers, firstLedger: FIRST });
     const [left, right] = frameFor(layout);
     assert.ok(left <= layout.fileSpan[0] && right >= layout.manifest.x + layout.cube, `ledgers ${ledgers}`);
     assert.ok(right - left >= 1.1 - 1e-9);
   }
-  const few = frameFor(layoutCloud({ chunks: 123, ledgers: 2 }));
-  const many = frameFor(layoutCloud({ chunks: 123, ledgers: 10 }));
+  const few = frameFor(layoutCloud({ chunks: 123, ledgers: 2, firstLedger: FIRST }));
+  const many = frameFor(layoutCloud({ chunks: 123, ledgers: 10, firstLedger: FIRST }));
   assert.ok(few[1] - few[0] < many[1] - many[0], 'a file on two ledgers is framed closer');
 });
 
@@ -144,7 +205,7 @@ test('a cube is not there, and has no inside, until its chunk has arrived', () =
   const tl = timeline();
   assert.equal(tl.visual(0, 5000).shown, false);
   assert.equal(tl.inside(0), null);
-  tl.chunkArrived(0, chunkBytes(0), 1000);
+  tl.chunkArrived(0, chunkBytes(0), 1000, ledgerOf(0));
   assert.equal(tl.visual(1, 5000).shown, false, 'another chunk is still not there');
   const v = tl.visual(0, 1000 + TIMINGS.lit / 2);
   assert.equal(v.shown, true);
@@ -155,14 +216,14 @@ test('a cube is not there, and has no inside, until its chunk has arrived', () =
 
 test('an arrived chunk is never lime until its block is verified', () => {
   const tl = timeline();
-  for (let i = 0; i < 123; i += 1) tl.chunkArrived(i, chunkBytes(i), 1000 + i);
+  for (let i = 0; i < 123; i += 1) tl.chunkArrived(i, chunkBytes(i), 1000 + i, ledgerOf(i));
   for (let i = 0; i < 123; i += 1) assert.equal(tl.visual(i, 1e9).lime, 0, `chunk ${i}`);
   assert.equal(tl.sweep(1e9), null, 'no sweep without a verification');
 });
 
 test('a verified block limes its own chunks only, left to right as the sweep passes', () => {
   const tl = timeline();
-  for (let i = 0; i < 123; i += 1) tl.chunkArrived(i, chunkBytes(i), 1000);
+  for (let i = 0; i < 123; i += 1) tl.chunkArrived(i, chunkBytes(i), 1000, ledgerOf(i));
   tl.blockVerified({ firstChunk: 0, lastChunk: 99 }, 5000);
 
   assert.equal(tl.visual(0, 5000).lime, 0, 'the sweep starts at the left end');
@@ -176,7 +237,7 @@ test('a verified block limes its own chunks only, left to right as the sweep pas
 
 test('the sweep runs across the block while it takes, then is gone', () => {
   const tl = timeline();
-  for (let i = 0; i < 123; i += 1) tl.chunkArrived(i, chunkBytes(i), 1000);
+  for (let i = 0; i < 123; i += 1) tl.chunkArrived(i, chunkBytes(i), 1000, ledgerOf(i));
   tl.blockVerified({ firstChunk: 0, lastChunk: 122 }, 5000);
   const layout = layoutCloud(REAL);
   assert.equal(tl.sweep(4999), null, 'not before the verification');
@@ -190,7 +251,7 @@ test('the sweep runs across the block while it takes, then is gone', () => {
 
 test('a block verified before its chunk is drawn does not light that chunk', () => {
   const tl = timeline();
-  tl.chunkArrived(0, chunkBytes(0), 1000);
+  tl.chunkArrived(0, chunkBytes(0), 1000, ledgerOf(0));
   tl.blockVerified({ firstChunk: 0, lastChunk: 3 }, 2000);
   assert.equal(tl.visual(1, 1e9).shown, false);
   assert.equal(tl.visual(1, 1e9).lime, 0);
@@ -199,7 +260,7 @@ test('a block verified before its chunk is drawn does not light that chunk', () 
 
 test('with reduced motion everything is final at once and nothing sweeps', () => {
   const tl = timeline({ timings: cloudTimings({ fast: false, reducedMotion: true }) });
-  tl.chunkArrived(0, chunkBytes(0), 1000);
+  tl.chunkArrived(0, chunkBytes(0), 1000, ledgerOf(0));
   assert.equal(tl.visual(0, 1000).lit, 1);
   assert.equal(tl.visual(0, 1000).lime, 0, 'still not verified');
   tl.blockVerified({ firstChunk: 0, lastChunk: 0 }, 2000);
@@ -210,8 +271,8 @@ test('with reduced motion everything is final at once and nothing sweeps', () =>
 
 test('a chunk reported twice keeps its first arrival time', () => {
   const tl = timeline();
-  tl.chunkArrived(0, chunkBytes(0), 1000);
-  tl.chunkArrived(0, chunkBytes(0), 9000);
+  tl.chunkArrived(0, chunkBytes(0), 1000, ledgerOf(0));
+  tl.chunkArrived(0, chunkBytes(0), 9000, ledgerOf(0));
   assert.equal(tl.visual(0, 1000 + TIMINGS.lit).lit, 1);
 });
 
@@ -228,9 +289,27 @@ test('the manifest cube appears with the manifest and turns lime only when every
 
 test('the settling time covers the last sweep and its fade, and is never negative', () => {
   const tl = timeline();
-  for (let i = 0; i < 123; i += 1) tl.chunkArrived(i, chunkBytes(i), 1000);
+  for (let i = 0; i < 123; i += 1) tl.chunkArrived(i, chunkBytes(i), 1000, ledgerOf(i));
   tl.blockVerified({ firstChunk: 0, lastChunk: 122 }, 5000);
   const wait = tl.settleDelay(5000);
   assert.ok(wait >= TIMINGS.sweep + TIMINGS.lime);
   assert.equal(tl.settleDelay(1e9), 0);
+});
+
+test('a chunk reported without a ledger is not drawn: its place would be a guess', () => {
+  const tl = timeline();
+  tl.chunkArrived(0, chunkBytes(0), 1000, undefined);
+  tl.chunkArrived(1, chunkBytes(1), 1000, 'x');
+  assert.equal(tl.cube(0), null);
+  assert.equal(tl.cube(1), null);
+  assert.equal(tl.visual(0, 1e9).shown, false);
+});
+
+test('a ledger that holds most of the chunks does not leave the frame: its tower stays within twelve layers', () => {
+  const layout = layoutCloud({ chunks: 123, ledgers: 2, firstLedger: FIRST });
+  const tl = createTimeline({ layout, timings: TIMINGS });
+  all.forEach((i) => tl.chunkArrived(i, chunkBytes(i), 1000, FIRST + (i < 108 ? 0 : 1)));
+  const layers = new Set(all.filter((i) => tl.cube(i).pad === layout.filePadFirst).map((i) => tl.cube(i).y.toFixed(5)));
+  assert.ok(layers.size <= 12, `${layers.size} layers`);
+  assert.equal(new Set(all.map((i) => placeKey(tl.cube(i)))).size, 123);
 });

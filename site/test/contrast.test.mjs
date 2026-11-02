@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { allRows, failures, renderReport, REPORT_PATH } from '../tools/contrast.mjs';
-import { contrast, over, parseColor } from '../tools/color.mjs';
+import { contrast, over, parseColor, toHex } from '../tools/color.mjs';
 
 test('the contrast arithmetic matches known WCAG values', () => {
   assert.equal(contrast(parseColor('#000000'), parseColor('#ffffff')).toFixed(2), '21.00');
@@ -39,13 +39,34 @@ test('the element overlay is measured in both themes, over black and over the br
   for (const r of rows) assert.ok(r.pass, `${r.group}: ${r.label} ${r.ratio.toFixed(2)}`);
 });
 
-test('the site accent reaches the element only outside the light theme, where its overlay would fall below 3:1', () => {
-  const css = readFileSync(new URL('../src/css/base.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-  const overrides = [...css.matchAll(/([^{}]*)\{[^{}]*--xrpl-file-accent:[^{}]*\}/g)].map((m) => m[1].trim());
-  assert.deepEqual(overrides, [':root:not([data-theme="light"]) xrpl-file']);
-  // What a moss accent would give on the brightest overlay: the reason for the scoping.
-  const light = readFileSync(new URL('../src/css/tokens.css', import.meta.url), 'utf8');
-  const moss = /:root\[data-theme="light"\][^}]*--accent:\s*(oklch\([^)]*\))/.exec(light)[1];
-  const bright = over([0, 0, 0], 0.72, parseColor('#ffffff'));
-  assert.ok(contrast(parseColor(moss), bright) < 3);
+const baseCss = () => readFileSync(new URL('../src/css/base.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const lightMoss = () => /:root\[data-theme="light"\][^}]*--accent:\s*(oklch\([^)]*\))/.exec(readFileSync(new URL('../src/css/tokens.css', import.meta.url), 'utf8'))[1];
+
+test('base.css gives the element the page accent for its frame and a lime for its dark overlay, in every theme', () => {
+  const rules = [...baseCss().matchAll(/([^{}]*)\{([^{}]*--xrpl-file-[\w-]*accent:[^{}]*)\}/g)];
+  assert.deepEqual(rules.map((m) => m[1].trim()), ['xrpl-file'], 'one rule, not scoped to a theme');
+  const declared = Object.fromEntries([...rules[0][2].matchAll(/--xrpl-file-([\w-]+):\s*var\(--([\w-]+)\)/g)].map((m) => [m[1], m[2]]));
+  assert.deepEqual(declared, {
+    accent: 'accent',
+    'on-accent': 'accent-ink',
+    'overlay-accent': 'overlay-accent',
+    'overlay-on-accent': 'overlay-on-accent',
+  });
+});
+
+test('in the light theme the frame accent is the page moss and the overlay accent is a lime that passes on the overlay', () => {
+  const rows = allRows().filter((r) => r.group === 'Element, theme="light"');
+  const frame = rows.find((r) => r.label.startsWith('Accent against the frame'));
+  assert.equal(frame.foreground, '--xrpl-file-accent (site)');
+  assert.equal(frame.foregroundHex, toHex(parseColor(lightMoss())));
+  const overlay = rows.filter((r) => r.label.includes('overlay') || r.label.includes('over a cover'));
+  assert.equal(overlay.length, 5);
+  for (const r of overlay) {
+    assert.ok(r.pass, `${r.label} ${r.ratio.toFixed(2)}`);
+    if (r.label.startsWith('Progress ring')) assert.equal(r.foreground, '--xrpl-file-overlay-accent (site)');
+  }
+});
+
+test('moss on the brightest overlay is below 3:1, which is why the overlay has its own accent', () => {
+  assert.ok(contrast(parseColor(lightMoss()), over([0, 0, 0], 0.72, parseColor('#ffffff'))) < 3);
 });

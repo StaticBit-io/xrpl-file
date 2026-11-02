@@ -220,3 +220,49 @@ test('the seen flag survives storage that throws and blocked storage', () => {
   assert.equal(map.get('xf-mosaic-seen'), '1');
   assert.equal(hasSeenMosaic(storage), true);
 });
+
+test('onChunk hands the listener the ledger the reader reported for the chunk', async () => {
+  const clock = fakeEnv();
+  const { listener, events } = recorder();
+  const reader = readerThat(async (_link, _progress, hooks) => {
+    hooks.onManifest(MANIFEST);
+    hooks.onChunk({ index: 0, bytes: new Uint8Array(1000), ledger: 10 });
+    hooks.onChunk({ index: 1, bytes: new Uint8Array(1000), ledger: 14 });
+    return new Promise(() => {});
+  });
+  startHeroRead({ link: LINK, listener }, { ...clock.env, createReader: () => reader });
+  await tick();
+  const chunks = events.filter(([name]) => name === 'onChunk').map(([, detail]) => [detail.index, detail.ledger]);
+  assert.deepEqual(chunks, [[0, 10], [1, 14]]);
+});
+
+test('after destroy() the hooks the reader still holds reach nobody', async () => {
+  const clock = fakeEnv();
+  const { listener, names } = recorder();
+  let hooks;
+  const reader = readerThat((_link, _progress, given) => {
+    hooks = given;
+    return new Promise(() => {});
+  });
+  const read = startHeroRead({ link: LINK, listener }, { ...clock.env, createReader: () => reader });
+  hooks.onManifest(MANIFEST);
+  read.destroy();
+  hooks.onChunk({ index: 0, bytes: new Uint8Array(10), ledger: 10 });
+  hooks.onBlockVerified({ firstChunk: 0, lastChunk: 0 });
+  hooks.onManifest({ ...MANIFEST, size: 5000 });
+  assert.deepEqual(names(), ['onManifest']);
+});
+
+test('a manifest that arrives after destroy() is not reported', async () => {
+  const clock = fakeEnv();
+  const { listener, names } = recorder();
+  let hooks;
+  const reader = readerThat((_link, _progress, given) => {
+    hooks = given;
+    return new Promise(() => {});
+  });
+  const read = startHeroRead({ link: LINK, listener }, { ...clock.env, createReader: () => reader });
+  read.destroy();
+  hooks.onManifest(MANIFEST);
+  assert.deepEqual(names(), []);
+});

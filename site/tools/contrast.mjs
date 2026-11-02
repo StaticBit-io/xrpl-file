@@ -14,6 +14,7 @@ import { contrast, over, parseColor, toHex } from './color.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 export const REPORT_PATH = join(here, '..', '..', 'docs', 'superpowers', 'reports', '2026-11-02-site', 'contrast.md');
 const TOKENS_PATH = join(here, '..', 'src', 'css', 'tokens.css');
+const BASE_PATH = join(here, '..', 'src', 'css', 'base.css');
 const README_PATH = join(here, '..', '..', 'README.md');
 
 const TEXT = 4.5;
@@ -121,35 +122,54 @@ const ELEMENT_PAIRS = [
   ['ui', 'Buttons, progress, spinner, focus ring against the box', 'accent', 'background', UI],
 ];
 
-export function elementRows(css, readme) {
+/** What base.css sets on `xrpl-file`: --xrpl-file-<name> -> the site token it points at. */
+export function readElementOverrides(baseCss) {
+  const css = baseCss.replace(/\/\*[\s\S]*?\*\//g, '');
+  const overrides = {};
+  for (const rule of css.matchAll(/(?<=^|\})\s*xrpl-file\s*\{([^{}]*)\}/g)) {
+    for (const m of rule[1].matchAll(/--xrpl-file-([a-z-]+):\s*var\(--([a-z0-9-]+)\)\s*;/g)) overrides[m[1]] = m[2];
+  }
+  return overrides;
+}
+
+export function elementRows(css, readme, baseCss = readFileSync(BASE_PATH, 'utf8')) {
   const palettes = readElementPalettes(readme);
+  const overrides = readElementOverrides(baseCss);
   const rows = [];
   for (const [theme, selector] of [['Light', ':root[data-theme="light"]'], ['Dark', ':root[data-theme="dark"]']]) {
     const site = readThemeTokens(css, selector);
-    // The file page puts the element in a --paper-2 frame. In the dark theme only, base.css replaces the
-    // element's accent and the text on it with the site's --accent and --accent-ink; the light theme keeps
-    // the element's own palette (its overlay draws the accent too, see the overlay rows below).
+    // The file page puts the element in a --paper-2 frame. base.css replaces the element's accent and the
+    // text on it with the page's, in both themes; every other colour is the documented palette.
     const paper = { name: `site --paper-2 (${theme.toLowerCase()})`, color: parseColor(site['paper-2']) };
-    const palette = theme === 'Dark' ? { ...palettes[theme], accent: site.accent, 'on-accent': site['accent-ink'] } : palettes[theme];
-    const colour = (name) => ({ name: `--xrpl-file-${name}`, color: parseColor(palette[name]) });
+    const palette = { ...palettes[theme] };
+    const fromSite = new Set();
+    for (const name of ['accent', 'on-accent']) {
+      if (overrides[name]) { palette[name] = site[overrides[name]]; fromSite.add(name); }
+    }
+    const colour = (name) => ({ name: `--xrpl-file-${name}${fromSite.has(name) ? ' (site)' : ''}`, color: parseColor(palette[name]) });
     const group = `Element, theme="${theme.toLowerCase()}"`;
     for (const [kind, label, foreground, background, minimum] of ELEMENT_PAIRS) {
       rows.push(row(group, kind, label, colour(foreground), colour(background), minimum));
     }
     rows.push(row(group, 'ui', 'Accent against the frame the element sits in (the element is embedded with the page theme)', colour('accent'), paper, UI));
+    rows.push(row(group, 'ui', 'Accent against a text file box', colour('accent'), colour('text-background'), UI));
+    // The progress bar's fill sits on its track: the track composited over the box.
+    const trackOver = theme === 'Light'
+      ? { name: 'track rgba(0,0,0,.16) over --xrpl-file-background', color: over([0, 0, 0], 0.16, parseColor(palette.background)) }
+      : { name: 'track rgba(255,255,255,.15) over --xrpl-file-background', color: over([1, 1, 1], 0.15, parseColor(palette.background)) };
+    rows.push(row(group, 'ui', 'Progress fill against its track', colour('accent'), trackOver, UI));
     rows.push(row(group, 'info', 'Element box against its frame (a picture frame: not a control, exempt)', colour('background'), paper, null));
 
-    // The overlay (caption, progress over a cover, idle cover) is dark in both themes and draws
-    // --xrpl-file-accent when the host sets it, else the element's #4da3ff (the README's dark accent).
-    const dark = theme === 'Dark';
-    const overlayAccent = {
-      name: dark ? '--xrpl-file-accent (site)' : '--xrpl-file-accent (element default)',
-      color: parseColor(dark ? site.accent : palettes.Dark.accent),
+    // The overlay (caption, progress over a cover, idle cover) is dark in both themes. It draws
+    // --xrpl-file-overlay-accent, else --xrpl-file-accent when the host sets it, else the element's #4da3ff.
+    const overlayName = (name) => {
+      for (const candidate of [`overlay-${name}`, name]) if (overrides[candidate]) return { name: `--xrpl-file-${candidate} (site)`, hex: site[overrides[candidate]] };
+      return { name: `--xrpl-file-${name} (element default)`, hex: palettes.Dark[name] };
     };
-    const overlayOnAccent = {
-      name: dark ? '--xrpl-file-on-accent (site)' : '--xrpl-file-on-accent (element default)',
-      color: parseColor(dark ? site['accent-ink'] : palettes.Dark['on-accent']),
-    };
+    const overlayAccentSource = overlayName('accent');
+    const overlayOnAccentSource = overlayName('on-accent');
+    const overlayAccent = { name: overlayAccentSource.name, color: parseColor(overlayAccentSource.hex) };
+    const overlayOnAccent = { name: overlayOnAccentSource.name, color: parseColor(overlayOnAccentSource.hex) };
     const overlayText = { name: '--xrpl-file-overlay-foreground', color: parseColor(OVERLAY_FOREGROUND) };
     const grounds = [
       { name: 'overlay over black', color: parseColor('#000000') },
@@ -209,11 +229,11 @@ export function renderReport(rows) {
     '',
     '- The element is always embedded with the page theme (`chrome.mjs` sets its `theme` attribute with the',
     '  switch), so a light element on a dark paper, or the reverse, does not occur.',
-    "- In the dark theme `base.css` replaces the element's `--xrpl-file-accent` and `--xrpl-file-on-accent`",
-    "  with the site's `--accent` and `--accent-ink`, so the element buttons carry the same signal colour as",
-    '  the page. The light theme does not: the element draws that accent on its own dark overlay as well, and',
-    "  a moss accent there falls below 3:1, so light keeps the element's own palette. The other element colours",
-    '  are the documented palette of the README.',
+    "- `base.css` replaces the element's `--xrpl-file-accent` and `--xrpl-file-on-accent` with the page's",
+    "  `--accent` and `--accent-ink` in both themes (moss in light), so the element's buttons and spinner carry the",
+    '  same signal colour as the page. The other element colours are the documented palette of the README.',
+    "- The element draws its overlay accent (`--xrpl-file-overlay-accent`, the page's `--overlay-accent`) on the",
+    '  overlay below. It is a lime in both themes, because moss on that overlay falls below 3:1.',
     '- Over a cover and on its caption the element draws on a dark overlay (rgba(0,0,0,.72)) in both themes.',
     '  The "overlay over black" and "overlay over a white cover" rows are its two extremes (the second is the',
     '  overlay composited over pure white, the brightest cover possible).',

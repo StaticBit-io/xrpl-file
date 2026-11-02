@@ -173,13 +173,14 @@ xrpl-file {
   max-width: 100%;
 }
 
-/* In the dark theme the element's accent is the site's lime, so the Download control inside the file and
-   the page share one signal colour. The element also draws this accent on its own dark overlay (the
-   progress ring and bar over a cover), so the override is not applied in the light theme, where a moss
-   accent would fall below 3:1 there: light keeps the element's own blue. */
-:root:not([data-theme="light"]) xrpl-file {
+/* The element's frame (the Download control, the spinner) carries the page's signal colour, moss in
+   the light theme. Over a cover and on its caption the element draws on its own dark overlay in both
+   themes, where moss falls below 3:1, so that part takes a lime of its own. */
+xrpl-file {
   --xrpl-file-accent: var(--accent);
   --xrpl-file-on-accent: var(--accent-ink);
+  --xrpl-file-overlay-accent: var(--overlay-accent);
+  --xrpl-file-overlay-on-accent: var(--overlay-on-accent);
 }
 
 @media (prefers-reduced-motion: reduce) {

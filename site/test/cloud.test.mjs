@@ -83,7 +83,7 @@ const strings = {
   failed: (code) => `failed:${code}`,
   fileLinkLabel: 'file page',
   verified: 'verified',
-  note: 'drawn note',
+  note: ({ ledgers, ledgersPerPad, capped }) => `note:${ledgers}:${ledgersPerPad}:${capped}`,
   fileCallout: (chunks) => ({ caption: 'file', value: String(chunks), unit: 'chunks' }),
   linkCallout: (bytes) => ({ caption: 'link', value: String(bytes), unit: 'bytes' }),
 };
@@ -120,7 +120,9 @@ function fakeEnv(overrides = {}) {
 }
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
-const chunk = (index) => ({ index, bytes: Uint8Array.from({ length: 1000 }, (_, i) => (i * 7 + index * 13) % 256) });
+// 16 chunks on each of the 8 ledgers, the last one a few short.
+const ledgerOf = (index) => MANIFEST.firstLedger + Math.min(7, Math.floor(index / 16));
+const chunk = (index, ledger = ledgerOf(index)) => ({ index, ledger, bytes: Uint8Array.from({ length: 1000 }, (_, i) => (i * 7 + index * 13) % 256) });
 
 function page() {
   const parts = {
@@ -175,7 +177,7 @@ test('nothing is claimed while the read has not started to answer: no card, no c
   assert.equal(parts.canvas.attrs['aria-label'], 'label:reading:null');
   assert.equal(parts.caption.attrs['aria-live'], 'polite');
   assert.equal(parts.caption.attrs.role, 'status');
-  assert.equal(parts.note.textContent, 'drawn note');
+  assert.equal(parts.note.textContent, 'note:null:null:false', 'what is true before any answer');
   cloud.destroy();
 });
 
@@ -183,8 +185,8 @@ test('the canvas follows devicePixelRatio and draws the ground before any answer
   const parts = page();
   const clock = fakeEnv();
   mount(parts, clock, readerThat(() => new Promise(() => {})));
-  assert.equal(parts.canvas.width, 800);
-  assert.equal(parts.canvas.height, 600);
+  assert.equal(parts.canvas.width, 600, 'the buffer is capped at 1.5 device pixels per CSS pixel on a ratio-2 screen');
+  assert.equal(parts.canvas.height, 450);
   clock.flushFrames();
   assert.equal(parts.log.putImageData, 1);
 });
@@ -351,5 +353,118 @@ test('a theme switch re-reads the colours', () => {
     assert.ok(parts.log.styleReads > before);
   } finally {
     globalThis.MutationObserver = saved;
+  }
+});
+
+function lastPixels(parts) { return Uint8ClampedArray.from(parts.log.last.data); }
+
+/** Mean x of the pixels that differ from the same scene with no chunk read. */
+async function changedCentre(ledger) {
+  const draw = async (withChunk) => {
+    const parts = page();
+    const clock = fakeEnv();
+    mount(parts, clock, readerThat(async (_link, _progress, hooks) => {
+      hooks.onManifest(MANIFEST);
+      if (withChunk) hooks.onChunk(chunk(0, ledger));
+      return new Promise(() => {});
+    }));
+    await tick();
+    clock.flushFrames();
+    return { data: lastPixels(parts), width: parts.canvas.width };
+  };
+  const base = await draw(false);
+  const drawn = await draw(true);
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < drawn.data.length; i += 4) {
+    if (drawn.data[i] !== base.data[i] || drawn.data[i + 1] !== base.data[i + 1] || drawn.data[i + 2] !== base.data[i + 2]) {
+      sum += (i / 4) % drawn.width;
+      count += 1;
+    }
+  }
+  return { x: sum / count, count };
+}
+
+test('a cube is drawn on the ledger its chunk reports: the same chunk on a later ledger stands further right', async () => {
+  const first = await changedCentre(MANIFEST.firstLedger);
+  const last = await changedCentre(MANIFEST.lastLedger);
+  assert.ok(first.count > 0 && last.count > 0, 'the chunk is drawn');
+  assert.ok(last.x - first.x > 40, `first ledger at x ${first.x.toFixed(0)}, last ledger at x ${last.x.toFixed(0)}`);
+});
+
+test('a chunk with no ledger is not drawn', async () => {
+  const none = await changedCentre(null);
+  assert.equal(none.count, 0);
+});
+
+test('the note is written again when the manifest names the ledger range, and says when pads group ledgers', async () => {
+  const exact = page();
+  mount(exact, fakeEnv(), verifiedRead({ hold: new Promise(() => {}) }));
+  await tick();
+  assert.equal(exact.note.textContent, 'note:8:1:false');
+
+  const wide = page();
+  mount(wide, fakeEnv(), readerThat(async (_link, _progress, hooks) => {
+    hooks.onManifest({ ...MANIFEST, firstLedger: 1000, lastLedger: 1339 });
+    return new Promise(() => {});
+  }));
+  await tick();
+  assert.equal(wide.note.textContent, 'note:340:34:true');
+});
+
+test('the sway ends with the read: after done no frame is requested, and a failure stops it too', async () => {
+  const parts = page();
+  const clock = fakeEnv();
+  const cloud = mount(parts, clock, verifiedRead(), { reducedMotion: false, fast: true });
+  await tick();
+  clock.advance(50);
+  clock.flushFrames();
+  assert.equal(clock.pendingFrames(), 1, 'swaying while the read runs');
+  clock.firePending();
+  await cloud.done;
+  assert.equal(cloud.phase, 'done');
+  clock.advance(5000);
+  clock.flushFrames();
+  clock.advance(100);
+  clock.flushFrames();
+  assert.equal(clock.pendingFrames(), 0, 'the animation has stopped');
+
+  const failing = page();
+  const failClock = fakeEnv();
+  const failed = mount(failing, failClock, readerThat(() => new Promise(() => {})), { reducedMotion: false, fast: false });
+  failClock.advance(100);
+  failClock.flushFrames();
+  failClock.advance(20_000);
+  failClock.pollOnce();
+  await failed.done;
+  failClock.advance(100);
+  failClock.flushFrames();
+  failClock.advance(100);
+  failClock.flushFrames();
+  assert.equal(failClock.pendingFrames(), 0);
+});
+
+test('the visibility observer follows its last entry', async () => {
+  const observers = [];
+  const saved = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe() {}
+    disconnect() {}
+  };
+  try {
+    const parts = page();
+    const clock = fakeEnv();
+    mount(parts, clock, readerThat(() => new Promise(() => {})), { reducedMotion: false, fast: false });
+    clock.advance(100);
+    clock.flushFrames();
+    observers[0].callback([{ isIntersecting: true }, { isIntersecting: false }]);
+    clock.advance(100);
+    clock.flushFrames();
+    assert.equal(clock.pendingFrames(), 0, 'it left the screen: the last entry says so');
+    observers[0].callback([{ isIntersecting: false }, { isIntersecting: true }]);
+    assert.equal(clock.pendingFrames(), 1, 'it came back: drawing resumes');
+  } finally {
+    globalThis.IntersectionObserver = saved;
   }
 });
