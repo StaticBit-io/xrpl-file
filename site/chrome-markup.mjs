@@ -76,6 +76,13 @@ export function languageAlternates(pagePath, langs = ACTIVE_LANGS) {
   ].join('\n');
 }
 
+/** The icon links every page carries, and the root files they name. */
+export const ICON_LINKS = [
+  '<link rel="icon" href="/favicon.ico" sizes="32x32">',
+  '<link rel="icon" href="/favicon.svg" type="image/svg+xml">',
+  '<link rel="apple-touch-icon" href="/apple-touch-icon.png">',
+];
+
 function renderHead({ lang, pagePath, langFromStorage }) {
   const preloads = ['geologica-latin'];
   if (lang === 'ru' && !langFromStorage) preloads.push('geologica-cyrillic');
@@ -85,6 +92,9 @@ function renderHead({ lang, pagePath, langFromStorage }) {
     ...(langFromStorage ? [] : [languageAlternates(pagePath)]),
     `<script>${prePaintScript()}</script>`,
     ...preloads.map((name) => `<link rel="preload" href="/fonts/${name}.woff2" as="font" type="font/woff2" crossorigin>`),
+    // The .ico first for browsers that take the first icon they can read; the svg wins where it is
+    // understood. Both and the touch icon are written by site/tools/favicon.mjs.
+    ...ICON_LINKS,
     '<link rel="stylesheet" href="/css/site.css">',
     '<script type="module" src="/js/chrome.mjs"></script>',
   ].join('\n');
@@ -132,7 +142,7 @@ function themeToggle(page) {
 }
 
 // A 3x3 patch of the cell motif: three cells read, one verified.
-const MARK_CELLS = [
+export const MARK_CELLS = [
   [0, 0, 'is-lit'], [1, 0, 'is-lit'], [2, 0, ''],
   [0, 1, ''], [1, 1, 'is-lit'], [2, 1, 'is-lit'],
   [0, 2, ''], [1, 2, ''], [2, 2, 'is-verified'],

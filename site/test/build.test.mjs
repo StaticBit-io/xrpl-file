@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build, checkElementVersion, elementVersionsIn, ELEMENT_VERSION, MAX_FILE_BYTES } from '../build.mjs';
 import { ELEMENT_PACKAGE, SITE_ORIGIN } from '../src/js/config.mjs';
+import { ICON_LINKS } from '../chrome-markup.mjs';
 import { ACTIVE_LANGS, LANGS, htmlLang } from '../src/js/languages.mjs';
 
 // A pass-through rule for every language folder the build can ship, as the real _redirects has.
@@ -329,5 +330,38 @@ test('every home page names the pinned element version in its prose', async () =
     const html = await readFile(file, 'utf8').catch(() => null);
     if (html === null) continue;
     assert.ok(html.includes(ELEMENT_VERSION), `${lang} home does not mention version ${ELEMENT_VERSION}`);
+  }
+});
+
+async function htmlFiles(dir, prefix = '') {
+  const { readdir } = await import('node:fs/promises');
+  const found = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) found.push(...await htmlFiles(join(dir, entry.name), name));
+    else if (entry.name.endsWith('.html')) found.push(name);
+  }
+  return found;
+}
+
+test('every built page of the real site carries the icon links, and the icons are in the output', async () => {
+  const f = await fixture();
+  try {
+    const siteDir = fileURLToPath(new URL('..', import.meta.url));
+    await build({ siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' });
+    const pages = await htmlFiles(f.outDir);
+    for (const page of ['index.html', 'file.html', '404.html', ...ACTIVE_FOLDERS.map((lang) => `${lang}/index.html`)]) {
+      assert.ok(pages.includes(page), `${page} was not built`);
+    }
+    for (const page of pages.filter((name) => !name.startsWith('element/'))) {
+      const html = await readFile(join(f.outDir, page), 'utf8');
+      for (const link of ICON_LINKS) assert.ok(html.includes(link), `${page} lacks ${link}`);
+    }
+    for (const link of ICON_LINKS) {
+      const href = /href="\/([^"]+)"/.exec(link)[1];
+      assert.ok((await stat(join(f.outDir, href))).size > 0, `${href} is not in the output`);
+    }
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
   }
 });

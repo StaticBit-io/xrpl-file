@@ -11,6 +11,15 @@
   Access-Control-Allow-Origin: *
   Cache-Control: public, max-age=31536000, immutable
 
+# The icons keep their names when they change, so they cannot be immutable; browsers ask for them on
+# every page, so a week in the cache spares those requests and a new icon still arrives within it.
+/favicon.svg
+  Cache-Control: public, max-age=604800
+/favicon.ico
+  Cache-Control: public, max-age=604800
+/apple-touch-icon.png
+  Cache-Control: public, max-age=604800
+
 # Pages are revalidated on every load; a page that changes must not be stuck in a cache.
 /
   Cache-Control: no-cache

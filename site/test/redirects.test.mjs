@@ -71,6 +71,15 @@ test('every language folder, active or not yet, is passed through to its own fil
   }
 });
 
+test('the icons are cached for a week, and no other cache block matches them', async () => {
+  const headers = await readFile(new URL('../src/_headers', import.meta.url), 'utf8');
+  for (const icon of ['/favicon.svg', '/favicon.ico', '/apple-touch-icon.png']) {
+    const block = new RegExp(`^${icon.replaceAll('.', '\\.')}\\r?\\n  Cache-Control: public, max-age=604800$`, 'm');
+    assert.match(headers, block, icon);
+  }
+  assert.ok(!/^\/\*\.(svg|ico|png)$/m.test(headers), 'a wildcard rule would add a second Cache-Control');
+});
+
 test('every language home is revalidated on every load, like the English one', async () => {
   const headers = await readFile(new URL('../src/_headers', import.meta.url), 'utf8');
   const blocks = headers.split(/\r?\n/).filter((line) => /^\//.test(line));

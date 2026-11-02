@@ -115,6 +115,7 @@ every unknown path with `index.html`. The site needs a real `404.html`.
 |---|---|---|
 | `/element/*`: `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` | The element build is versioned in its path and never changes. Embedding sites fetch `mp4box.min.js` from it cross-origin. | `location /element/ { add_header Access-Control-Allow-Origin "*" always; add_header Cache-Control "public, max-age=31536000, immutable" always; }` |
 | `/`, `/ru/`, `/de/`, `/es/`, `/pt/`, `/zh/`, `/*.html`: `Cache-Control: no-cache` | Pages are revalidated on every load. | `location = / { add_header Cache-Control "no-cache" always; }` and the same for `= /ru/` and the other language homes, and `~ \.html$` |
+| `/favicon.svg`, `/favicon.ico`, `/apple-touch-icon.png`: `Cache-Control: public, max-age=604800` | The icons keep their names when they change, so they cannot be immutable; a week spares the request every page makes for them. | `location ~ ^/(favicon\.(svg\|ico)\|apple-touch-icon\.png)$ { add_header Cache-Control "public, max-age=604800" always; }` |
 
 The `/*` block sets `X-Content-Type-Options: nosniff` for every path: the site's files are served with
 their real types, so a browser has no reason to guess. nginx: `add_header X-Content-Type-Options "nosniff" always;`
@@ -174,6 +175,15 @@ Contrast is computed, not eyeballed: `node site/tools/contrast.mjs` rewrites
 `docs/superpowers/reports/2026-11-02-site/contrast.md` from the tokens and the element palettes in the
 repository README, and `test/contrast.test.mjs` fails when a required pair misses WCAG AA or the report
 is out of date.
+
+The icons are the header's mark on the desktop app's dark tile. `node site/tools/favicon.mjs` writes
+`src/favicon.svg`, `src/favicon.ico` (16, 32 and 48 px) and `src/apple-touch-icon.png` (180 px) from
+`MARK_CELLS` in `chrome-markup.mjs`, with its own rasteriser and no image library;
+`test/favicon.test.mjs` fails when a committed file differs from what it writes. The tile is dark in both
+colour schemes, like the app's icon; a media query in the svg could not reach the .ico or the .png. In
+the favicon an empty cell is a filled dark square rather than an outline: at 16 px the outline is under a
+pixel wide, its hole closes, and the empty cells look like the lit ones. The 180 px touch icon keeps the
+outlines. `renderHead` puts the three links (`ICON_LINKS`) on every page.
 
 ## Languages
 
