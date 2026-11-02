@@ -276,7 +276,8 @@
   - **`price.mjs`:** `formatXrp(drops: number, lang) -> string` (drops / 1,000,000, up to 6 decimals trimmed, locale separators); `priceRows(json, lang) -> Array<{ size, fee, held, returned }>`.
   - **Sections in the spec's order:** hero, problem, how it works, price, permanent and public, for developers, footer. The content is listed per section in the spec. Copy is written with the skill `writing-site-copy`, English first, then Russian with the same facts.
   - **"Check a link" field:** submitting it navigates to `pathFromLink(value)`. An invalid value shows an inline error and does not navigate.
-  - **"Download the publisher" button:** reads `site/src/js/config.mjs` `PUBLISHER_URL` (initially `null`). When `null`, the button is disabled with "soon" ("скоро").
+  - **`site/src/js/config.mjs`:** exports `HERO_LINK` and `HERO_ASPECT` (the Global Constraints' hero constant and `1`) and `PUBLISHER_URL` (initially `null`). The hero calls `mountMosaic(canvas, { link: HERO_LINK, aspect: HERO_ASPECT, … })`.
+  - **"Download the publisher" button:** disabled with "soon" ("скоро") while `PUBLISHER_URL` is `null`.
   - **"For developers":** the snippet uses the `integrity` from `element/1.1.0/integrity.json`, inserted at build time by `site/build.mjs` (extend it), with a Copy button. It also links to the spec, the repository and the README.
   - **"How it works" drawing:** inline SVG in the cell motif, coloured only by tokens.
 
