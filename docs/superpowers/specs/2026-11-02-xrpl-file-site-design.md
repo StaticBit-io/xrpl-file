@@ -244,3 +244,37 @@ disabled, marked "soon". Switching it on is a one-line config change (the releas
 - Tests: unit tests for link ↔ path mapping and canonicalisation, the mosaic's state machine and
   the theme/language persistence; a browser check of both pages in both themes and both languages
   at phone and desktop widths.
+
+## Amendment 2026-11-02: Vantage, dark by default, six languages, the StaticBit logo
+
+The owner compared three sketches of this site in hallmark catalogue themes (`run/sketches/vantage`,
+`furrow`, `cobalt`, git-ignored) against the custom build and chose **Vantage**. This amendment
+overrides the sections it names; everything else stands.
+
+- **Look (overrides "Look").** hallmark's **Vantage** theme replaces custom mode: blue-black ground,
+  pale steel ink, Geologica, hairline frames with corner ticks, one lime signal. The sketch in
+  `run/sketches/vantage/` (`site.css`, `notes.md`) is the reference for tokens and treatment.
+- **Default theme is dark (overrides "Light theme is the default").** First visit is dark regardless
+  of the OS setting; the switch offers light. The light variant follows the sketch's notes
+  ("survey sheet in daylight": cool pale grey ground, never white; the cloud inverts; lime deepens
+  to moss for contrast). WCAG 2.2 AA in both.
+- **Hero (overrides "Signature: the chunk mosaic").** Vantage's own signature: a point cloud seen at
+  an oblique angle — ledgers as pads of ground, the hero file's chunks as towers of point cubes (one
+  cube per 1000-byte chunk, its inside scattered by that chunk's real bytes), the manifest as one cube
+  a few ledgers later, a sweep, two callouts ("N chunks"; "84 bytes, its hash is the link").
+  *Builder's call:* it stays honest the way the mosaic was — the cubes are driven by the real read
+  through the reader hooks (a cube lights when its chunk actually arrives; a block's cubes turn lime
+  when the block is verified; the sweep marks verification), so the mosaic's state machine
+  (`mosaic-state.mjs`) is reused under a new renderer. When everything is verified, the file itself
+  appears beside the cloud (a small `<xrpl-file>` card with "✓ verified") linking to its file page.
+  Failure and reduced-motion behaviour as before.
+- **Hero file (overrides the fixture constant).** The StaticBit logo, published to testnet as a new
+  fixture by the owner's file; `HERO_LINK` and `HERO_ASPECT` change to it. Until it is published the
+  current fixture stays.
+- **Languages (overrides "Languages").** Six: English `/`, Russian `/ru/`, German `/de/`, Spanish
+  `/es/`, Portuguese `/pt/`, Chinese (Simplified) `/zh/`, chosen from a dropdown in the header listing
+  each language in its own name (English, Русский, Deutsch, Español, Português, 中文). First visit:
+  the browser's language if it is one of the six, else English; the choice is remembered. Every page
+  and every string exists in all six. English and Russian are written by hand; German, Spanish,
+  Portuguese and Chinese are translated from English and marked in `site/README.md` as awaiting a
+  native speaker's review. `<html lang>` and `hreflang` alternates on every page.
