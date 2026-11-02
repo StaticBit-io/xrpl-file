@@ -252,6 +252,9 @@ progress { accent-color: var(--mint); }
 .xf-rail-item svg, .xf-tab svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .xf-rail-item:hover, .xf-tab:hover { color: var(--text); background: var(--chips); }
 .xf-rail-item[aria-current="page"], .xf-tab[aria-current="page"] { color: var(--mint); background: rgba(100, 207, 149, 0.10); }
+/* Held shut while an account close is in flight (CloseAccountModel.IsClosing). */
+.xf-rail-item:disabled, .xf-tab:disabled, .xf-icon-button:disabled { opacity: 0.45; cursor: not-allowed; }
+.xf-rail-item:disabled:hover, .xf-tab:disabled:hover, .xf-icon-button:disabled:hover { color: var(--text-secondary); background: transparent; }
 
 .xf-content { min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; overflow-wrap: break-word; outline: none; }
 

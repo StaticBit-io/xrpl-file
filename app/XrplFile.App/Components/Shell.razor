@@ -2,6 +2,7 @@
 @using XrplFile.App
 @inject UnlockModel Model
 @inject ShellModel Tabs
+@inject CloseAccountModel Closing
 @inject IJSRuntime JS
 
 @* One window, no router (design section 6). What renders is entirely the model's own Stage --
@@ -48,7 +49,7 @@ else if (_ready)
             <div class="xf-shell">
                 <header class="xf-topbar">
                     <span class="xf-rail-mark" aria-hidden="true">@Mark</span>
-                    <button type="button" class="xf-icon-button" aria-label="Lock the vault" @onclick="LockAsync">@LockIcon</button>
+                    <button type="button" class="xf-icon-button" aria-label="Lock the vault" disabled="@Closing.IsClosing" @onclick="LockAsync">@LockIcon</button>
                 </header>
 
                 <nav class="xf-rail" aria-label="Main">
@@ -56,12 +57,12 @@ else if (_ready)
                     @foreach (AppTab tab in RailTabs)
                     {
                         <button type="button" class="xf-rail-item" aria-current="@(Tabs.Tab == tab ? "page" : null)"
-                                @onclick="() => ShowTab(tab)">
+                                disabled="@Closing.IsClosing" @onclick="() => ShowTab(tab)">
                             @Icon(tab)<span>@tab</span>
                         </button>
                     }
                     <span class="xf-rail-spacer"></span>
-                    <button type="button" class="xf-rail-item" aria-label="Lock the vault" @onclick="LockAsync">
+                    <button type="button" class="xf-rail-item" aria-label="Lock the vault" disabled="@Closing.IsClosing" @onclick="LockAsync">
                         @LockIcon<span aria-hidden="true">Lock</span>
                     </button>
                 </nav>
@@ -108,11 +109,11 @@ else if (_ready)
                     @foreach (AppTab tab in TabbarTabs)
                     {
                         <button type="button" class="xf-tab" aria-current="@(Tabs.Tab == tab ? "page" : null)"
-                                @onclick="() => ShowTab(tab)">
+                                disabled="@Closing.IsClosing" @onclick="() => ShowTab(tab)">
                             @Icon(tab)<span>@tab</span>
                         </button>
                     }
-                    <button type="button" class="xf-tab" @ref="_moreButton"
+                    <button type="button" class="xf-tab" @ref="_moreButton" disabled="@Closing.IsClosing"
                             aria-expanded="@(Tabs.MoreOpen ? "true" : "false")" aria-controls="xf-more"
                             aria-current="@(Tabs.IsMoreCurrent ? "page" : null)" @onclick="ToggleMore">
                         @MoreIcon<span>More</span>
@@ -270,7 +271,26 @@ else
         }
     }
 
-    protected override void OnInitialized() => Tabs.Changed += OnTabChanged;
+    protected override void OnInitialized()
+    {
+        Tabs.Changed += OnTabChanged;
+        Closing.ClosingChanged += OnClosingChanged;
+    }
+
+    /// <summary>
+    /// Redraws the rail and tab bar when an account close starts or ends. They are disabled for as
+    /// long as it runs: leaving the Close screen cancels the token its AccountDelete is awaiting, and
+    /// that may be after the signed deletion is already on the wire. The Close screen disables its own
+    /// Back button for the same reason; this is the rest of the ways out. Same _disposed discipline as
+    /// OnTabChanged, because the close finishes on whatever thread the node answered on.
+    /// </summary>
+    private void OnClosingChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
+    });
 
     /// <summary>
     /// Redraws when something outside this component changes the tab. Through InvokeAsync and
@@ -362,6 +382,7 @@ else
         // Set before the timer is disposed, for the reason RevealSeed.razor's own Dispose explains.
         _disposed = true;
         Tabs.Changed -= OnTabChanged;
+        Closing.ClosingChanged -= OnClosingChanged;
         _self?.Dispose();
         _lockPollTimer?.Dispose();
         _lifetime.End();

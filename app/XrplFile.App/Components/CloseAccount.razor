@@ -34,7 +34,10 @@
    Every button that can start a network round trip is disabled while _busy, Back to accounts
    included: this is the one screen in the application where letting a person navigate away mid-call
    is not merely inconvenient -- CloseAsync may already have put a signed AccountDelete on the wire,
-   and disposing this component cancels the token it is awaiting on. *@
+   and disposing this component cancels the token it is awaiting on. The shell's rail, tab bar and
+   Lock button are held disabled for the same reason (Model.IsClosing), so Back is not the only way
+   out that is shut. Should the screen go anyway (the vault auto-locking, the window closing), the
+   outcome stays on this account's own state in the model, and selecting the account again shows it. *@
 
 @if (Model.Message is not null)
 {

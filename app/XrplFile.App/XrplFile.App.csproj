@@ -75,6 +75,17 @@
         <ProjectReference Include="..\XrplFile.App.Core\XrplFile.App.Core.csproj" />
     </ItemGroup>
 
+    <!-- The executable's own icon comes from the same appicon.svg as the window icon, and nobody
+         assigns it here: for an unpackaged Windows head Resizetizer's ResizetizeImages target sets
+         ApplicationIcon to the appicon.ico it generates, and the SDK hands that to the compiler (and
+         to the apphost) as the Win32 icon. That works only while the target runs before CoreCompile.
+         Should an SDK change reorder it, the exe would silently fall back to Explorer's generic
+         placeholder, which looks exactly like a missing feature rather than a broken build, so the
+         build stops instead. -->
+    <Target Name="_RequireExecutableIcon" BeforeTargets="CoreCompile" Condition="'$(ApplicationIcon)' == ''">
+        <Error Text="ApplicationIcon is empty before CoreCompile, so XrplFile.App.exe would carry no icon. Resizetizer is expected to set it from Resources\AppIcon\appicon.svg; see the comment in XrplFile.App.csproj." />
+    </Target>
+
     <Import Project="..\DesktopGarbageCollection.props" />
 
 </Project>
