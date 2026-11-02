@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from '../build.mjs';
 import { ENDPOINTS } from '../src/ledger.mjs';
 import { MANIFEST_FORMAT } from '../src/manifest.mjs';
@@ -89,11 +89,11 @@ test('the bundle is plain ASCII, so the page encoding cannot change it', async (
   assert.ok(bytes.includes(Buffer.from('verified \\u00b7 ')), 'the dot survives as an escape');
 });
 
-test('the output directory holds the four files and nothing else', async () => {
+test('the output directory holds the five files and nothing else', async () => {
   const out = await tempDir();
   await build({ webDir, outDir: out, version: VERSION });
   assert.deepEqual((await readdir(out)).sort(),
-    ['integrity.json', 'mp4box-LICENSE.txt', 'mp4box.min.js', 'xrpl-file-element.js']);
+    ['integrity.json', 'mp4box-LICENSE.txt', 'mp4box.min.js', 'xrpl-file-element.js', 'xrpl-file-reader.mjs']);
   assert.deepEqual(await readFile(join(out, 'mp4box-LICENSE.txt')), await readFile(join(webDir, 'vendor', 'mp4box-LICENSE.txt')));
 });
 
@@ -185,12 +185,12 @@ test('the wrapper mutes the library log it owns', async () => {
   assert.deepEqual(await consoleOutputOf(join(out, 'mp4box.min.js')), []);
 });
 
-test("integrity.json holds the SHA-384 of both files, and the element carries mp4box's", async () => {
+test("integrity.json holds the SHA-384 of the three scripts, and the element carries mp4box's", async () => {
   const out = await tempDir();
   const result = await build({ webDir, outDir: out, version: VERSION });
   const integrity = JSON.parse(await readFile(join(out, 'integrity.json'), 'utf8'));
-  assert.deepEqual(Object.keys(integrity), ['xrpl-file-element.js', 'mp4box.min.js']);
-  for (const name of ['xrpl-file-element.js', 'mp4box.min.js']) {
+  assert.deepEqual(Object.keys(integrity), ['xrpl-file-element.js', 'mp4box.min.js', 'xrpl-file-reader.mjs']);
+  for (const name of Object.keys(integrity)) {
     assert.equal(integrity[name], `sha384-${createHash('sha384').update(await readFile(join(out, name))).digest('base64')}`);
   }
   assert.deepEqual(result.integrity, integrity);
@@ -240,7 +240,7 @@ test('two builds are byte for byte the same', async () => {
   const b = await tempDir();
   await build({ webDir, outDir: a, version: VERSION });
   await build({ webDir, outDir: b, version: VERSION });
-  for (const name of ['xrpl-file-element.js', 'integrity.json']) {
+  for (const name of ['xrpl-file-element.js', 'xrpl-file-reader.mjs', 'integrity.json']) {
     assert.deepEqual(await readFile(join(a, name)), await readFile(join(b, name)));
   }
 });
@@ -332,4 +332,40 @@ test('the bundle names no host but the built-in nodes', async () => {
   // MANIFEST_FORMAT is text a writer puts into a manifest for people to read; nothing fetches it.
   const allowed = new Set([...Object.values(ENDPOINTS).flat(), 'http://www.w3.org/2000/svg', MANIFEST_FORMAT]);
   assert.deepEqual(urls.filter((url) => !allowed.has(url)), []);
+});
+
+test('build emits xrpl-file-reader.mjs with its integrity and the version banner', async () => {
+  const out = await tempDir();
+  const { integrity } = await build({ webDir, outDir: out, version: '1.1.0' });
+  const file = join(out, 'xrpl-file-reader.mjs');
+  const bytes = await readFile(file);
+  const code = bytes.toString('utf8');
+
+  assert.ok(code.startsWith('/*! xrpl-file reader 1.1.0 | MIT */\n'));
+  assert.equal(integrity['xrpl-file-reader.mjs'], `sha384-${createHash('sha384').update(bytes).digest('base64')}`);
+  assert.deepEqual(JSON.parse(await readFile(join(out, 'integrity.json'), 'utf8')), integrity);
+  assert.ok(bytes.every((byte) => byte < 0x80), 'plain ASCII, like the element');
+  assert.doesNotMatch(code, /^\s*import\b/m, 'self-contained: nothing is imported');
+
+  const module = await import(pathToFileURL(file).href);
+  assert.deepEqual(Object.keys(module).sort(),
+    ['ENDPOINTS', 'LedgerClient', 'XrplFileError', 'XrplFileReader', 'formatLink', 'parseLink']);
+  assert.deepEqual(module.ENDPOINTS, ENDPOINTS);
+  assert.equal(module.formatLink(module.parseLink('xrpl-file://TestNet/' + 'ab'.repeat(32))), 'xrpl-file://testnet/' + 'AB'.repeat(32));
+  assert.ok(new module.XrplFileError('NotLoaded', 'x') instanceof Error);
+  assert.equal(typeof module.XrplFileReader.prototype.read, 'function');
+  assert.equal(typeof module.LedgerClient.prototype.close, 'function');
+
+  const urls = code.match(/\b(?:https?|wss?):\/\/[^\s'"`)]+/g) ?? [];
+  const allowed = new Set([...Object.values(ENDPOINTS).flat(), 'http://www.w3.org/2000/svg', MANIFEST_FORMAT]);
+  assert.deepEqual(urls.filter((url) => !allowed.has(url)), [], 'only the built-in nodes are named');
+});
+
+test('the reader bundle is the shipped reader: both bundles carry the same module body', async () => {
+  const out = await tempDir();
+  await build({ webDir, outDir: out, version: VERSION });
+  const reader = await readFile(join(out, 'xrpl-file-reader.mjs'), 'utf8');
+  const element = await readFile(join(out, 'xrpl-file-element.js'), 'utf8');
+  const body = (code) => /__define\('src\/reader\.mjs'[\s\S]*?\n\}\);\n/.exec(code)[0];
+  assert.equal(body(reader), body(element));
 });

@@ -62,7 +62,7 @@ The `<xrpl-file>` element shows a file from the ledger on any web page: an image
 verified download for anything else. Build it, put the files of one version on a host, and add two lines:
 
 ```html
-<script src="https://<host>/1.0.0/xrpl-file-element.js" integrity="sha384-…" crossorigin="anonymous" defer></script>
+<script src="https://<host>/1.1.0/xrpl-file-element.js" integrity="sha384-/35U/a5CiIK17/1CG2Ts2eUC87fWh7x4J8QWIhM8P2eDrdvJR0mwbXI1s8bfulGk" crossorigin="anonymous" defer></script>
 <xrpl-file src="xrpl-file://testnet/…"></xrpl-file>
 ```
 
@@ -71,10 +71,11 @@ cd web && npm run build
 ```
 
 The build writes `web/dist/<version>/`: `xrpl-file-element.js` (one classic script that defines the
-element), `mp4box.min.js` (loaded beside it only when a plain MP4 is played), `mp4box-LICENSE.txt`, and
-`integrity.json` with the SHA-384 value of each script. The `integrity` attribute takes the value for
-`xrpl-file-element.js` from the `integrity.json` of the same version. The version is in the path, so a
-page that embeds `1.0.0` never changes under itself. The host serves both scripts with
+element), `mp4box.min.js` (loaded beside it only when a plain MP4 is played), `mp4box-LICENSE.txt`,
+`xrpl-file-reader.mjs` (the reader the element uses, as one ES module, for a page that reads files
+itself) and `integrity.json` with the SHA-384 value of each script. The `integrity` attribute takes the
+value for `xrpl-file-element.js` from the `integrity.json` of the same version. The version is in the
+path, so a page that embeds `1.1.0` never changes under itself. The host serves both scripts with
 `Access-Control-Allow-Origin`: Subresource Integrity on a script from another origin fails without it.
 
 | Attribute | Values | Meaning |
@@ -85,6 +86,7 @@ page that embeds `1.0.0` never changes under itself. The host serves both script
 | `loader` | `true` (default), `false` | `false` keeps the reserved space empty until the content is ready, for sites that draw their own placeholder |
 | `node` | a `wss://` URL | read from this node instead of the built-in ones; `ws://` is accepted only for `localhost` and `127.0.0.1`. A numeric network ID has no built-in node and needs this attribute |
 | `theme` | `dark` (default), `light`, `auto` | the colour palette; `auto` follows the visitor's `prefers-color-scheme`, any other value is `dark` |
+| `caption` | `off` | `off` removes the caption that appears on hover, with its copy button, for a page that shows the name, the link and a download control of its own; any other value, or none, keeps it |
 
 The inside is styled with the `theme` attribute, with the CSS custom properties below, and with
 `::part(loader)`, `::part(caption)` and `::part(message)`. A property the site sets wins over the theme's
@@ -127,8 +129,22 @@ the page, so they stay dark in both themes. These are the same in both themes:
 
 Over a cover and on the caption the accent keeps its dark-theme default, `#4da3ff` with `#06121f` on it,
 unless the site sets one. The element dispatches `xrpl-file-progress` (`detail`:
-`{ bytesDone, bytesTotal, blocksVerified, blocksTotal }`), `load` once the content is shown, and `error`
-(`detail`: `{ name, message }`).
+`{ bytesDone, bytesTotal, blocksVerified, blocksTotal }`), `load` once the content is shown (`detail`:
+`{ name, type, size, network, link }`) and `error` (`detail`: `{ name, message }`).
+
+The `load` detail describes the file from the same read, so a page needs no second one: `name` is the
+file name the element shows and saves under, or `null` when the manifest has none; `type` is the media
+type without parameters; `size` is in bytes; `network` and `link` are canonical (`link` is
+`xrpl-file://<network>/<HASH>`). It is present on every `load`, including the download view of a type the
+element does not display.
+
+`element.save()` runs the same verified download as the element's own Download button and returns a
+promise of how it went: `'saved'` (written through the browser's save dialog), `'started'` (handed to
+the browser as a download; a page cannot see whether the browser kept it) or `'cancelled'` (the visitor
+closed the dialog). It rejects with an `XrplFileError` whose `code` is `NotLoaded` before the file's
+description is known, with the element's own error while the element shows one, and with the reason when
+the save fails; a block that does not verify is never written. Call it after `load`, from a user gesture:
+the browser refuses the save dialog otherwise.
 
 The layout follows the element's own width, whatever the page's. From 240 px it is the full layout; from
 120 to 239 px a compact one (one line per text, a "Save" button, a caption of "✓ testnet" with a copy icon);
@@ -140,8 +156,20 @@ tighten, so that at least one line of the text shows.
 
 ```js
 const element = document.querySelector('xrpl-file');
+const button = document.querySelector('#download');
 element.addEventListener('xrpl-file-progress', (event) => console.log(event.detail.blocksVerified, event.detail.blocksTotal));
 element.addEventListener('error', (event) => console.warn(event.detail.name, event.detail.message));
+element.addEventListener('load', (event) => {
+  const { name, size, link } = event.detail;
+  button.disabled = false;
+  button.onclick = async () => {
+    try {
+      console.log(await element.save(), name, size, link);
+    } catch (error) {
+      console.warn(error.code ?? error.name, error.message);
+    }
+  };
+});
 ```
 
 The browser hashes the file only in a secure context, so the page must be served over HTTPS (or from

@@ -29,6 +29,11 @@ export function parseTheme(value) {
   return THEMES.has(text) ? text : 'dark';
 }
 
+/** The `caption` attribute: `off` hides the hover caption; any other value, or none, keeps it. */
+export function captionHidden(value) {
+  return typeof value === 'string' && value.trim().toLowerCase() === 'off';
+}
+
 export function parseLoader(value) {
   return !(typeof value === 'string' && value.trim().toLowerCase() === 'false');
 }

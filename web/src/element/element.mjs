@@ -4,17 +4,17 @@
 // DOM glue and is checked in a browser.
 import { TEMPLATE, STYLES } from './template.mjs';
 import { hostStyle, linkReadiness, captionParts, styleSupport } from './host.mjs';
-import { prepare, loadWhole, progressDetail } from './load.mjs';
+import { prepare, loadWhole, progressDetail, loadDetail } from './load.mjs';
 import { pool, PRIORITY } from './page.mjs';
 import { saveFile } from './download.mjs';
 import { copyText, execCopyIn } from './clipboard.mjs';
-import { parseLength, parseLoading, parseLoader, parseTheme, linkText, endpointsFor } from './attributes.mjs';
+import { parseLength, parseLoading, parseLoader, parseTheme, captionHidden, linkText, endpointsFor } from './attributes.mjs';
 import { viewForType, magicAgrees, normalizeType } from './view.mjs';
 import { textPreview, TEXT_LIMIT } from './text.mjs';
 import { VideoView } from './video.mjs';
 import { formatBytes, downloadName, bytesOf, progressLines, typeBadge, downloadLabel } from './format.mjs';
 import { elementError, messageFor, shortTitleFor, saveMessageFor, detailFor, canVerify, INSECURE, NO_LINK } from './messages.mjs';
-import { parseLink, formatLink } from '../link.mjs';
+import { parseLink, formatLink, XrplFileError } from '../link.mjs';
 
 const DEFAULT_RATIO = '16 / 9';
 // Ratio stages, each applied at most once and only ever forward: the reserved box, the cover, the content.
@@ -39,6 +39,7 @@ const NOTES = {
 };
 
 const isAbort = (error) => error?.name === 'AbortError';
+const abortError = () => new DOMException('The save was cancelled.', 'AbortError');
 
 function isLink(text) {
   try {
@@ -61,7 +62,7 @@ function sharedStyles() {
 }
 
 export class XrplFileElement extends HTMLElement {
-  static observedAttributes = ['src', 'width', 'height', 'loading', 'loader', 'node', 'theme'];
+  static observedAttributes = ['src', 'width', 'height', 'loading', 'loader', 'node', 'theme', 'caption'];
 
   #parts = {};
   #connected = false;
@@ -85,7 +86,9 @@ export class XrplFileElement extends HTMLElement {
 
   #phase = 'idle';
   #verified = false;
-  #saving = false;
+  #saving = null;
+  // The error the element is showing, so that save() can say why there is nothing to save.
+  #failure = null;
   #loaderOn = true;
   #ratio = DEFAULT_RATIO;
   #ratioStage = 0;
@@ -130,6 +133,9 @@ export class XrplFileElement extends HTMLElement {
       case 'theme':
         this.#applyTheme();
         break;
+      case 'caption':
+        this.#renderCaption();
+        break;
       case 'loader':
         this.#loaderOn = parseLoader(value);
         this.#showPhase(this.#phase);
@@ -151,8 +157,8 @@ export class XrplFileElement extends HTMLElement {
     img.addEventListener('load', () => this.#setRatio(RATIO_CONTENT, img.naturalWidth, img.naturalHeight));
     open.addEventListener('click', () => this.#openContent());
     copy.addEventListener('click', () => this.#copyLink());
-    dlButton.addEventListener('click', () => this.#save());
-    textDownload.addEventListener('click', () => this.#save());
+    dlButton.addEventListener('click', () => this.#saveFromButton());
+    textDownload.addEventListener('click', () => this.#saveFromButton());
     frame.addEventListener('pointerup', (event) => {
       // A tap toggles the caption where there is no hover; a tap on a button is that button's own.
       if (event.pointerType !== 'touch' || event.target.closest?.('button')) return;
@@ -237,7 +243,8 @@ export class XrplFileElement extends HTMLElement {
 
     this.#phase = 'idle';
     this.#verified = false;
-    this.#saving = false;
+    this.#saving = null;
+    this.#failure = null;
     this.#ratio = DEFAULT_RATIO;
     this.#ratioStage = 0;
     this.#clearViews();
@@ -434,7 +441,7 @@ export class XrplFileElement extends HTMLElement {
     }
     this.#parts.img.alt = downloadName(manifest);
     this.#showPhase('image');
-    this.#emit('load');
+    this.#emitLoad(record);
   }
 
   async #loadVideo(record, signal) {
@@ -452,7 +459,7 @@ export class XrplFileElement extends HTMLElement {
         // The first frame came out of verified blocks only.
         this.#verified = true;
         this.#renderCaption();
-        this.#emit('load');
+        this.#emitLoad(record);
       },
     });
     this.#video = view;
@@ -540,7 +547,7 @@ export class XrplFileElement extends HTMLElement {
       p.textNote.title = p.textNote.textContent;
     }
     this.#showPhase('text');
-    this.#emit('load');
+    this.#emitLoad(record);
   }
 
   // Views
@@ -612,7 +619,7 @@ export class XrplFileElement extends HTMLElement {
     p.dlNote.hidden = note === null;
     p.dlNote.textContent = note ?? '';
     this.#showPhase('download');
-    this.#emit('load');
+    this.#emitLoad(record);
   }
 
   #fail(error) {
@@ -630,6 +637,7 @@ export class XrplFileElement extends HTMLElement {
     this.#lease?.release();
     this.#handle = null;
     this.#lease = null;
+    this.#failure = error;
     this.#showPhase('error');
     this.#emit('error', detailFor(error));
   }
@@ -668,7 +676,8 @@ export class XrplFileElement extends HTMLElement {
 
   #renderCaption() {
     const p = this.#parts;
-    if (this.#link === null) { p.caption.hidden = true; return; }
+    // caption="off" is for a page that draws its own copy and download controls; hidden also takes the caption's copy button out of the tab order.
+    if (this.#link === null || captionHidden(this.getAttribute('caption'))) { p.caption.hidden = true; return; }
 
     const link = formatLink(this.#link);
     const { manifest } = this.#record ?? {};
@@ -718,11 +727,44 @@ export class XrplFileElement extends HTMLElement {
 
   // Download
 
-  async #save() {
-    if (this.#saving || this.#handle === null || this.#record === null) return;
+  /** The element's own buttons: the outcome is on the status line, so there is nothing to report here. */
+  #saveFromButton() {
+    if (this.#handle === null || this.#record === null) return;
+    this.#download().catch(() => {});
+  }
+
+  /**
+   * Saves the verified file, the same way the element's own Download button does, and resolves with
+   * how it went: `saved` (written through the save dialog), `started` (handed to the browser as a
+   * download, whose outcome a page cannot see) or `cancelled` (the visitor closed the dialog).
+   * Rejects with the element's error while it shows one, with `NotLoaded` before the file's
+   * description is known, and with the reason when the save itself fails: a block that does not
+   * verify is never written.
+   * @returns {Promise<'saved'|'started'|'cancelled'>}
+   */
+  save() {
+    if (this.#failure !== null) {
+      const failure = this.#failure instanceof XrplFileError ? this.#failure : new XrplFileError('Unknown', messageFor(this.#failure), { cause: this.#failure });
+      return Promise.reject(failure);
+    }
+    if (this.#handle === null || this.#record === null) {
+      return Promise.reject(new XrplFileError('NotLoaded', 'The file has not been read yet: wait for the load event.'));
+    }
+    return this.#download();
+  }
+
+  /** One save at a time: a second call while one runs gets that one's result. */
+  #download() {
+    if (this.#saving !== null) return this.#saving;
+    // A reset clears #saving while the old run is still ending; only the run that is current clears it.
+    const run = this.#runSave().finally(() => { if (this.#saving === run) this.#saving = null; });
+    this.#saving = run;
+    return run;
+  }
+
+  async #runSave() {
     const signal = this.#controller.signal;
     const p = this.#parts;
-    this.#saving = true;
     for (const button of [p.dlButton, p.textDownload]) button.disabled = true;
     try {
       const result = await saveFile({
@@ -731,19 +773,20 @@ export class XrplFileElement extends HTMLElement {
         signal,
         onProgress: (detail) => this.#showSaving(`Saving… ${bytesOf(detail.bytesDone, detail.bytesTotal)}`),
       });
-      if (signal.aborted) return;
+      if (signal.aborted) throw abortError();
       this.#showSaving(SAVE_STATUS[result] ?? '');
       if (result !== 'cancelled') {
         // Every block verified before it was written or put in the Blob.
         this.#verified = true;
         this.#renderCaption();
       }
+      return result;
     } catch (error) {
       // A failed save is the save's problem: the verified file stays on screen and the reason goes
       // to the status line. No `error` event either; that one means the file could not be shown.
       if (!signal.aborted && !isAbort(error)) this.#showSaving(saveMessageFor(error));
+      throw error;
     } finally {
-      this.#saving = false;
       for (const button of [p.dlButton, p.textDownload]) button.disabled = false;
     }
   }
@@ -755,6 +798,10 @@ export class XrplFileElement extends HTMLElement {
   }
 
   // Events
+
+  #emitLoad(record) {
+    this.#emit('load', loadDetail(record.manifest, this.#link));
+  }
 
   #emit(type, detail) {
     this.dispatchEvent(detail === undefined ? new Event(type) : new CustomEvent(type, { detail }));

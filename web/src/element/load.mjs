@@ -1,9 +1,28 @@
 // What the element reads from a file, apart from the browser: the manifest with its cover, and a
 // whole file (or the first blocks of one) read in order, every block verified before it is kept.
+import { formatLink } from '../link.mjs';
+import { downloadName } from './format.mjs';
+import { normalizeType } from './view.mjs';
 
 /** The `detail` of `xrpl-file-progress`: a fresh plain object with exactly these four numbers. */
 export function progressDetail({ bytesDone, bytesTotal, blocksVerified, blocksTotal }) {
   return { bytesDone, bytesTotal, blocksVerified, blocksTotal };
+}
+
+/**
+ * The `detail` of `load`: what a page needs to describe the file without a second read. The name is
+ * the one the element shows and saves under (the manifest's is attacker-chosen), or null when the
+ * manifest has none; the link is canonical, so it can be compared and used as a path.
+ */
+export function loadDetail(manifest, link) {
+  const named = typeof manifest.name === 'string' && manifest.name !== '';
+  return {
+    name: named ? downloadName(manifest) : null,
+    type: normalizeType(manifest.type),
+    size: manifest.size,
+    network: link.network,
+    link: formatLink(link),
+  };
 }
 
 /**
