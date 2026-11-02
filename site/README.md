@@ -189,7 +189,7 @@ The site is built for six languages. A language is a data change: its words, its
 | `zh` | `/zh/` | `zh-Hans` | `zh-Hans-CN` | yes, translated from English, awaiting a native speaker's review |
 
 Translated from English, awaiting a native speaker's review: de, es, pt, zh. They stay marked here until a
-native speaker has read them. English and Russian are written by hand. The locales are chosen for
+native speaker has read them. The same holds for the element's own strings in `web/src/element/strings.mjs`. English and Russian are written by hand. The locales are chosen for
 readers, not for a region: English is `en-GB` for its "2 November 2026" date, Portuguese is Brazilian, Spanish uses a decimal comma
 (`es-ES`), and Chinese is Simplified for mainland China, which is why its tag carries the script.
 

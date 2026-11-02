@@ -27,6 +27,7 @@ the other fixtures come from `links.before-logo.json`). Download used a stubbed
 | 13 | Chinese price fallback | `zh/index.html` said 暂时 ("temporarily") where English says "right now". | fixed | 目前; a test pins the qualifier of the price fallback in all six languages (c76181e) | |
 | 14 | Element contrast over pictures | The round play button over a cover and the caption Copy border over a white picture, both non-text UI needing 3:1. | fixed | The play fill alone measured 1.15–1.7:1 on a dark cover: a 2 px ring in the overlay foreground now keeps one edge at 3.47:1 or better on any grey. The Copy border went from 40 % to 60 % white: 4.53:1, was 2.92:1 (8d25496) | |
 | 15 | Transparent box (`background="transparent"`) | The element's text and accent on the site's own grounds, both themes: the file page's `--paper-2`, the hero card's `--paper` (dark) and `--paper-3` (light). 16 new rows in `contrast.md`. A loaded picture on the file page has no box (computed `rgba(0, 0, 0, 0)`), and the logo sits on the page. | fixed | The element's muted grey measured 4.44:1 on the light hero card; the site now gives the element its `--ink-muted`, 4.75:1 or better on every ground | |
+| 16 | Element language | The element follows its own `lang`, else the nearest `lang` on the page; the file page sets it on creation and on every in-place switch. Checked live: de page, then a switch to ru, both the page and the element follow; `/ru/` hero reads «Загрузка файла», «Скачать». The `error` event's `detail.message` stays English for scripts. | fixed | Ruling R23 (element text stays English) withdrawn: the table of every drawn string in six languages is in `web/src/element/strings.mjs` (6a425fb, 0db175d, 19a3b31). The README snippet also carried a stale 1.1.0 hash; it now matches the pin and a test keeps it so (b7a0f7c) | |
 
 Also checked: the snippet's `integrity` equals the SHA-384 of
 `dist/element/1.1.0/xrpl-file-element.js`, and `_headers` carries the `/element/*` CORS and
@@ -37,11 +38,10 @@ immutable-cache rule.
 1. The render tier covered `/ru/` only: that one page took about 35 minutes, and the process did not
    exit after printing its result. The other homes share the markup and styles of `/ru/`; the file
    page and 404 were not rendered.
-2. The `<xrpl-file>` element's own text (loader, errors, buttons) stays English on every language
-   page; the element has no localisation API (ruling R23).
-3. The German, Spanish, Portuguese and Chinese copy is translated from English and awaits a native
-   speaker's review (listed in `site/README.md`).
-4. Expected until publication, not a defect: the jsDelivr URL in the main embed snippet answers 404
+2. The German, Spanish, Portuguese and Chinese copy, the site's and now the element's
+   (`web/src/element/strings.mjs`), is translated from English and awaits a native speaker's review
+   (listed in `site/README.md`). The element keeps the network name and the `FILE` badge untranslated.
+3. Expected until publication, not a defect: the jsDelivr URL in the main embed snippet answers 404
    until the npm package is published; the alternative URL on the site works once the site is
    deployed.
-5. Single-URL pages (file page, 404) carry no `hreflang` alternates (ruling R21).
+4. Single-URL pages (file page, 404) carry no `hreflang` alternates (ruling R21).
