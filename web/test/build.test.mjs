@@ -86,7 +86,8 @@ test('the bundle is plain ASCII, so the page encoding cannot change it', async (
   const bytes = await readFile(join(out, 'xrpl-file-element.js'));
   assert.ok(bytes.every((byte) => byte < 0x80));
   assert.ok(bytes.includes(Buffer.from('\\u2713 ')), 'the check mark survives as an escape');
-  assert.ok(bytes.includes(Buffer.from('verified \\u00b7 ')), 'the dot survives as an escape');
+  assert.ok(bytes.includes(Buffer.from(' \\u00b7 ')), 'the dot survives as an escape');
+  assert.ok(bytes.includes(Buffer.from('\\u043f\\u0440\\u043e\\u0432\\u0435\\u0440\\u0435\\u043d\\u043e')), 'Cyrillic survives as escapes');
 });
 
 test('the output directory holds the five files and nothing else', async () => {
@@ -331,7 +332,10 @@ test('the bundle names no host but the built-in nodes', async () => {
   const urls = code.match(/\b(?:https?|wss?):\/\/[^\s'"`)]+/g) ?? [];
   // MANIFEST_FORMAT is text a writer puts into a manifest for people to read; nothing fetches it.
   const allowed = new Set([...Object.values(ENDPOINTS).flat(), 'http://www.w3.org/2000/svg', MANIFEST_FORMAT]);
-  assert.deepEqual(urls.filter((url) => !allowed.has(url)), []);
+  // The node-attribute sentence names the scheme in words ("must be a wss:// address"), and in some languages
+  // punctuation follows it directly ("wss://."): a scheme with no host after it names nothing to fetch.
+  const bareScheme = /^wss?:\/\/(?!\w)/;
+  assert.deepEqual(urls.filter((url) => !allowed.has(url) && !bareScheme.test(url)), []);
 });
 
 test('build emits xrpl-file-reader.mjs with its integrity and the version banner', async () => {

@@ -1,11 +1,10 @@
 import { PRIORITY } from './page.mjs';
 import { downloadName, extensionFor } from './format.mjs';
-import { elementError } from './messages.mjs';
+import { elementError, TOO_LARGE } from './messages.mjs';
 
 /** The most a browser without a save-file picker is asked to hold in memory: 2 GiB. */
 export const BLOB_LIMIT = 2_147_483_648;
 
-const TOO_LARGE = 'This file is too large to save in this browser.';
 // Revoking in the same task as the click can cancel the download in Safari and older Firefox.
 const REVOKE_DELAY_MS = 60_000;
 

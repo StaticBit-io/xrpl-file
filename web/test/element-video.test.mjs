@@ -7,6 +7,7 @@ import { VideoView } from '../src/element/video.mjs';
 import { StreamerError } from '../src/element/media/mse.mjs';
 import { XrplFileError } from '../src/link.mjs';
 import { messageFor, detailFor } from '../src/element/messages.mjs';
+import { STRINGS } from '../src/element/strings.mjs';
 import { PRIORITY } from '../src/element/page.mjs';
 
 const BLOCK = 1000;
@@ -198,7 +199,7 @@ class FakeStreamer {
   close() { this.closed = true; }
 }
 
-function setup({ cover = null, openFeed } = {}) {
+function setup({ cover = null, openFeed, lang } = {}) {
   const root = fakeRoot();
   const handle = new FakeHandle();
   handle.coverValue = cover;
@@ -215,6 +216,7 @@ function setup({ cover = null, openFeed } = {}) {
     onLoad: () => { log.loads++; },
     onSize: (kind, width, height) => log.sizes.push([kind, width, height]),
     onStatus: (text) => log.statuses.push(text),
+    lang,
     deps: { openFeed: openFeed ?? (async () => feed), Streamer: FakeStreamer },
   });
   return { view, root, handle, feed, log, video: () => root.video, streamer: () => FakeStreamer.last };
@@ -944,4 +946,53 @@ test('after a frame has been shown the video element failing is the error path',
     assert.equal(t.root.overlayText.textContent, 'This browser could not decode this video.');
     assert.deepEqual(detailFor(t.log.errors[0].error, { playing: true }), { name: null, message: 'This browser could not decode this video.' });
   } finally { t.view.close(); }
+});
+
+test('the overlay is worded in the language it is asked for, and again after relocalize()', async () => {
+  let lang = 'ru';
+  const t = setup({ lang: () => lang });
+  try {
+    await started(t);
+    assert.equal(t.root.overlayText.textContent, STRINGS.ru.buffering);
+    lang = 'de';
+    t.view.relocalize();
+    assert.equal(t.root.overlayText.textContent, STRINGS.de.buffering);
+    lang = 'en';
+    t.view.relocalize();
+    assert.equal(t.root.overlayText.textContent, 'Buffering…');
+  } finally { t.view.close(); }
+});
+
+test('the retry line of the loading view is in the language, and is sent again when it changes', async () => {
+  let lang = 'ru';
+  const t = setup({ lang: () => lang });
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  try {
+    const start = t.view.start();
+    await until(() => t.handle.pending(0).length === 1, 'the head read');
+    t.handle.pending(0)[0].reject(new XrplFileError('NodeUnreachable', 'down'));
+    await flush(); await flush();
+    assert.deepEqual(t.log.statuses, [STRINGS.ru.retrying]);
+    lang = 'zh';
+    t.view.relocalize();
+    assert.deepEqual(t.log.statuses, [STRINGS.ru.retrying, STRINGS.zh.retrying]);
+    mock.timers.tick(1000); await flush(); await flush();
+    await until(() => t.handle.pending(0).length === 1, 'the second try');
+    t.handle.pending(0)[0].resolve();
+    await start;
+    assert.deepEqual(t.log.statuses.at(-1), null);
+    t.view.relocalize();
+    assert.equal(t.log.statuses.at(-1), null, 'nothing is sent while there is no retry line');
+  } finally {
+    t.view.close();
+    mock.timers.reset();
+  }
+});
+
+test('a view asked for no language speaks English, and relocalize() on a closed view does nothing', async () => {
+  const t = setup();
+  await started(t);
+  assert.equal(t.root.overlayText.textContent, 'Buffering…');
+  t.view.close();
+  t.view.relocalize();
 });

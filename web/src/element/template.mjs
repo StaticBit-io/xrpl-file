@@ -1,5 +1,7 @@
 // The markup and styles inside the element's shadow root, written once. Nothing in it is built from
 // data: names, sizes, messages and file content are put in with textContent or attributes afterwards.
+// The words in it are English and only the first markup: before anything is shown the element sets every
+// one of them again from strings.mjs, in the page's language.
 // Styles follow the approved mockup.
 //
 // Colours come in two layers. A theme is a palette of private --t-* properties on .frame, picked by its
@@ -270,7 +272,7 @@ export const TEMPLATE = `
       <div class="big" id="dlName"></div>
       <div class="muted" id="dlMeta"><span class="dl-type" id="dlType"></span><span id="dlSize"></span><span class="dl-net" id="dlNet"></span></div>
       <div class="muted note" id="dlNote" hidden></div>
-      <button type="button" class="btn" id="dlButton"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v11m0 0-5-5m5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl-full">Download</span><span class="lbl-short">Save</span> <span class="sr-name" id="dlLabel"></span></button>
+      <button type="button" class="btn" id="dlButton"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v11m0 0-5-5m5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl-full" id="dlFull">Download</span><span class="lbl-short" id="dlShort">Save</span> <span class="sr-name" id="dlLabel"></span></button>
       <div class="status muted" id="dlStatus" role="status"></div>
     </div>
   </div>

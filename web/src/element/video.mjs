@@ -16,7 +16,8 @@ import {
 } from './media/playback.mjs';
 import { PRIORITY } from './page.mjs';
 import { progressDetail } from './load.mjs';
-import { messageFor, elementError } from './messages.mjs';
+import { messageFor, elementError, DECODE_FAILED } from './messages.mjs';
+import { stringsFor } from './strings.mjs';
 import { downloadName } from './format.mjs';
 
 const HAVE_CURRENT_DATA = 2;
@@ -27,10 +28,6 @@ const EDGE = 0.05;
 // the tracks of a file seldom end on exactly the same instant.
 const END_TOLERANCE = 0.5;
 const SAFETY_TICK_MS = 1000;
-
-const RETRYING = 'The node is not answering. Retrying…';
-const BUFFERING = 'Buffering…';
-const DECODE_FAILED = 'This browser could not decode this video.';
 
 const isAbort = (error) => error?.name === 'AbortError';
 
@@ -68,6 +65,7 @@ export class VideoView {
   #onLoad;
   #onSize;
   #onStatus;
+  #lang;
 
   #lifetime = new AbortController();
   #reads = new AbortController();
@@ -123,10 +121,11 @@ export class VideoView {
    * @param {(reason: string) => void} [options.onDownload] the browser rejected the stream before any frame was shown: the file is for download instead (`unplayable`)
    * @param {() => void} options.onLoad the first frame is on screen
    * @param {(kind: 'cover' | 'content', width: number, height: number) => void} [options.onSize] natural proportions, for the host's ratio
-   * @param {(text: string | null) => void} [options.onStatus] a line for the loading view while nothing is on screen yet; null restores its own
+   * @param {(text: string | null) => void} [options.onStatus] a line for the loading view while nothing is on screen yet, worded in the current language; null restores its own
+   * @param {() => string} [options.lang] the language of the overlay's words, asked each time they are drawn; English when left out
    * @param {object} [options.deps] test seams: `openFeed`, `Streamer`, `loadMp4Box`
    */
-  constructor({ root, handle, record, cover, priority, onProgress, onError, onDownload, onLoad, onSize, onStatus, deps = {} }) {
+  constructor({ root, handle, record, cover, priority, onProgress, onError, onDownload, onLoad, onSize, onStatus, lang, deps = {} }) {
     this.#root = root;
     this.#handle = handle;
     this.#record = record;
@@ -138,6 +137,7 @@ export class VideoView {
     this.#onLoad = onLoad;
     this.#onSize = onSize ?? (() => {});
     this.#onStatus = onStatus ?? (() => {});
+    this.#lang = lang ?? (() => 'en');
     const load = deps.loadMp4Box ?? (() => loadMp4Box({ scriptUrl: mp4boxScriptUrl() }));
     this.#deps = {
       openFeed: deps.openFeed ?? openFeed,
@@ -254,7 +254,7 @@ export class VideoView {
   #wait(ms, signal) {
     if (signal.aborted) return Promise.resolve();
     this.#retrying++;
-    if (!this.#ready) { this.#statusShown = true; this.#onStatus(RETRYING); }
+    if (!this.#ready) { this.#statusShown = true; this.#onStatus(this.#strings().retrying); }
     this.#refresh();
 
     return new Promise((resolve) => {
@@ -565,6 +565,17 @@ export class VideoView {
 
   // The overlay
 
+  #strings() {
+    return stringsFor(this.#lang());
+  }
+
+  /** The page's language changed: the overlay and a retry line of the loading view are worded again. */
+  relocalize() {
+    if (this.#closed) return;
+    if (this.#statusShown) this.#onStatus(this.#strings().retrying);
+    this.#refresh();
+  }
+
   #refresh() {
     if (this.#closed || this.#video === null || !this.#ready) return;
 
@@ -599,13 +610,14 @@ export class VideoView {
     if (state === 'none') return;
 
     if (state === 'buffering') {
-      this.#overlayText.textContent = this.#retrying > 0 ? RETRYING : BUFFERING;
+      const strings = this.#strings();
+      this.#overlayText.textContent = this.#retrying > 0 ? strings.retrying : strings.buffering;
       this.#overlayText.setAttribute('role', 'status');
       return;
     }
 
     const error = this.#fatal ?? this.#failure?.error ?? null;
-    this.#overlayText.textContent = messageFor(error, { playing: this.#hasFrame });
+    this.#overlayText.textContent = messageFor(error, { playing: this.#hasFrame, lang: this.#lang() });
     this.#overlayText.setAttribute('role', 'alert');
     if (!this.#errorReported) {
       this.#errorReported = true;

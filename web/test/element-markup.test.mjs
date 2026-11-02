@@ -134,7 +134,7 @@ test('the safety net: the box clips, single lines ellipsize, flex children may s
 test('the download button is named by its visible word and then the file name, with no aria-label to contradict it', () => {
   const button = TEMPLATE.match(/<button[^>]*id="dlButton"[\s\S]*?<\/button>/)[0];
   assert.doesNotMatch(button, /aria-label/);
-  assert.match(button, /class="lbl-full">Download<\/span><span class="lbl-short">Save<\/span> <span class="sr-name" id="dlLabel">/);
+  assert.match(button, /class="lbl-full" id="dlFull">Download<\/span><span class="lbl-short" id="dlShort">Save<\/span> <span class="sr-name" id="dlLabel">/);
   assert.match(STYLES, /\.sr-name/);
 });
 

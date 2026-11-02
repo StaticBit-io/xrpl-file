@@ -8,12 +8,13 @@ import { prepare, loadWhole, progressDetail, loadDetail } from './load.mjs';
 import { pool, PRIORITY } from './page.mjs';
 import { saveFile } from './download.mjs';
 import { copyText, execCopyIn } from './clipboard.mjs';
-import { parseLength, parseLoading, parseLoader, parseTheme, backgroundTransparent, captionHidden, linkText, endpointsFor } from './attributes.mjs';
+import { parseLength, parseLoading, parseLoader, parseTheme, backgroundTransparent, captionHidden, linkText, endpointsFor, languageOf } from './attributes.mjs';
 import { viewForType, magicAgrees, normalizeType } from './view.mjs';
 import { textPreview, TEXT_LIMIT } from './text.mjs';
 import { VideoView } from './video.mjs';
 import { formatBytes, downloadName, bytesOf, progressLines, typeBadge, downloadLabel } from './format.mjs';
 import { elementError, messageFor, shortTitleFor, saveMessageFor, detailFor, canVerify, INSECURE, NO_LINK } from './messages.mjs';
+import { stringsFor } from './strings.mjs';
 import { parseLink, formatLink, XrplFileError } from '../link.mjs';
 
 const DEFAULT_RATIO = '16 / 9';
@@ -23,20 +24,19 @@ const RATIO_CONTENT = 2;
 
 const VIEWS = ['idle', 'loading', 'image', 'video', 'text', 'download', 'error'];
 const COPIED_MS = 1500;
-const COPY_LABEL = 'Copy link';
 // An <a download> click is handed to the browser, which may still refuse it (a sandboxed iframe
 // without allow-downloads) without telling the page, so only the picker path may claim "Saved.".
-const SAVE_STATUS = { saved: 'Saved.', started: 'Download started.' };
+const SAVE_RESULT_KEYS = { saved: 'saved', started: 'downloadStarted' };
 
-const NOTE_TOO_LARGE = 'This picture is too large to show here.';
-const NOTE_MISMATCH = "This file's contents do not match its type, so it is offered as a download.";
-const NOTE_UNDECODABLE = 'This browser cannot show this picture.';
-const NOTE_UNPLAYABLE = 'This browser cannot play this video here.';
-// mp4box.js is fetched from the script's own origin; a host that serves the script without CORS headers breaks only that fetch.
-const NOTE_PLAYER = 'The video player could not be loaded from this site.';
-const NOTES = {
-  'too-large': NOTE_TOO_LARGE, mismatch: NOTE_MISMATCH, undecodable: NOTE_UNDECODABLE, unplayable: NOTE_UNPLAYABLE, player: NOTE_PLAYER,
+// The word for each reason a file is offered as a download. 'player' is mp4box.js, fetched from the
+// script's own origin: a host that serves the script without CORS headers breaks only that fetch.
+const NOTE_KEYS = {
+  'too-large': 'noteTooLarge', mismatch: 'noteMismatch', undecodable: 'noteUndecodable', unplayable: 'noteUnplayable', player: 'notePlayer',
 };
+
+// The loading view's text is kept as a function of the language, so that a change of language words it again.
+const READING = (lang) => ({ bytes: stringsFor(lang).reading, blocks: '' });
+const saying = (key) => (lang) => stringsFor(lang)[key];
 
 const isAbort = (error) => error?.name === 'AbortError';
 const abortError = () => new DOMException('The save was cancelled.', 'AbortError');
@@ -62,7 +62,7 @@ function sharedStyles() {
 }
 
 export class XrplFileElement extends HTMLElement {
-  static observedAttributes = ['src', 'width', 'height', 'loading', 'loader', 'node', 'theme', 'background', 'caption'];
+  static observedAttributes = ['src', 'width', 'height', 'loading', 'loader', 'node', 'theme', 'background', 'caption', 'lang'];
 
   #parts = {};
   #connected = false;
@@ -90,11 +90,21 @@ export class XrplFileElement extends HTMLElement {
   // The error the element is showing, so that save() can say why there is nothing to save.
   #failure = null;
   #loaderOn = true;
+  // The language of everything drawn, from the `lang` attribute, an ancestor or the document (languageOf).
+  #lang = 'en';
+  #loading = { lines: READING, percent: null };
+  #idleVideo = false;
+  // The reason the download view is showing (null when it is not), and whether the text view was cut short:
+  // what a change of language has to word again.
+  #downloadView = null;
+  #textTruncated = false;
+  // The save status line as a function of the language, or null while it is empty.
+  #saveStatus = null;
   #ratio = DEFAULT_RATIO;
   #ratioStage = 0;
   #urls = [];
   #copiedTimer = 0;
-  // 'Copied' or 'Copy failed' while the feedback shows, else null.
+  // 'copied' or 'failed' while the feedback shows, else null.
   #copyFeedback = null;
   // The element's own `:host` rule: a constructable sheet, or a <style> element where those do not exist.
   #hostSheet = null;
@@ -107,6 +117,8 @@ export class XrplFileElement extends HTMLElement {
     this.#adoptStyles(root);
     for (const element of root.querySelectorAll('[id]')) this.#parts[element.id] = element;
     this.#wire();
+    this.#lang = languageOf(this);
+    this.#applyLabels();
     this.#applySizing();
     this.#applyTheme();
     this.#applyBackground();
@@ -115,6 +127,8 @@ export class XrplFileElement extends HTMLElement {
   connectedCallback() {
     this.#connected = true;
     this.#restartScheduled = false;
+    // The ancestors are known only now, and a page may have changed `lang` while the element was away.
+    this.#updateLanguage();
     this.#start();
   }
 
@@ -139,6 +153,9 @@ export class XrplFileElement extends HTMLElement {
         break;
       case 'caption':
         this.#renderCaption();
+        break;
+      case 'lang':
+        this.#updateLanguage();
         break;
       case 'loader':
         this.#loaderOn = parseLoader(value);
@@ -222,6 +239,38 @@ export class XrplFileElement extends HTMLElement {
     this.#applySizing();
   }
 
+  // Language
+
+  #updateLanguage() {
+    const lang = languageOf(this);
+    if (lang === this.#lang) return;
+    this.#lang = lang;
+    this.#renderLanguage();
+  }
+
+  /** Words everything on screen again, from the state the element keeps for it. */
+  #renderLanguage() {
+    this.#applyLabels();
+    this.#paintLoading();
+    this.#paintRecord();
+    if (this.#failure !== null) this.#paintError();
+    this.#paintSaveStatus();
+    this.#renderCaption();
+    this.#video?.relocalize();
+  }
+
+  /** The words that do not come from a file: buttons and the loader's accessible name. */
+  #applyLabels() {
+    const p = this.#parts;
+    const s = stringsFor(this.#lang);
+    p.loading.setAttribute('aria-label', s.loadingLabel);
+    p.textDownload.textContent = s.download;
+    p.dlFull.textContent = s.download;
+    p.dlShort.textContent = s.save;
+    this.#paintOpen();
+    this.#renderCopy();
+  }
+
   // Starting over
 
   /** Ends the current generation: aborts every read it started, then lets go of the page's shared state. */
@@ -254,7 +303,11 @@ export class XrplFileElement extends HTMLElement {
     this.#phase = 'idle';
     this.#verified = false;
     this.#saving = null;
+    this.#saveStatus = null;
     this.#failure = null;
+    this.#idleVideo = false;
+    this.#downloadView = null;
+    this.#textTruncated = false;
     this.#ratio = DEFAULT_RATIO;
     this.#ratioStage = 0;
     this.#clearViews();
@@ -270,7 +323,7 @@ export class XrplFileElement extends HTMLElement {
     p.pre.textContent = '';
     p.textBar.hidden = true;
     p.dlNote.hidden = true;
-    for (const status of [p.dlStatus, p.textStatus]) status.textContent = '';
+    this.#paintSaveStatus();
     p.frame.classList.remove('video', 'tapped');
     p.idle.classList.remove('covered');
     p.overlay.hidden = true;
@@ -390,7 +443,7 @@ export class XrplFileElement extends HTMLElement {
   /** `loading="click"`: the manifest and the cover now, the content when the visitor asks. */
   async #prepareOnly() {
     const signal = this.#controller.signal;
-    this.#showLoading('Reading the file description…', null);
+    this.#showLoading(READING, null);
     try {
       this.#connect();
       const { record, cover } = await prepare(this.#handle);
@@ -409,7 +462,7 @@ export class XrplFileElement extends HTMLElement {
 
   async #load() {
     const signal = this.#controller.signal;
-    this.#showLoading('Reading the file description…', null);
+    this.#showLoading(READING, null);
     try {
       this.#connect();
       const record = this.#record ?? await this.#handle.record();
@@ -462,7 +515,8 @@ export class XrplFileElement extends HTMLElement {
       priority: this.#priority,
       onProgress: (detail, kind) => this.#report(detail, kind),
       onSize: (kind, width, height) => this.#setRatio(kind === 'cover' ? RATIO_COVER : RATIO_CONTENT, width, height),
-      onStatus: (text) => this.#renderLoading(text ?? 'Reading the file description…', null),
+      onStatus: (text) => this.#renderLoading(text === null ? READING : () => ({ bytes: text, blocks: '' }), null),
+      lang: () => this.#lang,
       onError: (error, state) => this.#videoFailed(error, state),
       onDownload: (reason) => this.#videoUnplayable(record, reason),
       onLoad: () => {
@@ -551,11 +605,8 @@ export class XrplFileElement extends HTMLElement {
     p.pre.textContent = text;
     p.pre.scrollTop = 0;
     p.textBar.hidden = !truncated;
-    if (truncated) {
-      p.textNote.textContent = `Showing the first 1 MB of ${formatBytes(manifest.size)}.`;
-      // A short box cuts the note with an ellipsis; the tooltip keeps all of it.
-      p.textNote.title = p.textNote.textContent;
-    }
+    this.#textTruncated = truncated;
+    if (truncated) this.#paintTextNote();
     this.#showPhase('text');
     this.#emitLoad(record);
   }
@@ -571,18 +622,25 @@ export class XrplFileElement extends HTMLElement {
     this.#renderCaption();
   }
 
-  #showLoading(detail, percent) {
+  #showLoading(lines, percent) {
     this.#lastBytes = 0;
-    this.#renderLoading(detail, percent);
+    this.#renderLoading(lines, percent);
     this.#showPhase('loading');
   }
 
-  /** `blocks` is the second half of the line, which a narrow box leaves out. */
-  #renderLoading(detail, percent, blocks = '') {
+  /** `lines(lang)` gives `{ bytes, blocks }`; `blocks` is the second half of the line, which a narrow box leaves out. */
+  #renderLoading(lines, percent) {
+    this.#loading = { lines, percent };
+    this.#paintLoading();
+  }
+
+  #paintLoading() {
     const p = this.#parts;
+    const { lines, percent } = this.#loading;
+    const text = lines(this.#lang);
     p.percent.textContent = percent === null ? '' : `${percent}%`;
-    p.progressBytes.textContent = detail;
-    p.progressBlocks.textContent = blocks;
+    p.progressBytes.textContent = text.bytes;
+    p.progressBlocks.textContent = text.blocks;
     p.barFill.style.width = `${percent ?? 0}%`;
     if (percent === null) p.loading.removeAttribute('aria-valuenow');
     else p.loading.setAttribute('aria-valuenow', String(percent));
@@ -593,10 +651,9 @@ export class XrplFileElement extends HTMLElement {
     const { manifest } = record;
     const isVideo = viewForType(manifest).view === 'video';
     p.idleName.textContent = downloadName(manifest);
-    p.idleMeta.textContent = formatBytes(manifest.size);
-    p.open.classList.toggle('play', isVideo);
-    p.open.textContent = isVideo ? '▶' : 'Open';
-    p.open.setAttribute('aria-label', isVideo ? 'Play' : 'Open');
+    p.idleMeta.textContent = formatBytes(manifest.size, this.#lang);
+    this.#idleVideo = isVideo;
+    this.#paintOpen();
     p.frame.classList.toggle('video', isVideo);
 
     if (cover) {
@@ -611,45 +668,78 @@ export class XrplFileElement extends HTMLElement {
   }
 
   #showDownload(record, reason) {
+    this.#downloadView = { reason };
+    this.#paintDownload();
+    this.#showPhase('download');
+    this.#emitLoad(record);
+  }
+
+  #paintDownload() {
     const p = this.#parts;
-    const { manifest } = record;
+    const s = stringsFor(this.#lang);
+    const { manifest } = this.#record;
     const name = downloadName(manifest);
     p.dlName.textContent = name;
     // The meta line is three pieces so that a narrow box can keep the size alone.
-    p.dlType.textContent = `${normalizeType(manifest.type) || 'unknown type'} · `;
-    p.dlSize.textContent = formatBytes(manifest.size);
+    p.dlType.textContent = `${normalizeType(manifest.type) || s.unknownType} · `;
+    p.dlSize.textContent = formatBytes(manifest.size, this.#lang);
     p.dlNet.textContent = ` · ${this.#link.network}`;
     p.dlBadge.textContent = typeBadge(manifest.type);
     p.dlBadge.title = name;
     // The button's name is its visible word ("Download", "Save" or, in the icon tier, the clipped
     // "Download") followed by this clipped file name, so the name always starts with what is shown.
     p.dlLabel.textContent = name;
-    p.dlButton.title = downloadLabel(manifest);
-    const note = NOTES[reason] ?? null;
-    p.dlNote.hidden = note === null;
-    p.dlNote.textContent = note ?? '';
-    this.#showPhase('download');
-    this.#emitLoad(record);
+    p.dlButton.title = downloadLabel(manifest, this.#lang);
+    const noteKey = Object.hasOwn(NOTE_KEYS, this.#downloadView.reason) ? NOTE_KEYS[this.#downloadView.reason] : null;
+    p.dlNote.hidden = noteKey === null;
+    p.dlNote.textContent = noteKey === null ? '' : s[noteKey];
+  }
+
+  /** The parts of the views that show the file's size, worded in the current language. */
+  #paintRecord() {
+    if (this.#record === null) return;
+    this.#parts.idleMeta.textContent = formatBytes(this.#record.manifest.size, this.#lang);
+    if (this.#downloadView !== null) this.#paintDownload();
+    if (this.#textTruncated) this.#paintTextNote();
+  }
+
+  #paintTextNote() {
+    const p = this.#parts;
+    p.textNote.textContent = stringsFor(this.#lang).textNote(formatBytes(this.#record.manifest.size, this.#lang));
+    // A short box cuts the note with an ellipsis; the tooltip keeps all of it.
+    p.textNote.title = p.textNote.textContent;
+  }
+
+  #paintOpen() {
+    const p = this.#parts;
+    const s = stringsFor(this.#lang);
+    p.open.classList.toggle('play', this.#idleVideo);
+    p.open.textContent = this.#idleVideo ? '▶' : s.open;
+    p.open.setAttribute('aria-label', this.#idleVideo ? s.play : s.open);
   }
 
   #fail(error) {
     this.#video?.close();
     this.#video = null;
-    const sentence = messageFor(error);
-    const p = this.#parts;
-    // The full sentence stays in the accessible text in every size; the short title and the icon are what a narrow box shows, with the sentence as their tooltip.
-    p.msgFull.textContent = sentence;
-    p.msgShort.textContent = shortTitleFor(error);
-    p.msgShort.title = sentence;
-    p.msgIcon.title = sentence;
     // Nothing is read after a failure: the connection is the page's to close, not ours to hold.
     this.#handle?.release();
     this.#lease?.release();
     this.#handle = null;
     this.#lease = null;
     this.#failure = error;
+    this.#paintError();
     this.#showPhase('error');
     this.#emit('error', detailFor(error));
+  }
+
+  #paintError() {
+    const p = this.#parts;
+    const sentence = messageFor(this.#failure, { lang: this.#lang });
+    // The full sentence stays in the accessible text in every size; the short title and the icon are what a narrow box shows, with the sentence as their tooltip.
+    p.msgFull.textContent = sentence;
+    p.msgShort.textContent = shortTitleFor(this.#failure, this.#lang);
+    p.msgShort.title = sentence;
+    p.msgIcon.title = sentence;
   }
 
   // Progress
@@ -677,8 +767,7 @@ export class XrplFileElement extends HTMLElement {
 
   #publish(detail) {
     const percent = detail.bytesTotal > 0 ? Math.min(100, Math.floor((detail.bytesDone / detail.bytesTotal) * 100)) : 0;
-    const lines = progressLines(detail);
-    this.#renderLoading(lines.bytes, percent, lines.blocks);
+    this.#renderLoading((lang) => progressLines(detail, lang), percent);
     this.#emit('xrpl-file-progress', progressDetail(detail));
   }
 
@@ -691,10 +780,10 @@ export class XrplFileElement extends HTMLElement {
 
     const link = formatLink(this.#link);
     const { manifest } = this.#record ?? {};
-    p.capName.textContent = manifest ? `${downloadName(manifest)} · ${formatBytes(manifest.size)}` : '';
+    p.capName.textContent = manifest ? `${downloadName(manifest)} · ${formatBytes(manifest.size, this.#lang)}` : '';
     // The mark follows what was actually read and verified, not the view: a download view reached
     // from the manifest alone has verified nothing.
-    const state = captionParts({ phase: this.#verified ? this.#phase : 'idle', network: this.#link.network });
+    const state = captionParts({ phase: this.#verified ? this.#phase : 'idle', network: this.#link.network, lang: this.#lang });
     p.capMark.textContent = state.mark;
     p.capWord.textContent = state.word;
     p.capNetwork.textContent = state.network;
@@ -712,21 +801,23 @@ export class XrplFileElement extends HTMLElement {
    */
   #renderCopy() {
     const p = this.#parts;
-    const feedback = this.#copyFeedback;
-    p.copyText.textContent = feedback ?? COPY_LABEL;
-    p.copy.setAttribute('aria-label', feedback ?? COPY_LABEL);
+    const s = stringsFor(this.#lang);
+    const state = this.#copyFeedback;
+    const feedback = state === null ? null : (state === 'copied' ? s.copied : s.copyFailed);
+    p.copyText.textContent = feedback ?? s.copyLink;
+    p.copy.setAttribute('aria-label', feedback ?? s.copyLink);
     p.copyStatus.textContent = feedback ?? '';
     if (feedback !== null) p.copy.title = feedback;
     else if (this.#link !== null) p.copy.title = formatLink(this.#link);
     else p.copy.removeAttribute('title');
-    if (feedback === null) p.copy.removeAttribute('data-state');
-    else p.copy.dataset.state = feedback === 'Copied' ? 'copied' : 'failed';
+    if (state === null) p.copy.removeAttribute('data-state');
+    else p.copy.dataset.state = state;
   }
 
   async #copyLink() {
     if (this.#link === null) return;
     const done = await copyText(formatLink(this.#link), { execCopy: execCopyIn(this.shadowRoot) });
-    this.#copyFeedback = done ? 'Copied' : 'Copy failed';
+    this.#copyFeedback = done ? 'copied' : 'failed';
     this.#renderCopy();
     clearTimeout(this.#copiedTimer);
     this.#copiedTimer = setTimeout(() => {
@@ -781,10 +872,10 @@ export class XrplFileElement extends HTMLElement {
         handle: this.#handle,
         record: this.#record,
         signal,
-        onProgress: (detail) => this.#showSaving(`Saving… ${bytesOf(detail.bytesDone, detail.bytesTotal)}`),
+        onProgress: (detail) => this.#showSaving((lang) => stringsFor(lang).savingProgress(bytesOf(detail.bytesDone, detail.bytesTotal, lang))),
       });
       if (signal.aborted) throw abortError();
-      this.#showSaving(SAVE_STATUS[result] ?? '');
+      this.#showSaving(Object.hasOwn(SAVE_RESULT_KEYS, result) ? saying(SAVE_RESULT_KEYS[result]) : null);
       if (result !== 'cancelled') {
         // Every block verified before it was written or put in the Blob.
         this.#verified = true;
@@ -794,14 +885,21 @@ export class XrplFileElement extends HTMLElement {
     } catch (error) {
       // A failed save is the save's problem: the verified file stays on screen and the reason goes
       // to the status line. No `error` event either; that one means the file could not be shown.
-      if (!signal.aborted && !isAbort(error)) this.#showSaving(saveMessageFor(error));
+      if (!signal.aborted && !isAbort(error)) this.#showSaving((lang) => saveMessageFor(error, lang));
       throw error;
     } finally {
       for (const button of [p.dlButton, p.textDownload]) button.disabled = false;
     }
   }
 
-  #showSaving(text) {
+  /** `say(lang)` gives the status line, or null empties it. */
+  #showSaving(say) {
+    this.#saveStatus = say;
+    this.#paintSaveStatus();
+  }
+
+  #paintSaveStatus() {
+    const text = this.#saveStatus === null ? '' : this.#saveStatus(this.#lang);
     this.#parts.dlStatus.textContent = text;
     this.#parts.textStatus.textContent = text;
     this.#parts.textStatus.title = text;

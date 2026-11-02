@@ -1,4 +1,5 @@
 import { normalizeType } from './view.mjs';
+import { stringsFor } from './strings.mjs';
 
 const EXTENSIONS = {
   'image/png': 'png',
@@ -19,7 +20,7 @@ const EXTENSIONS = {
   'application/pdf': 'pdf',
 };
 
-const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
+const UNIT_KEYS = ['unitB', 'unitKB', 'unitMB', 'unitGB', 'unitTB'];
 const MAX_NAME = 200;
 // Past this the "extension" is just a long tail of the name, not something worth protecting from the cut.
 const MAX_EXTENSION = 32;
@@ -35,16 +36,22 @@ export function extensionFor(type) {
   return Object.hasOwn(EXTENSIONS, normalizeType(type)) ? EXTENSIONS[normalizeType(type)] : 'bin';
 }
 
-/** Decimal units with one decimal, as file managers and browsers show them: 999 B, 12.4 KB, 36.5 MB. */
-export function formatBytes(n) {
-  if (n < 1000) return `${n} B`;
+/**
+ * Decimal units with one decimal, as file managers and browsers show them: 999 B, 12.4 KB, 36.5 MB.
+ * The unit and the decimal mark follow `lang` the way the site writes sizes (12,4 МБ in Russian, 12,4 MB
+ * in German, 12.4 MB in English and Chinese). Done by hand and not with Intl, so the text does not depend
+ * on the ICU data of the browser.
+ */
+export function formatBytes(n, lang = 'en') {
+  const s = stringsFor(lang);
+  if (n < 1000) return `${n} ${s.unitB}`;
   let value = n / 1000;
   let unit = 1;
-  while (Number(value.toFixed(1)) >= 1000 && unit < UNITS.length - 1) {
+  while (Number(value.toFixed(1)) >= 1000 && unit < UNIT_KEYS.length - 1) {
     value /= 1000;
     unit++;
   }
-  return `${value.toFixed(1)} ${UNITS[unit]}`;
+  return `${value.toFixed(1).replace('.', s.decimalMark)} ${s[UNIT_KEYS[unit]]}`;
 }
 
 function cut(name) {
@@ -73,20 +80,21 @@ export function downloadName(manifest) {
 }
 
 /** "12.4 of 36.5 MB": the unit is written once when both numbers share it. */
-export function bytesOf(done, total) {
-  const [doneValue, doneUnit] = formatBytes(done).split(' ');
-  const totalText = formatBytes(total);
-  return totalText.endsWith(` ${doneUnit}`) ? `${doneValue} of ${totalText}` : `${formatBytes(done)} of ${totalText}`;
+export function bytesOf(done, total, lang = 'en') {
+  const [doneValue, doneUnit] = formatBytes(done, lang).split(' ');
+  const totalText = formatBytes(total, lang);
+  const doneText = totalText.endsWith(` ${doneUnit}`) ? doneValue : formatBytes(done, lang);
+  return stringsFor(lang).bytesOf(doneText, totalText);
 }
 
 /**
  * The loader's two lines. They are separate so that a narrow box can keep the bytes and drop the
  * blocks; the blocks text carries its own separator so the two read as one line when both show.
  */
-export function progressLines({ bytesDone, bytesTotal, blocksVerified, blocksTotal }) {
+export function progressLines({ bytesDone, bytesTotal, blocksVerified, blocksTotal }, lang = 'en') {
   return {
-    bytes: bytesOf(bytesDone, bytesTotal),
-    blocks: ` · ${blocksVerified} of ${blocksTotal} blocks verified`,
+    bytes: bytesOf(bytesDone, bytesTotal, lang),
+    blocks: stringsFor(lang).blocksVerified(blocksVerified, blocksTotal),
   };
 }
 
@@ -107,6 +115,6 @@ export function typeBadge(type) {
 }
 
 /** The accessible name of the download button, which in the smallest box shows only an icon. */
-export function downloadLabel(manifest) {
-  return `Download ${downloadName(manifest)}`;
+export function downloadLabel(manifest, lang = 'en') {
+  return stringsFor(lang).downloadLabel(downloadName(manifest));
 }
