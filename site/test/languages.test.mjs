@@ -119,3 +119,35 @@ test('every active language has its home page, tagged with its own <html lang>',
     assert.match(html, new RegExp(`<html lang="${htmlLang(lang)}">`), lang);
   }
 });
+
+// The English reserve sentence has no actor: the reserve is part of the throwaway account's own balance,
+// held by the ledger's rules. A translation must not make the network the one who takes or gives it.
+test('the reserve sentence names no actor that holds or returns the reserve, in any language', () => {
+  const actor = /bindet das Netzwerk|gibt es .* zurück|la red retiene|devuelve|a rede retém|devolve|сеть удерживает|网络.{0,3}(锁定|退还)/;
+  for (const lang of ACTIVE_LANGS) {
+    const reserve = PRICE_STRINGS[lang].reserve({ held: 'HELD', returned: 'RETURNED', kept: 'KEPT' });
+    assert.doesNotMatch(reserve, actor, lang);
+  }
+});
+
+// English says "right now" or "just now" only where the string is about a moment (a failed read, a missing
+// price table) and nothing for a file that is not in the ledger; the other languages follow it string by string.
+test('"save unavailable" carries no time qualifier in any language, as in English', () => {
+  const qualifier = /\b(now|right now|just now)\b|сейчас|gerade|ahora|agora|暂时|目前|刚才/;
+  for (const lang of ACTIVE_LANGS) assert.doesNotMatch(TABLES[lang].saveUnavailable, qualifier, lang);
+});
+
+test('the German pages define "Chunk" before they use it bare', async () => {
+  const home = await readFile(new URL('../src/de/index.html', import.meta.url), 'utf8');
+  const first = home.indexOf('Chunk');
+  assert.ok(first > 0);
+  assert.match(home.slice(first - 10, first + 12), /\(Chunks\)/, 'the first use is the explained one');
+  assert.match(TABLES.de.howText, /^[^C]*\(Chunks\)/, 'the file page explains it at first use');
+});
+
+test('the Chinese home says 条目 for the ledger entry throughout, not 记录, and does not say the company went bankrupt', async () => {
+  const home = await readFile(new URL('../src/zh/index.html', import.meta.url), 'utf8');
+  assert.ok(home.includes('条目'));
+  assert.ok(!home.includes('记录'));
+  assert.ok(!home.includes('倒闭'));
+});

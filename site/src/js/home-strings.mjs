@@ -179,7 +179,7 @@ const CLOUD_STRINGS = {
           reading: `Nube de puntos de un tramo del XRP Ledger. Los fragmentos del archivo aparecen en ella como cubos mientras se leen${count}`,
           developing: `Nube de puntos de un tramo del XRP Ledger. Se están comprobando todos los bloques${count}`,
           done: `Nube de puntos de un tramo del XRP Ledger. El archivo se ha leído del ledger y está comprobado${count}`,
-          failed: 'Ahora mismo no se pudo leer el archivo del ledger',
+          failed: 'Ahora mismo no se puede leer el archivo del ledger',
         }[phase];
       },
       caption: ({ chunks, firstLedger, lastLedger }) =>
@@ -190,7 +190,7 @@ const CLOUD_STRINGS = {
         if (['NodeLacksHistory', 'ManifestNotFound', 'ChunkMissing', 'Incomplete'].includes(code)) {
           return 'Este archivo no está disponible ahora mismo en el ledger.';
         }
-        return 'Ahora mismo no se pudo leer el archivo.';
+        return 'Ahora mismo no se puede leer el archivo.';
       },
       fileLinkLabel: 'Abrir la página del archivo',
       verified: 'comprobado',
@@ -257,7 +257,7 @@ const CLOUD_STRINGS = {
           reading: `XRP Ledger 一段区间的点云。文件的分片在读取时以立方体的形式出现在其中${count}`,
           developing: `XRP Ledger 一段区间的点云。正在校验每一个数据块${count}`,
           done: `XRP Ledger 一段区间的点云。文件已从账本读取并通过校验${count}`,
-          failed: '暂时无法从账本读取该文件',
+          failed: '刚才未能从账本读取该文件',
         }[phase];
       },
       caption: ({ chunks, firstLedger, lastLedger }) =>
@@ -266,9 +266,9 @@ const CLOUD_STRINGS = {
         if (code === 'NodeUnreachable' || code === 'Stalled') return 'XRP Ledger 节点没有响应。请刷新页面重试。';
         if (code === 'BlockMismatch' || code === 'DecodeFailed') return '文件未通过校验，因此不显示。';
         if (['NodeLacksHistory', 'ManifestNotFound', 'ChunkMissing', 'Incomplete'].includes(code)) {
-          return '该文件暂时无法从账本读取。';
+          return '该文件目前无法从账本读取。';
         }
-        return '暂时无法读取该文件。';
+        return '刚才未能读取该文件。';
       },
       fileLinkLabel: '打开文件页面',
       verified: '已校验',
@@ -358,7 +358,7 @@ export const PRICE_STRINGS = {
     returned: 'Reserve, zurückgegeben',
     unit: 'XRP',
     reserve: ({ held, returned, kept }) =>
-      `Während eine Datei veröffentlicht wird, bindet das Netzwerk ${held} XRP als Reserve eines Einmalkontos. Wird das Konto gelöscht, gibt es ${returned} XRP zurück. Der Rest, ${kept} XRP, bleibt beim Netzwerk, als Preis für das Löschen des Kontos, unabhängig von der Dateigröße.`,
+      `Solange eine Datei veröffentlicht wird, ist ein Betrag von ${held} XRP als Reserve eines Einmalkontos gebunden. Wird das Konto gelöscht, kommen ${returned} XRP zurück. Der Rest, ${kept} XRP, bleibt beim Netzwerk, als Preis für das Löschen des Kontos, unabhängig von der Dateigröße.`,
     source: ({ network, date }) =>
       `Angaben aus ${NETWORK_NAMES.de[network] ?? network} vom ${date}. Gebühren und Reserven legt das Netzwerk fest, und sie können sich ändern.`,
   },
@@ -370,7 +370,7 @@ export const PRICE_STRINGS = {
     returned: 'Reserva, devuelta',
     unit: 'XRP',
     reserve: ({ held, returned, kept }) =>
-      `Mientras se publica un archivo, la red retiene ${held} XRP como reserva de una cuenta desechable. Cuando la cuenta se elimina, devuelve ${returned} XRP. El resto, ${kept} XRP, se queda en la red como precio de eliminar la cuenta, sea cual sea el tamaño del archivo.`,
+      `Mientras se publica un archivo, queda retenido un importe de ${held} XRP como reserva de una cuenta desechable. Cuando la cuenta se elimina, se recuperan ${returned} XRP. El resto, ${kept} XRP, se queda en la red como precio de eliminar la cuenta, sea cual sea el tamaño del archivo.`,
     source: ({ network, date }) =>
       `Datos de ${NETWORK_NAMES.es[network] ?? network} a fecha de ${date}. La red fija las comisiones y las reservas, y pueden cambiar.`,
   },
@@ -382,7 +382,7 @@ export const PRICE_STRINGS = {
     returned: 'Reserva, devolvida',
     unit: 'XRP',
     reserve: ({ held, returned, kept }) =>
-      `Enquanto um arquivo é publicado, a rede retém ${held} XRP como reserva de uma conta descartável. Quando a conta é excluída, devolve ${returned} XRP. O restante, ${kept} XRP, fica com a rede como preço da exclusão da conta, seja qual for o tamanho do arquivo.`,
+      `Enquanto um arquivo é publicado, fica retido um valor de ${held} XRP como reserva de uma conta descartável. Quando a conta é excluída, voltam ${returned} XRP. O restante, ${kept} XRP, fica com a rede como preço da exclusão da conta, seja qual for o tamanho do arquivo.`,
     // The network phrase carries its own "da" ("de" + "a rede"), so an unnamed network gets one too.
     source: ({ network, date }) =>
       `Dados ${NETWORK_NAMES.pt[network] ?? `da rede ${network}`} em ${date}. A rede define as taxas e as reservas, e elas podem mudar.`,
