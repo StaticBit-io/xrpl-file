@@ -567,6 +567,35 @@ test('a block that cannot be read is an error of the open, not a file without Cu
   );
 });
 
+/** A `readBlock` that answers every block but the head with one byte too few, the way a faulty reader would. */
+function shortReads(source) {
+  const reads = [];
+  return { reads, readBlock: async (index) => { reads.push(index); return source.block(index).slice(0, -1); } };
+}
+
+test('a block of the wrong length is an error of the open, not a WebM without Cues', async () => {
+  const source = blocksOf(read('clip.webm'));
+  const short = shortReads(source);
+
+  await assert.rejects(
+    () => open('webm', source, { readBlock: short.readBlock }),
+    /block \d+ has \d+ bytes, expected \d+/,
+  );
+  assert.deepEqual(short.reads, [Math.floor(parseWebmHead(source.head).cuesOffset / BLOCK)]);
+});
+
+test('a block of the wrong length is an error of the open, not a fragmented MP4 without a sidx', async () => {
+  // The moov (32..1330) is all in block 0; the sidx (1330..1394) runs into block 1.
+  const source = blocksOf(read('fragmented-sidx.mp4'), 1340);
+  const short = shortReads(source);
+
+  await assert.rejects(
+    () => open('iso', source, { readBlock: short.readBlock }),
+    /block 1 has \d+ bytes, expected \d+/,
+  );
+  assert.deepEqual(short.reads, [1]);
+});
+
 test('openFeed refuses what it cannot work with', async () => {
   const source = blocksOf(read('plain-start.mp4'));
 

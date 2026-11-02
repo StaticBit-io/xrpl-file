@@ -98,7 +98,11 @@ function blockSource({ head, readBlock, blockBytes, size }) {
     }
 
     const expected = Math.min(blockBytes, size - index * blockBytes);
-    if (bytes.length !== expected) throw new Error(`block ${index} has ${bytes.length} bytes, expected ${expected}`);
+    if (bytes.length !== expected) {
+      // Recorded like a failed read, so `optional` does not take a block of the wrong size for a file without the index.
+      failure = new Error(`block ${index} has ${bytes.length} bytes, expected ${expected}`);
+      throw failure;
+    }
 
     recent.set(index, bytes);
     if (recent.size > 2) recent.delete(recent.keys().next().value);
