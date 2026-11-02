@@ -375,6 +375,14 @@
   bottom: var(--space-3);
   width: min(11rem, 46%);
   padding: var(--space-2);
+  border: var(--rule-hair) solid var(--rule-2);
+  background: var(--scrim);
+}
+
+/* The logo's pale facets all but vanish on the light ground, so there the frame takes the step darker
+   paper of the quiet bands: still the site's own ground, not a box of another colour. */
+:root[data-theme="light"] .hero-card {
+  background: var(--paper-3);
 }
 
 .hero-card xrpl-file {
