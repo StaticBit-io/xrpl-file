@@ -487,6 +487,8 @@ export function mountCloud(canvas, options, env = {}) {
     element.setAttribute('src', linkText);
     element.setAttribute('caption', 'off');
     element.setAttribute('loading', 'eager');
+    // The logo is a transparent PNG: it sits on the card, not on the element's own box.
+    element.setAttribute('background', 'transparent');
     if (options.aspect) element.style.aspectRatio = String(options.aspect);
     const line = doc.createElement('p');
     line.className = 'hero-card__line';

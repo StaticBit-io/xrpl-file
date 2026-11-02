@@ -243,6 +243,7 @@ test('a verified read shows the card with the file, "verified" and the link to i
   assert.equal(element.tag, 'xrpl-file');
   assert.equal(element.attrs.src, LINK);
   assert.equal(element.attrs.caption, 'off');
+  assert.equal(element.attrs.background, 'transparent', 'the transparent logo sits on the card');
   assert.equal(element.attrs.theme, 'dark', 'the element follows the site theme');
   assert.equal(element.style.aspectRatio, String(1422 / 1231));
   assert.equal(textOf(line.children[0]), 'verified');

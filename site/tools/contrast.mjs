@@ -138,12 +138,12 @@ export function elementRows(css, readme, baseCss = readFileSync(BASE_PATH, 'utf8
   const rows = [];
   for (const [theme, selector] of [['Light', ':root[data-theme="light"]'], ['Dark', ':root[data-theme="dark"]']]) {
     const site = readThemeTokens(css, selector);
-    // The file page puts the element in a --paper-2 frame. base.css replaces the element's accent and the
-    // text on it with the page's, in both themes; every other colour is the documented palette.
+    // The file page puts the element in a --paper-2 frame. base.css replaces the element's accent, the
+    // text on it and its muted text with the page's, in both themes; every other colour is the documented palette.
     const paper = { name: `site --paper-2 (${theme.toLowerCase()})`, color: parseColor(site['paper-2']) };
     const palette = { ...palettes[theme] };
     const fromSite = new Set();
-    for (const name of ['accent', 'on-accent']) {
+    for (const name of ['accent', 'on-accent', 'muted']) {
       if (overrides[name]) { palette[name] = site[overrides[name]]; fromSite.add(name); }
     }
     const colour = (name) => ({ name: `--xrpl-file-${name}${fromSite.has(name) ? ' (site)' : ''}`, color: parseColor(palette[name]) });
@@ -159,6 +159,19 @@ export function elementRows(css, readme, baseCss = readFileSync(BASE_PATH, 'utf8
       : { name: 'track rgba(255,255,255,.15) over --xrpl-file-background', color: over([1, 1, 1], 0.15, parseColor(palette.background)) };
     rows.push(row(group, 'ui', 'Progress fill against its track', colour('accent'), trackOver, UI));
     rows.push(row(group, 'info', 'Element box against its frame (a picture frame: not a control, exempt)', colour('background'), paper, null));
+
+    // background="transparent" (the hero card, a picture on the file page) drops the box, so whatever the
+    // element draws before the picture arrives (loader, notes, an error) sits on the site's own ground:
+    // the file page's --paper-2, and the hero card's --paper under its scrim (dark) or --paper-3 (light).
+    const pageGrounds = [paper, theme === 'Light'
+      ? { name: 'site --paper-3 (light, hero card)', color: parseColor(site['paper-3']) }
+      : { name: 'site --paper (dark, hero card)', color: parseColor(site.paper) }];
+    for (const ground of pageGrounds) {
+      rows.push(row(group, 'text', `Transparent box: names, percentages, badge on the ${ground.name}`, colour('foreground'), ground, TEXT));
+      rows.push(row(group, 'text', `Transparent box: sizes, progress details, notes on the ${ground.name}`, colour('muted'), ground, TEXT));
+      rows.push(row(group, 'text', `Transparent box: error message on the ${ground.name}`, colour('danger'), ground, TEXT));
+      rows.push(row(group, 'ui', `Transparent box: buttons, progress, focus ring on the ${ground.name}`, colour('accent'), ground, UI));
+    }
 
     // The overlay (caption, progress over a cover, idle cover) is dark in both themes. It draws
     // --xrpl-file-overlay-accent, else --xrpl-file-accent when the host sets it, else the element's #4da3ff.

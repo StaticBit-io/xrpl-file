@@ -172,6 +172,10 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
 
   element.addEventListener('load', (event) => {
     detail = event.detail ?? {};
+    // A picture with transparent parts shows on the page itself. Until it loads, and for any other
+    // type, the box stays: the loader, a message, a text file or a video need a ground of their own.
+    if (typeof detail.type === 'string' && detail.type.startsWith('image/')) element.setAttribute('background', 'transparent');
+    else element.removeAttribute('background');
     render();
     syncButton();
   });

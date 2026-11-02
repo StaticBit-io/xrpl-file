@@ -388,7 +388,6 @@
 .hero-card xrpl-file {
   display: block;
   width: 100%;
-  --xrpl-file-background: transparent;
   --xrpl-file-radius: 0;
 }
 

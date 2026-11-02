@@ -181,6 +181,9 @@ xrpl-file {
   --xrpl-file-on-accent: var(--accent-ink);
   --xrpl-file-overlay-accent: var(--overlay-accent);
   --xrpl-file-overlay-on-accent: var(--overlay-on-accent);
+  /* With background="transparent" the element's notes sit on the site's own ground; its own light grey
+     falls to 4.44:1 on the light hero card, the site's muted ink holds 4.5:1 on every ground. */
+  --xrpl-file-muted: var(--ink-muted);
 }
 
 @media (prefers-reduced-motion: reduce) {

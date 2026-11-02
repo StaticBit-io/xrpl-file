@@ -51,6 +51,7 @@ test('base.css gives the element the page accent for its frame and a lime for it
     'on-accent': 'accent-ink',
     'overlay-accent': 'overlay-accent',
     'overlay-on-accent': 'overlay-on-accent',
+    muted: 'ink-muted',
   });
 });
 

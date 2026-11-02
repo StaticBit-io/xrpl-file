@@ -43,6 +43,7 @@ class FakeFile extends EventTarget {
   }
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.has(name) ? this.attributes.get(name) : null; }
+  removeAttribute(name) { this.attributes.delete(name); }
   save() {
     this.saves += 1;
     return this.outcome();
@@ -175,6 +176,29 @@ test('the page renders the element with the link, no caption and the page theme'
   assert.equal(doc.nodes['file-page'].hidden, false);
   assert.equal(doc.nodes['invalid-page'].hidden, true);
   assert.equal(doc.nodes['file-link'].textContent, LINK);
+});
+
+test('a picture loads without the box, and the box stays before load and for every other type', () => {
+  const { doc } = open(CANONICAL);
+  assert.equal(doc.file.getAttribute('background'), null, 'the loader and any message keep the box');
+  doc.file.load(DETAIL);
+  assert.equal(doc.file.getAttribute('background'), 'transparent');
+  for (const type of ['image/png', 'image/svg+xml', 'image/gif']) {
+    const page = open(CANONICAL);
+    page.doc.file.load({ ...DETAIL, type });
+    assert.equal(page.doc.file.getAttribute('background'), 'transparent', type);
+  }
+  for (const type of ['video/mp4', 'text/plain', 'application/pdf', 'imagery/x', undefined]) {
+    const page = open(CANONICAL);
+    page.doc.file.load({ ...DETAIL, type });
+    assert.equal(page.doc.file.getAttribute('background'), null, String(type));
+  }
+});
+
+test('a file that fails to load keeps the box', () => {
+  const { doc } = open(CANONICAL);
+  doc.file.fail();
+  assert.equal(doc.file.getAttribute('background'), null);
 });
 
 test('the theme is dark when the page has not set one, and light only when the page says so', () => {
