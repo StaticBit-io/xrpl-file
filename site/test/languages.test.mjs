@@ -137,6 +137,20 @@ test('"save unavailable" carries no time qualifier in any language, as in Englis
   for (const lang of ACTIVE_LANGS) assert.doesNotMatch(TABLES[lang].saveUnavailable, qualifier, lang);
 });
 
+// The one string that does speak of a moment: the price fallback says it is not available right now.
+// Chinese 暂时 ("for the time being") reads as a promise that it will come back; 目前 states the moment.
+test('the price fallback hint says "right now" in every language, as in English', async () => {
+  const moment = { en: /right now/, ru: /сейчас/, de: /gerade/, es: /ahora mismo/, pt: /agora/, zh: /目前/ };
+  for (const lang of ACTIVE_LANGS) {
+    const html = await readFile(new URL(`../src/${lang === 'en' ? '' : `${lang}/`}index.html`, import.meta.url), 'utf8');
+    const hint = html.match(/<div id="price-data"[^>]*><p class="hint">(.*?)<\/p>/)?.[1];
+    assert.ok(hint, `${lang} price fallback hint`);
+    assert.match(hint, moment[lang], lang);
+  }
+  const zh = await readFile(new URL('../src/zh/index.html', import.meta.url), 'utf8');
+  assert.ok(!zh.includes('暂时'), 'zh: 暂时 promises a return');
+});
+
 test('the German pages define "Chunk" before they use it bare', async () => {
   const home = await readFile(new URL('../src/de/index.html', import.meta.url), 'utf8');
   const first = home.indexOf('Chunk');
