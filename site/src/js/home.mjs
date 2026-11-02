@@ -40,16 +40,32 @@ function initHero(document, lang) {
   });
 }
 
-function initPublisher(document) {
+/** @param {string|null} [url] the release URL; injectable so a test need not edit config.mjs */
+export function initPublisher(document, url = PUBLISHER_URL) {
   const button = document.getElementById('publisher');
-  if (!button || PUBLISHER_URL === null) return;
+  if (!button || url === null) return;
   // The button is disabled in the HTML; a configured release URL turns it into a plain link.
   const link = document.createElement('a');
   link.id = button.id;
   link.className = button.className;
-  link.href = PUBLISHER_URL;
+  link.href = url;
   link.textContent = button.querySelector('[data-label]')?.textContent ?? button.textContent;
   button.replaceWith(link);
+}
+
+/** The "read from the ledger on <date>" line, with the date as a <time> element wherever the translation put it. */
+export function priceSource(document, sentence, date, takenAt) {
+  const source = element(document, 'p', undefined, 'price-source');
+  const at = sentence.indexOf(date);
+  // A translation that rephrases the date away must still show the sentence whole.
+  if (at < 0) {
+    source.textContent = sentence;
+    return source;
+  }
+  const time = element(document, 'time', date);
+  time.dateTime = takenAt;
+  source.append(sentence.slice(0, at), time, sentence.slice(at + date.length));
+  return source;
 }
 
 function renderPrice(document, container, json, lang) {
@@ -100,14 +116,8 @@ function renderPrice(document, container, json, lang) {
       ),
     );
   }
-  const source = element(document, 'p', undefined, 'price-source');
   const date = formatDate(json.takenAt, lang);
-  const time = element(document, 'time', date);
-  time.dateTime = json.takenAt;
-  const sentence = strings.source({ network: json.network, date });
-  const at = sentence.indexOf(date);
-  source.append(sentence.slice(0, at), time, sentence.slice(at + date.length));
-  nodes.push(source);
+  nodes.push(priceSource(document, strings.source({ network: json.network, date }), date, json.takenAt));
   container.replaceChildren(...nodes);
 }
 

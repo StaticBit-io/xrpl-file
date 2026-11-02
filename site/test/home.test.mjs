@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { HERO_ASPECT, HERO_LINK, PUBLISHER_URL } from '../src/js/config.mjs';
+import './support/register-reader.mjs';
+import { HERO_ASPECT, HERO_LINK } from '../src/js/config.mjs';
 
 import { ACTIVE_LANGS, htmlLang } from '../src/js/languages.mjs';
 
@@ -10,10 +11,9 @@ const pages = Object.fromEntries(await Promise.all(ACTIVE_LANGS.map(async (lang)
 
 const ids = (html) => [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]).sort();
 
-test('config holds the hero file (the transparent StaticBit logo), its aspect and an unset publisher URL', () => {
+test('config holds the hero file (the transparent StaticBit logo) and its aspect', () => {
   assert.equal(HERO_LINK, 'xrpl-file://testnet/2AEB485BB0FAECA2DF4B60F196D5199042288FEB124ED8D95F4313CF06200DB4');
   assert.equal(HERO_ASPECT, 1422 / 1231);
-  assert.equal(PUBLISHER_URL, null);
 });
 
 test('the hero markup has what the point cloud draws into, in both languages', () => {
@@ -160,4 +160,68 @@ test('the home pages spell no canonical or hreflang by hand: the build writes th
   for (const [lang, html] of Object.entries(pages)) {
     assert.ok(!/rel="canonical"|rel="alternate"|hreflang/.test(html), lang);
   }
+});
+
+// Just enough of a document for initPublisher: the button, and nodes that remember what was set on them.
+function publisherDocument() {
+  const replaced = [];
+  const button = {
+    id: 'publisher',
+    className: 'btn',
+    textContent: 'Download soon',
+    querySelector: (selector) => (selector === '[data-label]' ? { textContent: 'Download' } : null),
+    replaceWith: (node) => replaced.push(node),
+  };
+  const document = {
+    getElementById: (id) => (id === 'publisher' ? button : null),
+    createElement: (tag) => ({ tag }),
+  };
+  return { document, replaced };
+}
+
+test('without a release URL the publisher button stays as the page ships it', async () => {
+  const { initPublisher } = await import('../src/js/home.mjs');
+  const { document, replaced } = publisherDocument();
+  initPublisher(document, null);
+  assert.deepEqual(replaced, []);
+});
+
+test('with a release URL the publisher button becomes a link to it', async () => {
+  const { initPublisher } = await import('../src/js/home.mjs');
+  const { document, replaced } = publisherDocument();
+  initPublisher(document, 'https://github.com/example/releases/latest');
+  assert.equal(replaced.length, 1);
+  assert.equal(replaced[0].tag, 'a');
+  assert.equal(replaced[0].href, 'https://github.com/example/releases/latest');
+  assert.equal(replaced[0].id, 'publisher');
+  assert.equal(replaced[0].textContent, 'Download', 'the "soon" tag is left behind');
+});
+
+test('the shipped config keeps the page honest: with no release URL the button is the disabled one', async () => {
+  const { PUBLISHER_URL } = await import('../src/js/config.mjs');
+  const shipsDisabled = Object.values(pages).every((html) => /<button id="publisher"[^>]* disabled[ >]/.test(html));
+  assert.ok(PUBLISHER_URL !== null || shipsDisabled, 'a null PUBLISHER_URL needs the disabled button in every page');
+});
+
+function sourceDocument() {
+  return {
+    createElement: (tag) => ({ tag, children: [], append(...nodes) { this.children.push(...nodes); } }),
+  };
+}
+
+test('the price source line wraps the date in a <time> element where the sentence has it', async () => {
+  const { priceSource } = await import('../src/js/home.mjs');
+  const line = priceSource(sourceDocument(), 'Read from mainnet on 2 Nov 2026.', '2 Nov 2026', '2026-11-02T10:00:00Z');
+  assert.equal(line.children[0], 'Read from mainnet on ');
+  assert.equal(line.children[1].tag, 'time');
+  assert.equal(line.children[1].textContent, '2 Nov 2026');
+  assert.equal(line.children[1].dateTime, '2026-11-02T10:00:00Z');
+  assert.equal(line.children[2], '.');
+});
+
+test('the price source line shows the sentence whole when the date is not in it', async () => {
+  const { priceSource } = await import('../src/js/home.mjs');
+  const line = priceSource(sourceDocument(), 'Read from mainnet recently.', '2 Nov 2026', '2026-11-02T10:00:00Z');
+  assert.equal(line.textContent, 'Read from mainnet recently.');
+  assert.deepEqual(line.children, []);
 });
