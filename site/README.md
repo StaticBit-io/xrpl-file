@@ -56,7 +56,7 @@ the root of `dist/`.
 | Rule | Meaning | nginx |
 |---|---|---|
 | `/ru/:file /ru/:file 200`, and the same for `/de`, `/es`, `/pt`, `/zh`, `/js`, `/css`, `/data`, `/fonts`, `/img` | Static files in a two-segment folder are served as themselves. All five language folders are listed (see [Languages](#languages)). | `location ~ ^/(ru\|de\|es\|pt\|zh\|js\|css\|data\|fonts\|img)/ { try_files $uri =404; }` |
-| `/:network/:hash /file 200` | A file link path (`/testnet/<HASH>`, `/21338/<HASH>`) is answered by the one static file page (`file.html`), without changing the URL. The page reads the path. The target is the extension-less `/file`: Pages applies its HTML handling to a rewritten target too, so a target spelled `/file.html` is answered with a redirect to `/file` and the link in the path is lost. | `location ~* ^/(mainnet|testnet|devnet|[0-9]+)/[0-9a-f]{64}/?$ { try_files /file.html =404; }` |
+| `/:network/:hash /file 200` | A file link path (`/testnet/<HASH>`, `/21338/<HASH>`) is answered by the one static file page (`file.html`), without changing the URL. The page reads the path. The target is the extension-less `/file`: Pages applies its HTML handling to a rewritten target too, so a target spelled `/file.html` is answered with a redirect to `/file` and the link in the path is lost. | `location ~* "^/(mainnet\|testnet\|devnet\|[0-9]+)/[0-9a-f]{64}/?$" { try_files /file.html =404; }` |
 | `/:network/:hash/ /file 200` | The same with a trailing slash. | the `/?` in the pattern above |
 
 The nginx pattern is stricter than Pages. Pages sends any two-segment path that no earlier rule
@@ -114,6 +114,10 @@ every unknown path with `index.html`. The site needs a real `404.html`.
 |---|---|---|
 | `/element/*`: `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` | The element build is versioned in its path and never changes. Embedding sites fetch `mp4box.min.js` from it cross-origin. | `location /element/ { add_header Access-Control-Allow-Origin "*" always; add_header Cache-Control "public, max-age=31536000, immutable" always; }` |
 | `/`, `/ru/`, `/de/`, `/es/`, `/pt/`, `/zh/`, `/*.html`: `Cache-Control: no-cache` | Pages are revalidated on every load. | `location = / { add_header Cache-Control "no-cache" always; }` and the same for `= /ru/` and the other language homes, and `~ \.html$` |
+
+The `/*` block sets `X-Content-Type-Options: nosniff` for every path: the site's files are served with
+their real types, so a browser has no reason to guess. nginx: `add_header X-Content-Type-Options "nosniff" always;`
+in the server block (repeated in each `location` that has its own `add_header`).
 
 Pages joins the values of a header that several matching blocks set with a comma
 ([Pages, Headers](https://developers.cloudflare.com/pages/configuration/headers/)), so the blocks above
@@ -202,7 +206,10 @@ First visit: the inline script in `<head>` (`prePaintScript` in `chrome-markup.m
 the query and the fragment, when the stored choice (else the first matching browser language) is not
 English. It never acts on `/ru/` or any other path, for a visitor who arrives from this site (so the
 one who picks English in the menu with storage blocked does not bounce back), or when the stored choice
-is English. A test pins its choice against `getLang`. The build refuses a `src/<lang>/` folder for a
+is English. The "arrives from this site" test reads `document.referrer`, so it relies on the browser sending a
+same-origin `Referer`: a `Referrer-Policy: no-referrer` header (or meta tag) would empty it and the visitor who
+just chose English with storage blocked would be redirected back. Keep the policy at the browser default
+(`strict-origin-when-cross-origin`) or looser. A test pins its choice against `getLang`. The build refuses a `src/<lang>/` folder for a
 language that is not active, and an active language without its `src/<lang>/index.html`.
 
 ### Adding a language
