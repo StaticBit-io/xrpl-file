@@ -159,7 +159,7 @@ export class XrplFileElement extends HTMLElement {
         break;
       case 'loader':
         this.#loaderOn = parseLoader(value);
-        this.#showPhase(this.#phase);
+        this.#applyLoader();
         break;
       case 'loading':
         // Only a start that has not happened yet can still follow the new mode.
@@ -620,6 +620,16 @@ export class XrplFileElement extends HTMLElement {
     // With the loader off the box stays empty, so the site's own placeholder behind it shows through.
     p.frame.classList.toggle('bare', phase === 'loading' && !this.#loaderOn);
     this.#renderCaption();
+  }
+
+  /**
+   * Only the loading view and the bare box depend on the loader. Showing the current phase again would
+   * reveal the idle view of an element that has read nothing yet, whose Open button has no record to open.
+   */
+  #applyLoader() {
+    const p = this.#parts;
+    p.loading.hidden = this.#phase !== 'loading' || !this.#loaderOn;
+    p.frame.classList.toggle('bare', this.#phase === 'loading' && !this.#loaderOn);
   }
 
   #showLoading(lines, percent) {

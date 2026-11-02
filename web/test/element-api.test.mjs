@@ -572,3 +572,57 @@ test('the copy button and its feedback follow the language', async () => {
   assert.equal(part(element, 'copy').dataset.state, 'failed');
   element.disconnectedCallback();
 });
+
+const VIEW_IDS = ['idle', 'loading', 'image', 'video', 'text', 'download', 'error'];
+const shownViews = (element) => VIEW_IDS.filter((id) => !part(element, id).hidden);
+
+test('loader toggled live does not show the idle view of an element that has nothing to open yet', async () => {
+  // A lazy element waits for the page to scroll near it; an observer that never reports keeps it there.
+  const realObserver = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = class { observe() {} disconnect() {} };
+  try {
+    const element = mount(fakeHandle(), { src: LINK });
+    element.connectedCallback();
+    assert.deepEqual(shownViews(element), [], 'waiting: no view yet');
+
+    element.setAttribute('loader', 'false');
+    assert.deepEqual(shownViews(element), [], 'the empty idle view stays hidden, its Open button would do nothing');
+    assert.equal(part(element, 'frame').classList.contains('bare'), false);
+
+    element.setAttribute('loader', 'true');
+    assert.deepEqual(shownViews(element), []);
+    element.disconnectedCallback();
+  } finally {
+    if (realObserver === undefined) delete globalThis.IntersectionObserver;
+    else globalThis.IntersectionObserver = realObserver;
+  }
+});
+
+test('loader toggled live shows or hides the loading view and bares the box while a file is loading', () => {
+  const element = mount(fakeHandle({ hang: true }));
+  element.connectedCallback();
+  assert.deepEqual(shownViews(element), ['loading']);
+  assert.equal(part(element, 'frame').classList.contains('bare'), false);
+
+  element.setAttribute('loader', 'false');
+  assert.deepEqual(shownViews(element), [], 'the box stays empty for the site\'s own placeholder');
+  assert.equal(part(element, 'frame').classList.contains('bare'), true);
+
+  element.setAttribute('loader', 'true');
+  assert.deepEqual(shownViews(element), ['loading']);
+  assert.equal(part(element, 'frame').classList.contains('bare'), false);
+  element.disconnectedCallback();
+});
+
+test('loader toggled live leaves the idle view of a click-to-load element in place', async () => {
+  const element = mount(fakeHandle(), { src: LINK, loading: 'click' });
+  element.connectedCallback();
+  await later();
+  assert.deepEqual(shownViews(element), ['idle']);
+
+  element.setAttribute('loader', 'false');
+  assert.deepEqual(shownViews(element), ['idle']);
+  element.setAttribute('loader', 'true');
+  assert.deepEqual(shownViews(element), ['idle']);
+  element.disconnectedCallback();
+});
