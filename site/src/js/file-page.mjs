@@ -181,11 +181,13 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
   button.addEventListener('click', async () => {
     if (button.disabled) return;
     saving = true;
-    result = null;
+    // Saving a large file takes a while and the button is disabled meanwhile, so the line says why.
+    result = { key: 'downloadSaving' };
     syncButton();
     renderStatus();
     try {
       const outcome = await element.save();
+      result = null;
       // 'cancelled' (the dialog was closed) and anything unexpected leave the line empty: only
       // an outcome the element reported as done may say so.
       if (outcome === 'saved') result = { key: 'downloadSaved' };

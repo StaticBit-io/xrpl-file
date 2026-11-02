@@ -210,6 +210,8 @@ test('Download saves through the element and reports how it went', async () => {
 
   button.click();
   assert.equal(button.disabled, true, 'busy while saving');
+  assert.equal(status.textContent, 'Saving…', 'the disabled button is explained while a save runs');
+  assert.equal(status.dataset.state, 'ok');
   await settle();
   assert.equal(doc.file.saves, 1);
   assert.equal(status.textContent, 'Saved.');
