@@ -584,8 +584,7 @@ export function readTopLevel(bytes, at, final, resume = 0) {
   }
 
   // No size: the children are walked until one belongs to the Segment, so the Cluster is as long as its children are.
-  if (bytes.length - at > MAX_CLUSTER_BYTES) throw new RangeError(`the Cluster at byte ${at} runs past ${MAX_CLUSTER_BYTES} bytes`);
-
+  // The limit is on that length, not on the bytes held, which may run on into elements after the Cluster.
   let child = Math.max(at + resume, header.dataStart);
   while (child < bytes.length) {
     let element;
@@ -600,6 +599,8 @@ export function readTopLevel(bytes, at, final, resume = 0) {
     if (element.size === UNKNOWN_SIZE) {
       throw new RangeError(`the element at byte ${child} has no size, which only a Segment or Cluster may`);
     }
+    // A child still arriving counts at its full length, so a size that promises more than a Cluster may hold ends the wait.
+    if (element.end - at > MAX_CLUSTER_BYTES) throw new RangeError(`the Cluster at byte ${at} runs past ${MAX_CLUSTER_BYTES} bytes`);
     if (element.end > bytes.length) break;
     child = element.end;
   }

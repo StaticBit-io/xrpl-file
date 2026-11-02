@@ -492,8 +492,33 @@ test('readTopLevel refuses an element of unknown size that is not a Cluster, and
   assert.throws(() => readTopLevel(concat(idBytes(0x1f43b675), sizeOf(64 * 1024 * 1024)), 0, false), RangeError);
 });
 
+const OVER_LIMIT = 32 * 1024 * 1024 + 64;
+
 test('readTopLevel stops an unknown-size Cluster that keeps growing past what a Cluster can hold', () => {
-  const grown = new Uint8Array(32 * 1024 * 1024 + 64);
-  grown.set(concat(idBytes(0x1f43b675), UNKNOWN_SIZE_BYTES));
+  // One well-formed child that alone is longer than a Cluster may be, so the walk itself finds the Cluster too long.
+  const grown = concat(idBytes(0x1f43b675), UNKNOWN_SIZE_BYTES, element(0xec, new Uint8Array(OVER_LIMIT)));
   assert.throws(() => readTopLevel(grown, 0, false), /Cluster/);
+  assert.throws(() => readTopLevel(grown, 0, true), /Cluster/);
+
+  // The same when the next Segment child follows, which is where a Cluster that size would otherwise be handed back.
+  assert.throws(() => readTopLevel(concat(grown, element(0x1c53bb6b)), 0, false), /Cluster/);
+
+  // A child that only promises to be that long ends the wait before its bytes have arrived.
+  const promised = concat(idBytes(0x1f43b675), UNKNOWN_SIZE_BYTES, idBytes(0xec), sizeOf(OVER_LIMIT), new Uint8Array(16));
+  assert.throws(() => readTopLevel(promised, 0, false), /Cluster/);
+});
+
+test('readTopLevel measures the Cluster, not the bytes after it', () => {
+  // 15 bytes of Cluster, then a Cues element holding more than a Cluster may: the data is long, the Cluster is not.
+  const small = concat(idBytes(0x1f43b675), UNKNOWN_SIZE_BYTES, uint(0xe7, 1));
+  assert.equal(small.length, 15);
+  const trailing = element(0x1c53bb6b, new Uint8Array(OVER_LIMIT));
+  assert.ok(trailing.length > 32 * 1024 * 1024);
+
+  assert.deepEqual(readTopLevel(concat(small, trailing), 0, false), { kind: 'cluster', end: small.length });
+  assert.deepEqual(readTopLevel(concat(small, trailing), 0, true), { kind: 'cluster', end: small.length });
+
+  // A Cluster that starts further in is measured from where it starts.
+  const lead = new Uint8Array(100);
+  assert.deepEqual(readTopLevel(concat(lead, small, trailing), lead.length, false), { kind: 'cluster', end: lead.length + small.length });
 });
