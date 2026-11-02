@@ -2,13 +2,28 @@ using Xrpl.Client;
 
 namespace XrplFile.App.Core;
 
-public sealed class XrplConnectionFactory(INodeSettingsStore settings) : IConnectionFactory
+public sealed class XrplConnectionFactory : IConnectionFactory
 {
+    private readonly INodeSettingsStore _settings;
+    private readonly Func<string, IXrplClient> _createClient;
+
+    public XrplConnectionFactory(INodeSettingsStore settings)
+        : this(settings, ClientKeeper.CreateClient)
+    {
+    }
+
+    /// <summary>For tests: a client that fails a connect in a chosen way without a node.</summary>
+    internal XrplConnectionFactory(INodeSettingsStore settings, Func<string, IXrplClient> createClient)
+    {
+        _settings = settings;
+        _createClient = createClient;
+    }
+
     public async Task<ILedgerConnection> ConnectAsync(string network, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(network);
 
-        string url = NodeEndpoint.Resolve(settings, network)
+        string url = NodeEndpoint.Resolve(_settings, network)
             ?? throw new XrplFileException(
                 XrplFileError.NodeUnreachable,
                 $"no node URL is known for the network '{network}'; add one in Settings");
@@ -17,7 +32,7 @@ public sealed class XrplConnectionFactory(INodeSettingsStore settings) : IConnec
 
         try
         {
-            client = ClientKeeper.CreateClient(url);
+            client = _createClient(url);
             await client.Connect(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -37,8 +52,10 @@ public sealed class XrplConnectionFactory(INodeSettingsStore settings) : IConnec
             }
 
             // Cancellation is not an unreachable node, and a caller that asked for the operation to stop
-            // must not be told the node is down.
-            if (ex is OperationCanceledException) throw;
+            // must not be told the node is down. Only the caller's own cancellation, though: one the
+            // SDK raised by itself (a connection wait it swept) is a connect that failed, and callers
+            // that catch XrplFileException alone would otherwise read it as their screen closing.
+            if (ex is OperationCanceledException && cancellationToken.IsCancellationRequested) throw;
 
             // Everything a failed WebSocket handshake can throw -- a refused connection, a DNS
             // failure, a TLS failure, a protocol error -- is the same fact to the person holding
