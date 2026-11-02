@@ -62,7 +62,7 @@ The `<xrpl-file>` element shows a file from the ledger on any web page: an image
 verified download for anything else. Build it, put the files of one version on a host, and add two lines:
 
 ```html
-<script src="https://<host>/1.1.0/xrpl-file-element.js" integrity="sha384-Lqg3pFsNq+zbyl+YXmgteWhKn0mXAJsfwqJA66c2ta3C4QYoh6kOlr/WLCpmF5g+" crossorigin="anonymous" defer></script>
+<script src="https://<host>/1.1.0/xrpl-file-element.js" integrity="sha384-4fGtb76PWktyhRAyWrIVbNPhx5aaS921oVm/8GEfyAaQ+nO8JlBmzVZ9InbG/Hr8" crossorigin="anonymous" defer></script>
 <xrpl-file src="xrpl-file://testnet/…"></xrpl-file>
 ```
 
