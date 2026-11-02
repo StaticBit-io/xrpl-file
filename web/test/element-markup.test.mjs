@@ -141,3 +141,16 @@ test('the download button is named by its visible word and then the file name, w
 test('the icon button shrinks to the box height so it cannot leave a 28 px box', () => {
   assert.match(STYLES, /\.download \.btn \{[^}]*height: min\(26px, calc\(100cqb - 6px\)\)/);
 });
+
+test('the overlay surfaces read their own accent, then the frame accent, then the dark default', () => {
+  const rule = STYLES.match(/\.caption, \.overlay, \.idle\.covered \{([^}]*)\}/)[1];
+  assert.match(rule, /--accent:\s*var\(--xrpl-file-overlay-accent,\s*var\(--xrpl-file-accent,\s*#4da3ff\)\);/);
+  assert.match(rule, /--on-accent:\s*var\(--xrpl-file-overlay-on-accent,\s*var\(--xrpl-file-on-accent,\s*#06121f\)\);/);
+});
+
+test('the frame accent does not read the overlay accent', () => {
+  const frame = STYLES.slice(STYLES.indexOf('.frame {'), STYLES.indexOf('.frame[data-theme="light"]'));
+  assert.match(frame, /--accent:\s*var\(--xrpl-file-accent,\s*var\(--t-accent\)\);/);
+  assert.match(frame, /--on-accent:\s*var\(--xrpl-file-on-accent,\s*var\(--t-on-accent\)\);/);
+  assert.doesNotMatch(frame, /overlay-accent|overlay-on-accent/);
+});

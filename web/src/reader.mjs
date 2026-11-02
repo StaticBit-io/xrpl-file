@@ -25,7 +25,7 @@ export class XrplFileReader {
 
   /**
    * `hooks` lets a caller watch the read as it happens: onManifest(manifest) once the manifest is
-   * decoded and checked, onChunk({ index, bytes }) for each accepted chunk with its absolute index,
+   * decoded and checked, onChunk({ index, bytes, ledger }) for each accepted chunk with its absolute index and the ledger index of the transaction that carried it,
    * onBlockVerified({ block, firstChunk, lastChunk }) once a block's hash has matched. A chunk is
    * reported before its block is verified, so a caller drawing chunks as they arrive must treat them
    * as unverified until the block's event.
@@ -206,7 +206,7 @@ export class XrplFileReader {
       if (decoded.length > manifest.chunk) continue;
 
       chunks[slot] = decoded;
-      onChunk({ index, bytes: decoded });
+      onChunk({ index, bytes: decoded, ledger: tx.ledgerIndex });
       if (++found === count) break;
     }
 

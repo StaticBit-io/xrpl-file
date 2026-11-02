@@ -22,7 +22,7 @@ function recorder() {
   const events = [];
   const hooks = {
     onManifest: (manifest) => events.push({ kind: 'manifest', manifest }),
-    onChunk: ({ index, bytes }) => events.push({ kind: 'chunk', index, bytes }),
+    onChunk: ({ index, bytes, ledger }) => events.push({ kind: 'chunk', index, bytes, ledger }),
     onBlockVerified: (info) => events.push({ kind: 'block', ...info }),
   };
   return { events, hooks };
@@ -44,6 +44,18 @@ test('onChunk receives every chunk index once with its bytes', async () => {
   for (const c of ordered) { joined.set(c.bytes, at); at += c.bytes.length; }
   assert.deepEqual(joined, await vectorFileBytes(vector.seed, vector.size));
   assert.deepEqual(joined, result.bytes);
+});
+
+test('onChunk reports the ledger the chunk transaction was validated in', async () => {
+  const { vector, source } = await fixture();
+  const { events, hooks } = recorder();
+  await new XrplFileReader(source).read(link, () => {}, hooks);
+
+  const chunks = events.filter((e) => e.kind === 'chunk');
+  assert.equal(chunks.length, LAST_CHUNK + 1);
+  for (const c of chunks) {
+    assert.equal(c.ledger, vector.ledger.first + Math.floor(c.index / 100), `chunk ${c.index}`);
+  }
 });
 
 test('onBlockVerified fires once per block after all its chunks', async () => {

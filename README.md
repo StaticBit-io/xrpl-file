@@ -62,7 +62,7 @@ The `<xrpl-file>` element shows a file from the ledger on any web page: an image
 verified download for anything else. Build it, put the files of one version on a host, and add two lines:
 
 ```html
-<script src="https://<host>/1.1.0/xrpl-file-element.js" integrity="sha384-/35U/a5CiIK17/1CG2Ts2eUC87fWh7x4J8QWIhM8P2eDrdvJR0mwbXI1s8bfulGk" crossorigin="anonymous" defer></script>
+<script src="https://<host>/1.1.0/xrpl-file-element.js" integrity="sha384-0JbKNISOONBLicsgDhBPu023kYDqRzspp8GeXpacVTxTcc/mWu4g+C5oWPPm+Lq6" crossorigin="anonymous" defer></script>
 <xrpl-file src="xrpl-file://testnet/…"></xrpl-file>
 ```
 
@@ -120,6 +120,8 @@ the page, so they stay dark in both themes. These are the same in both themes:
 | `--xrpl-file-media-background` | `#000` | around a video, behind a cover |
 | `--xrpl-file-overlay` | `rgba(0,0,0,.72)` | the caption, the play button, a failed video |
 | `--xrpl-file-overlay-foreground` | `#ddd` | text on the overlay, over a cover and over a video |
+| `--xrpl-file-overlay-accent` | `--xrpl-file-accent`, else `#4da3ff` | buttons, progress and focus ring on the overlay, over a cover and on the caption |
+| `--xrpl-file-overlay-on-accent` | `--xrpl-file-on-accent`, else `#06121f` | text and icons on the overlay accent |
 | `--xrpl-file-overlay-border` | `rgba(255,255,255,.4)` | the caption's copy button |
 | `--xrpl-file-overlay-track` | `rgba(255,255,255,.15)` | the progress track over a video |
 | `--xrpl-file-overlay-success` | `#6fd08c` | the verified mark, "Copied" |
@@ -128,7 +130,9 @@ the page, so they stay dark in both themes. These are the same in both themes:
 | `--xrpl-file-radius` | `10px` | the corners |
 
 Over a cover and on the caption the accent keeps its dark-theme default, `#4da3ff` with `#06121f` on it,
-unless the site sets one. The element dispatches `xrpl-file-progress` (`detail`:
+unless the site sets `--xrpl-file-accent`, which then applies there too, or `--xrpl-file-overlay-accent` and
+`--xrpl-file-overlay-on-accent`, which apply only there. A site whose frame accent is a dark colour sets the overlay pair
+to a light one: the overlay is dark in both themes. The element dispatches `xrpl-file-progress` (`detail`:
 `{ bytesDone, bytesTotal, blocksVerified, blocksTotal }`), `load` once the content is shown (`detail`:
 `{ name, type, size, network, link }`) and `error` (`detail`: `{ name, message }`).
 

@@ -69,8 +69,8 @@ export const STYLES = `
   .frame[data-theme="light"] { ${LIGHT} }
   @media (prefers-color-scheme: light) { .frame[data-theme="auto"] { ${LIGHT} } }
   .caption, .overlay, .idle.covered {
-    --accent: var(--xrpl-file-accent, #4da3ff);
-    --on-accent: var(--xrpl-file-on-accent, #06121f);
+    --accent: var(--xrpl-file-overlay-accent, var(--xrpl-file-accent, #4da3ff));
+    --on-accent: var(--xrpl-file-overlay-on-accent, var(--xrpl-file-on-accent, #06121f));
     --fg: var(--overlay-foreground);
     --muted: var(--overlay-foreground);
     --track: var(--xrpl-file-overlay-track, rgba(255,255,255,.15));
