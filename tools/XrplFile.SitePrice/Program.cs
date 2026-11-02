@@ -1,5 +1,6 @@
 using System.Text;
 using Xrpl.Client;
+using Xrpl.Models.Methods;
 using XrplFile;
 using XrplFile.SitePrice;
 
@@ -38,8 +39,13 @@ try
 {
     await client.Connect(timeout.Token);
 
+    // The table says which network it was priced on, so it comes from the node rather than from a constant:
+    // a --node pointing at a testnet must not be filed as mainnet.
+    XrplResponse<ServerInfo> info = await client.ServerInfo(new ServerInfoRequest(), timeout.Token);
+    string network = SitePrice.NetworkName(info.Result?.Info?.NetworkID);
+
     PriceTable table = await SitePrice.ComputeAsync(
-        new XrplClientLedgerSource(client), sizes, DateTimeOffset.UtcNow, timeout.Token);
+        new XrplClientLedgerSource(client), sizes, DateTimeOffset.UtcNow, network, timeout.Token);
 
     table = table with { Node = node };
 
@@ -48,7 +54,7 @@ try
 
     await File.WriteAllTextAsync(output, SitePrice.ToJson(table) + "\n", new UTF8Encoding(false), timeout.Token);
 
-    Console.WriteLine($"Wrote {output} from {node}: {table.Rows.Count} rows.");
+    Console.WriteLine($"Wrote {output} from {node} ({network}): {table.Rows.Count} rows.");
 
     return 0;
 }

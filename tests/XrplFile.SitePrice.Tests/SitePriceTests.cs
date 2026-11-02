@@ -45,7 +45,7 @@ public sealed class SitePriceTests
     private static readonly long TooSmallForBatch = MemoLayout.ChunkBytes - 1;
 
     private static Task<PriceTable> ComputeAsync(params long[] sizes) =>
-        SitePrice.ComputeAsync(new FeeOnlySource(Fees, Open), sizes, Taken, CancellationToken.None);
+        SitePrice.ComputeAsync(new FeeOnlySource(Fees, Open), sizes, Taken, SitePrice.Mainnet, CancellationToken.None);
 
     [Fact]
     public async Task SmallFileIsPricedWithTickets()
@@ -122,6 +122,36 @@ public sealed class SitePriceTests
         Assert.Equal("mainnet", table.Network);
         Assert.Equal(Taken, table.TakenAt);
         Assert.Equal(new PriceFees(12, 1_000_000, 200_000), table.Fees);
+    }
+
+    [Fact]
+    public async Task TheTableIsStampedWithTheNetworkItWasGiven()
+    {
+        PriceTable table = await SitePrice.ComputeAsync(
+            new FeeOnlySource(Fees, Open), [10_240], Taken, "testnet", CancellationToken.None);
+
+        Assert.Equal("testnet", table.Network);
+
+        using JsonDocument json = JsonDocument.Parse(SitePrice.ToJson(table));
+        Assert.Equal("testnet", json.RootElement.GetProperty("network").GetString());
+    }
+
+    [Fact]
+    public async Task AnEmptyNetworkNameIsRefused()
+    {
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => SitePrice.ComputeAsync(
+            new FeeOnlySource(Fees, Open), [10_240], Taken, " ", CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(null, "mainnet")]
+    [InlineData(0u, "mainnet")]
+    [InlineData(1u, "testnet")]
+    [InlineData(2u, "devnet")]
+    [InlineData(21338u, "21338")]
+    public void NetworkNameFollowsTheNodesNetworkId(uint? networkId, string expected)
+    {
+        Assert.Equal(expected, SitePrice.NetworkName(networkId));
     }
 
     [Fact]

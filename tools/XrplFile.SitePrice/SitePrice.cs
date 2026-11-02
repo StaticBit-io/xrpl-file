@@ -55,11 +55,13 @@ public static class SitePrice
     /// (<see cref="PublishPolicy.Effective"/>, as <c>EstimateModel</c> does).
     /// </summary>
     /// <param name="source">A node's fees and amendments; accounts are never read from it.</param>
+    /// <param name="network">The name the table is stamped with; <see cref="NetworkName"/> derives it from the node.</param>
     public static async Task<PriceTable> ComputeAsync(
-        ILedgerSource source, IReadOnlyList<long> sizes, DateTimeOffset at, CancellationToken cancellationToken)
+        ILedgerSource source, IReadOnlyList<long> sizes, DateTimeOffset at, string network, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(sizes);
+        ArgumentException.ThrowIfNullOrWhiteSpace(network);
 
         FreshAccountSource fresh = new(source);
         NetworkFees fees = await fresh.FeesAsync(cancellationToken).ConfigureAwait(false);
@@ -73,8 +75,21 @@ public static class SitePrice
         }
 
         return new PriceTable(
-            Mainnet, at, string.Empty, new PriceFees(fees.OpenLedgerFeeDrops, fees.BaseReserveDrops, fees.OwnerReserveDrops), rows);
+            network, at, string.Empty, new PriceFees(fees.OpenLedgerFeeDrops, fees.BaseReserveDrops, fees.OwnerReserveDrops), rows);
     }
+
+    /// <summary>
+    /// The name of the network a node serves, from the <c>network_id</c> of its <c>server_info</c>. Mainnet has
+    /// id 0 and a node may leave the field out, so an absent id is mainnet; 1 and 2 are the public testnet and
+    /// devnet; any other id is written as its number, the form an <c>xrpl-file://</c> link uses.
+    /// </summary>
+    public static string NetworkName(uint? networkId) => networkId switch
+    {
+        null or 0 => Mainnet,
+        1 => "testnet",
+        2 => "devnet",
+        uint other => other.ToString(System.Globalization.CultureInfo.InvariantCulture),
+    };
 
     public static string ToJson(PriceTable table)
     {
