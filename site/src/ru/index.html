@@ -17,9 +17,9 @@
 <main id="main">
 <section class="hero container" aria-labelledby="hero-title">
 <div class="hero__text">
-<h1 id="hero-title">Файл внутри самого XRP Ledger</h1>
+<h1 id="hero-title">Храните файл в XRP Ledger</h1>
 <p class="lead">Картинка вашего токена или любой другой файл записываются в тот же реестр, что и токен, а читаются с проверкой по отпечатку.</p>
-<p>Картинка рядом: настоящий файл из реестра. Браузер проверяет его по частям и показывает, только когда каждая часть сошлась.</p>
+<p>Картинка на этой странице взята из реестра: это настоящий файл. Браузер показывает её, только когда проверена каждая часть.</p>
 <form id="check-link" class="check" novalidate>
 <label for="check-link-input">Проверить ссылку</label>
 <div class="check__row">
@@ -41,44 +41,44 @@
 
 <section class="section container" aria-labelledby="problem-title">
 <h2 id="problem-title">Ссылки на метаданные умирают</h2>
-<p>Токен XRP Ledger (NFT или MPT), DID или удостоверение обычно не хранят свою картинку и описание. Они хранят ссылку, а сам файл лежит в другом месте: в IPFS, на сервере эмитента, в корзине S3.</p>
+<p>Если NFT, MPT, DID или удостоверение хранит картинку и описание вне реестра, в токене есть только ссылка. Сам файл лежит в IPFS, на сервере эмитента или в корзине S3.</p>
 <ul class="faults">
 <li><strong>IPFS без закрепления</strong>Закрепление перестают оплачивать, и файл пропадает из IPFS.</li>
 <li><strong>Закрытый сервер</strong>Компания закрывается или переезжает, и по адресу приходит ошибка.</li>
 <li><strong>Закрытое хранилище</strong>Аккаунт в облаке закрывают, и файлы исчезают вместе с ним.</li>
 </ul>
-<p>Токен остаётся в реестре. Его картинка нет. С xrpl-file файл записан в тот же реестр, что и токен, поэтому живёт столько же, сколько он, а проверить его по отпечатку может любой, не доверяя ничьему серверу. Ссылка на файл занимает 84 байта, а поле URI у NFT вмещает 256.</p>
+<p>Токен остаётся в реестре, а файл по его ссылке можно потерять. С xrpl-file файл записан в тот же реестр, что и токен, поэтому живёт столько же, сколько он, а проверить его по отпечатку может любой, не доверяя ничьему серверу. Ссылка занимает 84 байта, а поле URI у NFT вмещает 256.</p>
 </section>
 
 <section class="section container" aria-labelledby="how-title">
 <h2 id="how-title">От файла до ссылки и обратно</h2>
 <ol class="steps">
 <li class="step">
-<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-1"><title id="step-drawing-1">Слева файл, справа клетки, на которые он нарезан.</title><rect class="c" x="4" y="16" width="40" height="56" rx="2"/><path class="line" d="M12 30h24"/><path class="line" d="M12 40h24"/><path class="line" d="M12 50h24"/><path class="line" d="M12 60h24"/><path class="link" d="M52 44h20m-6-5 6 5-6 5"/><rect class="c lit" x="80" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="62" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="62" width="14" height="14" rx="1.5"/></svg>
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-1"><title id="step-drawing-1">Слева файл, справа фрагменты, на которые он нарезан. Каждый фрагмент нарисован клеткой.</title><rect class="c" x="4" y="16" width="40" height="56" rx="2"/><path class="line" d="M12 30h24"/><path class="line" d="M12 40h24"/><path class="line" d="M12 50h24"/><path class="line" d="M12 60h24"/><path class="link" d="M52 44h20m-6-5 6 5-6 5"/><rect class="c lit" x="80" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="62" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="62" width="14" height="14" rx="1.5"/></svg>
 <h3>Нарезка</h3>
 <p>Файл режется на фрагменты по 1000 байт.</p>
 </li>
 <li class="step">
-<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-2"><title id="step-drawing-2">Три клетки, каждая лежит внутри своей транзакции.</title><rect class="c lit" x="4" y="9" width="14" height="14" rx="1.5"/><path class="link" d="M24 16h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="4" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="9" width="14" height="14" rx="1.5"/><path class="line" d="M80 13h62M80 20h36"/><rect class="c lit" x="4" y="41" width="14" height="14" rx="1.5"/><path class="link" d="M24 48h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="36" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="41" width="14" height="14" rx="1.5"/><path class="line" d="M80 45h62M80 52h36"/><rect class="c lit" x="4" y="73" width="14" height="14" rx="1.5"/><path class="link" d="M24 80h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="68" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="73" width="14" height="14" rx="1.5"/><path class="line" d="M80 77h62M80 84h36"/></svg>
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-2"><title id="step-drawing-2">Три фрагмента, каждый внутри своей транзакции.</title><rect class="c lit" x="4" y="9" width="14" height="14" rx="1.5"/><path class="link" d="M24 16h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="4" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="9" width="14" height="14" rx="1.5"/><path class="line" d="M80 13h62M80 20h36"/><rect class="c lit" x="4" y="41" width="14" height="14" rx="1.5"/><path class="link" d="M24 48h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="36" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="41" width="14" height="14" rx="1.5"/><path class="line" d="M80 45h62M80 52h36"/><rect class="c lit" x="4" y="73" width="14" height="14" rx="1.5"/><path class="link" d="M24 80h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="68" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="73" width="14" height="14" rx="1.5"/><path class="line" d="M80 77h62M80 84h36"/></svg>
 <h3>Запись в транзакции</h3>
-<p>Каждый фрагмент уходит в отдельную транзакцию и прикрепляется к ней как заметка (memo).</p>
+<p>Каждый фрагмент записывается в отдельную транзакцию, в поле memo.</p>
 </li>
 <li class="step">
-<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-3"><title id="step-drawing-3">Две группы клеток, каждая сведена к одной клетке-отпечатку. Оба отпечатка ведут к одной клетке манифеста.</title><rect class="c lit" x="8" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="24" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="40" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="56" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="92" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="108" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="124" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="140" y="4" width="12" height="12" rx="1.5"/><path class="line" d="M8 22h60M92 22h60"/><rect class="c ok" x="32" y="30" width="12" height="12" rx="1.5"/><rect class="c ok" x="116" y="30" width="12" height="12" rx="1.5"/><path class="line" d="M38 46v8h42v6M122 46v8H80v6"/><rect class="c ok" x="70" y="62" width="20" height="20" rx="1.5"/></svg>
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-3"><title id="step-drawing-3">Две группы фрагментов, каждая сведена к одному хэшу. Оба хэша ведут к одному манифесту.</title><rect class="c lit" x="8" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="24" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="40" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="56" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="92" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="108" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="124" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="140" y="4" width="12" height="12" rx="1.5"/><path class="line" d="M8 22h60M92 22h60"/><rect class="c ok" x="32" y="30" width="12" height="12" rx="1.5"/><rect class="c ok" x="116" y="30" width="12" height="12" rx="1.5"/><path class="line" d="M38 46v8h42v6M122 46v8H80v6"/><rect class="c ok" x="70" y="62" width="20" height="20" rx="1.5"/></svg>
 <h3>Отпечаток</h3>
 <p>Каждые 1024 фрагмента образуют блок, а хэш блока попадает в список блоков. Последняя транзакция, манифест, хранит отпечаток всего списка. Хэш этой транзакции и есть ссылка.</p>
 </li>
 <li class="step">
-<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-4"><title id="step-drawing-4">Сетка проверенных клеток, которые вместе складываются в картинку.</title><rect class="c ok" x="32" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="72" y="8" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="92" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="112" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="32" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="52" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="72" y="28" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="92" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="112" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="32" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="52" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="72" y="48" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="92" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="112" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="32" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="72" y="68" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="92" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="112" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/></svg>
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-4"><title id="step-drawing-4">Сетка проверенных фрагментов, которые вместе складываются в картинку.</title><rect class="c ok" x="32" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="72" y="8" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="92" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="112" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="32" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="52" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="72" y="28" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="92" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="112" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="32" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="52" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="72" y="48" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="92" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="112" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="32" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="72" y="68" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="92" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="112" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/></svg>
 <h3>Чтение и проверка</h3>
-<p>Тот, у кого есть ссылка, собирает фрагменты с узла XRP Ledger, склеивает файл и сверяет каждый блок с отпечатком. Файл, который не сошёлся, не показывается. Сервер этого сайта в чтении не участвует.</p>
+<p>Любой, у кого есть ссылка, получает фрагменты от узла XRP Ledger, собирает файл и сверяет каждый блок с отпечатком. Если файл не совпал, он не показывается. Сервер этого сайта в чтении не участвует.</p>
 </li>
 </ol>
 </section>
 
 <section class="section container" aria-labelledby="price-title">
 <h2 id="price-title">Сколько это стоит</h2>
-<p>Файл попадает в реестр примерно по одной транзакции на килобайт. Для каждого файла публикатор открывает одноразовый аккаунт и удаляет его, когда файл записан. Расходов два: комиссии, которые тратятся, и резерв, который удерживается, пока файл записывается, и большая часть возвращается.</p>
+<p>Файл записывается примерно по одной транзакции на каждый килобайт. Для каждого файла публикатор открывает одноразовый аккаунт и удаляет его, когда файл записан. Расходов два: комиссии, которые тратятся, и резерв: он удерживается, пока файл записывается, и большая часть возвращается.</p>
 <div id="price-data" class="price-data"><p class="hint">Таблица цен сейчас недоступна. Цифры есть и в файле данных <a href="/data/price.json">price.json</a>.</p></div>
 </section>
 
@@ -91,15 +91,15 @@
 </div>
 <div>
 <h3>Читать может любой</h3>
-<p>Ни аккаунта, ни разрешения, ни пароля. Файл прочтёт любой, у кого есть ссылка, а данные реестра и так открыты всем.</p>
+<p>Файл прочтёт любой, у кого есть ссылка. Данные реестра открыты всем.</p>
 </div>
 </div>
-<p class="notice">Публикуйте только то, что готовы показывать всему миру навсегда: не пароли, не личные данные, не картинку, права на которую у вас нет.</p>
+<p class="notice">Публикуйте только то, что готовы показывать всему миру навсегда: не пароли, не личные данные, не картинку, прав на которую у вас нет.</p>
 </section>
 
 <section class="section container" aria-labelledby="developers-title">
 <h2 id="developers-title">Разработчикам</h2>
-<p>Формат открыт. Его описывает спецификация, а в репозитории есть библиотека для .NET и модуль чтения для браузера.</p>
+<p>Формат описан в спецификации. В репозитории лежат библиотека для .NET и модуль чтения для браузера.</p>
 <ul class="devlinks">
 <li><a href="https://github.com/StaticBit-io/xrpl-file/blob/main/docs/spec/xrpl-file-v1.md">Спецификация</a></li>
 <li><a href="https://github.com/StaticBit-io/xrpl-file">Репозиторий</a></li>
@@ -107,7 +107,7 @@
 <li><a href="https://github.com/StaticBit-io/xrpl-file/tree/main/web/src">Модуль чтения для браузера</a></li>
 </ul>
 <h3>Показать файл на своей странице</h3>
-<p>Добавьте скрипт и элемент. Скрипт закреплён на версии 1.1.0 и проверяется по значению integrity: если файл когда-нибудь изменится, браузер откажется его выполнять.</p>
+<p>Добавьте скрипт и элемент. Скрипт закреплён на версии 1.1.0 и проверяется по значению integrity: если файл изменится, браузер не станет его выполнять.</p>
 <div class="snippet">
 <p class="snippet__label">Из npm, через jsDelivr</p>
 <pre tabindex="0" aria-label="Код для вставки: Из npm, через jsDelivr"><code id="embed-snippet"><!--@element-snippet--></code></pre>
@@ -124,7 +124,7 @@
 <span id="snippet-status-alt" class="snippet__status" role="status"></span>
 </div>
 </div>
-<p class="attributes"><code>width</code> и <code>height</code> задают размер, <code>loading</code> решает, когда начнётся чтение, <code>theme</code> выбирает светлую или тёмную палитру, а <code>node</code> читает с узла, который выберете вы. Все атрибуты описаны в README: <a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">Вставка в README</a>.</p>
+<p class="attributes"><code>width</code> и <code>height</code> задают размер, <code>loading</code> определяет, когда начнётся чтение, <code>theme</code> задаёт светлую или тёмную палитру, а <code>node</code> задаёт узел, с которого читается файл. Полный список в README: <a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">Вставка файла</a>.</p>
 </section>
 </main>
 <!--@chrome:footer-->

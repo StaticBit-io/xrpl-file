@@ -37,7 +37,7 @@ export function mosaicStrings(lang, network) {
         const count = chunks === null ? '' : `, ${ruCount(chunks, 'фрагмент', 'фрагмента', 'фрагментов')}`;
         return {
           reading: `Картинка, которую читают из реестра${count}`,
-          developing: `Картинка проверена и проявляется${count}`,
+          developing: `Картинка проверена и появляется${count}`,
           done: `Картинка, прочитанная из реестра и проверенная${count}`,
           failed: 'Картинку сейчас не удалось прочитать из реестра',
         }[phase];
@@ -83,11 +83,11 @@ export function mosaicStrings(lang, network) {
 export const CHECK_LINK_STRINGS = {
   en: {
     empty: 'Paste a link first.',
-    invalid: 'This is not an xrpl-file link. A link looks like xrpl-file://testnet/ followed by 64 letters and digits.',
+    invalid: 'This is not an xrpl-file link. A link looks like xrpl-file://testnet/ followed by 64 characters 0-9 and A-F.',
   },
   ru: {
     empty: 'Сначала вставьте ссылку.',
-    invalid: 'Это не ссылка xrpl-file. Ссылка выглядит так: xrpl-file://testnet/ и 64 буквы и цифры.',
+    invalid: 'Это не ссылка xrpl-file. Ссылка выглядит так: xrpl-file://testnet/ и 64 символа 0-9 и A-F.',
   },
 };
 
@@ -119,6 +119,6 @@ export const PRICE_STRINGS = {
     reserve: ({ held, returned, kept }) =>
       `Пока файл записывается, ${held} XRP удерживается как резерв одноразового аккаунта. Когда аккаунт удалён, ${returned} XRP возвращается. Остальные ${kept} XRP остаются у сети как плата за удаление аккаунта, каким бы ни был размер файла.`,
     source: ({ network, date }) =>
-      `Цифры сняты в ${NETWORK_NAMES.ru[network] ?? network} ${date}. Комиссии и резервы задаёт сеть, и они могут меняться.`,
+      `Данные взяты из ${NETWORK_NAMES.ru[network] ?? network} ${date}. Комиссии и резервы задаёт сеть, и они могут меняться.`,
   },
 };
