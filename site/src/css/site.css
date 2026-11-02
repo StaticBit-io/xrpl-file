@@ -216,3 +216,59 @@
     white-space: nowrap;
   }
 }
+
+/* The chunk mosaic and the line under it. The canvas takes its width from its box and its height from
+   the aspect ratio mountMosaic sets; the caption keeps its line free from the start so the result
+   does not move the page. */
+.mosaic {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.mosaic-caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-5);
+  min-height: calc(var(--text-sm) * var(--leading-body) + var(--space-3));
+  padding-top: var(--space-3);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.mosaic-caption__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mosaic-caption[data-phase="done"] .mosaic-caption__status {
+  color: var(--ink);
+}
+
+.mosaic-caption__check,
+.mosaic-caption__mark {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  fill: none;
+}
+
+.mosaic-caption__check {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+/* The failure state reuses the unread cell: an outline, nothing filled. */
+.mosaic-caption__mark {
+  stroke: var(--rule);
+  stroke-width: 1.5;
+}
+
+.mosaic-caption__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  margin-block: calc(var(--space-3) * -1);
+}
