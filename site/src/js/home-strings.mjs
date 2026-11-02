@@ -42,7 +42,7 @@ export function mosaicStrings(lang, network) {
         if (code === 'NodeUnreachable' || code === 'Stalled') return 'Реестр не ответил. Обновите страницу, чтобы попробовать ещё раз.';
         if (code === 'BlockMismatch' || code === 'DecodeFailed') return 'Картинка не прошла проверку, поэтому не показана.';
         if (['NodeLacksHistory', 'ManifestNotFound', 'ChunkMissing', 'Incomplete'].includes(code)) {
-          return `В ${network} этой картинки сейчас нет.`;
+          return 'Эта картинка сейчас недоступна в реестре.';
         }
         return 'Картинку сейчас не удалось прочитать.';
       },
@@ -66,7 +66,7 @@ export function mosaicStrings(lang, network) {
       if (code === 'NodeUnreachable' || code === 'Stalled') return 'The ledger did not answer. Reload the page to try again.';
       if (code === 'BlockMismatch' || code === 'DecodeFailed') return 'The picture did not pass the check, so it is not shown.';
       if (['NodeLacksHistory', 'ManifestNotFound', 'ChunkMissing', 'Incomplete'].includes(code)) {
-        return `The ${network} does not have this picture right now.`;
+        return 'This picture is not available from the ledger right now.';
       }
       return 'The picture could not be read just now.';
     },
