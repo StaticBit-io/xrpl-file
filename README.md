@@ -511,6 +511,12 @@ cd web && node --test test/*.test.mjs
 Windows. `dotnet build XrplFile.sln` itself now needs Windows and the `maui-windows` workload for
 that reason; see "The desktop application" above for building and running `XrplFile.App` itself.
 
+The browser element's npm package (the jsDelivr embed URL) is assembled, not published, by one more
+command after `cd web && npm run build`: `node web/pack.mjs` writes `web/npm/<version>/` with the build's
+files copied byte for byte (so the `integrity` values stay valid on jsDelivr), a `package.json`, the "Embed
+a file" section as `README.md` and the `LICENSE`. The package name is `ELEMENT_PACKAGE` in
+`site/src/js/config.mjs`. Publishing that directory to npm is the owner's step.
+
 `dotnet test` does not run xunit.v3 on the .NET 10 SDK: the test project is an executable and
 is driven with `dotnet run`, taking xunit's own filters (`-class`, `-method`, `-trait`, `-trait-`)
 after the `--` separator instead of `dotnet test`'s `--filter`.
