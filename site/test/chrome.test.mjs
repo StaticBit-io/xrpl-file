@@ -249,6 +249,39 @@ test('on the file page the language comes from storage, then from the first brow
   assert.equal(blocked.documentElement.lang, 'en');
 });
 
+test('on a stored-language page the wordmark leads to the home of the language in use and follows a switch', () => {
+  const path = `/testnet/${HASH}`;
+  for (const start of ACTIVE_LANGS) {
+    const doc = fakeDocument({ lang: 'en', langSource: 'storage' });
+    const links = langLinks(doc);
+    const wordmark = doc.add(['[data-home]'], { href: '/' });
+    initChrome({ document: doc, location: { pathname: path }, storage: memoryStorage({ 'xf-lang': start }), navigatorLanguages: ['en-US'] });
+    assert.equal(wordmark.getAttribute('href'), homePath(start), `stored ${start}`);
+    for (const chosen of ACTIVE_LANGS) {
+      links[chosen].click();
+      assert.equal(wordmark.getAttribute('href'), homePath(chosen), `${start} then ${chosen}`);
+    }
+  }
+
+  const blocked = fakeDocument({ langSource: 'storage' });
+  const home = blocked.add(['[data-home]'], { href: '/' });
+  initChrome({ document: blocked, location: { pathname: path }, storage: throwingStorage, navigatorLanguages: ['de-DE'] });
+  assert.equal(home.getAttribute('href'), homePath('de'), 'the browser language is used when storage is blocked');
+
+  const fixed = fakeDocument({ lang: 'ru' });
+  const own = fixed.add(['[data-home]'], { href: '/ru/' });
+  initChrome({ document: fixed, location: { pathname: '/ru/' }, storage: memoryStorage({ 'xf-lang': 'de' }) });
+  assert.equal(own.getAttribute('href'), '/ru/', 'a fixed-language page keeps its own home');
+});
+
+test('only a stored-language page marks its wordmark for the script to retarget', () => {
+  const stored = renderChrome('header', { lang: 'en', pagePath: '/nope', langFromStorage: true });
+  assert.match(stored, /<a class="wordmark" href="\/" data-home /);
+  for (const lang of ACTIVE_LANGS) {
+    assert.doesNotMatch(renderChrome('header', fixedPage(lang, homePath(lang))), /data-home/, lang);
+  }
+});
+
 function menuDocument(extraHtmlAttributes = {}) {
   const doc = fakeDocument({ lang: 'en', ...extraHtmlAttributes });
   const menu = doc.add(['[data-lang-menu]']);

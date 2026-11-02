@@ -1,6 +1,6 @@
 // Behaviour of the shared header and footer: the theme switch, the language menu and links and, on a page
 // whose language is the visitor's stored choice, switching the chrome's own text in place.
-import { LANGUAGE_NAMES, htmlLang, isActive, pageLang } from './languages.mjs';
+import { LANGUAGE_NAMES, homePath, htmlLang, isActive, pageLang } from './languages.mjs';
 import { applyTheme, equivalentPath, getLang, getTheme, safeLocalStorage, setLang, setTheme } from './prefs.mjs';
 import { STRINGS } from './chrome-strings.mjs';
 
@@ -75,6 +75,10 @@ function initLanguage(document, location, storage, browserLanguages) {
       // A stored-language page has one URL for every language (the file page, its address-error view, the 404).
       const href = fromStorage ? location.pathname : equivalentPath(location.pathname, link.dataset.langLink);
       link.setAttribute('href', href);
+    }
+    // The wordmark's home link: a stored-language page is built once, so its build-time "/" is the English home.
+    if (fromStorage) {
+      for (const link of document.querySelectorAll('[data-home]')) link.setAttribute('href', homePath(lang));
     }
   };
 

@@ -152,7 +152,7 @@ function renderHeader(page) {
   return `<a class="skip-link" href="#main"${i18n('skip')}>${text('skip')}</a>
 <header class="site-header">
 <div class="container site-header__bar">
-<a class="wordmark" href="${home}" aria-label="${text('homeLabel')}"${i18nLabel('homeLabel')}>${wordmarkMark()}<span aria-hidden="true">xrpl-file</span></a>
+<a class="wordmark" href="${home}"${page.langFromStorage ? ' data-home' : ''} aria-label="${text('homeLabel')}"${i18nLabel('homeLabel')}>${wordmarkMark()}<span aria-hidden="true">xrpl-file</span></a>
 <div class="site-header__tools">
 ${langMenu(page)}
 ${themeToggle(page)}
