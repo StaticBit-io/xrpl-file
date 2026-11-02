@@ -36,8 +36,9 @@ immutable-cache rule.
 ## Open rows
 
 1. The render tier covered `/ru/` only: that one page took about 35 minutes, and the process did not
-   exit after printing its result. The other homes share the markup and styles of `/ru/`; the file
-   page and 404 were not rendered.
+   exit after printing its result. A run on the file page (the logo) printed nothing in 45 minutes and
+   was stopped at that limit. The tier refuses `/nope` because it answers HTTP 404, so the 404 page was
+   not rendered either. The other homes share the markup and styles of `/ru/`.
 2. The German, Spanish, Portuguese and Chinese copy, the site's and now the element's
    (`web/src/element/strings.mjs`), is translated from English and awaits a native speaker's review
    (listed in `site/README.md`). The element keeps the network name and the `FILE` badge untranslated.
