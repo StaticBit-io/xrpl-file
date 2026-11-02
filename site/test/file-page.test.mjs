@@ -5,7 +5,7 @@ import './support/register-reader.mjs';
 
 const { initFilePage, initNotFoundPage } = await import('../src/js/file-page.mjs');
 const { t, formatSize, networkName } = await import('../src/js/strings.mjs');
-const { ACTIVE_LANGS: LANGS, homePath, localeOf } = await import('../src/js/languages.mjs');
+const { ACTIVE_LANGS: LANGS, homePath, htmlLang, localeOf } = await import('../src/js/languages.mjs');
 const strings = await import('../src/js/strings.mjs');
 
 const HASH = '32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59';
@@ -406,6 +406,41 @@ test('the page texts follow the language switch', () => {
   doc.switchLanguage('en');
   assert.equal(doc.nodes['file-size'].textContent, '178 KB');
   assert.equal(doc.home.getAttribute('href'), '/');
+});
+
+test('the element is given the language of the page when it is created and on every switch', () => {
+  for (const lang of LANGS) {
+    const { doc } = open(CANONICAL, { lang });
+    assert.equal(doc.file.getAttribute('lang'), htmlLang(lang), `created in ${lang}`);
+    for (const next of LANGS) {
+      doc.switchLanguage(next);
+      assert.equal(doc.file.getAttribute('lang'), htmlLang(next), `${lang} -> ${next}`);
+    }
+  }
+});
+
+test('the element gets the same tag the page puts on <html>, and Chinese says its script', () => {
+  const { doc } = open(CANONICAL, { lang: 'zh' });
+  assert.equal(doc.file.getAttribute('lang'), 'zh-Hans');
+  doc.switchLanguage('pt');
+  assert.equal(doc.file.getAttribute('lang'), 'pt');
+});
+
+test('a language the site does not offer gives the element English', () => {
+  const { doc } = open(CANONICAL, { lang: 'fr' });
+  assert.equal(doc.file.getAttribute('lang'), 'en');
+  doc.switchLanguage('ru');
+  doc.switchLanguage('xx');
+  assert.equal(doc.file.getAttribute('lang'), 'en');
+});
+
+test('switching language keeps the element, the loaded details and the Download button', () => {
+  const { doc } = open(CANONICAL, { lang: 'ru' });
+  doc.file.load(DETAIL);
+  doc.switchLanguage('de');
+  assert.deepEqual(doc.nodes['file-view'].children, [doc.file], 'one element, not re-created');
+  assert.equal(doc.nodes['file-download'].disabled, false);
+  assert.equal(doc.file.getAttribute('src'), LINK);
 });
 
 test('a shown save result is re-worded in the new language, an error stays an error', async () => {

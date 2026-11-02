@@ -4,13 +4,14 @@
 // come from the element's `load` event and `save()`, never from a second read of the ledger.
 import { initCheckLink } from './check-link.mjs';
 import { initCopyButton } from './copy-button.mjs';
-import { activeLang, homePath } from './languages.mjs';
+import { activeLang, homePath, htmlLang } from './languages.mjs';
 import { getLang } from './prefs.mjs';
 import { linkFromPath } from './route.mjs';
 import { formatSize, networkName, t } from './strings.mjs';
 
-// Errors of save() by what the visitor can do about them. The element words its own errors in
-// English only; the page is bilingual, so it words the save result itself.
+// Errors of save() by what the visitor can do about them. The element draws its own texts in the
+// page's language, but a rejected save() carries an English message for scripts, so the page words the
+// result on its own status line.
 const SAVE_ERROR_KEYS = {
   NotLoaded: 'saveNotLoaded',
   BlockMismatch: 'saveNotVerified',
@@ -134,6 +135,9 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
   // The page draws its own copy and download controls under the file.
   element.setAttribute('caption', 'off');
   element.setAttribute('theme', doc.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+  // The element reads the page's language when it connects and follows its own `lang` after that. This page
+  // switches language in place, so <html lang> changes under an element that is already there: it is told.
+  element.setAttribute('lang', htmlLang(lang));
   view.append(element);
 
   linkText.textContent = route.link;
@@ -209,6 +213,7 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
   syncButton();
   doc.addEventListener('xf-langchange', (event) => {
     lang = normalise(event.detail?.lang);
+    element.setAttribute('lang', htmlLang(lang));
     render();
   });
   return { view: 'file', element };
