@@ -65,7 +65,8 @@ Follow-ups outside this document, recorded so they are not lost:
 - Audio playback **(builder's call)**: audio types fall back to the download view in this
   version.
 - PDF, office documents, archives: shown as a file with a download button.
-- Localization. All text in the element is English (owner's decision).
+- Localization in 1.0.0. All text in the element was English (owner's decision); 1.1.0 draws it in the
+  page's language, see the `lang` attribute in 2.1. What scripts read stays English.
 - Publishing an npm package. The build produces a versioned file; where it is hosted is
   project 2.
 
@@ -162,6 +163,7 @@ with ordinary CSS: classes, `style`, its parent's grid or flex.
 | `theme` | `dark`, `light`, `auto` | `dark` | the colour palette; `auto` follows the visitor's `prefers-color-scheme` (added in 1.1.0) |
 | `background` | `transparent` | the theme's box | `transparent` drops the box and the empty-box scrim, so a picture sits on the page itself; it wins over `--xrpl-file-background`. Text, video letterbox, cover backing, overlay and caption keep their backing. Text colours still follow `theme`, so the embedder picks the theme that matches its page (added in 1.1.0) |
 | `caption` | `off` | shown | `off` removes the hover caption (added in 1.1.0) |
+| `lang` | `en`, `ru`, `de`, `es`, `pt`, `zh`; a longer tag is matched by its primary subtag, case-insensitively (`pt-BR` is `pt`, `zh-Hans` is `zh`) | the nearest `lang` above the element, then the document's, else English | the language of every word the element draws, and of its sizes: units and decimal mark follow the site's (КБ and МБ with a comma in Russian, a comma in German, Spanish and Portuguese, a point in English and Chinese). Any other language is English. Read when the element connects and when its own `lang` changes, which words everything on screen again without reloading the file. The `error` event's `message` and the errors `save()` rejects with stay English, because scripts match on them (added in 1.1.0) |
 
 Styling hooks for the inside:
 
@@ -171,7 +173,7 @@ Styling hooks for the inside:
 
 Events for site scripts, dispatched on the element: `xrpl-file-progress` (`detail`: bytes
 done, bytes total, blocks verified, blocks total), `load` (content shown), `error` (`detail`:
-the error name from spec section 8 and the English message shown).
+the error name from spec section 8 and the English message shown, whatever the `lang`).
 
 ### 2.2 Size without jumps
 
@@ -225,7 +227,8 @@ document. It shows all six states and the three caption variants; the owner chos
 3. **Image**.
 4. **Text**.
 5. **Download view**.
-6. **Error**: one short English sentence, with the spec's error name in the `error` event. For
+6. **Error**: one short sentence, with the spec's error name in the `error` event; the box words it in
+   the element's `lang`, the event keeps the English one. For
    example "This file did not pass verification. Block 12 does not match the file's fingerprint.
    Nothing was shown." or "The node does not have the history this file needs."
 

@@ -88,6 +88,7 @@ path, so a page that embeds `1.1.0` never changes under itself. The host serves 
 | `theme` | `dark` (default), `light`, `auto` | the colour palette; `auto` follows the visitor's `prefers-color-scheme`, any other value is `dark` |
 | `background` | `transparent` | `transparent` drops the box behind the file and the dark theme's shading of an empty box, so a picture with transparent parts sits on the page itself; it wins over `--xrpl-file-background`. A text file, the bars around a video, the backing of a cover, the overlay and the caption keep theirs. Text colours still follow `theme`: pick the theme that matches your page. Any other value, or none, keeps the box |
 | `caption` | `off` | `off` removes the caption that appears on hover, with its copy button, for a page that shows the name, the link and a download control of its own; any other value, or none, keeps it |
+| `lang` | `en`, `ru`, `de`, `es`, `pt`, `zh` (or a longer tag that starts with one: `pt-BR`, `zh-Hans`) | the language of every word the element draws: the loader, buttons, messages, notes and sizes (`12,4 МБ` in Russian, `12,4 MB` in German and Spanish and Portuguese, `12.4 MB` in English and Chinese). Without the attribute the element follows the nearest `lang` above it on the page, then the document's. Any other language is English. The element reads that `lang` when it connects and when its own `lang` changes; a page that switches language without a reload sets the attribute on the element. The `error` event's `detail.message` and the errors `save()` rejects with stay in English whatever the language: scripts match on them |
 
 The inside is styled with the `theme` attribute, with the CSS custom properties below, and with
 `::part(loader)`, `::part(caption)` and `::part(message)`. A property the site sets wins over the theme's
@@ -135,7 +136,7 @@ unless the site sets `--xrpl-file-accent`, which then applies there too, or `--x
 `--xrpl-file-overlay-on-accent`, which apply only there. A site whose frame accent is a dark colour sets the overlay pair
 to a light one: the overlay is dark in both themes. The element dispatches `xrpl-file-progress` (`detail`:
 `{ bytesDone, bytesTotal, blocksVerified, blocksTotal }`), `load` once the content is shown (`detail`:
-`{ name, type, size, network, link }`) and `error` (`detail`: `{ name, message }`).
+`{ name, type, size, network, link }`) and `error` (`detail`: `{ name, message }`; the message is English whatever the `lang`).
 
 The `load` detail describes the file from the same read, so a page needs no second one: `name` is the
 file name the element shows and saves under, or `null` when the manifest has none; `type` is the media
