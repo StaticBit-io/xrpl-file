@@ -129,6 +129,9 @@ test('the README is the "Embed a file" section with the jsDelivr snippet and the
   assert.ok(readme.includes('| Attribute | Values | Meaning |'));
   assert.ok(!readme.includes('## Reading a file'));
   assert.ok(!readme.includes('## Publishing a file'));
+  assert.ok(!readme.includes('web/demo'));
+  assert.ok(!readme.includes('dev.html'));
+  assert.ok(!readme.includes('web/src'));
 });
 
 test('packing again replaces the directory instead of leaving old files in it', async () => {

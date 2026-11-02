@@ -62,7 +62,7 @@ The `<xrpl-file>` element shows a file from the ledger on any web page: an image
 verified download for anything else. Build it, put the files of one version on a host, and add two lines:
 
 ```html
-<script src="https://<host>/1.1.0/xrpl-file-element.js" integrity="sha384-0JbKNISOONBLicsgDhBPu023kYDqRzspp8GeXpacVTxTcc/mWu4g+C5oWPPm+Lq6" crossorigin="anonymous" defer></script>
+<script src="https://<host>/1.1.0/xrpl-file-element.js" integrity="sha384-EYxwz7jIVs0kq71CjOTzFWTru5/2lNU6GLtE1BKfTKTvDs14GmQSmSZwicBLTLV1" crossorigin="anonymous" defer></script>
 <xrpl-file src="xrpl-file://testnet/…"></xrpl-file>
 ```
 
@@ -147,8 +147,11 @@ promise of how it went: `'saved'` (written through the browser's save dialog), `
 the browser as a download; a page cannot see whether the browser kept it) or `'cancelled'` (the visitor
 closed the dialog). It rejects with an `XrplFileError` whose `code` is `NotLoaded` before the file's
 description is known, with the element's own error while the element shows one, and with the reason when
-the save fails; a block that does not verify is never written. Call it after `load`, from a user gesture:
-the browser refuses the save dialog otherwise.
+the save fails; a block that does not verify is never written. It can also reject with a `DOMException`
+that is not an `XrplFileError`: `AbortError` when the element is reset or loads another file while the
+save runs, and `NotAllowedError` or `SecurityError` when the browser's file APIs refuse the write
+(a refused save dialog alone does not reject: the save then falls back to an in-memory download). Call
+it after `load`, from a user gesture: the browser refuses the save dialog otherwise.
 
 The layout follows the element's own width, whatever the page's. From 240 px it is the full layout; from
 120 to 239 px a compact one (one line per text, a "Save" button, a caption of "✓ testnet" with a copy icon);
@@ -507,6 +510,8 @@ dotnet build XrplFile.Libraries.slnf
 dotnet run --project tests/XrplFile.Core.Tests -- -trait- "Category=Integration"
 dotnet run --project tests/XrplFile.App.Core.Tests -- -trait- "Category=Integration"
 dotnet run --project tests/XrplFile.Keys.Tests -- -trait- "Category=Integration"
+dotnet run --project tests/XrplFile.SitePrice.Tests
+node --test site/test/*.test.mjs
 cd web && node --test test/*.test.mjs
 ```
 
@@ -514,6 +519,11 @@ cd web && node --test test/*.test.mjs
 (`net10.0-windows10.0.19041.0`) — the only project in the solution that cannot build outside
 Windows. `dotnet build XrplFile.sln` itself now needs Windows and the `maui-windows` workload for
 that reason; see "The desktop application" above for building and running `XrplFile.App` itself.
+
+`web/integrity/<version>.json` is the integrity the released version was built with, and a web test
+fails when `web/src` builds that version to anything else: `/element/<version>/` is served as immutable,
+so a changed file under a published version breaks the `integrity` attribute of every page that embeds
+it. Bump the version in `web/package.json`; update the record in place only for a version not yet released.
 
 The browser element's npm package (the jsDelivr embed URL) is assembled, not published, by one more
 command after `cd web && npm run build`: `node web/pack.mjs` writes `web/npm/<version>/` with the build's

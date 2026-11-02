@@ -52,6 +52,9 @@ function packageReadme({ name, version, integrity, repoReadme }) {
   section = replaceOnce(section, /```html\n[\s\S]*?\n```/, snippetOf({ name, version, integrity }), 'the html snippet');
   section = replaceOnce(section, /```bash\ncd web && npm run build\n```\n\n/, '', 'the build command');
   section = replaceOnce(section, /The build writes `web\/dist\/<version>\/`:/, 'The package holds:', 'the sentence that lists the built files');
+  // The paragraph on the repository's demo pages names paths that do not exist in the package, and a
+  // published version's README cannot be corrected afterwards.
+  section = replaceOnce(section, /\n\n`web\/demo` has pages[^\n]*(?:\n[^\n]+)*/, '', 'the paragraph about web/demo');
 
   return `# ${name}\n\n${section}\n\nSource and licence: ${REPOSITORY}\n`;
 }

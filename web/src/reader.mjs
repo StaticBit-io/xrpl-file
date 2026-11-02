@@ -28,7 +28,8 @@ export class XrplFileReader {
    * decoded and checked, onChunk({ index, bytes, ledger }) for each accepted chunk with its absolute index and the ledger index of the transaction that carried it,
    * onBlockVerified({ block, firstChunk, lastChunk }) once a block's hash has matched. A chunk is
    * reported before its block is verified, so a caller drawing chunks as they arrive must treat them
-   * as unverified until the block's event.
+   * as unverified until the block's event. The `manifest` and a chunk's `bytes` handed to the hooks are
+   * the reader's own objects, not copies: a hook must not mutate them.
    */
   async read(link, onProgress = () => {}, hooks = {}) {
     const record = await this.manifest(link);
