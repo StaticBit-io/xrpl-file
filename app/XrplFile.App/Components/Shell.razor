@@ -325,8 +325,27 @@ else
 
             // One file read, here, rather than one per tick: NoticeLock deliberately leaves
             // DeviceUnlockOffered alone, and the unlock screen this is about to show needs it.
-            await Model.RefreshAsync(_lifetime.Token);
-            StateHasChanged();
+            try
+            {
+                await Model.RefreshAsync(_lifetime.Token);
+            }
+            catch (OperationCanceledException) when (_lifetime.Token.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception e)
+            {
+                // Nothing observes this task, so a failure is logged here or nowhere. The vault
+                // file could not be read (a sync client holding it, an unplugged volume); NoticeLock
+                // already set Stage to Locked, so the unlock screen is still the right one to draw,
+                // only without the device-unlock offer this read was for.
+                StartupLog.Write("Shell: RefreshAsync after a lock failed", e);
+            }
+
+            if (!_disposed)
+            {
+                StateHasChanged();
+            }
         });
     }
 
