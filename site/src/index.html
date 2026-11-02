@@ -26,7 +26,7 @@
 <input id="check-link-input" class="field" type="text" name="link" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xrpl-file://testnet/…">
 <button class="button" type="submit">Open</button>
 </div>
-<p id="check-link-error" class="check__error" hidden></p>
+<p id="check-link-error" class="check__error" role="alert"></p>
 </form>
 <div class="publisher">
 <button id="publisher" class="button button--quiet" type="button" disabled aria-describedby="publisher-hint"><span data-label>Download the publisher</span> <span class="tag">soon</span></button>
@@ -116,9 +116,6 @@
 <span id="snippet-status" class="snippet__status" role="status"></span>
 </div>
 </div>
-<!--@npm-unpublished-->
-<p class="notice">The npm package is not published yet, so the first address does not work today. The second snippet loads the same file from this site.</p>
-<!--@/npm-unpublished-->
 <div class="snippet">
 <p class="snippet__label">The same file from this site</p>
 <pre tabindex="0" aria-label="Embed code: The same file from this site"><code id="embed-snippet-alt"><!--@element-snippet-alt--></code></pre>

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build, MAX_FILE_BYTES } from '../build.mjs';
-import { ELEMENT_PACKAGE, ELEMENT_PACKAGE_PUBLISHED } from '../src/js/config.mjs';
+import { ELEMENT_PACKAGE } from '../src/js/config.mjs';
 
 const GUARDED_REDIRECTS = '/ru/:file /ru/:file 200\n/js/:file /js/:file 200\n/data/:file /data/:file 200\n/:network/:hash /file 200\n';
 
@@ -177,13 +177,12 @@ test('refuses a marker on a page without a usable <html lang>, or an unknown mar
 });
 
 const SNIPPET_BODY =
-  '<pre><code><!--@element-snippet--></code></pre><pre><code><!--@element-snippet-alt--></code></pre>' +
-  '<!--@npm-unpublished--><p>NOT-PUBLISHED-NOTE</p><!--@/npm-unpublished-->';
+  '<pre><code><!--@element-snippet--></code></pre><pre><code><!--@element-snippet-alt--></code></pre>';
 
 test('built index.html contains the 1.1.0 snippet with the integrity from integrity.json', () =>
   buildWithPages({ 'index.html': PAGE('en', SNIPPET_BODY) }, async (f, read) => {
     const html = await read('index.html');
-    for (const marker of ['<!--@element-snippet-->', '<!--@element-snippet-alt-->', '<!--@npm-unpublished-->']) {
+    for (const marker of ['<!--@element-snippet-->', '<!--@element-snippet-alt-->']) {
       assert.ok(!html.includes(marker), `no ${marker} is left behind`);
     }
     const [primary, alternative] = html.match(/<pre><code>[\s\S]*?<\/code><\/pre>/g);
@@ -198,12 +197,6 @@ test('built index.html contains the 1.1.0 snippet with the integrity from integr
       assert.match(snippet, /&lt;xrpl-file src="xrpl-file:\/\/testnet\/[0-9A-F]{64}"/);
     }
     assert.ok(!html.includes('sha384-OTHER'), 'only the value for the element script is used');
-  }));
-
-test('the "package not published" note is kept exactly while ELEMENT_PACKAGE_PUBLISHED is false', () =>
-  buildWithPages({ 'index.html': PAGE('en', SNIPPET_BODY) }, async (f, read) => {
-    assert.equal(ELEMENT_PACKAGE_PUBLISHED, false);
-    assert.ok((await read('index.html')).includes('<p>NOT-PUBLISHED-NOTE</p>'));
   }));
 
 test('refuses a snippet marker when integrity.json has no value for the element script', () =>

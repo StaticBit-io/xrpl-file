@@ -19,7 +19,17 @@ function fakeField() {
     focus() { this.focused = true; },
     addEventListener(type, handler) { (listeners[`input:${type}`] ??= []).push(handler); },
   };
-  const message = { id: 'link-error', textContent: '', hidden: true };
+  // Every write to the live region is recorded: a screen reader announces a change of text.
+  const writes = [];
+  let text = '';
+  const message = {
+    id: 'link-error',
+    get textContent() { return text; },
+    set textContent(value) { text = value; writes.push(value); },
+  };
+  const queue = [];
+  const defer = (callback) => queue.push(callback);
+  const flush = () => { while (queue.length > 0) queue.shift()(); };
   const form = {
     addEventListener(type, handler) { (listeners[`form:${type}`] ??= []).push(handler); },
   };
@@ -32,7 +42,7 @@ function fakeField() {
     input.value = value;
     for (const handler of listeners['input:input'] ?? []) handler({});
   };
-  return { form, input, message, submit, type };
+  return { form, input, message, submit, type, writes, defer, flush };
 }
 
 test('a valid link navigates to its canonical file path', () => {
@@ -51,9 +61,9 @@ test('an invalid value shows an accessible inline error and does not navigate', 
   initCheckLink({ ...field, strings: STRINGS, navigate: (path) => visited.push(path) });
   field.type('https://example.com/not-a-link');
   field.submit();
+  field.flush();
   assert.deepEqual(visited, []);
   assert.equal(field.message.textContent, STRINGS.invalid);
-  assert.equal(field.message.hidden, false);
   assert.equal(field.input.attrs['aria-invalid'], 'true');
   assert.equal(field.input.attrs['aria-describedby'], 'link-error');
   assert.equal(field.input.focused, true);
@@ -63,6 +73,7 @@ test('an empty field has its own message', () => {
   const field = fakeField();
   initCheckLink({ ...field, strings: STRINGS, navigate: () => assert.fail('must not navigate') });
   field.submit();
+  field.flush();
   assert.equal(field.message.textContent, STRINGS.empty);
 });
 
@@ -71,9 +82,41 @@ test('editing the field clears the error', () => {
   initCheckLink({ ...field, strings: STRINGS, navigate: () => {} });
   field.type('nope');
   field.submit();
+  field.flush();
   field.type('xrpl-file://');
   assert.equal(field.message.textContent, '');
-  assert.equal(field.message.hidden, true);
   assert.equal(field.input.attrs['aria-invalid'], undefined);
   assert.equal(field.input.attrs['aria-describedby'], undefined);
+});
+
+test('the message element is a live region that is never hidden, only emptied and refilled', () => {
+  const field = fakeField();
+  initCheckLink({ ...field, strings: STRINGS, navigate: () => {} });
+  field.type('nope');
+  field.submit();
+  field.flush();
+  assert.equal('hidden' in field.message, false, 'the live region is not toggled with hidden');
+});
+
+test('the same error submitted twice is announced twice: the region is emptied in between', () => {
+  const field = fakeField();
+  initCheckLink({ ...field, strings: STRINGS, navigate: () => {} });
+  field.type('nope');
+  field.submit();
+  field.flush();
+  field.submit();
+  field.flush();
+  const invalids = field.writes.map((value) => (value === '' ? '' : 'text'));
+  assert.deepEqual(invalids.filter((value, index, all) => value !== all[index - 1]), ['', 'text', '', 'text']);
+  assert.equal(field.message.textContent, STRINGS.invalid);
+});
+
+test('typing between the submit and the delayed write cancels the stale message', () => {
+  const field = fakeField();
+  initCheckLink({ ...field, strings: STRINGS, navigate: () => {} });
+  field.type('nope');
+  field.submit();
+  field.type('xrpl-file://x');
+  field.flush();
+  assert.equal(field.message.textContent, '');
 });

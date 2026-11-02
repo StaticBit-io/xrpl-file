@@ -14,6 +14,3 @@ export const SITE_ORIGIN = 'https://xrpl-file.staticbit.io';
 
 /** The npm package jsDelivr serves the element from. The final name is not chosen yet. */
 export const ELEMENT_PACKAGE = 'xrpl-file-element';
-
-/** False until the package is on npm: the page then says so and points at the site's own copy. */
-export const ELEMENT_PACKAGE_PUBLISHED = false;

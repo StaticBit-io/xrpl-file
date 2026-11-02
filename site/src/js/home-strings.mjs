@@ -7,6 +7,12 @@ const NETWORK_NAMES = {
   ru: { mainnet: 'основной сети XRP Ledger', testnet: 'тестовой сети XRP Ledger' },
 };
 
+// The caption names the network in a few words; a network without an entry keeps its own name.
+const NETWORK_SHORT = {
+  en: {},
+  ru: { mainnet: 'основной сети', testnet: 'тестовой сети' },
+};
+
 const russianPlurals = new Intl.PluralRules('ru');
 
 function ruCount(count, one, few, many) {
@@ -37,7 +43,7 @@ export function mosaicStrings(lang, network) {
         }[phase];
       },
       caption: ({ chunks, firstLedger, lastLedger }) =>
-        `проверено в ${network} · ${ruCount(chunks, 'фрагмент', 'фрагмента', 'фрагментов')} · ${ledgerRange(firstLedger, lastLedger, ledgers)}`,
+        `проверено в ${NETWORK_SHORT.ru[network] ?? network} · ${ruCount(chunks, 'фрагмент', 'фрагмента', 'фрагментов')} · ${ledgerRange(firstLedger, lastLedger, ledgers)}`,
       failed: (code) => {
         if (code === 'NodeUnreachable' || code === 'Stalled') return 'Реестр не ответил. Обновите страницу, чтобы попробовать ещё раз.';
         if (code === 'BlockMismatch' || code === 'DecodeFailed') return 'Картинка не прошла проверку, поэтому не показана.';

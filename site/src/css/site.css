@@ -425,6 +425,11 @@
   color: var(--error);
 }
 
+/* The live region stays in the page; empty, it takes no room. */
+.check__error:empty {
+  margin: 0;
+}
+
 .hint {
   color: var(--ink-muted);
   font-size: var(--text-sm);
@@ -602,11 +607,6 @@
 .snippet {
   margin-top: var(--space-5);
   max-width: 52rem;
-}
-
-.snippet + .notice,
-.notice + .snippet {
-  margin-top: var(--space-5);
 }
 
 .snippet__label {

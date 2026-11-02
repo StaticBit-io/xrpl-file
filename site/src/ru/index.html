@@ -26,7 +26,7 @@
 <input id="check-link-input" class="field" type="text" name="link" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xrpl-file://testnet/…">
 <button class="button" type="submit">Открыть</button>
 </div>
-<p id="check-link-error" class="check__error" hidden></p>
+<p id="check-link-error" class="check__error" role="alert"></p>
 </form>
 <div class="publisher">
 <button id="publisher" class="button button--quiet" type="button" disabled aria-describedby="publisher-hint"><span data-label>Скачать публикатор</span> <span class="tag">скоро</span></button>
@@ -78,7 +78,7 @@
 
 <section class="section container" aria-labelledby="price-title">
 <h2 id="price-title">Сколько это стоит</h2>
-<p>Файл попадает в реестр примерно по одной транзакции на килобайт. Для каждого файла публикатор открывает одноразовый аккаунт и удаляет его, когда файл записан. Расходов два: комиссии, которые тратятся, и резерв, который удерживается, пока файл записывается, и почти весь возвращается.</p>
+<p>Файл попадает в реестр примерно по одной транзакции на килобайт. Для каждого файла публикатор открывает одноразовый аккаунт и удаляет его, когда файл записан. Расходов два: комиссии, которые тратятся, и резерв, который удерживается, пока файл записывается, и большая часть возвращается.</p>
 <div id="price-data" class="price-data"><p class="hint">Таблица цен сейчас недоступна. Цифры есть и в файле данных <a href="/data/price.json">price.json</a>.</p></div>
 </section>
 
@@ -116,9 +116,6 @@
 <span id="snippet-status" class="snippet__status" role="status"></span>
 </div>
 </div>
-<!--@npm-unpublished-->
-<p class="notice">Пакет в npm ещё не опубликован, поэтому первый адрес пока не работает. Второй вариант загружает тот же файл с этого сайта.</p>
-<!--@/npm-unpublished-->
 <div class="snippet">
 <p class="snippet__label">Тот же файл с этого сайта</p>
 <pre tabindex="0" aria-label="Код для вставки: Тот же файл с этого сайта"><code id="embed-snippet-alt"><!--@element-snippet-alt--></code></pre>

@@ -211,10 +211,9 @@ transaction count by a fee: the file's own fee column is what is shown.
 - `HERO_LINK`, `HERO_ASPECT`: the hero file (see above).
 - `PUBLISHER_URL`: the publisher's GitHub Releases URL. While it is `null` the "Download the
   publisher" button is disabled and marked "soon"; set the URL and the button becomes a link.
-- `ELEMENT_PACKAGE`, `ELEMENT_PACKAGE_PUBLISHED`: the npm package name in the first embed snippet
-  (`cdn.jsdelivr.net/npm/<package>@1.1.0/...`) and whether it is on npm. While it is `false` the
-  page says the package is not published yet and points at the second snippet, the same file served
-  from this site. `build.mjs` reads both, so the snippets and the note change together.
+- `ELEMENT_PACKAGE`: the npm package name in the first embed snippet
+  (`cdn.jsdelivr.net/npm/<package>@1.1.0/...`). The second snippet is the same file served from this
+  site. `build.mjs` reads the constant, so the snippet follows it.
 
 The embed snippets are inserted at build time: `<!--@element-snippet-->` and
 `<!--@element-snippet-alt-->` in a page become the escaped snippets, with the `integrity` value from

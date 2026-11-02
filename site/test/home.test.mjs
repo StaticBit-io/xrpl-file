@@ -56,3 +56,20 @@ test('the drawings are coloured by classes only, never by literal colours', () =
 test('no long dashes in the copy', () => {
   for (const html of Object.values(pages)) assert.ok(!html.includes('—'));
 });
+
+test('the check-a-link error is a live region that is in the page from the start', () => {
+  for (const html of Object.values(pages)) {
+    assert.match(html, /<p id="check-link-error" class="check__error" role="alert"><\/p>/);
+  }
+});
+
+test('the Russian reserve line says most of it comes back, not nearly all', () => {
+  assert.ok(pages.ru.includes('большая часть возвращается'));
+  assert.ok(!pages.ru.includes('почти весь'));
+});
+
+test('no visible home copy talks about the test network being reset', () => {
+  for (const html of Object.values(pages)) {
+    assert.ok(!/reset from time to time|test network|сбрасыва|тестовая сеть/i.test(html));
+  }
+});
