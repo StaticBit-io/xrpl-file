@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { initChrome } from '../src/js/chrome.mjs';
-import { ACTIVE_LANGS, LANGS, equivalentPath } from '../src/js/prefs.mjs';
-import { LANGUAGE_NAMES, htmlLang } from '../src/js/languages.mjs';
+import { ACTIVE_LANGS, LANGS, equivalentPath, getLang } from '../src/js/prefs.mjs';
+import { LANGUAGE_NAMES, homePath, htmlLang } from '../src/js/languages.mjs';
 import { renderChrome, prePaintScript, languageAlternates, REPOSITORY_URL, SPECIFICATION_URL } from '../chrome-markup.mjs';
 import { STRINGS } from '../src/js/chrome-strings.mjs';
 import { SITE_ORIGIN } from '../src/js/config.mjs';
@@ -191,7 +191,7 @@ test('the current language link is marked and the other is not', () => {
   const en = langLink(doc, 'en');
   const ru = langLink(doc, 'ru');
   initChrome({ document: doc, location: { pathname: '/ru/' }, storage: memoryStorage() });
-  assert.equal(ru.getAttribute('aria-current'), 'true');
+  assert.equal(ru.getAttribute('aria-current'), 'page');
   assert.equal(en.hasAttribute('aria-current'), false);
 });
 
@@ -228,7 +228,7 @@ test('on the file page the switch changes the stored language in place and annou
   assert.equal(label.textContent, STRINGS.ru.repository);
   assert.equal(aria.getAttribute('aria-label'), STRINGS.ru.homeLabel);
   assert.equal(current.textContent, LANGUAGE_NAMES.ru, 'the menu button shows the language now in use');
-  assert.equal(ru.getAttribute('aria-current'), 'true');
+  assert.equal(ru.getAttribute('aria-current'), 'page');
   assert.equal(en.hasAttribute('aria-current'), false);
   assert.equal(ru.getAttribute('href'), path);
   const announced = doc.events.at(-1);
@@ -384,7 +384,7 @@ test('the header language control is a disclosure of plain links, one per active
     const summary = /<summary[\s\S]*?<\/summary>/.exec(header)[0];
     assert.ok(summary.includes(`>${STRINGS[lang].languageLabel}</span>`), 'the button is named "Language" for assistive technology');
     assert.ok(summary.includes(`<span data-lang-current>${LANGUAGE_NAMES[lang]}</span>`), 'and shows the language in use');
-    const links = [...header.matchAll(/<a data-lang-link="(\w+)" href="([^"]*)" lang="([^"]*)" hreflang="([^"]*)"( aria-current="true")?>([^<]*)<\/a>/g)];
+    const links = [...header.matchAll(/<a data-lang-link="(\w+)" href="([^"]*)" lang="([^"]*)" hreflang="([^"]*)"( aria-current="page")?>([^<]*)<\/a>/g)];
     assert.deepEqual(links.map((match) => match[1]), ACTIVE_LANGS, 'the menu lists every active language, in order');
     for (const [, code, href, tag, hreflang, current, name] of links) {
       assert.equal(href, equivalentPath(`${prefixOf(lang)}/`, code));
@@ -468,4 +468,111 @@ test('languageAlternates handles all six languages, with Chinese tagged zh-Hans 
   const fromChinese = languageAlternates('/zh/x', LANGS);
   assert.ok(fromChinese.includes(`<link rel="alternate" hreflang="en" href="${SITE_ORIGIN}/x">`));
   assert.ok(fromChinese.includes(`<link rel="alternate" hreflang="x-default" href="${SITE_ORIGIN}/x">`));
+});
+
+const SITE_HOST = new URL(SITE_ORIGIN).origin;
+
+/** Runs the inline script the way a browser would on `pathname` and returns where it sent the visitor, or null. */
+function visit({ pathname = '/', search = '', hash = '', referrer = '', stored, languages, language, storage, langs } = {}) {
+  const location = {
+    pathname, search, hash, origin: SITE_HOST,
+    replaced: null,
+    replace(url) { this.replaced = url; },
+  };
+  const sandbox = {
+    URL,
+    location,
+    document: { referrer, documentElement: { dataset: {} } },
+    navigator: { languages, language },
+    localStorage: storage ?? memoryStorage(stored === undefined ? {} : { 'xf-lang': stored }),
+  };
+  vm.runInNewContext(prePaintScript(langs), sandbox);
+  return location.replaced;
+}
+
+const BROWSERS = [undefined, [], ['en-US'], ['ru-RU'], ['fr', 'ru'], ['ru', 'en'], ['de-AT'], ['zh-TW'], ['pt-BR'], ['es-419'], ['ja', 'en']];
+const STORED = [undefined, 'en', 'ru', 'de', 'zh', 'garbage'];
+
+test('on the root the inline script sends the visitor where getLang would, and only away from English', () => {
+  for (const stored of STORED) {
+    for (const languages of BROWSERS) {
+      const lang = getLang(memoryStorage(stored === undefined ? {} : { 'xf-lang': stored }), languages);
+      const expected = lang === 'en' ? null : homePath(lang);
+      assert.equal(visit({ stored, languages }), expected, `stored ${stored}, browser ${JSON.stringify(languages)}`);
+    }
+  }
+});
+
+test('first visit: a Russian browser lands on /ru/, an English or unsupported one stays', () => {
+  assert.equal(visit({ languages: ['ru-RU', 'en'] }), '/ru/');
+  assert.equal(visit({ languages: ['fr', 'ru'] }), '/ru/');
+  assert.equal(visit({ languages: ['en-US', 'ru'] }), null);
+  assert.equal(visit({ languages: ['fr'] }), null);
+  assert.equal(visit({ language: 'ru' }), '/ru/', 'navigator.language when there is no list');
+  assert.equal(visit({ languages: [], language: 'ru' }), '/ru/');
+  assert.equal(visit({}), null);
+});
+
+test('a remembered Russian choice returns to /ru/, a remembered English one stays on /', () => {
+  assert.equal(visit({ stored: 'ru', languages: ['en-US'] }), '/ru/');
+  assert.equal(visit({ stored: 'en', languages: ['ru-RU'] }), null, 'the visitor chose English: the browser does not override it');
+});
+
+test('the inline script survives storage that throws or is unreachable', () => {
+  const throwing = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); } };
+  assert.equal(visit({ storage: throwing, languages: ['ru-RU'] }), '/ru/');
+  assert.equal(visit({ storage: throwing, languages: ['en'] }), null);
+  const location = { pathname: '/', search: '', hash: '', origin: SITE_HOST, replaced: null, replace(url) { this.replaced = url; } };
+  const denied = { URL, location, document: { referrer: '', documentElement: { dataset: {} } }, navigator: { languages: ['ru'] } };
+  Object.defineProperty(denied, 'localStorage', { get() { throw new Error('denied'); } });
+  vm.runInNewContext(prePaintScript(), denied);
+  assert.equal(location.replaced, '/ru/');
+});
+
+test('the inline script never moves a visitor who came from this site, or who is not on the root', () => {
+  assert.equal(visit({ referrer: `${SITE_HOST}/ru/`, languages: ['ru-RU'] }), null, 'they just chose English in the menu');
+  assert.equal(visit({ referrer: `${SITE_HOST}/`, stored: 'ru' }), null);
+  assert.equal(visit({ referrer: 'https://example.com/page', languages: ['ru-RU'] }), '/ru/', 'a visitor from elsewhere is redirected');
+  assert.equal(visit({ referrer: 'not a url', languages: ['ru-RU'] }), '/ru/');
+  for (const pathname of ['/ru/', '/index.html', '/x', `/testnet/${HASH}`, '/nope', '/file']) {
+    assert.equal(visit({ pathname, stored: 'ru', languages: ['ru-RU'] }), null, pathname);
+  }
+});
+
+test('the redirect keeps the query and the fragment', () => {
+  assert.equal(visit({ search: '?a=1', hash: '#price-title', languages: ['ru'] }), '/ru/?a=1#price-title');
+});
+
+test('with all six languages active the script reads the primary subtag like getLang', () => {
+  const six = (languages, stored) => visit({ languages, stored, langs: LANGS });
+  assert.equal(six(['de-AT']), '/de/');
+  assert.equal(six(['zh-TW']), '/zh/');
+  assert.equal(six(['zh-Hans-CN']), '/zh/');
+  assert.equal(six(['pt-BR']), '/pt/');
+  assert.equal(six(['es-419']), '/es/');
+  assert.equal(six(['fr', 'es']), '/es/');
+  assert.equal(six(['en', 'de']), null);
+  assert.equal(six(['en'], 'zh'), '/zh/');
+  assert.equal(six(['de'], 'en'), null);
+});
+
+test('with German not active a German browser stays on the English page', () => {
+  assert.equal(visit({ languages: ['de-AT'], langs: ['en', 'ru'] }), null);
+});
+
+test('the head of the English home carries the redirect, and it is in the same script as the theme', () => {
+  const head = renderChrome('head', fixedPage('en', '/'));
+  assert.ok(head.includes('location.replace('));
+  assert.equal(head.match(/<script>/g).length, 1);
+});
+
+test('choosing English in the menu is remembered before the page is left', () => {
+  const doc = fakeDocument({ lang: 'ru' });
+  const en = langLink(doc, 'en');
+  langLink(doc, 'ru');
+  const storage = memoryStorage({ 'xf-lang': 'ru' });
+  initChrome({ document: doc, location: { pathname: '/ru/' }, storage });
+  const event = en.click();
+  assert.equal(storage.data.get('xf-lang'), 'en');
+  assert.equal(event.defaultPrevented, false);
 });

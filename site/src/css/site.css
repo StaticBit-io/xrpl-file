@@ -122,7 +122,7 @@
   text-decoration: none;
 }
 
-.lang-switch a[aria-current="true"] {
+.lang-switch a[aria-current="page"] {
   border-bottom-color: var(--ink);
   color: var(--ink);
   font-weight: var(--weight-label);
@@ -201,7 +201,7 @@
   text-decoration: none;
 }
 
-.lang-menu__list a[aria-current="true"] {
+.lang-menu__list a[aria-current="page"] {
   box-shadow: inset 2px 0 0 var(--ink);
   color: var(--ink);
 }
@@ -606,7 +606,7 @@
 }
 
 .field {
-  flex: 1 1 14rem;
+  flex: 1 1 10rem;
   min-width: 0;
   min-height: 3rem;
   padding: var(--space-2) var(--space-4);

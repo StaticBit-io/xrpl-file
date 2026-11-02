@@ -196,7 +196,14 @@ and Russian are written by hand. The locales are chosen for readers, not for a r
 and a page in the build, and only an active language is chosen by `getLang` (the stored choice, else
 the first language of `navigator.languages` whose primary subtag is active: `zh-TW` is Chinese,
 `pt-BR` Portuguese, `es-419` Spanish; else English). Tests loop over `ACTIVE_LANGS`, so flipping the
-list is what turns the checks on for a new language. The build refuses a `src/<lang>/` folder for a
+list is what turns the checks on for a new language.
+
+First visit: the inline script in `<head>` (`prePaintScript` in `chrome-markup.mjs`, written from
+`ACTIVE_LANGS`) moves a visitor from exactly `/` to their language's home with `location.replace`, keeping
+the query and the fragment, when the stored choice (else the first matching browser language) is not
+English. It never acts on `/ru/` or any other path, for a visitor who arrives from this site (so the
+one who picks English in the menu with storage blocked does not bounce back), or when the stored choice
+is English. A test pins its choice against `getLang`. The build refuses a `src/<lang>/` folder for a
 language that is not active, and an active language without its `src/<lang>/index.html`.
 
 ### Adding a language

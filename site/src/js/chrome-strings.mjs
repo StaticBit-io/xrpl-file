@@ -22,6 +22,3 @@ export const STRINGS = {
     lightTheme: 'Светлая тема',
   },
 };
-
-/** Language names are written in their own language and never translated. */
-export const LANGUAGE_NAMES = { en: 'English', ru: 'Русский' };

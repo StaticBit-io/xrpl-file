@@ -15,7 +15,7 @@ function translate(document, lang) {
 
 function markCurrentLanguage(document, lang) {
   for (const link of document.querySelectorAll('[data-lang-link]')) {
-    if (link.dataset.langLink === lang) link.setAttribute('aria-current', 'true');
+    if (link.dataset.langLink === lang) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   }
 }

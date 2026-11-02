@@ -1,21 +1,46 @@
 // Build-time markup for the shared head, header and footer. build.mjs replaces a marker comment in a
 // page with the matching part, so no page repeats this markup and none can drift from another.
 import { SITE_ORIGIN } from './src/js/config.mjs';
-import { ACTIVE_LANGS, LANGUAGE_NAMES, htmlLang, homePath } from './src/js/languages.mjs';
-import { equivalentPath, THEME_KEY } from './src/js/prefs.mjs';
+import { ACTIVE_LANGS, DEFAULT_LANG, LANGUAGE_NAMES, htmlLang, homePath } from './src/js/languages.mjs';
+import { equivalentPath, LANG_KEY, THEME_KEY } from './src/js/prefs.mjs';
 import { STRINGS } from './src/js/chrome-strings.mjs';
 
 export const REPOSITORY_URL = 'https://github.com/StaticBit-io/xrpl-file';
 export const SPECIFICATION_URL = 'https://github.com/StaticBit-io/xrpl-file/blob/main/docs/spec/xrpl-file-v1.md';
 
 /**
- * Runs in <head> before first paint so the page never flashes the wrong theme. The same rule as
- * getTheme in prefs.mjs (only a stored "light" gives light, everything else is dark), written out
- * because a classic inline script cannot import; the storage key comes from prefs.mjs.
+ * The first-visit language rule, written out for the inline script: only on the English home, send the
+ * visitor to the language getLang would choose (the stored choice if it is active, else the first
+ * browser language whose primary subtag is active), unless that is English. A visitor who arrives from
+ * this site is never moved: with storage blocked, the one who just chose English in the menu would
+ * bounce straight back. Every read is guarded, like the rest of prefs.mjs.
  */
-export function prePaintScript() {
+function languageRedirect(langs) {
+  const homes = JSON.stringify(Object.fromEntries(langs.map((lang) => [lang, homePath(lang)])));
   return (
-    `(function(){var t="dark";try{if(localStorage.getItem(${JSON.stringify(THEME_KEY)})==="light")t="light"}catch(e){}` +
+    'try{if(location.pathname==="/"){' +
+    `var H=${homes},R=document.referrer,S=false;` +
+    'try{S=!!R&&new URL(R).origin===location.origin}catch(e){}' +
+    'if(!S){var K=null,G=null;' +
+    `try{K=localStorage.getItem(${JSON.stringify(LANG_KEY)})}catch(e){}` +
+    'if(K&&H.hasOwnProperty(K))G=K;else{' +
+    'var L=navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language];' +
+    'for(var i=0;i<L.length;i++){var C=String(L[i]||"").toLowerCase().split(/[-_]/)[0];if(H.hasOwnProperty(C)){G=C;break}}}' +
+    `if(G&&G!==${JSON.stringify(DEFAULT_LANG)})location.replace(H[G]+location.search+location.hash)}}}catch(e){}`
+  );
+}
+
+/**
+ * Runs in <head> before first paint so the page never flashes the wrong theme (the same rule as
+ * getTheme in prefs.mjs: only a stored "light" gives light, everything else is dark) and so a first
+ * visit to the English home can move to the visitor's language before anything is drawn. A classic
+ * inline script cannot import, so both rules are written out here; the storage keys and the language
+ * list come from prefs.mjs and languages.mjs, and tests pin the language rule against getLang.
+ * @param {string[]} [langs] the active languages
+ */
+export function prePaintScript(langs = ACTIVE_LANGS) {
+  return (
+    `(function(){${languageRedirect(langs)}var t="dark";try{if(localStorage.getItem(${JSON.stringify(THEME_KEY)})==="light")t="light"}catch(e){}` +
     'document.documentElement.dataset.theme=t})()'
   );
 }
@@ -78,7 +103,7 @@ function langLinks(page) {
     // No script: a stored-language page falls back to the home pages; with script chrome.mjs
     // replaces every href with the page's own URL.
     const href = page.langFromStorage ? homePath(lang) : equivalentPath(page.pagePath, lang);
-    const current = !page.langFromStorage && lang === page.lang ? ' aria-current="true"' : '';
+    const current = !page.langFromStorage && lang === page.lang ? ' aria-current="page"' : '';
     return `<li><a data-lang-link="${lang}" href="${href}" lang="${htmlLang(lang)}" hreflang="${htmlLang(lang)}"${current}>${LANGUAGE_NAMES[lang]}</a></li>`;
   }).join('\n');
 }

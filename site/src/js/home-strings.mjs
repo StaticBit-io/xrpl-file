@@ -89,7 +89,7 @@ const CLOUD_STRINGS = {
       label: (phase, { chunks }) => {
         const count = chunks === null ? '' : `, ${chunksOf(chunks)}`;
         return {
-          reading: `Облако точек: участок XRP Ledger. Фрагменты файла появляются в нём кубами по мере чтения${count}`,
+          reading: `Облако точек: участок XRP Ledger. Фрагменты файла появляются в этом облаке кубами по мере чтения${count}`,
           developing: `Облако точек: участок XRP Ledger. Все блоки проверяются${count}`,
           done: `Облако точек: участок XRP Ledger. Файл прочитан из реестра и проверен${count}`,
           failed: 'Файл сейчас не удалось прочитать из реестра',

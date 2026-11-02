@@ -127,14 +127,14 @@ test('inlines the shared head, header and footer into a page and takes the langu
     assert.ok(!en.includes('<!--@chrome:'), 'no marker is left behind');
     assert.match(en, /<link rel="stylesheet" href="\/css\/site\.css">/);
     assert.match(en, /<a class="wordmark" href="\/"/);
-    assert.match(en, /data-lang-link="en" href="\/" lang="en" hreflang="en" aria-current="true"/);
+    assert.match(en, /data-lang-link="en" href="\/" lang="en" hreflang="en" aria-current="page"/);
     assert.match(en, /data-lang-link="ru" href="\/ru\/"/);
     assert.match(en, /<main id="main">Hello<\/main>/);
     assert.ok(en.includes('Repository'));
 
     const ru = await read('ru/index.html');
     assert.match(ru, /<a class="wordmark" href="\/ru\/"/);
-    assert.match(ru, /data-lang-link="ru" href="\/ru\/" lang="ru" hreflang="ru" aria-current="true"/);
+    assert.match(ru, /data-lang-link="ru" href="\/ru\/" lang="ru" hreflang="ru" aria-current="page"/);
     assert.ok(ru.includes('Репозиторий'));
     assert.ok(ru.includes('/fonts/geologica-cyrillic.woff2'));
   }));
@@ -267,7 +267,7 @@ test('refuses an active language that has no home page and names the missing fil
       await rm(join(f.siteDir, 'src', lang), { recursive: true, force: true });
       await assert.rejects(
         build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' }),
-        new RegExp(`${lang}/index\.html`),
+        new RegExp(`${lang}/index\\.html`),
       );
       assert.equal(await exists(f.outDir), false);
     });
@@ -283,7 +283,7 @@ test('refuses a page whose <html lang> is not the language of its folder', async
       await writeFile(join(f.siteDir, 'src', name), html);
       await assert.rejects(
         build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' }),
-        new RegExp(name.replace('.', '\.')),
+        new RegExp(name.replace('.', '\\.')),
         name,
       );
     });
@@ -296,7 +296,7 @@ test('refuses a language-folder page that would be shadowed because _redirects h
     await withFixture(rules, async (f) => {
       await assert.rejects(
         build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' }),
-        new RegExp(`/${lang}/index\.html`),
+        new RegExp(`/${lang}/index\\.html`),
       );
     });
   }
