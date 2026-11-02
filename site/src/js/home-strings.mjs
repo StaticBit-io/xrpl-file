@@ -31,7 +31,7 @@ function ledgerRange(first, last, word) {
 /** `network` is the hero file's network, e.g. "testnet": the caption names where the file was read. */
 export function mosaicStrings(lang, network) {
   if (lang === 'ru') {
-    const ledgers = { one: 'леджер', many: 'леджеры' };
+    const ledgers = { one: 'версия реестра', many: 'версии реестра' };
     return {
       label: (phase, { chunks }) => {
         const count = chunks === null ? '' : `, ${ruCount(chunks, 'фрагмент', 'фрагмента', 'фрагментов')}`;
@@ -45,7 +45,7 @@ export function mosaicStrings(lang, network) {
       caption: ({ chunks, firstLedger, lastLedger }) =>
         `проверено в ${NETWORK_SHORT.ru[network] ?? network} · ${ruCount(chunks, 'фрагмент', 'фрагмента', 'фрагментов')} · ${ledgerRange(firstLedger, lastLedger, ledgers)}`,
       failed: (code) => {
-        if (code === 'NodeUnreachable' || code === 'Stalled') return 'Реестр не ответил. Обновите страницу, чтобы попробовать ещё раз.';
+        if (code === 'NodeUnreachable' || code === 'Stalled') return 'Узел XRP Ledger не ответил. Обновите страницу, чтобы попробовать ещё раз.';
         if (code === 'BlockMismatch' || code === 'DecodeFailed') return 'Картинка не прошла проверку, поэтому не показана.';
         if (['NodeLacksHistory', 'ManifestNotFound', 'ChunkMissing', 'Incomplete'].includes(code)) {
           return 'Эта картинка сейчас недоступна в реестре.';
@@ -69,7 +69,7 @@ export function mosaicStrings(lang, network) {
     caption: ({ chunks, firstLedger, lastLedger }) =>
       `verified on ${network} · ${enChunks(chunks)} · ${ledgerRange(firstLedger, lastLedger, ledgers)}`,
     failed: (code) => {
-      if (code === 'NodeUnreachable' || code === 'Stalled') return 'The ledger did not answer. Reload the page to try again.';
+      if (code === 'NodeUnreachable' || code === 'Stalled') return 'The XRP Ledger node did not answer. Reload the page to try again.';
       if (code === 'BlockMismatch' || code === 'DecodeFailed') return 'The picture did not pass the check, so it is not shown.';
       if (['NodeLacksHistory', 'ManifestNotFound', 'ChunkMissing', 'Incomplete'].includes(code)) {
         return 'This picture is not available from the ledger right now.';
@@ -83,11 +83,11 @@ export function mosaicStrings(lang, network) {
 export const CHECK_LINK_STRINGS = {
   en: {
     empty: 'Paste a link first.',
-    invalid: 'This is not an xrpl-file link. A link looks like xrpl-file://testnet/ followed by 64 characters 0-9 and A-F.',
+    invalid: 'This is not an xrpl-file link. A link looks like xrpl-file://testnet/ followed by 64 hexadecimal characters (0-9, A-F).',
   },
   ru: {
     empty: 'Сначала вставьте ссылку.',
-    invalid: 'Это не ссылка xrpl-file. Ссылка выглядит так: xrpl-file://testnet/ и 64 символа 0-9 и A-F.',
+    invalid: 'Это не ссылка xrpl-file. Ссылка выглядит так: xrpl-file://testnet/ и 64 шестнадцатеричных символа (0-9, A-F).',
   },
 };
 
@@ -119,6 +119,6 @@ export const PRICE_STRINGS = {
     reserve: ({ held, returned, kept }) =>
       `Пока файл записывается, ${held} XRP удерживается как резерв одноразового аккаунта. Когда аккаунт удалён, ${returned} XRP возвращается. Остальные ${kept} XRP остаются у сети как плата за удаление аккаунта, каким бы ни был размер файла.`,
     source: ({ network, date }) =>
-      `Данные взяты из ${NETWORK_NAMES.ru[network] ?? network} ${date}. Комиссии и резервы задаёт сеть, и они могут меняться.`,
+      `Данные ${NETWORK_NAMES.ru[network] ?? network} на ${date}. Комиссии и резервы задаёт сеть, и они могут меняться.`,
   },
 };

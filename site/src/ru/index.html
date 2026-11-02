@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>xrpl-file: файл внутри XRP Ledger</title>
+<title>xrpl-file: храните файл в XRP Ledger</title>
 <meta name="description" content="xrpl-file записывает файл в XRP Ledger и читает его обратно с проверкой по отпечатку. Храните картинку и метаданные токена в том же реестре, что и сам токен.">
 <link rel="canonical" href="https://xrpl-file.staticbit.io/ru/">
 <link rel="alternate" hreflang="en" href="https://xrpl-file.staticbit.io/">
@@ -19,7 +19,7 @@
 <div class="hero__text">
 <h1 id="hero-title">Храните файл в XRP Ledger</h1>
 <p class="lead">Картинка вашего токена или любой другой файл записываются в тот же реестр, что и токен, а читаются с проверкой по отпечатку.</p>
-<p>Картинка на этой странице взята из реестра: это настоящий файл. Браузер показывает её, только когда проверена каждая часть.</p>
+<p>Картинка на этой странице взята из реестра: это настоящий файл. Браузер показывает её, только когда каждая часть проверена по отпечатку.</p>
 <form id="check-link" class="check" novalidate>
 <label for="check-link-input">Проверить ссылку</label>
 <div class="check__row">
@@ -29,7 +29,7 @@
 <p id="check-link-error" class="check__error" role="alert"></p>
 </form>
 <div class="publisher">
-<button id="publisher" class="button button--quiet" type="button" disabled aria-describedby="publisher-hint"><span data-label>Скачать публикатор</span> <span class="tag">скоро</span></button>
+<button id="publisher" class="button button--quiet" type="button" disabled aria-describedby="publisher-hint"><span data-label>Скачать приложение для публикации</span> <span class="tag">скоро</span></button>
 <p id="publisher-hint" class="hint">Приложение для Windows, которое записывает ваши файлы в реестр.</p>
 </div>
 </div>
@@ -41,13 +41,13 @@
 
 <section class="section container" aria-labelledby="problem-title">
 <h2 id="problem-title">Ссылки на метаданные умирают</h2>
-<p>Если NFT, MPT, DID или удостоверение хранит картинку и описание вне реестра, в токене есть только ссылка. Сам файл лежит в IPFS, на сервере эмитента или в корзине S3.</p>
+<p>Если NFT, MPT, DID или удостоверение хранит картинку и описание вне реестра, в нём есть только ссылка. Сам файл лежит в IPFS, на сервере эмитента или в корзине S3.</p>
 <ul class="faults">
 <li><strong>IPFS без закрепления</strong>Закрепление перестают оплачивать, и файл пропадает из IPFS.</li>
 <li><strong>Закрытый сервер</strong>Компания закрывается или переезжает, и по адресу приходит ошибка.</li>
 <li><strong>Закрытое хранилище</strong>Аккаунт в облаке закрывают, и файлы исчезают вместе с ним.</li>
 </ul>
-<p>Токен остаётся в реестре, а файл по его ссылке можно потерять. С xrpl-file файл записан в тот же реестр, что и токен, поэтому живёт столько же, сколько он, а проверить его по отпечатку может любой, не доверяя ничьему серверу. Ссылка занимает 84 байта, а поле URI у NFT вмещает 256.</p>
+<p>Эта запись остаётся в реестре, а файл по её ссылке можно потерять. С xrpl-file файл записан в тот же реестр транзакциями, которые нельзя изменить или удалить, и проверить его по отпечатку может любой, не доверяя ничьему серверу. Ссылка xrpl-file занимает 84 байта, а поле URI у NFT вмещает 256.</p>
 </section>
 
 <section class="section container" aria-labelledby="how-title">
@@ -71,14 +71,14 @@
 <li class="step">
 <svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-4"><title id="step-drawing-4">Сетка проверенных фрагментов, которые вместе складываются в картинку.</title><rect class="c ok" x="32" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="72" y="8" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="92" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="112" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="32" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="52" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="72" y="28" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="92" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="112" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="32" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="52" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="72" y="48" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="92" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="112" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="32" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="72" y="68" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="92" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="112" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/></svg>
 <h3>Чтение и проверка</h3>
-<p>Любой, у кого есть ссылка, получает фрагменты от узла XRP Ledger, собирает файл и сверяет каждый блок с отпечатком. Если файл не совпал, он не показывается. Сервер этого сайта в чтении не участвует.</p>
+<p>Любой, у кого есть ссылка, получает фрагменты от узла XRP Ledger, собирает файл и сверяет каждый блок с отпечатком. Если файл не совпал с отпечатком, он не показывается. Сервер этого сайта в чтении не участвует.</p>
 </li>
 </ol>
 </section>
 
 <section class="section container" aria-labelledby="price-title">
 <h2 id="price-title">Сколько это стоит</h2>
-<p>Файл записывается примерно по одной транзакции на каждый килобайт. Для каждого файла публикатор открывает одноразовый аккаунт и удаляет его, когда файл записан. Расходов два: комиссии, которые тратятся, и резерв: он удерживается, пока файл записывается, и большая часть возвращается.</p>
+<p>Файл записывается примерно по одной транзакции на каждый килобайт. Для каждого файла приложение для публикации открывает одноразовый аккаунт и удаляет его, когда файл записан. Расходы бывают двух видов. Комиссии тратятся. Резерв удерживается, пока файл записывается, и большая часть резерва возвращается.</p>
 <div id="price-data" class="price-data"><p class="hint">Таблица цен сейчас недоступна. Цифры есть и в файле данных <a href="/data/price.json">price.json</a>.</p></div>
 </section>
 
@@ -91,7 +91,7 @@
 </div>
 <div>
 <h3>Читать может любой</h3>
-<p>Файл прочтёт любой, у кого есть ссылка. Данные реестра открыты всем.</p>
+<p>Файл может прочесть любой. Данные реестра открыты всем, а ссылка не секрет.</p>
 </div>
 </div>
 <p class="notice">Публикуйте только то, что готовы показывать всему миру навсегда: не пароли, не личные данные, не картинку, прав на которую у вас нет.</p>
@@ -124,7 +124,7 @@
 <span id="snippet-status-alt" class="snippet__status" role="status"></span>
 </div>
 </div>
-<p class="attributes"><code>width</code> и <code>height</code> задают размер, <code>loading</code> определяет, когда начнётся чтение, <code>theme</code> задаёт светлую или тёмную палитру, а <code>node</code> задаёт узел, с которого читается файл. Полный список в README: <a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">Вставка файла</a>.</p>
+<p class="attributes"><code>width</code> и <code>height</code> задают размер, <code>loading</code> определяет, когда начнётся чтение, <code>theme</code> задаёт светлую или тёмную палитру, а <code>node</code> указывает узел, с которого читается файл. Полный список в README: <a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">Вставка файла</a>.</p>
 </section>
 </main>
 <!--@chrome:footer-->

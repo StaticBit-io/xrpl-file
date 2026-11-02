@@ -19,7 +19,7 @@
 <div class="hero__text">
 <h1 id="hero-title">Store a file in the XRP Ledger</h1>
 <p class="lead">Your token’s picture or any other file, written into the same ledger as the token and read back checked against its fingerprint.</p>
-<p>The picture on this page is a real file from the ledger. Your browser shows it only after every piece has been checked.</p>
+<p>The picture on this page is a real file from the ledger. Your browser shows it only after every piece has been checked against its fingerprint.</p>
 <form id="check-link" class="check" novalidate>
 <label for="check-link-input">Check a link</label>
 <div class="check__row">
@@ -41,13 +41,13 @@
 
 <section class="section container" aria-labelledby="problem-title">
 <h2 id="problem-title">Links to metadata die</h2>
-<p>When an NFT, an MPT, a DID or a credential keeps its picture and description off the ledger, the token holds only a link. The file sits on IPFS, on the issuer’s own server or in an S3 bucket.</p>
+<p>When an NFT, an MPT, a DID or a credential keeps its picture and description off the ledger, it holds only a link. The file sits on IPFS, on the issuer’s own server or in an S3 bucket.</p>
 <ul class="faults">
 <li><strong>IPFS without pinning</strong>Pinning stops being paid for, and the file drops out of IPFS.</li>
 <li><strong>A closed server</strong>The company shuts down or moves, and the address answers with an error.</li>
-<li><strong>A lapsed bucket</strong>The storage account is closed, and the files go with it.</li>
+<li><strong>A closed bucket</strong>The storage account is closed, and the files go with it.</li>
 </ul>
-<p>The token stays in the ledger, but the file behind its link can be lost. With xrpl-file the file is written into the same ledger as the token, so it lives as long as the token does, and anyone can check it against its fingerprint without trusting a server. The link is 84 bytes, and an NFT’s URI field holds 256.</p>
+<p>That entry stays in the ledger, but the file behind its link can be lost. With xrpl-file the file is written into the same ledger, in transactions that cannot be changed or deleted, and anyone can check it against its fingerprint without trusting a server. The xrpl-file link is 84 bytes, and an NFT’s URI field holds 256.</p>
 </section>
 
 <section class="section container" aria-labelledby="how-title">
@@ -71,7 +71,7 @@
 <li class="step">
 <svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-4"><title id="step-drawing-4">A grid of verified chunks that together form a picture.</title><rect class="c ok" x="32" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="72" y="8" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="92" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="112" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="32" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="52" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="72" y="28" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="92" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="112" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="32" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="52" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="72" y="48" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="92" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="112" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="32" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="72" y="68" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="92" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="112" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/></svg>
 <h3>Read and checked</h3>
-<p>Anyone with the link gets the chunks from an XRP Ledger node, assembles the file and checks every block against its fingerprint. A file that does not match is not shown. This site’s server takes no part in it.</p>
+<p>Anyone with the link gets the chunks from an XRP Ledger node, assembles the file and checks every block against its fingerprint. A file that does not match its fingerprint is not shown. This site’s server takes no part in it.</p>
 </li>
 </ol>
 </section>
@@ -91,7 +91,7 @@
 </div>
 <div>
 <h3>Anyone can read it</h3>
-<p>Anyone who has the link can read the file. The data of the ledger is open to everyone.</p>
+<p>Anyone can read the file. The data of the ledger is open to everyone, and the link is not a secret.</p>
 </div>
 </div>
 <p class="notice">Publish only what you are glad to show the whole world for good: not a password, not personal data, not a picture you have no right to share.</p>
@@ -124,7 +124,7 @@
 <span id="snippet-status-alt" class="snippet__status" role="status"></span>
 </div>
 </div>
-<p class="attributes"><code>width</code> and <code>height</code> set the size, <code>loading</code> says when reading starts, <code>theme</code> sets the light or dark palette, and <code>node</code> sets the node to read from. The full list is in the README: <a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">Embed a file</a>.</p>
+<p class="attributes"><code>width</code> and <code>height</code> set the size, <code>loading</code> says when reading starts, <code>theme</code> sets the light or dark palette, and <code>node</code> names the node to read from. The full list is in the README: <a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">Embed a file</a>.</p>
 </section>
 </main>
 <!--@chrome:footer-->

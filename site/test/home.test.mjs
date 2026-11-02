@@ -64,7 +64,7 @@ test('the check-a-link error is a live region that is in the page from the start
 });
 
 test('the Russian reserve line says most of it comes back, not nearly all', () => {
-  assert.ok(pages.ru.includes('большая часть возвращается'));
+  assert.ok(pages.ru.includes('большая часть резерва возвращается'));
   assert.ok(!pages.ru.includes('почти весь'));
 });
 
