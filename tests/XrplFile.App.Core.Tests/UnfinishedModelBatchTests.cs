@@ -144,6 +144,21 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
     }
 
     [Fact]
+    public async Task A_locked_vault_is_not_reported_as_the_payer_key_having_left_it()
+    {
+        // The payer key is still in the vault; only the vault cannot be read right now. Saying the
+        // key is gone and offering a replacement would send the person after a problem they do not have.
+        (UnfinishedModel model, KeyVault vault, _, _, _) = await BatchRunAsync(new byte[3000]);
+        await vault.LockAsync();
+
+        Assert.False(await model.ResumeAsync(model.Rows[0], Token));
+
+        Assert.Null(model.NeedsPayer);
+        Assert.Empty(model.PayerChoices);
+        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
+    }
+
+    [Fact]
     public async Task Deleting_one_batch_run_keeps_the_payer_label_on_the_others()
     {
         (UnfinishedModel model, _, string statePath, _, _) = await BatchRunAsync(new byte[3000]);

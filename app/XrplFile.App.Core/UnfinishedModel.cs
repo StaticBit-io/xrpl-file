@@ -221,7 +221,18 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
 
         if (row.IsBatch && vault is not null)
         {
-            IReadOnlyList<VaultEntryInfo> keys = await KeysAsync(cancellationToken).ConfigureAwait(false);
+            IReadOnlyList<VaultEntryInfo> keys;
+            try
+            {
+                keys = await vault.ListAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (VaultException ex)
+            {
+                // Not KeysAsync, which reads a failure as an empty vault: a vault that cannot be
+                // listed (locked, above all) says nothing about whether the payer key is still in it.
+                Message = VaultErrorMessages.For(ex.Error);
+                return false;
+            }
 
             if (!keys.Any(key => string.Equals(key.Reference, row.PayerKeyReference, StringComparison.Ordinal)))
             {
