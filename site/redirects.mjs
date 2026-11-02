@@ -82,3 +82,15 @@ export function findShadowed(files, rules) {
   }
   return shadowed;
 }
+
+const HTML_TARGET = /(\.html|\/index)$/;
+
+/**
+ * 200 rules whose destination is spelled with .html, /index or /index.html. On Pages the HTML-handling
+ * redirect still runs on a rewritten target, so such a rule answers with a redirect to the pretty URL
+ * and the visitor's address changes (for the file page, the link in the path is lost). Name the
+ * extension-less target instead: /file.
+ */
+export function findHtmlRewriteTargets(rules) {
+  return rules.filter((rule) => rule.status === 200 && HTML_TARGET.test(rule.destination));
+}

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build, MAX_FILE_BYTES } from '../build.mjs';
 
-const GUARDED_REDIRECTS = '/js/:file /js/:file 200\n/data/:file /data/:file 200\n/:network/:hash /file.html 200\n';
+const GUARDED_REDIRECTS = '/js/:file /js/:file 200\n/data/:file /data/:file 200\n/:network/:hash /file 200\n';
 
 async function fixture(redirects = GUARDED_REDIRECTS) {
   const root = await mkdtemp(join(tmpdir(), 'xf-site-build-'));
@@ -71,10 +71,23 @@ test('the default limit is the Cloudflare Pages 25 MiB per file', () => {
 });
 
 test('refuses a static file that the file-page rewrite would shadow', () =>
-  withFixture('/:network/:hash /file.html 200\n', async (f) => {
+  withFixture('/:network/:hash /file 200\n', async (f) => {
     await assert.rejects(
       build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' }),
       /\/js\/a\.mjs/,
     );
     assert.equal(await exists(f.outDir), false);
   }));
+
+test('refuses a 200 rule whose destination ends in .html, /index or /index.html', async () => {
+  for (const destination of ['/file.html', '/x/index.html', '/x/index']) {
+    const redirects = `/js/:file /js/:file 200\n/data/:file /data/:file 200\n/:network/:hash ${destination} 200\n`;
+    await withFixture(redirects, async (f) => {
+      await assert.rejects(
+        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' }),
+        /\.html|\/index/,
+      );
+      assert.equal(await exists(f.outDir), false);
+    });
+  }
+});

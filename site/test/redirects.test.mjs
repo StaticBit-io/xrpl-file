@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { parseRedirects, applyRedirects, findShadowed } from '../redirects.mjs';
+import { parseRedirects, applyRedirects, findShadowed, findHtmlRewriteTargets } from '../redirects.mjs';
 
 const HASH = '32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59';
 const rules = parseRedirects(await readFile(new URL('../src/_redirects', import.meta.url), 'utf8'));
@@ -28,8 +28,8 @@ test('a placeholder matches one segment, a splat matches the rest', () => {
 });
 
 test('the site file-page rule rewrites a link path, with or without a trailing slash', () => {
-  assert.deepEqual(applyRedirects(`/testnet/${HASH}`, rules), { status: 200, path: '/file.html' });
-  assert.deepEqual(applyRedirects(`/21338/${HASH.toLowerCase()}/`, rules), { status: 200, path: '/file.html' });
+  assert.deepEqual(applyRedirects(`/testnet/${HASH}`, rules), { status: 200, path: '/file' });
+  assert.deepEqual(applyRedirects(`/21338/${HASH.toLowerCase()}/`, rules), { status: 200, path: '/file' });
 });
 
 test('static two-segment paths are served as themselves, never rewritten to the file page', () => {
@@ -48,7 +48,15 @@ test('single-segment and deeper paths are untouched by the file-page rule', () =
 });
 
 test('findShadowed reports a file whose URL a rule sends elsewhere', () => {
-  const bad = parseRedirects('/:network/:hash /file.html 200\n');
+  const bad = parseRedirects('/:network/:hash /file 200\n');
   assert.deepEqual(findShadowed(['index.html', 'js/a.mjs', 'ru/index.html'], bad), ['/js/a.mjs', '/ru/index.html']);
   assert.deepEqual(findShadowed(['index.html', 'js/a.mjs', 'ru/index.html', 'element/1.1.0/x.js'], rules), []);
+});
+
+test('findHtmlRewriteTargets reports 200 rules that point at .html, /index or /index.html', () => {
+  const found = findHtmlRewriteTargets(parseRedirects(
+    '/a /file.html 200\n/b /x/index.html 200\n/c /x/index 200\n/d /file 200\n/e /page.html 301\n/ru/:f /ru/:f 200\n',
+  ));
+  assert.deepEqual(found.map((rule) => rule.source), ['/a', '/b', '/c']);
+  assert.deepEqual(findHtmlRewriteTargets(rules), []);
 });

@@ -11,5 +11,5 @@
 /img/:file /img/:file 200
 
 # The file page: /<network>/<HASH> (decimal NetworkIDs included) is one static page that reads the path.
-/:network/:hash /file.html 200
-/:network/:hash/ /file.html 200
+/:network/:hash /file 200
+/:network/:hash/ /file 200

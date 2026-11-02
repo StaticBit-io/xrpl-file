@@ -54,8 +54,13 @@ the root of `dist/`.
 | Rule | Meaning | nginx |
 |---|---|---|
 | `/ru/:file /ru/:file 200`, and the same for `/js`, `/css`, `/data`, `/fonts`, `/img` | Static files in a two-segment folder are served as themselves. | `location ~ ^/(ru\|js\|css\|data\|fonts\|img)/ { try_files $uri =404; }` |
-| `/:network/:hash /file.html 200` | A file link path (`/testnet/<HASH>`, `/21338/<HASH>`) is answered by the one static file page, without changing the URL. The page reads the path. | `location ~ ^/(mainnet\|testnet\|devnet\|[0-9]+)/[0-9A-Fa-f]{64}$ { try_files /file.html =404; }` |
-| `/:network/:hash/ /file.html 200` | The same with a trailing slash. | `.../?$` in the pattern above |
+| `/:network/:hash /file 200` | A file link path (`/testnet/<HASH>`, `/21338/<HASH>`) is answered by the one static file page (`file.html`), without changing the URL. The page reads the path. The target is the extension-less `/file`: Pages applies its HTML handling to a rewritten target too, so a target spelled `/file.html` is answered with a redirect to `/file` and the link in the path is lost. | `location ~* ^/(mainnet|testnet|devnet|[0-9]+)/[0-9a-f]{64}/?$ { try_files /file.html =404; }` |
+| `/:network/:hash/ /file 200` | The same with a trailing slash. | the `/?` in the pattern above |
+
+The nginx pattern is stricter than Pages. Pages sends any two-segment path that no earlier rule
+claims (`/foo/bar`) to the file page, which then shows its "not a link" state; nginx answers 404 for
+it, because the pattern only matches a network name or NetworkID and a 64-digit hash. `~*` keeps the
+match case-insensitive, as the spec requires (`/TESTNET/<hash>` is accepted and canonicalised by the page).
 
 Language pages are plain files: `/` is `index.html`, `/ru/` is `ru/index.html`; no rule is needed.
 
@@ -84,14 +89,19 @@ Three safeguards keep this honest:
 - `build.mjs` fails when any built file's URL (and, for an `index.html`, its directory URL) is
   sent somewhere else by `_redirects`. Adding a new two-segment folder without its pass-through rule
   therefore fails the build instead of breaking in production.
-- `serve.mjs` uses the same first-match evaluator and no "file exists" shortcut, so the dev server
-  is as strict as the documented production rule.
+- `build.mjs` also fails when a 200 rule's destination ends in `.html`, `/index` or `/index.html`
+  (see the file-page row above).
+- `serve.mjs` uses the same first-match evaluator and no "file exists" shortcut, and emulates Pages'
+  HTML handling: `/x.html` and `/x/index.html` answer with a redirect to `/x` and `/x/`, and a rewrite
+  to `/file` is resolved to `file.html` and served as 200 at the original URL.
 - `test/redirects.test.mjs` checks the shipped `_redirects` against the real folder names.
 
 Not verified on a live deployment: that Pages really answers a pass-through 200 rule with the asset.
 Check it once on the first preview deployment: open `/js/route.mjs`, `/ru/` and
 `/testnet/<HASH>`; the first must be JavaScript, the second the Russian home page, the third the
-file page.
+file page. `/testnet/<HASH>` must answer 200 with no `Location` header (for example
+`curl -sI https://<preview>/testnet/<HASH>`); a 3xx there means the rewrite is being redirected and
+the link is lost.
 
 Pages also treats a project without a top-level `404.html` as a single-page application and answers
 every unknown path with `index.html`. The site needs a real `404.html`.

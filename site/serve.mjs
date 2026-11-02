@@ -46,6 +46,10 @@ async function loadRules(root) {
   }
 }
 
+function prettyUrl(htmlPath) {
+  return htmlPath.endsWith('/index.html') ? htmlPath.slice(0, -'index.html'.length) : htmlPath.slice(0, -'.html'.length);
+}
+
 /** Maps a request path to { status, file, body } or { status, location }. */
 export async function resolveRequest(root, pathname, rules) {
   let urlPath;
@@ -62,6 +66,9 @@ export async function resolveRequest(root, pathname, rules) {
     if (index) return { status: 200, ...index };
   } else {
     const exact = await readIfFile(root, target);
+    // Pages' HTML handling also applies to a rewritten target: /x.html becomes /x and /x/index.html
+    // becomes /x/ by redirect, so a 200 rule must name the extension-less path.
+    if (exact && target.endsWith('.html')) return { status: 307, location: prettyUrl(target) };
     if (exact) return { status: 200, ...exact };
     if (await readIfFile(root, target + '/index.html')) return { status: 301, location: target + '/' };
     const page = await readIfFile(root, target + '.html');

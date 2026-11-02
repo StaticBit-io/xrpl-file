@@ -8,7 +8,7 @@
 import { cp, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findShadowed, parseRedirects } from './redirects.mjs';
+import { findHtmlRewriteTargets, findShadowed, parseRedirects } from './redirects.mjs';
 
 export const ELEMENT_VERSION = '1.1.0';
 // Cloudflare Pages rejects a deployment with any file over 25 MiB.
@@ -56,10 +56,18 @@ async function checkRewrites(outDir) {
   } catch {
     return;
   }
+  const rules = parseRedirects(text);
+  const htmlTargets = findHtmlRewriteTargets(rules);
+  if (htmlTargets.length > 0) {
+    throw new Error(
+      `_redirects has 200 rules that point at an .html or /index target (${htmlTargets.map((r) => r.destination).join(', ')}). ` +
+        'Pages redirects such a rewrite to the pretty URL; use the extension-less path, e.g. /file.',
+    );
+  }
   const files = (await listFiles(outDir))
     .map((file) => relative(outDir, file).split(sep).join('/'))
     .filter((file) => !HOST_FILES.has(file));
-  const shadowed = findShadowed(files, parseRedirects(text));
+  const shadowed = findShadowed(files, rules);
   if (shadowed.length > 0) {
     throw new Error(
       `_redirects would send these static files somewhere else: ${shadowed.join(', ')}. ` +

@@ -26,7 +26,7 @@ async function siteRoot() {
 test('an existing two-segment file is served as itself, not as the file page', async () => {
   const { root, rules } = await siteRoot();
   try {
-    for (const [path, body] of [['/ru/index.html', 'ru home'], ['/js/route.mjs', 'js'], ['/data/price.json', '{}']]) {
+    for (const [path, body] of [['/ru/', 'ru home'], ['/js/route.mjs', 'js'], ['/data/price.json', '{}']]) {
       const result = await resolveRequest(root, path, rules);
       assert.equal(result.status, 200, path);
       assert.equal(result.body.toString(), body, path);
@@ -41,6 +41,7 @@ test('a link path is rewritten to the file page, a missing static path is a 404'
   try {
     const page = await resolveRequest(root, `/testnet/${HASH}`, rules);
     assert.equal(page.status, 200);
+    assert.equal(page.location, undefined);
     assert.equal(page.body.toString(), 'file page');
     const missing = await resolveRequest(root, '/js/absent.mjs', rules);
     assert.equal(missing.status, 404);
@@ -85,6 +86,30 @@ test('on a busy port the server takes the next one and never the busy one', asyn
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await new Promise((resolve) => blocker.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('like Pages, a .html URL redirects to its pretty form instead of serving the file', async () => {
+  const { root, rules } = await siteRoot();
+  try {
+    assert.deepEqual(await resolveRequest(root, '/file.html', rules), { status: 307, location: '/file' });
+    assert.deepEqual(await resolveRequest(root, '/ru/index.html', rules), { status: 307, location: '/ru/' });
+    assert.deepEqual(await resolveRequest(root, '/index.html', rules), { status: 307, location: '/' });
+    const page = await resolveRequest(root, '/file', rules);
+    assert.equal(page.status, 200);
+    assert.equal(page.body.toString(), 'file page');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a rewrite whose target ends in .html loses the link, as it does on Pages', async () => {
+  const { root } = await siteRoot();
+  try {
+    const rules = parseRedirects('/:network/:hash /file.html 200\n');
+    assert.deepEqual(await resolveRequest(root, `/testnet/${HASH}`, rules), { status: 307, location: '/file' });
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
