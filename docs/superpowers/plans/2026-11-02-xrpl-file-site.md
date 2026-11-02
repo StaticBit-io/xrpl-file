@@ -33,7 +33,8 @@
 - The file page lives at `/<network>/<HASH>`: one URL for both languages, canonical lower-case network and upper-case hash.
 - Site source lives in `site/`; the build output `site/dist/` is git-ignored.
 - `/element/<version>/*` is served with `Access-Control-Allow-Origin: *` and `Cache-Control: public, max-age=31536000, immutable`. HTML pages are not cached long.
-- The embed snippet pins element `1.1.0` with `integrity` and `crossorigin="anonymous"`.
+- The embed snippet pins element `1.1.0` with `integrity` and `crossorigin="anonymous"`, is a classic `<script … defer>` (never `type="module"`), and points at **jsDelivr over npm** (`https://cdn.jsdelivr.net/npm/${ELEMENT_PACKAGE}@1.1.0/xrpl-file-element.js`); `ELEMENT_PACKAGE` is a constant in `site/src/js/config.mjs` (owner's choice pending, default `xrpl-file-element`). The site's own `/element/1.1.0/` copy is shown as the alternative URL. See the spec's "embed URL" decision.
+- npm: `web/build.mjs` (or a small `web/pack.mjs`) assembles a publishable package directory `web/npm/<version>/` (`package.json` with name from `ELEMENT_PACKAGE`, version, license MIT, `files`, no dependencies; the dist files; README excerpt; licences). Publishing (`npm publish`) is only on the owner's command (Task 10).
 - Hero file constant: `xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59`, aspect ratio `1:1` (1600×1600 WebP, 178,448 bytes).
 - Publisher download: GitHub Releases. Until a release URL is configured, the button is visible, disabled and marked "soon".
 - Cloudflare Pages limits each file to 25 MB.
@@ -349,7 +350,9 @@
 - [ ] **Step 3: Fix and repeat.** Fix defects in their owning task's files, commit each fix (`fix(site): …`), and repeat the failed rows.
 - [ ] **Step 4: Commit** the report: `docs(reports): site acceptance`.
 
-### Task 10: Deploy to Cloudflare Pages — only on the owner's command
+### Task 10: Deploy to Cloudflare Pages and publish the npm package — only on the owner's command
+
+Additionally to the steps below: prepare (do not run) `npm publish web/npm/1.1.0 --access public` with the owner's chosen package name; after the owner's command, publish, then verify `https://cdn.jsdelivr.net/npm/<package>@1.1.0/xrpl-file-element.js` serves `application/javascript`, CORS `*`, and matches the `integrity`.
 
 - [ ] **Step 1: Prepare the deploy note** for the owner, and do not deploy yet. It covers:
   - project name `xrpl-file-site`, output dir `site/dist`, build command `node web/build.mjs && node site/build.mjs`;

@@ -202,10 +202,22 @@ disabled, marked "soon". Switching it on is a one-line config change (the releas
 - Only two host-specific files: rewrites/redirects (`_redirects`) and headers (`_headers`). Their
   nginx equivalents are documented next to them in `site/README.md`.
 - The `<xrpl-file>` build (`web/dist/<version>/`) is published under
-  `/element/<version>/xrpl-file-element.js` (+ `mp4box.min.js`, licence, `integrity.json`). The
-  snippet on the site uses a pinned version with `integrity` and `crossorigin`. `/element/*` is
-  served with `Access-Control-Allow-Origin: *` (mp4box is fetched cross-origin from embedding
-  sites) and long-lived immutable caching; HTML pages are not cached long.
+  `/element/<version>/xrpl-file-element.js` (+ `mp4box.min.js`, licence, `integrity.json`).
+  `/element/*` is served with `Access-Control-Allow-Origin: *` (mp4box is fetched cross-origin
+  from embedding sites) and long-lived immutable caching; HTML pages are not cached long.
+- **The owner's decision on the embed URL (2026-11-02):** the snippet that people copy to their
+  sites points at **jsDelivr serving an npm package** of the element, not at this domain — an
+  embed must not die with `staticbit.io`. Example:
+  `<script src="https://cdn.jsdelivr.net/npm/<package>@1.1.0/xrpl-file-element.js" integrity="sha384-…" crossorigin="anonymous" defer></script>`.
+  The script is a classic script (never `type="module"`: the element finds `mp4box.min.js` beside
+  its own `document.currentScript`). The site keeps its own copy under `/element/<version>/` for
+  its pages and as a documented alternative; both URLs carry the same file, so the same
+  `integrity`. The package name is the owner's choice (free on npm: `xrpl-file-element`,
+  `@staticbit/xrpl-file-element`); the package holds exactly `web/dist/<version>/` plus a
+  `package.json`, `README.md` and licence. Publishing to npm is irreversible per version and done
+  only on the owner's command; until then the site shows the jsDelivr snippet with a note that the
+  package is not published yet, or falls back to the site's own URL — whichever the owner picks at
+  publish time.
 - The site itself loads the element and the reader from the same build — never a second copy.
 - A build step copies `web/dist/<version>/` into the site output; the site's own pages are not
   minified beyond what keeps them readable.
