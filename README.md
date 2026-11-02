@@ -84,11 +84,49 @@ page that embeds `1.0.0` never changes under itself. The host serves both script
 | `loading` | `lazy` (default), `eager`, `click` | `lazy` starts one viewport height before the element is visible, `eager` at once, `click` reads only the manifest and cover and loads the content on a click |
 | `loader` | `true` (default), `false` | `false` keeps the reserved space empty until the content is ready, for sites that draw their own placeholder |
 | `node` | a `wss://` URL | read from this node instead of the built-in ones; `ws://` is accepted only for `localhost` and `127.0.0.1`. A numeric network ID has no built-in node and needs this attribute |
+| `theme` | `dark` (default), `light`, `auto` | the colour palette; `auto` follows the visitor's `prefers-color-scheme`, any other value is `dark` |
 
-The inside is styled with CSS custom properties `--xrpl-file-accent`, `--xrpl-file-radius`,
-`--xrpl-file-background` and `--xrpl-file-foreground`, and with `::part(loader)`, `::part(caption)` and
-`::part(message)`. Buttons draw dark text on the accent colour, so a site that sets a dark
-`--xrpl-file-accent` should keep enough contrast. The element dispatches `xrpl-file-progress` (`detail`:
+The inside is styled with the `theme` attribute, with the CSS custom properties below, and with
+`::part(loader)`, `::part(caption)` and `::part(message)`. A property the site sets wins over the theme's
+value, in every theme; set it on the element or on any ancestor:
+
+```css
+xrpl-file { --xrpl-file-accent: #7a3cff; --xrpl-file-on-accent: #ffffff; }
+```
+
+Both palettes meet WCAG 2.2 AA; a site that overrides a colour keeps that contrast itself, and an
+accent goes together with `--xrpl-file-on-accent`, the text on it. These follow the theme:
+
+| Property | Dark | Light | Used for |
+|---|---|---|---|
+| `--xrpl-file-accent` | `#4da3ff` | `#0b62c4` | buttons, progress, spinner, focus ring |
+| `--xrpl-file-on-accent` | `#06121f` | `#ffffff` | text and icons on the accent |
+| `--xrpl-file-background` | `#14161a` | `#f3f4f6` | the box |
+| `--xrpl-file-foreground` | `#e8e8ea` | `#1b1d22` | names, percentages, the type badge |
+| `--xrpl-file-muted` | `#9a9ca3` | `#5b5f6b` | sizes, progress details, notes, the badge border |
+| `--xrpl-file-track` | `rgba(255,255,255,.15)` | `rgba(0,0,0,.16)` | the unfilled part of the progress bar and spinner |
+| `--xrpl-file-danger` | `#ff8a8a` | `#b3261e` | an error message in the box |
+| `--xrpl-file-text-background` | `#1b1e23` | `#ffffff` | a text file |
+| `--xrpl-file-text-foreground` | `#e8e8ea` | `#1f2328` | a text file and its bar |
+| `--xrpl-file-text-bar` | `#262a30` | `#e6e8eb` | the bar above a text file cut short |
+
+The caption, the loader over a video and the click-to-open view over a cover sit on a picture, not on
+the page, so they stay dark in both themes. These are the same in both themes:
+
+| Property | Default | Used for |
+|---|---|---|
+| `--xrpl-file-media-background` | `#000` | around a video, behind a cover |
+| `--xrpl-file-overlay` | `rgba(0,0,0,.72)` | the caption, the play button, a failed video |
+| `--xrpl-file-overlay-foreground` | `#ddd` | text on the overlay, over a cover and over a video |
+| `--xrpl-file-overlay-border` | `rgba(255,255,255,.4)` | the caption's copy button |
+| `--xrpl-file-overlay-track` | `rgba(255,255,255,.15)` | the progress track over a video |
+| `--xrpl-file-overlay-success` | `#6fd08c` | the verified mark, "Copied" |
+| `--xrpl-file-overlay-danger` | `#ffa0a0` | "Copy failed", a failed video |
+| `--xrpl-file-scrim` | `linear-gradient(to top, rgba(0,0,0,.65), rgba(0,0,0,.15))` | over a cover; the dark theme also draws it on an empty box |
+| `--xrpl-file-radius` | `10px` | the corners |
+
+Over a cover and on the caption the accent keeps its dark-theme default, `#4da3ff` with `#06121f` on it,
+unless the site sets one. The element dispatches `xrpl-file-progress` (`detail`:
 `{ bytesDone, bytesTotal, blocksVerified, blocksTotal }`), `load` once the content is shown, and `error`
 (`detail`: `{ name, message }`).
 
