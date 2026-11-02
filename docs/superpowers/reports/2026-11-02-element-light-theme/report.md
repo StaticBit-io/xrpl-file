@@ -161,8 +161,35 @@ Not checked:
 - The failed-copy state live (it needs the clipboard to refuse); measured in the harness.
 - Screenshots were taken with the pane hidden and are downscaled to 800 px wide.
 
-Seen in passing, not part of this change: at 300×48 the text view shows only its bar, because the bar
-wraps to two lines and leaves no height for the text. It is the same in both themes and was so before.
+
+## Follow-up: the text view in a short box
+
+A text file cut short to its first megabyte has a bar above it (the note, a Download button, the save
+status). The bar wrapped, and its paddings and those of the text follow the width, so in a short box
+the bar took all of it. Lines of text left visible, from the harness with the status "Saved." shown:
+
+| Box | Before: bar, lines | After: bar, lines |
+|---|---|---|
+| 300×48 | 56 px, 0 | 23 px, 1 |
+| 480×48 | 35 px, 0 | 24 px, 1 |
+| 300×80 | 56 px, 0 | 23 px, 2 |
+| 300×100 | 56 px, 1 | 23 px, 3 (5 at 300×119) |
+| 200×80 | 51 px, 0 | 22 px, 3 |
+| 100×100 | 88 px, 0 | 22 px, 4 |
+| 100×60 | 88 px, 0 | 22 px, 1 |
+| 200×130, 320×180 | unchanged: the bar wraps and shows every word | unchanged |
+
+The fix is a block `@container (height < 120px)`: the bar keeps to one line (`nowrap`), the note and
+the status give way with an ellipsis while the button keeps its size, and the vertical paddings shrink: 2 px
+for the bar and the text, none for the button. Taller boxes keep the wrapping bar, because the status can
+be a whole sentence ("This file is too large to save in this browser.") and there is room for it. The
+note and the status carry their full text as a `title`; the status is a live region, so a screen reader
+still hears it whole. In a box 100 px wide the note has no width left and only the button shows.
+
+The Download button in a short box is 15 to 18 px high, under the 24 px of SC 2.5.8; it passes by the
+spacing exception, since no other target lies within 12 px of it (the caption's copy button sits in
+the opposite corner). The contrast run over the text views in both themes found no failing pair.
+`web/demo/themes.html` now has a cut-short text at 300×48 and at 100×100, checked live in both themes.
 
 ## Screenshots
 
@@ -180,9 +207,12 @@ wraps to two lines and leaves no height for the text. It is the same in both the
 | `live-light-loader.jpg` | the loader mid-read, light theme (an earlier layout of the demo page) |
 | `live-dark-video-buffering.jpg` | the loader mid-read and "Buffering…" over a video, dark theme |
 | `live-light-focus-ring.jpg` | keyboard focus on the download button, light theme |
+| `harness-short-text-light.jpg` | the text view from 300×80 to 320×180 after the follow-up, light theme |
+| `live-short-text-dark.jpg` | live: a cut-short text at 300×48 and 100×100, dark theme |
 
 ## Tests
 
-`cd web && npm test`: 575 pass, 0 fail (571 before; new: theme parsing and fallback, no colour
+`cd web && npm test`: 576 pass, 0 fail (571 before; new: theme parsing and fallback, no colour
 outside a palette or a public default, the light palette under both selectors with the same
-properties as the dark one, every public property documented in the README).
+properties as the dark one, every public property documented in the README, and the short-box rules
+of the text bar).
