@@ -59,7 +59,7 @@ const SITE_PAIRS = [
   ['ui', 'Focus ring on the hovered or pressed control', 'focus', 'paper-3', UI],
   ['ui', 'Control border (theme switch, buttons, link field)', 'rule', 'paper', UI],
   ['ui', 'Control border on raised surface (link field)', 'rule', 'paper-2', UI],
-  ['ui', 'Verified check mark (hero card)', 'accent', 'paper-2', UI],
+  ['ui', 'Verified check mark (hero card, on the cloud ground)', 'accent', 'paper', UI],
   ['ui', 'Unread cell outline', 'cell', 'paper-2', UI],
   ['ui', 'Lit cell', 'cell-lit', 'paper-2', UI],
   ['ui', 'Verified cell', 'cell-verified', 'paper-2', UI],
@@ -162,10 +162,8 @@ export function elementRows(css, readme, baseCss = readFileSync(BASE_PATH, 'utf8
 
     // background="transparent" (the hero card, a picture on the file page) drops the box, so whatever the
     // element draws before the picture arrives (loader, notes, an error) sits on the site's own ground:
-    // the file page's --paper-2, and the hero card's --paper under its scrim (dark) or --paper-3 (light).
-    const pageGrounds = [paper, theme === 'Light'
-      ? { name: 'site --paper-3 (light, hero card)', color: parseColor(site['paper-3']) }
-      : { name: 'site --paper (dark, hero card)', color: parseColor(site.paper) }];
+    // the file page's --paper-2, and the hero card's --paper (the card has no backing of its own).
+    const pageGrounds = [paper, { name: `site --paper (${theme.toLowerCase()}, hero card)`, color: parseColor(site.paper) }];
     for (const ground of pageGrounds) {
       rows.push(row(group, 'text', `Transparent box: names, percentages, badge on the ${ground.name}`, colour('foreground'), ground, TEXT));
       rows.push(row(group, 'text', `Transparent box: sizes, progress details, notes on the ${ground.name}`, colour('muted'), ground, TEXT));

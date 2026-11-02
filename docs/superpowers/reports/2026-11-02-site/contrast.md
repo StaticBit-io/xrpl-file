@@ -36,7 +36,7 @@ Result: every required pair passes.
 | Focus ring on the hovered or pressed control | `--focus` #265c00 | `--paper-3` #d1d9dd | 5.60:1 | 3:1 | pass |
 | Control border (theme switch, buttons, link field) | `--rule` #76828b | `--paper` #e9edf0 | 3.34:1 | 3:1 | pass |
 | Control border on raised surface (link field) | `--rule` #76828b | `--paper-2` #dee4e7 | 3.05:1 | 3:1 | pass |
-| Verified check mark (hero card) | `--accent` #336f00 | `--paper-2` #dee4e7 | 4.81:1 | 3:1 | pass |
+| Verified check mark (hero card, on the cloud ground) | `--accent` #336f00 | `--paper` #e9edf0 | 5.27:1 | 3:1 | pass |
 | Unread cell outline | `--cell` #6d7982 | `--paper-2` #dee4e7 | 3.46:1 | 3:1 | pass |
 | Lit cell | `--cell-lit` #394a56 | `--paper-2` #dee4e7 | 7.12:1 | 3:1 | pass |
 | Verified cell | `--cell-verified` #336f00 | `--paper-2` #dee4e7 | 4.81:1 | 3:1 | pass |
@@ -68,7 +68,7 @@ Result: every required pair passes.
 | Focus ring on the hovered or pressed control | `--focus` #bcf053 | `--paper-3` #111a1f | 13.25:1 | 3:1 | pass |
 | Control border (theme switch, buttons, link field) | `--rule` #67747c | `--paper` #04090c | 4.14:1 | 3:1 | pass |
 | Control border on raised surface (link field) | `--rule` #67747c | `--paper-2` #091015 | 3.95:1 | 3:1 | pass |
-| Verified check mark (hero card) | `--accent` #bcf053 | `--paper-2` #091015 | 14.31:1 | 3:1 | pass |
+| Verified check mark (hero card, on the cloud ground) | `--accent` #bcf053 | `--paper` #04090c | 14.99:1 | 3:1 | pass |
 | Unread cell outline | `--cell` #546673 | `--paper-2` #091015 | 3.20:1 | 3:1 | pass |
 | Lit cell | `--cell-lit` #86a3b3 | `--paper-2` #091015 | 7.21:1 | 3:1 | pass |
 | Verified cell | `--cell-verified` #bcf053 | `--paper-2` #091015 | 14.31:1 | 3:1 | pass |
@@ -94,10 +94,10 @@ Result: every required pair passes.
 | Transparent box: sizes, progress details, notes on the site --paper-2 (light) | `--xrpl-file-muted (site)` #535c63 | `site --paper-2 (light)` #dee4e7 | 5.29:1 | 4.5:1 | pass |
 | Transparent box: error message on the site --paper-2 (light) | `--xrpl-file-danger` #b3261e | `site --paper-2 (light)` #dee4e7 | 5.08:1 | 4.5:1 | pass |
 | Transparent box: buttons, progress, focus ring on the site --paper-2 (light) | `--xrpl-file-accent (site)` #336f00 | `site --paper-2 (light)` #dee4e7 | 4.81:1 | 3:1 | pass |
-| Transparent box: names, percentages, badge on the site --paper-3 (light, hero card) | `--xrpl-file-foreground` #1b1d22 | `site --paper-3 (light, hero card)` #d1d9dd | 11.76:1 | 4.5:1 | pass |
-| Transparent box: sizes, progress details, notes on the site --paper-3 (light, hero card) | `--xrpl-file-muted (site)` #535c63 | `site --paper-3 (light, hero card)` #d1d9dd | 4.74:1 | 4.5:1 | pass |
-| Transparent box: error message on the site --paper-3 (light, hero card) | `--xrpl-file-danger` #b3261e | `site --paper-3 (light, hero card)` #d1d9dd | 4.56:1 | 4.5:1 | pass |
-| Transparent box: buttons, progress, focus ring on the site --paper-3 (light, hero card) | `--xrpl-file-accent (site)` #336f00 | `site --paper-3 (light, hero card)` #d1d9dd | 4.31:1 | 3:1 | pass |
+| Transparent box: names, percentages, badge on the site --paper (light, hero card) | `--xrpl-file-foreground` #1b1d22 | `site --paper (light, hero card)` #e9edf0 | 14.37:1 | 4.5:1 | pass |
+| Transparent box: sizes, progress details, notes on the site --paper (light, hero card) | `--xrpl-file-muted (site)` #535c63 | `site --paper (light, hero card)` #e9edf0 | 5.79:1 | 4.5:1 | pass |
+| Transparent box: error message on the site --paper (light, hero card) | `--xrpl-file-danger` #b3261e | `site --paper (light, hero card)` #e9edf0 | 5.57:1 | 4.5:1 | pass |
+| Transparent box: buttons, progress, focus ring on the site --paper (light, hero card) | `--xrpl-file-accent (site)` #336f00 | `site --paper (light, hero card)` #e9edf0 | 5.27:1 | 3:1 | pass |
 | Progress ring and bar, focus ring on the overlay over black | `--xrpl-file-overlay-accent (site)` #bcf053 | `overlay over black` #000000 | 15.74:1 | 3:1 | pass |
 | Overlay text on the overlay over black | `--xrpl-file-overlay-foreground` #dddddd | `overlay over black` #000000 | 15.46:1 | 4.5:1 | pass |
 | Progress ring and bar, focus ring on the overlay over a white cover | `--xrpl-file-overlay-accent (site)` #bcf053 | `overlay over a white cover` #474747 | 6.92:1 | 3:1 | pass |
