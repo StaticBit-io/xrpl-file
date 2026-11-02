@@ -1,7 +1,12 @@
 // The markup and styles inside the element's shadow root, written once. Nothing in it is built from
 // data: names, sizes, messages and file content are put in with textContent or attributes afterwards.
-// Styles follow the approved mockup; the four --xrpl-file-* properties are the site's hooks and the
-// values after the commas are their defaults.
+// Styles follow the approved mockup.
+//
+// Colours come in two layers. A theme is a palette of private --t-* properties on .frame, picked by its
+// data-theme (the element's `theme` attribute, parsed in attributes.mjs); the public --xrpl-file-*
+// properties are read over it, so a site's own value always wins over the theme's. Dark is the default
+// and the original look. Media surfaces (the caption, the overlay on a video, the idle view over a
+// cover) sit on pictures, not on the page, so they keep the dark palette in every theme.
 //
 // Size tiers follow the element's own width, not the page's: .frame is a size container, and the
 // @container rules at the end switch to a compact layout under 240px and an icon layout under 120px
@@ -18,17 +23,60 @@
 // Clipped away but still read by a screen reader: for text a narrow tier replaces with something shorter.
 const VISUALLY_HIDDEN = `position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;`;
 
+// The two palettes. --t-scrim is the scrim over a box without a cover: the original dark look, which
+// the light theme leaves out.
+const DARK = `
+    color-scheme: dark;
+    --t-accent: #4da3ff; --t-on-accent: #06121f;
+    --t-background: #14161a; --t-foreground: #e8e8ea; --t-muted: #9a9ca3;
+    --t-track: rgba(255,255,255,.15); --t-danger: #ff8a8a;
+    --t-text-background: #1b1e23; --t-text-foreground: #e8e8ea; --t-text-bar: #262a30;
+    --t-scrim: linear-gradient(to top, rgba(0,0,0,.65), rgba(0,0,0,.15));`;
+
+const LIGHT = `
+    color-scheme: light;
+    --t-accent: #0b62c4; --t-on-accent: #ffffff;
+    --t-background: #f3f4f6; --t-foreground: #1b1d22; --t-muted: #5b5f6b;
+    --t-track: rgba(0,0,0,.16); --t-danger: #b3261e;
+    --t-text-background: #ffffff; --t-text-foreground: #1f2328; --t-text-bar: #e6e8eb;
+    --t-scrim: none;`;
+
 export const STYLES = `
   *, *::before, *::after { box-sizing: border-box; }
   [hidden] { display: none !important; }
   .frame {
-    --accent: var(--xrpl-file-accent, #4da3ff);
+    ${DARK}
+    --accent: var(--xrpl-file-accent, var(--t-accent));
+    --on-accent: var(--xrpl-file-on-accent, var(--t-on-accent));
+    --background: var(--xrpl-file-background, var(--t-background));
+    --fg: var(--xrpl-file-foreground, var(--t-foreground));
+    --muted: var(--xrpl-file-muted, var(--t-muted));
+    --track: var(--xrpl-file-track, var(--t-track));
+    --danger: var(--xrpl-file-danger, var(--t-danger));
+    --text-background: var(--xrpl-file-text-background, var(--t-text-background));
+    --text-foreground: var(--xrpl-file-text-foreground, var(--t-text-foreground));
+    --text-bar: var(--xrpl-file-text-bar, var(--t-text-bar));
+    --media: var(--xrpl-file-media-background, #000);
+    --overlay: var(--xrpl-file-overlay, rgba(0,0,0,.72));
+    --overlay-foreground: var(--xrpl-file-overlay-foreground, #ddd);
     position: absolute; inset: 0; overflow: hidden;
     container-type: size;
     border-radius: var(--xrpl-file-radius, 10px);
-    background: var(--xrpl-file-background, #14161a);
-    color: var(--xrpl-file-foreground, #e8e8ea);
+    background: var(--background);
+    color: var(--fg);
     font: 13px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .frame[data-theme="light"] { ${LIGHT} }
+  @media (prefers-color-scheme: light) { .frame[data-theme="auto"] { ${LIGHT} } }
+  .caption, .overlay, .idle.covered {
+    --accent: var(--xrpl-file-accent, #4da3ff);
+    --on-accent: var(--xrpl-file-on-accent, #06121f);
+    --fg: var(--overlay-foreground);
+    --muted: var(--overlay-foreground);
+    --track: var(--xrpl-file-overlay-track, rgba(255,255,255,.15));
+    --danger: var(--xrpl-file-overlay-danger, #ffa0a0);
+    --success: var(--xrpl-file-overlay-success, #6fd08c);
+    color: var(--fg);
   }
   .frame.bare { background: transparent; }
   .view {
@@ -39,41 +87,43 @@ export const STYLES = `
   .dim { opacity: 0.45; }
   .center { position: relative; padding: 0 18px; padding: 0 clamp(8px, 5.6cqi, 18px); max-width: 100%; max-height: 100%; min-width: 0; }
   .big { font-size: 22px; font-size: clamp(16px, 7cqi, 22px); font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
-  .muted { color: #9a9ca3; overflow-wrap: anywhere; font-size: 13px; font-size: clamp(11px, 4cqi, 13px); }
+  .muted { color: var(--muted); overflow-wrap: anywhere; font-size: 13px; font-size: clamp(11px, 4cqi, 13px); }
   .note { margin-top: 6px; font-size: 12.5px; font-size: clamp(11px, 3.9cqi, 12.5px); }
   .sr, .sr-name { ${VISUALLY_HIDDEN} }
 
-  .ring { width: 38px; height: 38px; width: clamp(24px, 12cqi, 38px); height: clamp(24px, 12cqi, 38px); border-radius: 50%; margin: 0 auto 10px; border: 3px solid rgba(255,255,255,.15); border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
+  .ring { width: 38px; height: 38px; width: clamp(24px, 12cqi, 38px); height: clamp(24px, 12cqi, 38px); border-radius: 50%; margin: 0 auto 10px; border: 3px solid var(--track); border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .ring { animation: none; } }
-  .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(255,255,255,.12); }
+  .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: var(--track); }
   .bar > i { display: block; height: 100%; width: 0; background: var(--accent); }
 
-  .btn { display: inline-block; margin-top: 10px; padding: 6px 14px; padding: clamp(4px, 1.9cqi, 6px) clamp(10px, 4.4cqi, 14px); border: 0; border-radius: 6px; background: var(--accent); color: #06121f; font: inherit; font-size: 13px; font-size: clamp(11px, 4cqi, 13px); font-weight: 600; cursor: pointer; }
+  .btn { display: inline-block; margin-top: 10px; padding: 6px 14px; padding: clamp(4px, 1.9cqi, 6px) clamp(10px, 4.4cqi, 14px); border: 0; border-radius: 6px; background: var(--accent); color: var(--on-accent); font: inherit; font-size: 13px; font-size: clamp(11px, 4cqi, 13px); font-weight: 600; cursor: pointer; }
   .btn:disabled { opacity: 0.6; cursor: default; }
-  .btn.play { width: 56px; height: 56px; width: clamp(24px, 30cqmin, 56px); height: clamp(24px, 30cqmin, 56px); padding: 0; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; font-size: 22px; font-size: clamp(11px, 9cqmin, 22px); line-height: 56px; line-height: clamp(24px, 30cqmin, 56px); }
+  .btn.play { width: 56px; height: 56px; width: clamp(24px, 30cqmin, 56px); height: clamp(24px, 30cqmin, 56px); padding: 0; border-radius: 50%; background: var(--overlay); color: var(--overlay-foreground); font-size: 22px; font-size: clamp(11px, 9cqmin, 22px); line-height: 56px; line-height: clamp(24px, 30cqmin, 56px); }
   button:focus-visible, pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .status { margin-top: 6px; min-height: 1.6em; font-size: 12.5px; font-size: clamp(11px, 3.9cqi, 12.5px); }
   .btn .ico { display: none; width: 1.25em; height: 1.25em; vertical-align: -0.25em; }
   .lbl-short, .badge { display: none; }
 
-  .player video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+  .player video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--media); }
   .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; pointer-events: none; }
-  .overlay.failed { background: rgba(0,0,0,.72); }
+  .overlay.failed { background: var(--overlay); }
   .overlay.failed .ring, .overlay.failed .bar { display: none; }
-  .overlay.failed .overlay-text { color: #ff8a8a; font-size: 14px; }
+  .overlay.failed .overlay-text { color: var(--danger); font-size: 14px; }
   .overlay .bar > i { width: 30%; animation: slide 1.2s ease-in-out infinite; }
   @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
   @media (prefers-reduced-motion: reduce) { .overlay .bar > i { animation: none; width: 100%; opacity: 0.5; } }
 
-  .idle .scrim { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,.65), rgba(0,0,0,.15)); }
-  .error .message { color: #ff8a8a; font-size: 14px; font-size: clamp(11px, 4.4cqi, 14px); padding: 0 18px; padding: 0 clamp(8px, 5.6cqi, 18px); max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
+  .idle.covered { background: var(--media); }
+  .idle .scrim { position: absolute; inset: 0; background: var(--xrpl-file-scrim, var(--t-scrim)); }
+  .idle.covered .scrim { background: var(--xrpl-file-scrim, linear-gradient(to top, rgba(0,0,0,.65), rgba(0,0,0,.15))); }
+  .error .message { color: var(--danger); font-size: 14px; font-size: clamp(11px, 4.4cqi, 14px); padding: 0 18px; padding: 0 clamp(8px, 5.6cqi, 18px); max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
   .msg-icon, .msg-short { display: none; }
   .msg-icon svg { width: 22px; height: 22px; width: clamp(16px, 30cqmin, 22px); height: clamp(16px, 30cqmin, 22px); vertical-align: middle; }
 
-  .text { flex-direction: column; align-items: stretch; justify-content: flex-start; text-align: left; background: #f7f7f5; color: #222; }
+  .text { flex-direction: column; align-items: stretch; justify-content: flex-start; text-align: left; background: var(--text-background); color: var(--text-foreground); }
   .text pre { flex: 1; min-height: 0; margin: 0; padding: 14px 16px; padding: clamp(6px, 4.4cqi, 14px) clamp(8px, 5cqi, 16px); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.5 ui-monospace, Consolas, monospace; font: clamp(11px, 4cqi, 13px)/1.5 ui-monospace, Consolas, monospace; }
-  .textbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 5px 12px; padding: clamp(3px, 1.6cqi, 5px) clamp(6px, 3.7cqi, 12px); background: #e6e6e1; color: #444; font-size: 12.5px; font-size: clamp(11px, 3.9cqi, 12.5px); }
+  .textbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 5px 12px; padding: clamp(3px, 1.6cqi, 5px) clamp(6px, 3.7cqi, 12px); background: var(--text-bar); color: var(--text-foreground); font-size: 12.5px; font-size: clamp(11px, 3.9cqi, 12.5px); }
   .textbar .btn { margin: 0; padding: 2px 10px; }
   .textbar .status { margin: 0; min-height: 0; }
 
@@ -81,7 +131,7 @@ export const STYLES = `
     position: absolute; left: 8px; right: 8px; bottom: 10px;
     left: clamp(4px, 2.5cqi, 8px); right: clamp(4px, 2.5cqi, 8px); bottom: clamp(4px, 3.1cqi, 10px);
     display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 10px;
-    padding: 5px 8px; padding: clamp(3px, 1.6cqi, 5px) clamp(5px, 2.5cqi, 8px); border-radius: 6px; background: rgba(0,0,0,.72); color: #ddd; font-size: 11.5px; font-size: clamp(11px, 3.6cqi, 11.5px); line-height: 1.5;
+    padding: 5px 8px; padding: clamp(3px, 1.6cqi, 5px) clamp(5px, 2.5cqi, 8px); border-radius: 6px; background: var(--overlay); font-size: 11.5px; font-size: clamp(11px, 3.6cqi, 11.5px); line-height: 1.5;
     opacity: 0; pointer-events: none; transition: opacity .15s;
   }
   @media (prefers-reduced-motion: reduce) { .caption { transition: none; } }
@@ -91,10 +141,10 @@ export const STYLES = `
   .caption .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .caption .side { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .caption .net { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .caption .ok { color: #6fd08c; }
-  .caption button { padding: 1px 8px; border: 1px solid rgba(255,255,255,.4); border-radius: 4px; background: transparent; color: #ddd; font: inherit; cursor: pointer; }
-  .caption button[data-state="copied"] { border-color: #6fd08c; color: #6fd08c; }
-  .caption button[data-state="failed"] { border-color: #ff8a8a; color: #ff8a8a; }
+  .caption .ok { color: var(--success); }
+  .caption button { padding: 1px 8px; border: 1px solid var(--xrpl-file-overlay-border, rgba(255,255,255,.4)); border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  .caption button[data-state="copied"] { border-color: var(--success); color: var(--success); }
+  .caption button[data-state="failed"] { border-color: var(--danger); color: var(--danger); }
   .caption .cp-ico, .caption .cp-mark { display: none; }
   .caption .cp-ico { width: 14px; height: 14px; vertical-align: -3px; }
 
@@ -130,7 +180,7 @@ export const STYLES = `
     .loading .big { font-size: clamp(11px, 12cqi, 14px); }
     /* Before the first percent there is only the status line, which this size hides: show that something is going on. */
     .loading .big:empty::before { content: "\\2026"; }
-    .badge { display: inline-block; padding: 0 5px; border: 1px solid rgba(255,255,255,.35); border-radius: 4px; font-size: 11px; font-weight: 700; line-height: 1.5; letter-spacing: .04em; color: #e8e8ea; }
+    .badge { display: inline-block; padding: 0 5px; border: 1px solid var(--muted); border-radius: 4px; font-size: 11px; font-weight: 700; line-height: 1.5; letter-spacing: .04em; color: var(--fg); }
     .download .btn { display: inline-flex; align-items: center; justify-content: center; width: min(26px, calc(100cqb - 6px)); height: min(26px, calc(100cqb - 6px)); margin-top: 4px; padding: 0; }
     .download .btn .ico { display: inline-block; margin: 0; }
     .download .lbl-full { ${VISUALLY_HIDDEN} display: inline; }
@@ -144,8 +194,11 @@ export const STYLES = `
     .caption .name, .caption .net, .caption .cp-text, .caption .cp-ico { display: none; }
     .caption.verified .cp-mark { display: inline; }
     .caption:not(.verified) .cp-ico { display: inline-block; }
-    .caption button { width: 24px; height: 24px; padding: 0; border-radius: 50%; background: rgba(0,0,0,.72); line-height: 1; }
+    .caption button { width: 24px; height: 24px; padding: 0; border-radius: 50%; background: var(--overlay); line-height: 1; }
     .caption button:focus-visible, .btn:focus-visible { outline-offset: -2px; }
+    /* Drawn inside the button, the ring takes the colour of what is drawn on its fill. */
+    .btn:not(.play):focus-visible { outline-color: var(--on-accent); }
+    .btn.play:focus-visible { outline-color: var(--overlay-foreground); }
   }
 
   /* Too short for a badge above the button. */

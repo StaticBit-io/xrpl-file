@@ -23,6 +23,36 @@ test('the style text keeps the site hooks and the parts the markup exposes', () 
   for (const part of ['loader', 'caption', 'message']) assert.match(TEMPLATE, new RegExp(`part="${part}"`));
 });
 
+const COLOUR = /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(|linear-gradient\(/gi;
+
+test('every colour is a theme palette entry or the default of a public --xrpl-file-* property', () => {
+  const declarations = STYLES.replace(/\/\*[\s\S]*?\*\//g, '').split(/[;{}]/).map((d) => d.trim()).filter(Boolean);
+  for (const declaration of declarations) {
+    if (/^--t-[\w-]+:/.test(declaration)) continue;
+    for (const match of declaration.matchAll(COLOUR)) {
+      assert.match(declaration.slice(0, match.index), /var\(--xrpl-file-[\w-]+,\s*$|var\(--xrpl-file-[\w-]+,\s*linear-gradient\(.*$/, declaration);
+    }
+  }
+});
+
+test('the light palette applies under theme="light" and under theme="auto" when the visitor prefers light', () => {
+  assert.match(STYLES, /\.frame \{\s*color-scheme: dark;/);
+  const light = STYLES.match(/\.frame\[data-theme="light"\] \{([^}]*)\}/)[1];
+  assert.match(light, /color-scheme: light;/);
+  const auto = STYLES.match(/@media \(prefers-color-scheme: light\) \{ \.frame\[data-theme="auto"\] \{([^}]*)\} \}/)[1];
+  assert.equal(auto, light);
+  const names = (block) => [...block.matchAll(/(--t-[\w-]+):/g)].map((m) => m[1]).sort();
+  const dark = STYLES.slice(STYLES.indexOf('.frame {'), STYLES.indexOf('.frame[data-theme="light"]'));
+  assert.deepEqual(names(light), names(dark), 'both palettes set the same properties');
+});
+
+test('every public --xrpl-file-* property is documented in the README', async () => {
+  const readme = await readFile(new URL('../../README.md', import.meta.url), 'utf8');
+  const properties = new Set([...STYLES.matchAll(/--xrpl-file-[\w-]+/g)].map((m) => m[0]));
+  assert.ok(properties.size > 4);
+  for (const property of properties) assert.ok(readme.includes(`\`${property}\``), property);
+});
+
 test('every tier has its pieces in the markup, hidden or shown by the styles alone', () => {
   const ids = [
     'dlBadge', 'dlType', 'dlSize', 'dlNet', 'dlLabel',

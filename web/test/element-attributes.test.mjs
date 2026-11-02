@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseLength, parseLoading, parseLoader, linkText, endpointsFor } from '../src/element/attributes.mjs';
+import { parseLength, parseLoading, parseLoader, parseTheme, linkText, endpointsFor } from '../src/element/attributes.mjs';
 import { NO_NODE, BAD_NODE } from '../src/element/messages.mjs';
 import { ENDPOINTS } from '../src/ledger.mjs';
 
@@ -28,6 +28,16 @@ test('the loader stays on unless the attribute says false', () => {
   assert.equal(parseLoader('false'), false);
   assert.equal(parseLoader('FALSE'), false);
   assert.equal(parseLoader('no'), true);
+});
+
+test('the theme is dark unless light or auto is named, so an existing block keeps its look', () => {
+  assert.equal(parseTheme(null), 'dark');
+  assert.equal(parseTheme(''), 'dark');
+  assert.equal(parseTheme('light'), 'light');
+  assert.equal(parseTheme(' Light '), 'light');
+  assert.equal(parseTheme('AUTO'), 'auto');
+  assert.equal(parseTheme('dark'), 'dark');
+  for (const v of ['sepia', 'light dark', 'light;color:red', 'system']) assert.equal(parseTheme(v), 'dark', v);
 });
 
 test('the link comes from src, else from the trimmed text content', () => {

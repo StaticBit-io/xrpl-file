@@ -6,6 +6,7 @@ const BARE = new RegExp(`^${NUMBER}$`);
 // A closed list of units and a bare number: the value is written into a style rule, so nothing else may pass.
 const LENGTH = new RegExp(`^${NUMBER}(?:px|%|vh|vw|vmin|vmax|em|rem|ch|cm|mm|in|pt|pc)$`, 'i');
 const LOADING = new Set(['lazy', 'eager', 'click']);
+const THEMES = new Set(['dark', 'light', 'auto']);
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1']);
 
 /** A `width` or `height` attribute as a CSS length: a bare number is pixels, as on <img>; null when it is not a plain length. */
@@ -20,6 +21,12 @@ export function parseLength(value) {
 export function parseLoading(value) {
   const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return LOADING.has(text) ? text : 'lazy';
+}
+
+/** The `theme` attribute: `dark`, `light` or `auto`; anything else is the default, `dark`, so an embedded block never changes look by accident. */
+export function parseTheme(value) {
+  const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return THEMES.has(text) ? text : 'dark';
 }
 
 export function parseLoader(value) {

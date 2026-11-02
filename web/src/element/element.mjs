@@ -8,7 +8,7 @@ import { prepare, loadWhole, progressDetail } from './load.mjs';
 import { pool, PRIORITY } from './page.mjs';
 import { saveFile } from './download.mjs';
 import { copyText, execCopyIn } from './clipboard.mjs';
-import { parseLength, parseLoading, parseLoader, linkText, endpointsFor } from './attributes.mjs';
+import { parseLength, parseLoading, parseLoader, parseTheme, linkText, endpointsFor } from './attributes.mjs';
 import { viewForType, magicAgrees, normalizeType } from './view.mjs';
 import { textPreview, TEXT_LIMIT } from './text.mjs';
 import { VideoView } from './video.mjs';
@@ -61,7 +61,7 @@ function sharedStyles() {
 }
 
 export class XrplFileElement extends HTMLElement {
-  static observedAttributes = ['src', 'width', 'height', 'loading', 'loader', 'node'];
+  static observedAttributes = ['src', 'width', 'height', 'loading', 'loader', 'node', 'theme'];
 
   #parts = {};
   #connected = false;
@@ -105,6 +105,7 @@ export class XrplFileElement extends HTMLElement {
     for (const element of root.querySelectorAll('[id]')) this.#parts[element.id] = element;
     this.#wire();
     this.#applySizing();
+    this.#applyTheme();
   }
 
   connectedCallback() {
@@ -125,6 +126,9 @@ export class XrplFileElement extends HTMLElement {
       case 'width':
       case 'height':
         this.#applySizing();
+        break;
+      case 'theme':
+        this.#applyTheme();
         break;
       case 'loader':
         this.#loaderOn = parseLoader(value);
@@ -191,6 +195,10 @@ export class XrplFileElement extends HTMLElement {
     else this.#hostStyleElement.textContent = rule;
   }
 
+  #applyTheme() {
+    this.#parts.frame.dataset.theme = parseTheme(this.getAttribute('theme'));
+  }
+
   #setRatio(stage, width, height) {
     if (stage <= this.#ratioStage || !(width > 0) || !(height > 0)) return;
     this.#ratioStage = stage;
@@ -247,6 +255,7 @@ export class XrplFileElement extends HTMLElement {
     p.dlNote.hidden = true;
     for (const status of [p.dlStatus, p.textStatus]) status.textContent = '';
     p.frame.classList.remove('video', 'tapped');
+    p.idle.classList.remove('covered');
     p.overlay.hidden = true;
     p.overlayText.textContent = '';
     this.#copyFeedback = null;
@@ -575,6 +584,8 @@ export class XrplFileElement extends HTMLElement {
       p.cover.src = url;
       p.cover.hidden = false;
     }
+    // Over a cover the idle view is a media surface: dark in every theme, so its scrim and text read the same.
+    p.idle.classList.toggle('covered', Boolean(cover));
     this.#showPhase('idle');
   }
 
