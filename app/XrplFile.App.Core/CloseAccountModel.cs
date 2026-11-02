@@ -154,7 +154,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
         Preview = null;
         LedgersRemaining = null;
 
-        if (_reference is null || _network is null || Destination is null)
+        if (_reference is not { } reference || _network is not { } network || Destination is not { } destination)
         {
             Message = "Choose where the remainder should go.";
             return;
@@ -163,18 +163,18 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
         try
         {
             await using ILedgerConnection connection =
-                await connections.ConnectAsync(_network, cancellationToken).ConfigureAwait(false);
+                await connections.ConnectAsync(network, cancellationToken).ConfigureAwait(false);
 
             VaultSigner signer = await VaultSigner
-                .CreateAsync(vault, _reference, cancellationToken).ConfigureAwait(false);
+                .CreateAsync(vault, reference, cancellationToken).ConfigureAwait(false);
 
             ThrowawayAccount account = new(connection.Sink, connection.Source, signer);
 
             DeletionResult preview = await account
-                .PreviewDeletionAsync(Destination, cancellationToken).ConfigureAwait(false);
+                .PreviewDeletionAsync(destination, cancellationToken).ConfigureAwait(false);
 
             AccountState home = await connection.Source
-                .AccountStateAsync(Destination, cancellationToken).ConfigureAwait(false);
+                .AccountStateAsync(destination, cancellationToken).ConfigureAwait(false);
 
             // Assigned as soon as the node has actually answered both calls a confirmation needs --
             // before the extra read below, which is a nice-to-have on top of a preflight that is
@@ -235,21 +235,25 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
 
         Message = null;
 
-        if (!CanClose || _reference is null || _network is null || Destination is null) return;
+        if (!CanClose || _reference is not { } reference || _network is not { } network
+            || Destination is not { } destination) return;
 
         _closing = true;
 
+        // Everything below works from these copies, never from the fields: this model is shared, and
+        // a SelectAsync for another account can run while an await here is pending. The closure
+        // record above all must land on the account the node actually deleted.
         try
         {
             await using ILedgerConnection connection =
-                await connections.ConnectAsync(_network, cancellationToken).ConfigureAwait(false);
+                await connections.ConnectAsync(network, cancellationToken).ConfigureAwait(false);
 
             VaultSigner signer = await VaultSigner
-                .CreateAsync(vault, _reference, cancellationToken).ConfigureAwait(false);
+                .CreateAsync(vault, reference, cancellationToken).ConfigureAwait(false);
 
             ThrowawayAccount account = new(connection.Sink, connection.Source, signer);
 
-            DeletionResult result = await account.DeleteAsync(Destination, cancellationToken).ConfigureAwait(false);
+            DeletionResult result = await account.DeleteAsync(destination, cancellationToken).ConfigureAwait(false);
 
             Preview = result;
 
@@ -275,7 +279,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
                 // write that matters from landing. Cancellation is still honoured everywhere above
                 // this point, where stopping genuinely means nothing happened.
                 await vault.UpdateAsync(
-                    _reference, new VaultEntryEdit(Closure: closure), CancellationToken.None).ConfigureAwait(false);
+                    reference, new VaultEntryEdit(Closure: closure), CancellationToken.None).ConfigureAwait(false);
 
                 Closed = closure;
             }
