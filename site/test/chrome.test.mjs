@@ -80,50 +80,56 @@ function langLink(doc, lang) {
 }
 
 test('theme switch toggles data-theme and every xrpl-file theme attribute', () => {
-  const doc = fakeDocument({ theme: 'light' });
+  const doc = fakeDocument({ theme: 'dark' });
   const header = themeButton(doc);
   const footer = themeButton(doc);
-  const first = doc.add(['xrpl-file'], { theme: 'light' });
+  const first = doc.add(['xrpl-file'], { theme: 'dark' });
   const second = doc.add(['xrpl-file']);
   const storage = memoryStorage();
   initChrome({ document: doc, location: { pathname: '/' }, storage });
 
-  assert.equal(doc.documentElement.dataset.theme, 'light');
-  assert.equal(header.getAttribute('aria-pressed'), 'false');
-
-  header.click();
   assert.equal(doc.documentElement.dataset.theme, 'dark');
   assert.equal(first.getAttribute('theme'), 'dark');
-  assert.equal(second.getAttribute('theme'), 'dark');
-  assert.equal(storage.data.get('xf-theme'), 'dark');
+  assert.equal(header.getAttribute('aria-pressed'), 'false', 'the switch is pressed while the light theme is on');
+
+  header.click();
+  assert.equal(doc.documentElement.dataset.theme, 'light');
+  assert.equal(first.getAttribute('theme'), 'light');
+  assert.equal(second.getAttribute('theme'), 'light');
+  assert.equal(storage.data.get('xf-theme'), 'light');
   assert.equal(header.getAttribute('aria-pressed'), 'true');
   assert.equal(footer.getAttribute('aria-pressed'), 'true', 'the footer switch follows the header one');
 
   footer.click();
-  assert.equal(doc.documentElement.dataset.theme, 'light');
-  assert.equal(first.getAttribute('theme'), 'light');
-  assert.equal(storage.data.get('xf-theme'), 'light');
+  assert.equal(doc.documentElement.dataset.theme, 'dark');
+  assert.equal(first.getAttribute('theme'), 'dark');
+  assert.equal(storage.data.get('xf-theme'), 'dark');
   assert.equal(header.getAttribute('aria-pressed'), 'false');
 });
 
-test('the switches are revealed and a remembered dark theme is applied on load', () => {
-  const doc = fakeDocument({ theme: 'light' });
+test('the first visit is dark, and a remembered light theme is applied on load', () => {
+  const fresh = fakeDocument({ theme: 'light' });
+  themeButton(fresh);
+  initChrome({ document: fresh, location: { pathname: '/' }, storage: memoryStorage() });
+  assert.equal(fresh.documentElement.dataset.theme, 'dark');
+
+  const doc = fakeDocument({ theme: 'dark' });
   const button = themeButton(doc);
   const element = doc.add(['xrpl-file']);
-  initChrome({ document: doc, location: { pathname: '/' }, storage: memoryStorage({ 'xf-theme': 'dark' }) });
-  assert.equal(doc.documentElement.dataset.theme, 'dark');
-  assert.equal(element.getAttribute('theme'), 'dark');
+  initChrome({ document: doc, location: { pathname: '/' }, storage: memoryStorage({ 'xf-theme': 'light' }) });
+  assert.equal(doc.documentElement.dataset.theme, 'light');
+  assert.equal(element.getAttribute('theme'), 'light');
   assert.equal(button.getAttribute('aria-pressed'), 'true');
   assert.equal(button.getAttribute('data-ready'), '');
 });
 
-test('with storage that throws the page is light and the switch still works for this page', () => {
+test('with storage that throws the page is dark and the switch still works for this page', () => {
   const doc = fakeDocument();
   const button = themeButton(doc);
   assert.doesNotThrow(() => initChrome({ document: doc, location: { pathname: '/' }, storage: throwingStorage }));
-  assert.equal(doc.documentElement.dataset.theme, 'light');
-  assert.doesNotThrow(() => button.click());
   assert.equal(doc.documentElement.dataset.theme, 'dark');
+  assert.doesNotThrow(() => button.click());
+  assert.equal(doc.documentElement.dataset.theme, 'light');
   assert.equal(button.getAttribute('aria-pressed'), 'true');
 });
 
@@ -215,7 +221,7 @@ test('on the file page the language comes from storage, then from the browser', 
   assert.equal(blocked.documentElement.lang, 'en');
 });
 
-test('the pre-paint script applies the stored theme, and light when storage is missing, blocked or odd', () => {
+test('the pre-paint script applies the stored theme, and dark when storage is missing, blocked or odd', () => {
   const script = prePaintScript();
   const run = (localStorage) => {
     const documentElement = { dataset: {} };
@@ -223,26 +229,26 @@ test('the pre-paint script applies the stored theme, and light when storage is m
     vm.runInNewContext(script, sandbox);
     return documentElement.dataset.theme;
   };
-  assert.equal(run({ getItem: () => 'dark' }), 'dark');
   assert.equal(run({ getItem: () => 'light' }), 'light');
-  assert.equal(run({ getItem: () => 'sepia' }), 'light');
-  assert.equal(run({ getItem: () => null }), 'light');
-  assert.equal(run({ getItem() { throw new Error('blocked'); } }), 'light');
+  assert.equal(run({ getItem: () => 'dark' }), 'dark');
+  assert.equal(run({ getItem: () => 'sepia' }), 'dark');
+  assert.equal(run({ getItem: () => null }), 'dark');
+  assert.equal(run({ getItem() { throw new Error('blocked'); } }), 'dark');
   // The property read itself throws when site data is blocked.
   const documentElement = { dataset: {} };
   const denied = { document: { documentElement } };
   Object.defineProperty(denied, 'localStorage', { get() { throw new Error('denied'); } });
   vm.runInNewContext(script, denied);
-  assert.equal(documentElement.dataset.theme, 'light');
+  assert.equal(documentElement.dataset.theme, 'dark');
 });
 
 test('the pre-paint script reads the same key as prefs.mjs', async () => {
   const { setTheme } = await import('../src/js/prefs.mjs');
   const storage = memoryStorage();
-  setTheme('dark', storage);
+  setTheme('light', storage);
   const documentElement = { dataset: {} };
   vm.runInNewContext(prePaintScript(), { document: { documentElement }, localStorage: storage });
-  assert.equal(documentElement.dataset.theme, 'dark');
+  assert.equal(documentElement.dataset.theme, 'light');
 });
 
 test('both languages carry every string', () => {
@@ -261,7 +267,7 @@ test('the header links home in its language and holds the language and theme swi
   assert.match(ru, /<a class="wordmark" href="\/ru\/"/);
   assert.match(ru, /data-lang-link="en" href="\/" lang="en" hreflang="en"(?! aria-current)/);
   assert.match(ru, /data-lang-link="ru" href="\/ru\/" lang="ru" hreflang="ru" aria-current="true"/);
-  assert.ok(ru.includes(STRINGS.ru.darkTheme));
+  assert.ok(ru.includes(STRINGS.ru.lightTheme));
 });
 
 test('the footer names the repository, the specification, the language and the theme', () => {
@@ -278,13 +284,13 @@ test('a page whose language is stored keeps one URL and falls back to the two ho
   const header = renderChrome('header', { lang: 'en', pagePath: '/file', langFromStorage: true });
   assert.match(header, /data-lang-link="en" href="\/"/);
   assert.match(header, /data-lang-link="ru" href="\/ru\/"/);
-  assert.match(header, /data-i18n="darkTheme"/);
+  assert.match(header, /data-i18n="lightTheme"/);
 });
 
 test('the head part carries the pre-paint script before the stylesheet', () => {
   const head = renderChrome('head', { lang: 'ru', pagePath: '/ru/', langFromStorage: false });
   assert.ok(head.indexOf('<script>') < head.indexOf('rel="stylesheet"'));
-  assert.ok(head.includes('/fonts/onest-latin.woff2'));
-  assert.ok(head.includes('/fonts/onest-cyrillic.woff2'), 'a Russian page preloads the Cyrillic face');
-  assert.ok(!renderChrome('head', { lang: 'en', pagePath: '/', langFromStorage: false }).includes('onest-cyrillic'));
+  assert.ok(head.includes('/fonts/geologica-latin.woff2'));
+  assert.ok(head.includes('/fonts/geologica-cyrillic.woff2'), 'a Russian page preloads the Cyrillic face');
+  assert.ok(!renderChrome('head', { lang: 'en', pagePath: '/', langFromStorage: false }).includes('geologica-cyrillic'));
 });

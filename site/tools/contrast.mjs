@@ -40,21 +40,30 @@ export function readThemeTokens(css, selector) {
 const SITE_PAIRS = [
   ['text', 'Body text', 'ink', 'paper', TEXT],
   ['text', 'Body text on raised surface and hover', 'ink', 'paper-2', TEXT],
-  ['text', 'Muted text (captions, footer labels, inactive language)', 'ink-muted', 'paper', TEXT],
+  ['text', 'Muted text (captions, footer labels, hints)', 'ink-muted', 'paper', TEXT],
   ['text', 'Muted text on raised surface', 'ink-muted', 'paper-2', TEXT],
-  ['text', 'Links', 'accent', 'paper', TEXT],
-  ['text', 'Links on raised surface', 'accent', 'paper-2', TEXT],
-  ['text', 'Text on an accent fill (selection, primary button)', 'accent-ink', 'accent', TEXT],
-  ['text', 'Text on an ink fill (skip link, pressed theme switch)', 'paper', 'ink', TEXT],
+  ['text', 'Secondary text (body, lead, inactive language)', 'ink-2', 'paper', TEXT],
+  ['text', 'Secondary text on raised surface', 'ink-2', 'paper-2', TEXT],
+  ['text', 'Secondary text on the hovered control', 'ink-2', 'paper-3', TEXT],
+  ['text', 'Text on the hovered control', 'ink', 'paper-3', TEXT],
+  ['text', 'Accent as text (reserved for found and verified labels)', 'accent', 'paper', TEXT],
+  ['text', 'Accent as text on raised surface', 'accent', 'paper-2', TEXT],
+  ['text', 'Text on an accent fill (primary button)', 'accent-ink', 'accent', TEXT],
+  ['text', 'Text on the hovered accent fill', 'accent-ink', 'accent-hi', TEXT],
+  ['text', 'Text on an ink fill (skip link)', 'paper', 'ink', TEXT],
   ['text', 'Error message', 'error', 'paper', TEXT],
+  ['text', 'Error message on raised surface', 'error', 'paper-2', TEXT],
   ['ui', 'Focus ring', 'focus', 'paper', UI],
   ['ui', 'Focus ring on raised surface', 'focus', 'paper-2', UI],
-  ['ui', 'Control border (theme switch)', 'rule', 'paper', UI],
-  ['ui', 'Current language underline', 'accent', 'paper', UI],
-  ['ui', 'Unread cell outline', 'cell', 'paper', UI],
-  ['ui', 'Lit cell', 'cell-lit', 'paper', UI],
-  ['ui', 'Verified cell', 'cell-verified', 'paper', UI],
+  ['ui', 'Focus ring on the hovered or pressed control', 'focus', 'paper-3', UI],
+  ['ui', 'Control border (theme switch, buttons, link field)', 'rule', 'paper', UI],
+  ['ui', 'Control border on raised surface (link field)', 'rule', 'paper-2', UI],
+  ['ui', 'Verified check mark (mosaic caption)', 'accent', 'paper-2', UI],
+  ['ui', 'Unread cell outline', 'cell', 'paper-2', UI],
+  ['ui', 'Lit cell', 'cell-lit', 'paper-2', UI],
+  ['ui', 'Verified cell', 'cell-verified', 'paper-2', UI],
   ['info', 'Decorative hairline (exempt: carries no information)', 'rule-soft', 'paper', null],
+  ['info', 'Corner ticks and section rules (exempt: decorative)', 'rule-2', 'paper', null],
   ['info', 'Lit cell against verified cell (state also shown in text)', 'cell-lit', 'cell-verified', null],
 ];
 
@@ -113,15 +122,17 @@ export function elementRows(css, readme) {
   const rows = [];
   for (const [theme, selector] of [['Light', ':root[data-theme="light"]'], ['Dark', ':root[data-theme="dark"]']]) {
     const site = readThemeTokens(css, selector);
-    const paper = { name: `site --paper (${theme.toLowerCase()})`, color: parseColor(site.paper) };
-    const palette = palettes[theme];
+    // The file page puts the element in a --paper-2 frame; the site (base.css) also replaces the element's
+    // accent and the text on it with its own --accent and --accent-ink.
+    const paper = { name: `site --paper-2 (${theme.toLowerCase()})`, color: parseColor(site['paper-2']) };
+    const palette = { ...palettes[theme], accent: site.accent, 'on-accent': site['accent-ink'] };
     const colour = (name) => ({ name: `--xrpl-file-${name}`, color: parseColor(palette[name]) });
     const group = `Element, theme="${theme.toLowerCase()}"`;
     for (const [kind, label, foreground, background, minimum] of ELEMENT_PAIRS) {
       rows.push(row(group, kind, label, colour(foreground), colour(background), minimum));
     }
-    rows.push(row(group, 'ui', 'Accent against the site paper (the element is embedded with the page theme)', colour('accent'), paper, UI));
-    rows.push(row(group, 'info', 'Element box against the site paper (a picture frame: not a control, exempt)', colour('background'), paper, null));
+    rows.push(row(group, 'ui', 'Accent against the frame the element sits in (the element is embedded with the page theme)', colour('accent'), paper, UI));
+    rows.push(row(group, 'info', 'Element box against its frame (a picture frame: not a control, exempt)', colour('background'), paper, null));
   }
   return rows;
 }
@@ -152,7 +163,7 @@ export function renderReport(rows) {
     '- Text: at least 4.5:1. Non-text UI and graphics that carry information: at least 3:1.',
     '- Rows marked "exempt" are shown for the record and have no threshold.',
     '- Every token the stylesheets use for a colour is in `tokens.css`; `--paper` is OKLCH L 0.945 in the light',
-    '  theme and 0.175 in the dark one, never `#fff` or `#000`.',
+    '  theme and 0.135 in the dark one, never `#fff` or `#000`.',
     '',
     `Result: ${failed === 0 ? 'every required pair passes.' : `${failed} required pair(s) FAIL.`}`,
     '',
@@ -171,6 +182,9 @@ export function renderReport(rows) {
     '',
     '- The element is always embedded with the page theme (`chrome.mjs` sets its `theme` attribute with the',
     '  switch), so a light element on a dark paper, or the reverse, does not occur.',
+    "- `base.css` replaces the element's `--xrpl-file-accent` and `--xrpl-file-on-accent` with the site's",
+    '  `--accent` and `--accent-ink`, so the element buttons carry the same signal colour as the page; the',
+    '  other element colours are the documented palette of the README. The "Element" groups below use both.',
     '- Over a cover and on its caption the element draws on a dark overlay in both themes; those colours',
     '  are the element\'s own and are verified with the element (README, "Embed a file").',
     '- The unread cell is drawn as an outline at 3:1, so an empty mosaic reads as graph paper; the lit and',

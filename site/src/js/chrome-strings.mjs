@@ -9,7 +9,7 @@ export const STRINGS = {
     repository: 'Repository',
     specification: 'Specification',
     themeLabel: 'Theme',
-    darkTheme: 'Dark theme',
+    lightTheme: 'Light theme',
   },
   ru: {
     skip: 'К содержимому',
@@ -19,7 +19,7 @@ export const STRINGS = {
     repository: 'Репозиторий',
     specification: 'Спецификация',
     themeLabel: 'Тема',
-    darkTheme: 'Тёмная тема',
+    lightTheme: 'Светлая тема',
   },
 };
 

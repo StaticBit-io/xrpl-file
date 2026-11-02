@@ -126,7 +126,7 @@ test('inlines the shared head, header and footer into a page and takes the langu
     assert.match(ru, /<a class="wordmark" href="\/ru\/"/);
     assert.match(ru, /data-lang-link="ru" href="\/ru\/" lang="ru" hreflang="ru" aria-current="true"/);
     assert.ok(ru.includes('Репозиторий'));
-    assert.ok(ru.includes('/fonts/onest-cyrillic.woff2'));
+    assert.ok(ru.includes('/fonts/geologica-cyrillic.woff2'));
   }));
 
 test('a page marked data-lang-source="storage" gets one URL for both languages and in-place chrome text', () =>

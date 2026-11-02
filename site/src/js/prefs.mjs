@@ -28,13 +28,13 @@ function writeItem(storage, key, value) {
   }
 }
 
-/** The first visit is light whatever the OS prefers; only an explicit stored choice gives dark. */
+/** The first visit is dark whatever the OS prefers; only an explicit stored choice gives light. */
 export function getTheme(storage = safeLocalStorage()) {
-  return readItem(storage, THEME_KEY) === 'dark' ? 'dark' : 'light';
+  return readItem(storage, THEME_KEY) === 'light' ? 'light' : 'dark';
 }
 
 export function setTheme(theme, storage = safeLocalStorage()) {
-  writeItem(storage, THEME_KEY, theme === 'dark' ? 'dark' : 'light');
+  writeItem(storage, THEME_KEY, theme === 'light' ? 'light' : 'dark');
 }
 
 export function getLang(storage = safeLocalStorage(), navigatorLanguage = globalThis.navigator?.language) {
@@ -57,7 +57,7 @@ export function equivalentPath(pathname, lang) {
 }
 
 export function applyTheme(doc, theme) {
-  const value = theme === 'dark' ? 'dark' : 'light';
+  const value = theme === 'light' ? 'light' : 'dark';
   doc.documentElement.dataset.theme = value;
   for (const element of doc.querySelectorAll('xrpl-file')) element.setAttribute('theme', value);
 }

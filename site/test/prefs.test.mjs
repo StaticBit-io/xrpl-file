@@ -20,30 +20,33 @@ const throwingStorage = {
   setItem() { throw new Error('blocked'); },
 };
 
-test('getTheme defaults to light and survives a storage that throws', () => {
-  assert.equal(getTheme(memoryStorage()), 'light');
-  assert.equal(getTheme(throwingStorage), 'light');
-  assert.equal(getTheme(null), 'light');
+test('getTheme defaults to dark and survives a storage that throws', () => {
+  assert.equal(getTheme(memoryStorage()), 'dark');
+  assert.equal(getTheme(throwingStorage), 'dark');
+  assert.equal(getTheme(null), 'dark');
 });
 
 test('setTheme with a storage that throws does not throw', () => {
-  assert.doesNotThrow(() => setTheme('dark', throwingStorage));
-  assert.doesNotThrow(() => setTheme('dark', null));
+  assert.doesNotThrow(() => setTheme('light', throwingStorage));
+  assert.doesNotThrow(() => setTheme('light', null));
 });
 
 test('the theme round-trips through storage under xf-theme', () => {
   const storage = memoryStorage();
+  setTheme('light', storage);
+  assert.equal(storage.data.get('xf-theme'), 'light');
+  assert.equal(getTheme(storage), 'light');
   setTheme('dark', storage);
   assert.equal(storage.data.get('xf-theme'), 'dark');
   assert.equal(getTheme(storage), 'dark');
-  assert.equal(getTheme(memoryStorage({ 'xf-theme': 'garbage' })), 'light');
+  assert.equal(getTheme(memoryStorage({ 'xf-theme': 'garbage' })), 'dark');
 });
 
-test('the first visit is light even when the OS prefers dark', () => {
+test('the first visit is dark even when the OS prefers light', () => {
   const original = globalThis.matchMedia;
-  globalThis.matchMedia = (query) => ({ matches: query.includes('dark'), media: query });
+  globalThis.matchMedia = (query) => ({ matches: query.includes('light'), media: query });
   try {
-    assert.equal(getTheme(memoryStorage()), 'light');
+    assert.equal(getTheme(memoryStorage()), 'dark');
   } finally {
     if (original === undefined) delete globalThis.matchMedia;
     else globalThis.matchMedia = original;
@@ -58,8 +61,8 @@ test('safeLocalStorage does not throw when localStorage access throws', () => {
   });
   try {
     assert.equal(safeLocalStorage(), null);
-    assert.equal(getTheme(), 'light');
-    assert.doesNotThrow(() => setTheme('dark'));
+    assert.equal(getTheme(), 'dark');
+    assert.doesNotThrow(() => setTheme('light'));
     assert.equal(getLang(undefined, 'ru-RU'), 'ru');
   } finally {
     if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor);
@@ -107,7 +110,9 @@ test('applyTheme sets the page theme and the theme of every xrpl-file element', 
       return [1, 2].map(() => ({ setAttribute: (name, value) => attributes.push([name, value]) }));
     },
   };
-  applyTheme(doc, 'dark');
-  assert.equal(doc.documentElement.dataset.theme, 'dark');
-  assert.deepEqual(attributes, [['theme', 'dark'], ['theme', 'dark']]);
+  applyTheme(doc, 'light');
+  assert.equal(doc.documentElement.dataset.theme, 'light');
+  assert.deepEqual(attributes, [['theme', 'light'], ['theme', 'light']]);
+  applyTheme(doc, 'sepia');
+  assert.equal(doc.documentElement.dataset.theme, 'dark', 'anything but light is dark');
 });

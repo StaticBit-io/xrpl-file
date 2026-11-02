@@ -20,15 +20,16 @@ function markCurrentLanguage(document, lang) {
 
 function initTheme(document, storage) {
   const buttons = document.querySelectorAll('[data-theme-toggle]');
+  // The switch is named for the theme it turns on ("Light theme") and is pressed while that theme is on.
   const show = (theme) => {
     applyTheme(document, theme);
-    for (const button of buttons) button.setAttribute('aria-pressed', String(theme === 'dark'));
+    for (const button of buttons) button.setAttribute('aria-pressed', String(theme === 'light'));
   };
   show(getTheme(storage));
   for (const button of buttons) {
     button.addEventListener('click', () => {
       // Read the page, not storage: with blocked storage the switch must still work for this page.
-      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
       show(next);
       setTheme(next, storage);
     });

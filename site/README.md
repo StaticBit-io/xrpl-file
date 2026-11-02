@@ -125,15 +125,23 @@ every header in each location that needs it.
 ## Visual system and the shared header and footer
 
 `src/css/tokens.css` holds every colour, face, size and space the pages use, `base.css` the element
-defaults, `site.css` the header and footer (its first lines are the design stamp). A page links
-nothing itself: the head marker below brings `site.css`, which imports the other two. A page's own CSS
-styles only with the tokens. Colours are on `:root[data-theme="light"]` (also the default without the
-attribute) and `:root[data-theme="dark"]`: `--paper`, `--paper-2`, `--ink`, `--ink-muted`, `--rule`,
-`--rule-soft`, `--accent`, `--accent-ink`, `--focus`, `--error` and the mosaic's `--cell`,
-`--cell-lit`, `--cell-verified`. Text is Onest for everything and JetBrains Mono (`code`, `.value`)
-only for real values; both are self-hosted in `src/fonts/` with their OFL licences and download
-sources (`SOURCES.txt`), latin and cyrillic subsets, no request leaves the site. Neither font has a
-check mark or an arrow glyph: draw them (SVG) instead of typing U+2713 or U+2192.
+defaults, `site.css` the header, footer and pages (its first lines are the design stamp: hallmark's
+Vantage theme, catalogue mode). A page links nothing itself: the head marker below brings `site.css`,
+which imports the other two. A page's own CSS styles only with the tokens. Colours are on
+`:root[data-theme="dark"]` (also the default without the attribute: the first visit is dark whatever
+the OS prefers) and `:root[data-theme="light"]`: `--paper`, `--paper-2`, `--paper-3`, `--ink`,
+`--ink-2`, `--ink-muted`, `--rule`, `--rule-2`, `--rule-soft`, `--accent`, `--accent-hi`,
+`--accent-ink`, `--focus`, `--error` and the mosaic's `--cell`, `--cell-lit`, `--cell-verified`.
+The lime accent (moss in light) marks only what is primary or verified. The theme switch is named for
+the theme it turns on ("Light theme") and is pressed while that theme is on; the choice is kept in
+`localStorage` under `xf-theme`, and a blocked storage leaves the page dark with a working switch.
+Text is Geologica for everything, self-hosted in `src/fonts/` (variable woff2, latin and cyrillic
+subsets, the OFL licence and the download sources with checksums in `SOURCES.txt`; no request leaves
+the site). Chinese falls back to the system CJK faces named in `--font-body`. A monospace is only for
+real values (`code`, `.value`) and is the visitor's own system face. Geologica has no check mark and
+no thin space: draw a check mark (SVG) instead of typing U+2713, and use margins, not U+2009.
+`site/tools/contrast.mjs` regenerates the AA table in `docs/superpowers/reports/2026-11-02-site/contrast.md`,
+and `site/test/contrast.test.mjs` fails when a pair misses its threshold.
 
 A page uses the shared chrome by putting three markers in its source; `build.mjs` replaces them:
 

@@ -13,12 +13,16 @@
 <!--@chrome:header-->
 <main id="main">
 <div id="file-page" class="file container" hidden>
-<div id="file-view" class="file__view"></div>
+<div id="file-view" class="file__view ticks"></div>
+<div class="file__grid">
+<div class="file__lead">
+<h1 id="file-title" class="file__title">File</h1>
 <div class="file__actions">
 <button id="file-download" class="button" type="button" disabled data-s="download">Download</button>
 <p id="file-status" class="file__status" role="status"></p>
 </div>
-<h1 id="file-title" class="file__title">File</h1>
+</div>
+<div class="file__facts">
 <dl id="file-details" class="file__details" hidden>
 <div id="file-size-row">
 <dt data-s="sizeLabel">Size</dt>
@@ -37,7 +41,9 @@
 <span id="file-copy-status" class="snippet__status" role="status"></span>
 </div>
 </div>
-<section class="section file__how" aria-labelledby="how-title">
+</div>
+</div>
+<section class="file__how" aria-labelledby="how-title">
 <h2 id="how-title" data-s="howTitle">How this works</h2>
 <p data-s="howText">xrpl-file writes a file into the XRP Ledger in chunks. Your browser collects the chunks, assembles the file and checks it against its fingerprint. A file that does not match its fingerprint is not shown. This site’s server takes no part in it.</p>
 <p><a href="/" data-home data-s="howLink">More on the home page</a></p>

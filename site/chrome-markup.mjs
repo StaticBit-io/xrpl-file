@@ -10,12 +10,12 @@ const LANGS = ['en', 'ru'];
 
 /**
  * Runs in <head> before first paint so the page never flashes the wrong theme. The same rule as
- * getTheme in prefs.mjs (only a stored "dark" gives dark, everything else is light), written out
+ * getTheme in prefs.mjs (only a stored "light" gives light, everything else is dark), written out
  * because a classic inline script cannot import; the storage key comes from prefs.mjs.
  */
 export function prePaintScript() {
   return (
-    `(function(){var t="light";try{if(localStorage.getItem(${JSON.stringify(THEME_KEY)})==="dark")t="dark"}catch(e){}` +
+    `(function(){var t="dark";try{if(localStorage.getItem(${JSON.stringify(THEME_KEY)})==="light")t="light"}catch(e){}` +
     'document.documentElement.dataset.theme=t})()'
   );
 }
@@ -38,8 +38,8 @@ export function renderChrome(part, page) {
 }
 
 function renderHead({ lang, langFromStorage }) {
-  const preloads = ['onest-latin'];
-  if (lang === 'ru' && !langFromStorage) preloads.push('onest-cyrillic');
+  const preloads = ['geologica-latin'];
+  if (lang === 'ru' && !langFromStorage) preloads.push('geologica-cyrillic');
   return [
     `<script>${prePaintScript()}</script>`,
     ...preloads.map((name) => `<link rel="preload" href="/fonts/${name}.woff2" as="font" type="font/woff2" crossorigin>`),
@@ -72,7 +72,7 @@ function themeToggle(page) {
     '<button type="button" class="theme-toggle" data-theme-toggle aria-pressed="false">' +
     '<svg class="theme-toggle__icon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">' +
     '<rect x="1" y="1" width="14" height="14" rx="2"/><path d="M8 1h5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8z"/></svg>' +
-    `<span${i18n('darkTheme')}>${text('darkTheme')}</span></button>`
+    `<span${i18n('lightTheme')}>${text('lightTheme')}</span></button>`
   );
 }
 
@@ -113,7 +113,6 @@ ${themeToggle(page)}
 function renderFooter(page) {
   const { text, i18n } = labels(page);
   return `<footer class="site-footer">
-<div class="cell-rule" aria-hidden="true"></div>
 <div class="container site-footer__grid">
 <div>
 <p class="site-footer__label"${i18n('projectLabel')}>${text('projectLabel')}</p>
