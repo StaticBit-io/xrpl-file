@@ -1,7 +1,9 @@
 // Assembles the deployable site into site/dist:
 //   site/src/**                  -> /            (pages, scripts, styles, fonts, _redirects, _headers)
 //                                   with <!--@chrome:head|header|footer--> markers in a page replaced by
-//                                   the shared markup of chrome-markup.mjs
+//                                   the shared markup of chrome-markup.mjs, and <!--@element-snippet--> replaced
+//                                   by the embed snippets (jsDelivr and this site) with the element's integrity
+//                                   from integrity.json
 //   web/dist/<version>/*         -> /element/<version>/   (the element and the reader bundle)
 //   site/data/price.json         -> /data/price.json
 // The site loads the element and the reader from that one copy; nothing else carries reader code.
@@ -11,6 +13,8 @@ import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promi
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderChrome } from './chrome-markup.mjs';
+import { ELEMENT_PACKAGE_PUBLISHED } from './src/js/config.mjs';
+import { ELEMENT_FILE, alternativeSnippetHtml, snippetHtml } from './snippet.mjs';
 import { findHtmlRewriteTargets, findShadowed, parseRedirects } from './redirects.mjs';
 
 export const ELEMENT_VERSION = '1.1.0';
@@ -78,6 +82,40 @@ async function inlineChrome(outDir) {
   }
 }
 
+const SNIPPET_MARKER = '<!--@element-snippet-->';
+const ALT_SNIPPET_MARKER = '<!--@element-snippet-alt-->';
+// Text between these markers is kept only while the npm package is not published.
+const UNPUBLISHED_NOTE = /<!--@npm-unpublished-->([\s\S]*?)<!--@\/npm-unpublished-->/g;
+
+/**
+ * Fills the embed snippets of a page: both markers get the escaped snippet with the element's integrity
+ * from integrity.json, and the "package not published" note stays or goes with ELEMENT_PACKAGE_PUBLISHED.
+ */
+async function inlineSnippet(outDir, elementDir, elementVersion) {
+  let integrity = null;
+  for (const file of await listFiles(outDir)) {
+    const relative_ = relative(outDir, file);
+    if (!file.endsWith('.html') || relative_.split(sep)[0] === 'element') continue;
+    const html = await readFile(file, 'utf8');
+    if (!html.includes(SNIPPET_MARKER) && !html.includes(ALT_SNIPPET_MARKER) && !html.includes('<!--@npm-unpublished-->')) continue;
+    if (integrity === null) {
+      const values = JSON.parse(await readFile(join(elementDir, 'integrity.json'), 'utf8'));
+      integrity = values[ELEMENT_FILE];
+      if (typeof integrity !== 'string' || !integrity.startsWith('sha384-')) {
+        throw new Error(`integrity.json of element ${elementVersion} has no sha384 value for ${ELEMENT_FILE}`);
+      }
+    }
+    const options = { version: elementVersion, integrity };
+    await writeFile(
+      file,
+      html
+        .replaceAll(SNIPPET_MARKER, () => snippetHtml(options))
+        .replaceAll(ALT_SNIPPET_MARKER, () => alternativeSnippetHtml(options))
+        .replace(UNPUBLISHED_NOTE, (_, note) => (ELEMENT_PACKAGE_PUBLISHED ? '' : note)),
+    );
+  }
+}
+
 async function checkSizes(outDir, maxFileBytes) {
   const tooBig = [];
   for (const file of await listFiles(outDir)) {
@@ -136,6 +174,7 @@ export async function build({ siteDir, webDistDir, outDir, elementVersion = ELEM
   try {
     await cp(join(siteDir, 'src'), outDir, { recursive: true });
     await inlineChrome(outDir);
+    await inlineSnippet(outDir, elementDir, elementVersion);
     await cp(elementDir, join(outDir, 'element', elementVersion), { recursive: true });
     await mkdir(join(outDir, 'data'), { recursive: true });
     await cp(priceFile, join(outDir, 'data', 'price.json'));

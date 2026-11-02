@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build, MAX_FILE_BYTES } from '../build.mjs';
+import { ELEMENT_PACKAGE, ELEMENT_PACKAGE_PUBLISHED } from '../src/js/config.mjs';
 
 const GUARDED_REDIRECTS = '/ru/:file /ru/:file 200\n/js/:file /js/:file 200\n/data/:file /data/:file 200\n/:network/:hash /file 200\n';
 
@@ -20,6 +21,10 @@ async function fixture(redirects = GUARDED_REDIRECTS) {
   await writeFile(join(siteDir, 'data', 'price.json'), '{"rows":[]}');
   await writeFile(join(webDistDir, '1.1.0', 'xrpl-file-element.js'), '// element');
   await writeFile(join(webDistDir, '1.1.0', 'xrpl-file-reader.mjs'), '// reader');
+  await writeFile(
+    join(webDistDir, '1.1.0', 'integrity.json'),
+    JSON.stringify({ 'xrpl-file-element.js': 'sha384-TESTVALUE+/=', 'mp4box.min.js': 'sha384-OTHER' }),
+  );
   return { root, siteDir, webDistDir, outDir: join(root, 'dist') };
 }
 
@@ -170,3 +175,44 @@ test('refuses a marker on a page without a usable <html lang>, or an unknown mar
     });
   }
 });
+
+const SNIPPET_BODY =
+  '<pre><code><!--@element-snippet--></code></pre><pre><code><!--@element-snippet-alt--></code></pre>' +
+  '<!--@npm-unpublished--><p>NOT-PUBLISHED-NOTE</p><!--@/npm-unpublished-->';
+
+test('built index.html contains the 1.1.0 snippet with the integrity from integrity.json', () =>
+  buildWithPages({ 'index.html': PAGE('en', SNIPPET_BODY) }, async (f, read) => {
+    const html = await read('index.html');
+    for (const marker of ['<!--@element-snippet-->', '<!--@element-snippet-alt-->', '<!--@npm-unpublished-->']) {
+      assert.ok(!html.includes(marker), `no ${marker} is left behind`);
+    }
+    const [primary, alternative] = html.match(/<pre><code>[\s\S]*?<\/code><\/pre>/g);
+
+    assert.ok(primary.includes(`src="https://cdn.jsdelivr.net/npm/${ELEMENT_PACKAGE}@1.1.0/xrpl-file-element.js"`));
+    // The snippet is pasted into other sites, so the alternative names the site's own origin.
+    assert.ok(alternative.includes('src="https://xrpl-file.staticbit.io/element/1.1.0/xrpl-file-element.js"'));
+    for (const snippet of [primary, alternative]) {
+      assert.ok(snippet.includes('integrity="sha384-TESTVALUE+/="'));
+      assert.ok(snippet.includes('crossorigin="anonymous"'));
+      assert.ok(!snippet.includes('type="module"'), 'the element is a classic script');
+      assert.match(snippet, /&lt;xrpl-file src="xrpl-file:\/\/testnet\/[0-9A-F]{64}"/);
+    }
+    assert.ok(!html.includes('sha384-OTHER'), 'only the value for the element script is used');
+  }));
+
+test('the "package not published" note is kept exactly while ELEMENT_PACKAGE_PUBLISHED is false', () =>
+  buildWithPages({ 'index.html': PAGE('en', SNIPPET_BODY) }, async (f, read) => {
+    assert.equal(ELEMENT_PACKAGE_PUBLISHED, false);
+    assert.ok((await read('index.html')).includes('<p>NOT-PUBLISHED-NOTE</p>'));
+  }));
+
+test('refuses a snippet marker when integrity.json has no value for the element script', () =>
+  withFixture(undefined, async (f) => {
+    await writeFile(join(f.webDistDir, '1.1.0', 'integrity.json'), '{}');
+    await writeFile(join(f.siteDir, 'src', 'index.html'), PAGE('en', '<code><!--@element-snippet--></code>'));
+    await assert.rejects(
+      build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' }),
+      /integrity/,
+    );
+    assert.equal(await exists(f.outDir), false);
+  }));

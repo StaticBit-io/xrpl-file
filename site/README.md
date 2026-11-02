@@ -198,3 +198,25 @@ dotnet run --project tools/XrplFile.SitePrice -- --out site/data/price.json
 
 `--node <wss url>` overrides the default node (`wss://xrplcluster.com`). The file records the time
 it was taken; commit it, then rebuild.
+
+The home page fetches `/data/price.json` in the visitor's browser and draws the table from it; if the
+fetch fails the section keeps a plain sentence instead. It shows the fees (spent) and the reserve
+(held and returned) as they are in the file, with the date in UTC. Nothing on the page multiplies a
+transaction count by a fee: the file's own fee column is what is shown.
+
+## Home page settings
+
+`site/src/js/config.mjs` holds the values the owner changes by hand:
+
+- `HERO_LINK`, `HERO_ASPECT`: the hero file (see above).
+- `PUBLISHER_URL`: the publisher's GitHub Releases URL. While it is `null` the "Download the
+  publisher" button is disabled and marked "soon"; set the URL and the button becomes a link.
+- `ELEMENT_PACKAGE`, `ELEMENT_PACKAGE_PUBLISHED`: the npm package name in the first embed snippet
+  (`cdn.jsdelivr.net/npm/<package>@1.1.0/...`) and whether it is on npm. While it is `false` the
+  page says the package is not published yet and points at the second snippet, the same file served
+  from this site. `build.mjs` reads both, so the snippets and the note change together.
+
+The embed snippets are inserted at build time: `<!--@element-snippet-->` and
+`<!--@element-snippet-alt-->` in a page become the escaped snippets, with the `integrity` value from
+`web/dist/1.1.0/integrity.json`. Both load a classic script (never `type="module"`: the element looks
+for `mp4box.min.js` beside `document.currentScript`).
