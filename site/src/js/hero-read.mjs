@@ -18,8 +18,6 @@ import {
 
 export const SEEN_KEY = 'xf-mosaic-seen';
 
-// The state machine sizes a grid it no longer draws; any positive aspect ratio does.
-const STATE_ASPECT = 1;
 const STALL_POLL_MS = 500;
 // Cubes the hero shows before the manifest says how many chunks there are.
 const PLACEHOLDER_CHUNKS = 1;
@@ -89,7 +87,7 @@ export function startHeroRead(options, env = {}) {
   const listener = options.listener ?? {};
   const developDelay = options.developDelay ?? (() => 0);
 
-  let state = createMosaic({ chunks: PLACEHOLDER_CHUNKS, aspect: STATE_ASPECT, now: now() });
+  let state = createMosaic({ chunks: PLACEHOLDER_CHUNKS, now: now() });
   let manifest = null;
   let source = null;
   let pollId = null;
@@ -146,7 +144,7 @@ export function startHeroRead(options, env = {}) {
       if (state.phase !== 'reading' || manifest !== null) return;
       manifest = received;
       const chunks = Math.ceil(received.size / received.chunk);
-      state = createMosaic({ chunks, aspect: STATE_ASPECT, now: state.activityAt });
+      state = createMosaic({ chunks, now: state.activityAt });
       listener.onManifest?.({ manifest: received, chunks, time: now() });
     },
     onChunk(chunk) {
