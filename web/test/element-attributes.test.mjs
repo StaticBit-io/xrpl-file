@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseLength, parseLoading, parseLoader, parseTheme, linkText, endpointsFor } from '../src/element/attributes.mjs';
+import { parseLength, parseLoading, parseLoader, parseTheme, backgroundTransparent, captionHidden, linkText, endpointsFor } from '../src/element/attributes.mjs';
 import { NO_NODE, BAD_NODE } from '../src/element/messages.mjs';
 import { ENDPOINTS } from '../src/ledger.mjs';
 
@@ -67,4 +67,14 @@ test('a numeric network without a node has no endpoints to use', () => {
 test('a node that is not wss:// (or local ws://) is refused', () => {
   for (const bad of ['ws://example.com', 'http://localhost', 'https://x', 'not a url'])
     assert.throws(() => endpointsFor({ network: 'testnet' }, bad), (e) => e.sentence === BAD_NODE, bad);
+});
+
+test('only caption="off" hides the caption; any other value or none keeps it', () => {
+  for (const v of ['off', ' OFF ', 'Off']) assert.equal(captionHidden(v), true, v);
+  for (const v of [null, undefined, '', 'on', 'false', 'hidden', 'of']) assert.equal(captionHidden(v), false, String(v));
+});
+
+test('background is transparent only when it says transparent, so an existing block keeps its box', () => {
+  for (const v of ['transparent', ' Transparent ', 'TRANSPARENT']) assert.equal(backgroundTransparent(v), true, v);
+  for (const v of [null, undefined, '', 'none', 'theme', 'transparent;color:red', '#fff']) assert.equal(backgroundTransparent(v), false, String(v));
 });

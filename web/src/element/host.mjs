@@ -1,4 +1,5 @@
 // Decisions the element makes that need no DOM, kept here so node --test can pin them.
+import { stringsFor } from './strings.mjs';
 
 /**
  * The `:host` rule. It sits in the shadow root's own stylesheet, so any rule of the site's wins
@@ -30,14 +31,14 @@ const VERIFIED_PHASES = new Set(['image', 'text', 'video', 'download']);
  * narrower box can drop the word and the smallest keeps the mark alone. The pieces are empty until
  * something verified was read.
  */
-export function captionParts({ phase, network }) {
+export function captionParts({ phase, network, lang = 'en' }) {
   const verified = VERIFIED_PHASES.has(phase);
-  return { verified, mark: verified ? '✓ ' : '', word: verified ? 'verified · ' : '', network };
+  return { verified, mark: verified ? '✓ ' : '', word: verified ? `${stringsFor(lang).verified} · ` : '', network };
 }
 
 /** The right-hand side of the caption: the network, with the verified mark once something verified was read. */
-export function captionState({ phase, network }) {
-  const { verified, mark, word } = captionParts({ phase, network });
+export function captionState({ phase, network, lang = 'en' }) {
+  const { verified, mark, word } = captionParts({ phase, network, lang });
   return { verified, text: `${mark}${word}${network}` };
 }
 

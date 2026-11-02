@@ -1,5 +1,7 @@
 // The markup and styles inside the element's shadow root, written once. Nothing in it is built from
 // data: names, sizes, messages and file content are put in with textContent or attributes afterwards.
+// The words in it are English and only the first markup: before anything is shown the element sets every
+// one of them again from strings.mjs, in the page's language.
 // Styles follow the approved mockup.
 //
 // Colours come in two layers. A theme is a palette of private --t-* properties on .frame, picked by its
@@ -69,8 +71,8 @@ export const STYLES = `
   .frame[data-theme="light"] { ${LIGHT} }
   @media (prefers-color-scheme: light) { .frame[data-theme="auto"] { ${LIGHT} } }
   .caption, .overlay, .idle.covered {
-    --accent: var(--xrpl-file-accent, #4da3ff);
-    --on-accent: var(--xrpl-file-on-accent, #06121f);
+    --accent: var(--xrpl-file-overlay-accent, var(--xrpl-file-accent, #4da3ff));
+    --on-accent: var(--xrpl-file-overlay-on-accent, var(--xrpl-file-on-accent, #06121f));
     --fg: var(--overlay-foreground);
     --muted: var(--overlay-foreground);
     --track: var(--xrpl-file-overlay-track, rgba(255,255,255,.15));
@@ -100,6 +102,9 @@ export const STYLES = `
   .btn { display: inline-block; margin-top: 10px; padding: 6px 14px; padding: clamp(4px, 1.9cqi, 6px) clamp(10px, 4.4cqi, 14px); border: 0; border-radius: 6px; background: var(--accent); color: var(--on-accent); font: inherit; font-size: 13px; font-size: clamp(11px, 4cqi, 13px); font-weight: 600; cursor: pointer; }
   .btn:disabled { opacity: 0.6; cursor: default; }
   .btn.play { width: 56px; height: 56px; width: clamp(24px, 30cqmin, 56px); height: clamp(24px, 30cqmin, 56px); padding: 0; border-radius: 50%; background: var(--overlay); color: var(--overlay-foreground); font-size: 22px; font-size: clamp(11px, 9cqmin, 22px); line-height: 56px; line-height: clamp(24px, 30cqmin, 56px); }
+  /* The dark fill alone vanishes on a dark cover (1.2:1); a light ring around it keeps the button at 3:1
+     on any picture, since one of the two edges always stands out. */
+  .btn.play { box-shadow: 0 0 0 2px var(--overlay-foreground); }
   button:focus-visible, pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .status { margin-top: 6px; min-height: 1.6em; font-size: 12.5px; font-size: clamp(11px, 3.9cqi, 12.5px); }
   .btn .ico { display: none; width: 1.25em; height: 1.25em; vertical-align: -0.25em; }
@@ -116,6 +121,11 @@ export const STYLES = `
 
   .idle.covered { background: var(--media); }
   .idle .scrim { position: absolute; inset: 0; background: var(--xrpl-file-scrim, var(--t-scrim)); }
+  /* background="transparent": the box gives way to the page under it, over any --xrpl-file-background, and the
+     empty-box scrim goes with it, or it would darken the page. What sits on content keeps its own backing:
+     a cover's scrim, the text view, the video letterbox, the overlay and the caption. */
+  .frame[data-background="transparent"] { background: transparent; }
+  .frame[data-background="transparent"] .idle:not(.covered) .scrim { background: none; }
   .idle.covered .scrim { background: var(--xrpl-file-scrim, linear-gradient(to top, rgba(0,0,0,.65), rgba(0,0,0,.15))); }
   .error .message { color: var(--danger); font-size: 14px; font-size: clamp(11px, 4.4cqi, 14px); padding: 0 18px; padding: 0 clamp(8px, 5.6cqi, 18px); max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
   .msg-icon, .msg-short { display: none; }
@@ -142,7 +152,7 @@ export const STYLES = `
   .caption .side { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .caption .net { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .caption .ok { color: var(--success); }
-  .caption button { padding: 1px 8px; border: 1px solid var(--xrpl-file-overlay-border, rgba(255,255,255,.4)); border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  .caption button { padding: 1px 8px; border: 1px solid var(--xrpl-file-overlay-border, rgba(255,255,255,.6)); border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
   .caption button[data-state="copied"] { border-color: var(--success); color: var(--success); }
   .caption button[data-state="failed"] { border-color: var(--danger); color: var(--danger); }
   .caption .cp-ico, .caption .cp-mark { display: none; }
@@ -262,7 +272,7 @@ export const TEMPLATE = `
       <div class="big" id="dlName"></div>
       <div class="muted" id="dlMeta"><span class="dl-type" id="dlType"></span><span id="dlSize"></span><span class="dl-net" id="dlNet"></span></div>
       <div class="muted note" id="dlNote" hidden></div>
-      <button type="button" class="btn" id="dlButton"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v11m0 0-5-5m5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl-full">Download</span><span class="lbl-short">Save</span> <span class="sr-name" id="dlLabel"></span></button>
+      <button type="button" class="btn" id="dlButton"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 4v11m0 0-5-5m5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl-full" id="dlFull">Download</span><span class="lbl-short" id="dlShort">Save</span> <span class="sr-name" id="dlLabel"></span></button>
       <div class="status muted" id="dlStatus" role="status"></div>
     </div>
   </div>

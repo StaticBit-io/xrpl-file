@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>XrplFile.SitePrice</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The publisher's own estimate and policy: the site must show what the application would show. -->
+    <ProjectReference Include="..\..\src\XrplFile.Core\XrplFile.Core.csproj" />
+    <ProjectReference Include="..\..\app\XrplFile.App.Core\XrplFile.App.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Xrpl" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="XrplFile.SitePrice.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xrpl-file：把文件存入 XRP Ledger</title>
+<meta name="description" content="xrpl-file 把文件写入 XRP Ledger，读取时按指纹校验。代币的图片和元数据可以和代币存放在同一个账本里。">
+<!--@chrome:head-->
+<script type="module" src="/js/home.mjs"></script>
+</head>
+<body>
+<!--@chrome:header-->
+<main id="main">
+<section class="hero container" aria-labelledby="hero-title">
+<div class="hero__text">
+<h1 id="hero-title">把文件存入 XRP Ledger</h1>
+<p class="lead">代币的图片或任何其他文件，写入与代币相同的账本，读取时按指纹校验。</p>
+<form id="check-link" class="check" novalidate>
+<label for="check-link-input">检查链接</label>
+<div class="check__row">
+<input id="check-link-input" class="field" type="text" name="link" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xrpl-file://testnet/…">
+<button class="button" type="submit">打开</button>
+</div>
+<p id="check-link-error" class="check__error" role="alert"></p>
+</form>
+<div class="publisher">
+<button id="publisher" class="button button--quiet" type="button" disabled aria-describedby="publisher-hint"><span data-label>下载发布工具</span> <span class="tag">即将推出</span></button>
+<p id="publisher-hint" class="hint">把你的文件写入账本的 Windows 应用。</p>
+</div>
+</div>
+<figure class="hero__figure">
+<div class="hero-cloud ticks">
+<canvas id="hero-cloud" class="cloud" role="img" aria-label="XRP Ledger 一段区间的点云。文件正在从账本读取"></canvas>
+<div id="co-file" class="callout" aria-hidden="true"></div>
+<div id="co-link" class="callout" aria-hidden="true"></div>
+<div id="hero-card" class="hero-card" hidden></div>
+</div>
+<figcaption id="hero-caption" class="cloud-caption"></figcaption>
+<p id="hero-note" class="cloud-note"></p>
+<p class="cloud-about">立方体显示一个真实文件的分片是如何从账本中读取的。每个数据块都按指纹校验通过后，文件本身会出现在它们旁边。</p>
+</figure>
+</section>
+
+<section class="band band--quiet" aria-labelledby="problem-title">
+<div class="container">
+<div class="head">
+<h2 id="problem-title">指向元数据的链接会失效</h2>
+<p>当 NFT、MPT、DID 或凭证把图片和描述存放在账本之外时，账本中的条目只保存一个链接。文件则放在 IPFS 上、发行方自己的服务器上或 S3 存储桶中。</p>
+</div>
+<ul class="faults">
+<li><strong>未固定（pin）的 IPFS</strong>固定服务停止付费后，文件就会从 IPFS 中消失。</li>
+<li><strong>服务器关闭</strong>公司关闭或搬迁后，原地址只会返回错误。</li>
+<li><strong>存储桶被关闭</strong>存储账户被关闭，文件也随之消失。</li>
+</ul>
+<p>这个条目会一直留在账本里，但链接背后的文件可能丢失。使用 xrpl-file 时，文件被写入同一个账本，写入文件的交易无法修改或删除，任何人都可以按指纹校验文件，无需信任任何服务器。xrpl-file 链接为 84 字节，而 NFT 的 URI 字段可容纳 256 字节。</p>
+</div>
+</section>
+
+<section class="band" aria-labelledby="how-title">
+<div class="container">
+<div class="head">
+<h2 id="how-title">从文件到链接，再回到文件</h2>
+</div>
+<ol class="steps">
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-1"><title id="step-drawing-1">左边是一个文件，右边是它被切成的分片，用方格表示。</title><rect class="c" x="4" y="16" width="40" height="56" rx="2"/><path class="line" d="M12 30h24"/><path class="line" d="M12 40h24"/><path class="line" d="M12 50h24"/><path class="line" d="M12 60h24"/><path class="link" d="M52 44h20m-6-5 6 5-6 5"/><rect class="c lit" x="80" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="62" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="62" width="14" height="14" rx="1.5"/></svg>
+<h3>切成分片</h3>
+<p>文件被切成若干块，每块 1000 字节，称为分片。</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-2"><title id="step-drawing-2">三个分片，每个放在各自的交易里。</title><rect class="c lit" x="4" y="9" width="14" height="14" rx="1.5"/><path class="link" d="M24 16h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="4" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="9" width="14" height="14" rx="1.5"/><path class="line" d="M80 13h62M80 20h36"/><rect class="c lit" x="4" y="41" width="14" height="14" rx="1.5"/><path class="link" d="M24 48h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="36" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="41" width="14" height="14" rx="1.5"/><path class="line" d="M80 45h62M80 52h36"/><rect class="c lit" x="4" y="73" width="14" height="14" rx="1.5"/><path class="link" d="M24 80h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="68" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="73" width="14" height="14" rx="1.5"/><path class="line" d="M80 77h62M80 84h36"/></svg>
+<h3>写成交易</h3>
+<p>每个分片写入各自的交易，放在备注（Memo）字段中。</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-3"><title id="step-drawing-3">两组分片，每组归结为一个哈希。两个哈希都指向同一份清单。</title><rect class="c lit" x="8" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="24" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="40" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="56" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="92" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="108" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="124" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="140" y="4" width="12" height="12" rx="1.5"/><path class="line" d="M8 22h60M92 22h60"/><rect class="c ok" x="32" y="30" width="12" height="12" rx="1.5"/><rect class="c ok" x="116" y="30" width="12" height="12" rx="1.5"/><path class="line" d="M38 46v8h42v6M122 46v8H80v6"/><rect class="c ok" x="70" y="62" width="20" height="20" rx="1.5"/></svg>
+<h3>生成指纹</h3>
+<p>每 1024 个分片组成一个数据块，数据块的哈希进入数据块列表。最后一笔交易称为清单，其中保存整个列表的指纹。这笔交易的哈希就是链接。</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-4"><title id="step-drawing-4">由已校验的分片组成的方格，拼成一幅图片。</title><rect class="c ok" x="32" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="72" y="8" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="92" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="112" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="32" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="52" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="72" y="28" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="92" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="112" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="32" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="52" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="72" y="48" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="92" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="112" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="32" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="72" y="68" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="92" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="112" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/></svg>
+<h3>读取并校验</h3>
+<p>任何拿到链接的人都可以从 XRP Ledger 节点取得分片，拼出文件，并按指纹校验每个数据块。与指纹不符的文件不会显示。本站服务器不参与这一过程。</p>
+</li>
+</ol>
+</div>
+</section>
+
+<section class="band band--quiet" aria-labelledby="price-title">
+<div class="container">
+<div class="head">
+<h2 id="price-title">费用</h2>
+<p>文件写入账本时，大约每千字节对应一笔交易。发布每个文件时，发布工具都会开设一个一次性账户，并在文件写完后将其删除。费用分为两类。手续费会被花掉。储备金在文件写入期间被锁定，其中大部分会退回。</p>
+</div>
+<div id="price-data" class="price-data"><p class="hint">价格表目前无法显示。数据也可以在数据文件 <a href="/data/price.json">price.json</a> 中查看。</p></div>
+</div>
+</section>
+
+<section class="band" aria-labelledby="permanent-title">
+<div class="container">
+<div class="head">
+<h2 id="permanent-title">永久且公开</h2>
+</div>
+<div class="facts">
+<div>
+<h3>无法删除</h3>
+<p>写入账本的内容会一直留在那里。任何人都无法删除或修改，你和我们也一样。</p>
+</div>
+<div>
+<h3>任何人都能读取</h3>
+<p>任何人都可以读取这个文件。账本上的数据对所有人公开，链接也不是秘密。</p>
+</div>
+</div>
+<p class="notice">只发布你愿意永久向全世界公开的内容：不要发布密码、个人信息，或你无权分享的图片。</p>
+</div>
+</section>
+
+<section class="band band--quiet" aria-labelledby="developers-title">
+<div class="container">
+<div class="head">
+<h2 id="developers-title">面向开发者</h2>
+<p>格式由规范描述。代码仓库中有 .NET 库和供浏览器使用的读取器。</p>
+</div>
+<ul class="devlinks">
+<li><a href="https://github.com/StaticBit-io/xrpl-file/blob/main/docs/spec/xrpl-file-v1.md">规范</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file">代码仓库</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file/tree/main/src/XrplFile.Core">.NET 库</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file/tree/main/web/src">浏览器读取器</a></li>
+</ul>
+<h3>在你的页面中显示文件</h3>
+<p>添加脚本和元素即可。脚本固定在 1.1.0 版本，并通过 integrity 值校验：文件一旦改变，浏览器就不会执行它。</p>
+<div class="snippet">
+<p class="snippet__label">来自 npm，经由 jsDelivr</p>
+<pre tabindex="0" aria-label="嵌入代码：来自 npm，经由 jsDelivr"><code id="embed-snippet"><!--@element-snippet--></code></pre>
+<div class="snippet__bar">
+<button id="snippet-copy" class="button button--quiet" type="button" aria-label="复制嵌入代码：来自 npm，经由 jsDelivr">复制</button>
+<span id="snippet-status" class="snippet__status" role="status"></span>
+</div>
+</div>
+<div class="snippet">
+<p class="snippet__label">同一个文件，来自本站</p>
+<pre tabindex="0" aria-label="嵌入代码：同一个文件，来自本站"><code id="embed-snippet-alt"><!--@element-snippet-alt--></code></pre>
+<div class="snippet__bar">
+<button id="snippet-copy-alt" class="button button--quiet" type="button" aria-label="复制嵌入代码：同一个文件，来自本站">复制</button>
+<span id="snippet-status-alt" class="snippet__status" role="status"></span>
+</div>
+</div>
+<p class="attributes"><code>width</code> 和 <code>height</code> 设置尺寸，<code>loading</code> 指定何时开始读取，<code>theme</code> 选择浅色或深色配色，<code>node</code> 指定读取所用的节点。完整列表见 README：<a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">嵌入文件</a>。</p>
+</div>
+</section>
+</main>
+<!--@chrome:footer-->
+</body>
+</html>

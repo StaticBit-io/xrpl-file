@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xrpl-file: Eine Datei im XRP Ledger speichern</title>
+<meta name="description" content="xrpl-file schreibt eine Datei in das XRP Ledger und liest sie wieder aus, geprüft anhand ihres Fingerabdrucks. So liegen Bild und Metadaten eines Tokens im selben Ledger wie der Token.">
+<!--@chrome:head-->
+<script type="module" src="/js/home.mjs"></script>
+</head>
+<body>
+<!--@chrome:header-->
+<main id="main">
+<section class="hero container" aria-labelledby="hero-title">
+<div class="hero__text">
+<h1 id="hero-title">Eine Datei im XRP Ledger speichern</h1>
+<p class="lead">Das Bild Ihres Tokens oder jede andere Datei: in dasselbe Ledger geschrieben wie der Token und beim Lesen anhand ihres Fingerabdrucks geprüft.</p>
+<form id="check-link" class="check" novalidate>
+<label for="check-link-input">Link prüfen</label>
+<div class="check__row">
+<input id="check-link-input" class="field" type="text" name="link" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xrpl-file://testnet/…">
+<button class="button" type="submit">Öffnen</button>
+</div>
+<p id="check-link-error" class="check__error" role="alert"></p>
+</form>
+<div class="publisher">
+<button id="publisher" class="button button--quiet" type="button" disabled aria-describedby="publisher-hint"><span data-label>Publisher-App herunterladen</span> <span class="tag">bald</span></button>
+<p id="publisher-hint" class="hint">Die Windows-App, die Ihre Dateien in das Ledger schreibt.</p>
+</div>
+</div>
+<figure class="hero__figure">
+<div class="hero-cloud ticks">
+<canvas id="hero-cloud" class="cloud" role="img" aria-label="Punktwolke eines Ausschnitts des XRP Ledger. Die Datei wird aus dem Ledger gelesen"></canvas>
+<div id="co-file" class="callout" aria-hidden="true"></div>
+<div id="co-link" class="callout" aria-hidden="true"></div>
+<div id="hero-card" class="hero-card" hidden></div>
+</div>
+<figcaption id="hero-caption" class="cloud-caption"></figcaption>
+<p id="hero-note" class="cloud-note"></p>
+<p class="cloud-about">Die Würfel zeigen die Stücke (Chunks) einer echten Datei, während sie aus dem Ledger gelesen werden. Sobald jeder Block anhand seines Fingerabdrucks geprüft ist, erscheint daneben die Datei selbst.</p>
+</figure>
+</section>
+
+<section class="band band--quiet" aria-labelledby="problem-title">
+<div class="container">
+<div class="head">
+<h2 id="problem-title">Links zu Metadaten verschwinden</h2>
+<p>Speichert ein NFT, ein MPT, eine DID oder ein Credential sein Bild und seine Beschreibung außerhalb des Ledgers, enthält der Ledger-Eintrag nur einen Link. Die Datei liegt auf IPFS, auf dem eigenen Server des Ausstellers oder in einem S3-Bucket.</p>
+</div>
+<ul class="faults">
+<li><strong>IPFS ohne Pinning</strong>Das Pinning wird nicht mehr bezahlt, und die Datei verschwindet aus IPFS.</li>
+<li><strong>Ein abgeschalteter Server</strong>Das Unternehmen schließt oder zieht um, und die Adresse antwortet mit einem Fehler.</li>
+<li><strong>Ein geschlossener Bucket</strong>Das Speicherkonto wird geschlossen, und die Dateien verschwinden mit ihm.</li>
+</ul>
+<p>Dieser Eintrag bleibt im Ledger, doch die Datei hinter seinem Link kann verloren gehen. Mit xrpl-file wird die Datei in dasselbe Ledger geschrieben, in Transaktionen, die sich nicht ändern oder löschen lassen, und jeder kann sie anhand ihres Fingerabdrucks prüfen, ohne einem Server zu vertrauen. Der xrpl-file-Link ist 84 Byte lang, das URI-Feld eines NFT fasst 256.</p>
+</div>
+</section>
+
+<section class="band" aria-labelledby="how-title">
+<div class="container">
+<div class="head">
+<h2 id="how-title">Von der Datei zum Link und zurück</h2>
+</div>
+<ol class="steps">
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-1"><title id="step-drawing-1">Links eine Datei, rechts die Chunks, in die sie zerlegt wird, als Zellen gezeichnet.</title><rect class="c" x="4" y="16" width="40" height="56" rx="2"/><path class="line" d="M12 30h24"/><path class="line" d="M12 40h24"/><path class="line" d="M12 50h24"/><path class="line" d="M12 60h24"/><path class="link" d="M52 44h20m-6-5 6 5-6 5"/><rect class="c lit" x="80" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="62" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="62" width="14" height="14" rx="1.5"/></svg>
+<h3>In Chunks zerlegt</h3>
+<p>Die Datei wird in Stücke von je 1000 Byte zerlegt, sogenannte Chunks.</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-2"><title id="step-drawing-2">Drei Chunks, jeder in seiner eigenen Transaktion.</title><rect class="c lit" x="4" y="9" width="14" height="14" rx="1.5"/><path class="link" d="M24 16h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="4" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="9" width="14" height="14" rx="1.5"/><path class="line" d="M80 13h62M80 20h36"/><rect class="c lit" x="4" y="41" width="14" height="14" rx="1.5"/><path class="link" d="M24 48h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="36" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="41" width="14" height="14" rx="1.5"/><path class="line" d="M80 45h62M80 52h36"/><rect class="c lit" x="4" y="73" width="14" height="14" rx="1.5"/><path class="link" d="M24 80h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="68" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="73" width="14" height="14" rx="1.5"/><path class="line" d="M80 77h62M80 84h36"/></svg>
+<h3>Als Transaktionen geschrieben</h3>
+<p>Jeder Chunk wird in eine eigene Transaktion geschrieben, in das Memo-Feld.</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-3"><title id="step-drawing-3">Zwei Gruppen von Chunks, jede auf einen Hash reduziert. Beide Hashes führen zu einem einzigen Manifest.</title><rect class="c lit" x="8" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="24" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="40" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="56" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="92" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="108" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="124" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="140" y="4" width="12" height="12" rx="1.5"/><path class="line" d="M8 22h60M92 22h60"/><rect class="c ok" x="32" y="30" width="12" height="12" rx="1.5"/><rect class="c ok" x="116" y="30" width="12" height="12" rx="1.5"/><path class="line" d="M38 46v8h42v6M122 46v8H80v6"/><rect class="c ok" x="70" y="62" width="20" height="20" rx="1.5"/></svg>
+<h3>Mit Fingerabdruck</h3>
+<p>Je 1024 Chunks bilden einen Block, und der Hash des Blocks kommt in eine Blockliste. Eine letzte Transaktion, das Manifest, enthält den Fingerabdruck der ganzen Liste. Der Hash dieser Transaktion ist der Link.</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-4"><title id="step-drawing-4">Ein Raster geprüfter Chunks, die zusammen ein Bild ergeben.</title><rect class="c ok" x="32" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="72" y="8" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="92" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="112" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="32" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="52" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="72" y="28" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="92" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="112" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="32" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="52" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="72" y="48" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="92" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="112" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="32" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="72" y="68" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="92" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="112" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/></svg>
+<h3>Gelesen und geprüft</h3>
+<p>Wer den Link hat, holt die Chunks von einem Knoten des XRP Ledger, setzt die Datei zusammen und prüft jeden Block anhand seines Fingerabdrucks. Eine Datei, die nicht zu ihrem Fingerabdruck passt, wird nicht angezeigt. Der Server dieser Website ist daran nicht beteiligt.</p>
+</li>
+</ol>
+</div>
+</section>
+
+<section class="band band--quiet" aria-labelledby="price-title">
+<div class="container">
+<div class="head">
+<h2 id="price-title">Was es kostet</h2>
+<p>Eine Datei kommt mit etwa einer Transaktion pro Kilobyte in das Ledger. Für jede Datei legt die Publisher-App ein Einmalkonto an und löscht es, sobald die Datei geschrieben ist. Es gibt zwei Arten von Kosten. Gebühren werden verbraucht. Eine Reserve ist gebunden, solange die Datei geschrieben wird, und der größte Teil der Reserve kommt zurück.</p>
+</div>
+<div id="price-data" class="price-data"><p class="hint">Die Preistabelle ist gerade nicht verfügbar. Die Zahlen stehen auch in der Datendatei <a href="/data/price.json">price.json</a>.</p></div>
+</div>
+</section>
+
+<section class="band" aria-labelledby="permanent-title">
+<div class="container">
+<div class="head">
+<h2 id="permanent-title">Dauerhaft und öffentlich</h2>
+</div>
+<div class="facts">
+<div>
+<h3>Es lässt sich nicht löschen</h3>
+<p>Was ins Ledger geschrieben ist, bleibt dort. Niemand kann es löschen oder ändern, Sie und wir eingeschlossen.</p>
+</div>
+<div>
+<h3>Jeder kann es lesen</h3>
+<p>Jeder kann die Datei lesen. Die Daten des Ledgers sind für alle offen, und der Link ist kein Geheimnis.</p>
+</div>
+</div>
+<p class="notice">Veröffentlichen Sie nur, was Sie der ganzen Welt für immer zeigen möchten: kein Passwort, keine persönlichen Daten, kein Bild, das Sie nicht weitergeben dürfen.</p>
+</div>
+</section>
+
+<section class="band band--quiet" aria-labelledby="developers-title">
+<div class="container">
+<div class="head">
+<h2 id="developers-title">Für Entwickler</h2>
+<p>Die Spezifikation beschreibt das Format. Das Repository enthält eine .NET-Bibliothek und einen Reader für den Browser.</p>
+</div>
+<ul class="devlinks">
+<li><a href="https://github.com/StaticBit-io/xrpl-file/blob/main/docs/spec/xrpl-file-v1.md">Spezifikation</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file">Repository</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file/tree/main/src/XrplFile.Core">.NET-Bibliothek</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file/tree/main/web/src">Browser-Reader</a></li>
+</ul>
+<h3>Eine Datei auf Ihrer Seite anzeigen</h3>
+<p>Binden Sie das Skript und das Element ein. Das Skript ist auf Version 1.1.0 festgelegt und wird gegen seinen integrity-Wert geprüft: Ändert sich die Datei, führt der Browser es nicht aus.</p>
+<div class="snippet">
+<p class="snippet__label">Aus npm, über jsDelivr</p>
+<pre tabindex="0" aria-label="Code zum Einbetten: Aus npm, über jsDelivr"><code id="embed-snippet"><!--@element-snippet--></code></pre>
+<div class="snippet__bar">
+<button id="snippet-copy" class="button button--quiet" type="button" aria-label="Code zum Einbetten kopieren: Aus npm, über jsDelivr">Kopieren</button>
+<span id="snippet-status" class="snippet__status" role="status"></span>
+</div>
+</div>
+<div class="snippet">
+<p class="snippet__label">Dieselbe Datei von dieser Website</p>
+<pre tabindex="0" aria-label="Code zum Einbetten: Dieselbe Datei von dieser Website"><code id="embed-snippet-alt"><!--@element-snippet-alt--></code></pre>
+<div class="snippet__bar">
+<button id="snippet-copy-alt" class="button button--quiet" type="button" aria-label="Code zum Einbetten kopieren: Dieselbe Datei von dieser Website">Kopieren</button>
+<span id="snippet-status-alt" class="snippet__status" role="status"></span>
+</div>
+</div>
+<p class="attributes"><code>width</code> und <code>height</code> legen die Größe fest, <code>loading</code> bestimmt, wann das Lesen beginnt, <code>theme</code> wählt die helle oder dunkle Palette, und <code>node</code> nennt den Knoten, von dem gelesen wird. Die vollständige Liste steht in der README: <a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">Datei einbetten</a>.</p>
+</div>
+</section>
+</main>
+<!--@chrome:footer-->
+</body>
+</html>

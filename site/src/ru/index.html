@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xrpl-file: храните файл в XRP Ledger</title>
+<meta name="description" content="xrpl-file записывает файл в XRP Ledger и читает его обратно с проверкой по отпечатку. Храните картинку и метаданные токена в том же реестре, что и сам токен.">
+<!--@chrome:head-->
+<script type="module" src="/js/home.mjs"></script>
+</head>
+<body>
+<!--@chrome:header-->
+<main id="main">
+<section class="hero container" aria-labelledby="hero-title">
+<div class="hero__text">
+<h1 id="hero-title">Храните файл в XRP Ledger</h1>
+<p class="lead">Картинка вашего токена или любой другой файл записываются в тот же реестр, что и токен, а читаются с проверкой по отпечатку.</p>
+<form id="check-link" class="check" novalidate>
+<label for="check-link-input">Проверить ссылку</label>
+<div class="check__row">
+<input id="check-link-input" class="field" type="text" name="link" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xrpl-file://testnet/…">
+<button class="button" type="submit">Открыть</button>
+</div>
+<p id="check-link-error" class="check__error" role="alert"></p>
+</form>
+<div class="publisher">
+<button id="publisher" class="button button--quiet" type="button" disabled aria-describedby="publisher-hint"><span data-label>Скачать приложение для публикации</span> <span class="tag">скоро</span></button>
+<p id="publisher-hint" class="hint">Приложение для Windows, которое записывает ваши файлы в реестр.</p>
+</div>
+</div>
+<figure class="hero__figure">
+<div class="hero-cloud ticks">
+<canvas id="hero-cloud" class="cloud" role="img" aria-label="Облако точек: участок XRP Ledger. Файл читается из реестра"></canvas>
+<div id="co-file" class="callout" aria-hidden="true"></div>
+<div id="co-link" class="callout" aria-hidden="true"></div>
+<div id="hero-card" class="hero-card" hidden></div>
+</div>
+<figcaption id="hero-caption" class="cloud-caption"></figcaption>
+<p id="hero-note" class="cloud-note"></p>
+<p class="cloud-about">Кубы изображают фрагменты настоящего файла и появляются по мере чтения из реестра. Когда каждый блок проверен по отпечатку, рядом появляется сам файл.</p>
+</figure>
+</section>
+
+<section class="band band--quiet" aria-labelledby="problem-title">
+<div class="container">
+<div class="head">
+<h2 id="problem-title">Ссылки на метаданные умирают</h2>
+<p>Если NFT, MPT, DID или удостоверение хранит картинку и описание вне реестра, в записи есть только ссылка. Сам файл лежит в IPFS, на сервере эмитента или в корзине S3.</p>
+</div>
+<ul class="faults">
+<li><strong>IPFS без закрепления</strong>Закрепление перестают оплачивать, и файл пропадает из IPFS.</li>
+<li><strong>Закрытый сервер</strong>Компания закрывается или переезжает, и по адресу приходит ошибка.</li>
+<li><strong>Закрытое хранилище</strong>Аккаунт в облаке закрывают, и файлы исчезают вместе с ним.</li>
+</ul>
+<p>Эта запись остаётся в реестре, а файл по её ссылке можно потерять. С xrpl-file файл записан в тот же реестр транзакциями, которые нельзя изменить или удалить, и проверить его по отпечатку может любой, не доверяя ничьему серверу. Ссылка xrpl-file занимает 84 байта, а поле URI у NFT вмещает 256.</p>
+</div>
+</section>
+
+<section class="band" aria-labelledby="how-title">
+<div class="container">
+<div class="head">
+<h2 id="how-title">От файла до ссылки и обратно</h2>
+</div>
+<ol class="steps">
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-1"><title id="step-drawing-1">Слева файл, справа фрагменты, на которые он нарезан. Каждый фрагмент нарисован клеткой.</title><rect class="c" x="4" y="16" width="40" height="56" rx="2"/><path class="line" d="M12 30h24"/><path class="line" d="M12 40h24"/><path class="line" d="M12 50h24"/><path class="line" d="M12 60h24"/><path class="link" d="M52 44h20m-6-5 6 5-6 5"/><rect class="c lit" x="80" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="62" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="62" width="14" height="14" rx="1.5"/></svg>
+<h3>Нарезка</h3>
+<p>Файл режется на фрагменты по 1000 байт.</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-2"><title id="step-drawing-2">Три фрагмента, каждый внутри своей транзакции.</title><rect class="c lit" x="4" y="9" width="14" height="14" rx="1.5"/><path class="link" d="M24 16h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="4" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="9" width="14" height="14" rx="1.5"/><path class="line" d="M80 13h62M80 20h36"/><rect class="c lit" x="4" y="41" width="14" height="14" rx="1.5"/><path class="link" d="M24 48h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="36" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="41" width="14" height="14" rx="1.5"/><path class="line" d="M80 45h62M80 52h36"/><rect class="c lit" x="4" y="73" width="14" height="14" rx="1.5"/><path class="link" d="M24 80h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="68" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="73" width="14" height="14" rx="1.5"/><path class="line" d="M80 77h62M80 84h36"/></svg>
+<h3>Запись в транзакции</h3>
+<p>Каждый фрагмент записывается в отдельную транзакцию, в поле memo.</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-3"><title id="step-drawing-3">Две группы фрагментов, каждая сведена к одному хэшу. Оба хэша ведут к одному манифесту.</title><rect class="c lit" x="8" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="24" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="40" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="56" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="92" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="108" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="124" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="140" y="4" width="12" height="12" rx="1.5"/><path class="line" d="M8 22h60M92 22h60"/><rect class="c ok" x="32" y="30" width="12" height="12" rx="1.5"/><rect class="c ok" x="116" y="30" width="12" height="12" rx="1.5"/><path class="line" d="M38 46v8h42v6M122 46v8H80v6"/><rect class="c ok" x="70" y="62" width="20" height="20" rx="1.5"/></svg>
+<h3>Отпечаток</h3>
+<p>Каждые 1024 фрагмента образуют блок, а хэш блока попадает в список блоков. Последняя транзакция, манифест, хранит отпечаток всего списка. Хэш этой транзакции и есть ссылка.</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-4"><title id="step-drawing-4">Сетка проверенных фрагментов, которые вместе складываются в картинку.</title><rect class="c ok" x="32" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="72" y="8" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="92" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="112" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="32" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="52" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="72" y="28" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="92" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="112" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="32" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="52" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="72" y="48" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="92" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="112" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="32" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="72" y="68" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="92" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="112" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/></svg>
+<h3>Чтение и проверка</h3>
+<p>Любой, у кого есть ссылка, получает фрагменты от узла XRP Ledger, собирает файл и сверяет каждый блок с отпечатком. Если файл не совпал с отпечатком, он не показывается. Сервер этого сайта в чтении не участвует.</p>
+</li>
+</ol>
+</div>
+</section>
+
+<section class="band band--quiet" aria-labelledby="price-title">
+<div class="container">
+<div class="head">
+<h2 id="price-title">Сколько это стоит</h2>
+<p>Файл записывается примерно по одной транзакции на каждый килобайт. Для каждого файла приложение для публикации открывает одноразовый аккаунт и удаляет его, когда файл записан. Расходы бывают двух видов. Комиссии тратятся. Резерв удерживается, пока файл записывается, и большая часть резерва возвращается.</p>
+</div>
+<div id="price-data" class="price-data"><p class="hint">Таблица цен сейчас недоступна. Цифры есть и в файле данных <a href="/data/price.json">price.json</a>.</p></div>
+</div>
+</section>
+
+<section class="band" aria-labelledby="permanent-title">
+<div class="container">
+<div class="head">
+<h2 id="permanent-title">Навсегда и для всех</h2>
+</div>
+<div class="facts">
+<div>
+<h3>Удалить нельзя</h3>
+<p>Записанное в реестр остаётся в нём. Удалить или изменить его не может никто, ни вы, ни мы.</p>
+</div>
+<div>
+<h3>Читать может любой</h3>
+<p>Файл может прочесть любой. Данные реестра открыты всем, а ссылка не секрет.</p>
+</div>
+</div>
+<p class="notice">Публикуйте только то, что готовы показывать всему миру навсегда: не пароли, не личные данные, не картинку, прав на которую у вас нет.</p>
+</div>
+</section>
+
+<section class="band band--quiet" aria-labelledby="developers-title">
+<div class="container">
+<div class="head">
+<h2 id="developers-title">Разработчикам</h2>
+<p>Формат описан в спецификации. В репозитории лежат библиотека для .NET и модуль чтения для браузера.</p>
+</div>
+<ul class="devlinks">
+<li><a href="https://github.com/StaticBit-io/xrpl-file/blob/main/docs/spec/xrpl-file-v1.md">Спецификация</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file">Репозиторий</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file/tree/main/src/XrplFile.Core">Библиотека для .NET</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file/tree/main/web/src">Модуль чтения для браузера</a></li>
+</ul>
+<h3>Показать файл на своей странице</h3>
+<p>Добавьте скрипт и элемент. Скрипт закреплён на версии 1.1.0 и проверяется по значению integrity: если файл изменится, браузер не станет его выполнять.</p>
+<div class="snippet">
+<p class="snippet__label">Из npm, через jsDelivr</p>
+<pre tabindex="0" aria-label="Код для вставки: Из npm, через jsDelivr"><code id="embed-snippet"><!--@element-snippet--></code></pre>
+<div class="snippet__bar">
+<button id="snippet-copy" class="button button--quiet" type="button" aria-label="Копировать код для вставки: Из npm, через jsDelivr">Копировать</button>
+<span id="snippet-status" class="snippet__status" role="status"></span>
+</div>
+</div>
+<div class="snippet">
+<p class="snippet__label">Тот же файл с этого сайта</p>
+<pre tabindex="0" aria-label="Код для вставки: Тот же файл с этого сайта"><code id="embed-snippet-alt"><!--@element-snippet-alt--></code></pre>
+<div class="snippet__bar">
+<button id="snippet-copy-alt" class="button button--quiet" type="button" aria-label="Копировать код для вставки: Тот же файл с этого сайта">Копировать</button>
+<span id="snippet-status-alt" class="snippet__status" role="status"></span>
+</div>
+</div>
+<p class="attributes"><code>width</code> и <code>height</code> задают размер, <code>loading</code> определяет, когда начнётся чтение, <code>theme</code> задаёт светлую или тёмную палитру, а <code>node</code> указывает узел, с которого читается файл. Полный список в README: <a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">Вставка файла</a>.</p>
+</div>
+</section>
+</main>
+<!--@chrome:footer-->
+</body>
+</html>

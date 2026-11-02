@@ -134,10 +134,40 @@ test('the safety net: the box clips, single lines ellipsize, flex children may s
 test('the download button is named by its visible word and then the file name, with no aria-label to contradict it', () => {
   const button = TEMPLATE.match(/<button[^>]*id="dlButton"[\s\S]*?<\/button>/)[0];
   assert.doesNotMatch(button, /aria-label/);
-  assert.match(button, /class="lbl-full">Download<\/span><span class="lbl-short">Save<\/span> <span class="sr-name" id="dlLabel">/);
+  assert.match(button, /class="lbl-full" id="dlFull">Download<\/span><span class="lbl-short" id="dlShort">Save<\/span> <span class="sr-name" id="dlLabel">/);
   assert.match(STYLES, /\.sr-name/);
 });
 
 test('the icon button shrinks to the box height so it cannot leave a 28 px box', () => {
   assert.match(STYLES, /\.download \.btn \{[^}]*height: min\(26px, calc\(100cqb - 6px\)\)/);
+});
+
+test('the overlay surfaces read their own accent, then the frame accent, then the dark default', () => {
+  const rule = STYLES.match(/\.caption, \.overlay, \.idle\.covered \{([^}]*)\}/)[1];
+  assert.match(rule, /--accent:\s*var\(--xrpl-file-overlay-accent,\s*var\(--xrpl-file-accent,\s*#4da3ff\)\);/);
+  assert.match(rule, /--on-accent:\s*var\(--xrpl-file-overlay-on-accent,\s*var\(--xrpl-file-on-accent,\s*#06121f\)\);/);
+});
+
+test('the frame accent does not read the overlay accent', () => {
+  const frame = STYLES.slice(STYLES.indexOf('.frame {'), STYLES.indexOf('.frame[data-theme="light"]'));
+  assert.match(frame, /--accent:\s*var\(--xrpl-file-accent,\s*var\(--t-accent\)\);/);
+  assert.match(frame, /--on-accent:\s*var\(--xrpl-file-on-accent,\s*var\(--t-on-accent\)\);/);
+  assert.doesNotMatch(frame, /overlay-accent|overlay-on-accent/);
+});
+
+test('a transparent frame drops the box even over --xrpl-file-background, which still sets it without the attribute', () => {
+  const frame = STYLES.slice(STYLES.indexOf('.frame {'), STYLES.indexOf('.frame[data-theme="light"]'));
+  assert.match(frame, /--background:\s*var\(--xrpl-file-background,\s*var\(--t-background\)\);/);
+  assert.match(frame, /\sbackground:\s*var\(--background\);/);
+  const rule = STYLES.match(/\.frame\[data-background="transparent"\] \{([^}]*)\}/)[1];
+  assert.match(rule, /background:\s*transparent;/, 'a literal, not a variable a page could set');
+});
+
+test('a transparent frame turns off the empty-box scrim and nothing that sits on content', () => {
+  const css = STYLES.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.frame\[data-background="transparent"\] \.idle:not\(\.covered\) \.scrim \{\s*background:\s*none;\s*\}/);
+  const rules = [...css.matchAll(/([^{}]*data-background[^{}]*)\{/g)].map((match) => match[1].trim());
+  assert.deepEqual(rules, ['.frame[data-background="transparent"]', '.frame[data-background="transparent"] .idle:not(.covered) .scrim']);
+  assert.match(css, /\.text \{[^}]*background: var\(--text-background\);/, 'the text view keeps its own backing');
+  assert.match(css, /\.idle\.covered \.scrim \{ background: var\(--xrpl-file-scrim,/, 'a cover keeps its scrim');
 });

@@ -6,3 +6,5 @@ node_modules/
 run/
 .superpowers/
 web/dist/
+site/dist/
+web/npm/

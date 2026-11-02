@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en" data-lang-source="storage">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xrpl-file</title>
+<meta name="description" content="A file stored in the XRP Ledger. Your browser reads it from the ledger and checks it against its fingerprint before showing it.">
+<!--@chrome:head-->
+<script src="/element/1.1.0/xrpl-file-element.js" defer></script>
+<script type="module" src="/js/file-page.mjs"></script>
+</head>
+<body data-page="file">
+<!--@chrome:header-->
+<main id="main">
+<div id="file-page" class="file container" hidden>
+<div id="file-view" class="file__view ticks"></div>
+<div class="file__grid">
+<div class="file__lead">
+<h1 id="file-title" class="file__title">File</h1>
+<div class="file__actions">
+<button id="file-download" class="button" type="button" disabled data-s="download">Download</button>
+<p id="file-status" class="file__status" role="status"></p>
+</div>
+</div>
+<div class="file__facts">
+<dl id="file-details" class="file__details" hidden>
+<div id="file-size-row">
+<dt data-s="sizeLabel">Size</dt>
+<dd id="file-size" class="value"></dd>
+</div>
+<div>
+<dt data-s="networkLabel">Network</dt>
+<dd id="file-network"></dd>
+</div>
+</dl>
+<div class="file__link">
+<p class="file__link-label" data-s="linkLabel">Link</p>
+<div class="file__link-row">
+<code id="file-link" class="file__link-value"></code>
+<button id="file-copy" class="button button--quiet" type="button" data-s-label="copyLabel" aria-label="Copy the link"><span data-s="copy">Copy</span></button>
+<span id="file-copy-status" class="snippet__status" role="status"></span>
+</div>
+</div>
+</div>
+</div>
+<section class="file__how" aria-labelledby="how-title">
+<h2 id="how-title" data-s="howTitle">How this works</h2>
+<p data-s="howText">xrpl-file writes a file into the XRP Ledger in chunks. Your browser collects the chunks, assembles the file and checks it against its fingerprint. A file that does not match its fingerprint is not shown. This site’s server takes no part in it.</p>
+<p><a href="/" data-home data-s="howLink">More on the home page</a></p>
+</section>
+</div>
+<div id="invalid-page" class="notice-page container" hidden>
+<h1 data-s="checkTitle">Check a link</h1>
+<form id="check-link" class="check" novalidate>
+<label for="check-link-input" data-s="checkLabel">Paste an xrpl-file link to open its file</label>
+<div class="check__row">
+<input id="check-link-input" class="field" type="text" name="link" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xrpl-file://testnet/…">
+<button class="button" type="submit" data-s="checkOpen">Open</button>
+</div>
+<p id="check-link-error" class="check__error" role="alert"></p>
+</form>
+<p><a href="/" data-home data-s="homeLink">Go to the home page</a></p>
+</div>
+</main>
+<!--@chrome:footer-->
+</body>
+</html>

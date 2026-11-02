@@ -6,7 +6,8 @@
 
   Serve with `node web/demo/serve.mjs 8790` and open
   http://127.0.0.1:8790/demo/themes-harness.html?themes=dark,light,auto&sizes=320x180,200x150,100x100,300x48&page=light
-  (`states=` picks views by name). Then, in the console:
+  (`states=` picks views by name; `vars=--xrpl-file-accent:%23336f00;--xrpl-file-overlay-accent:%23bcf053`
+  sets custom properties on every host, as a site would). Then, in the console:
   `await eval(await (await fetch('themes-measure.js')).text())` returns one row per text and UI pair.
 -->
 <html lang="en">
@@ -107,6 +108,10 @@ for (const theme of themes) {
       const host = document.createElement('div');
       host.className = 'host';
       host.style.width = `${w}px`; host.style.height = `${h}px`;
+      for (const declaration of (query.get('vars') ?? '').split(';').filter(Boolean)) {
+        const at = declaration.indexOf(':');
+        host.style.setProperty(declaration.slice(0, at).trim(), declaration.slice(at + 1).trim());
+      }
       const root = host.attachShadow({ mode: 'open' });
       root.innerHTML = TEMPLATE;
       root.adoptedStyleSheets = [sheet];

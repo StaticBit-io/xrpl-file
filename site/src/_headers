@@ -1,0 +1,37 @@
+# Cloudflare Pages: when several blocks match, their headers are added together, so the cache
+# policies below must not overlap. Distinct headers can share a path: /* only adds nosniff.
+
+# Every file is served with its real type; a browser has no reason to sniff it into another.
+/*
+  X-Content-Type-Options: nosniff
+
+# The published element build is versioned in its path and never changes; embedding sites fetch
+# mp4box from it cross-origin.
+/element/*
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=31536000, immutable
+
+# The icons keep their names when they change, so they cannot be immutable; browsers ask for them on
+# every page, so a week in the cache spares those requests and a new icon still arrives within it.
+/favicon.svg
+  Cache-Control: public, max-age=604800
+/favicon.ico
+  Cache-Control: public, max-age=604800
+/apple-touch-icon.png
+  Cache-Control: public, max-age=604800
+
+# Pages are revalidated on every load; a page that changes must not be stuck in a cache.
+/
+  Cache-Control: no-cache
+/*.html
+  Cache-Control: no-cache
+/ru/
+  Cache-Control: no-cache
+/de/
+  Cache-Control: no-cache
+/es/
+  Cache-Control: no-cache
+/pt/
+  Cache-Control: no-cache
+/zh/
+  Cache-Control: no-cache

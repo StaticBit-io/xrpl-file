@@ -1,14 +1,20 @@
 import { XrplFileError } from '../link.mjs';
+import { STRINGS, stringsFor } from './strings.mjs';
 
-export const NO_NODE = 'This network has no built-in node. Set the node attribute.';
-export const BAD_NODE = 'The node attribute must be a wss:// address.';
-export const INSECURE = 'This page is not served over HTTPS, so the browser cannot check this file.';
-export const NO_LINK = 'There is no xrpl-file link in this element.';
+// The English sentences are the element's documented text: the `error` event and XrplFileError carry
+// them whatever the page's language, and scripts match on them. A language only changes what is drawn.
+const EN = STRINGS.en;
 
-const GENERIC = 'Something went wrong while showing this file.';
+export const NO_NODE = EN.noNode;
+export const BAD_NODE = EN.badNode;
+export const INSECURE = EN.insecure;
+export const NO_LINK = EN.noLink;
+export const TOO_LARGE = EN.tooLarge;
+export const DECODE_FAILED = EN.decodeFailed;
 
 /**
- * An error the element raises itself, before or beside the reader. Its sentence is shown as written;
+ * An error the element raises itself, before or beside the reader. Its sentence is the English one, which
+ * scripts see; what is drawn is the same sentence in the page's language (see {@link messageFor}).
  * `code` may be null when the failure has no name in the shared error set.
  */
 export function elementError(code, sentence) {
@@ -17,42 +23,49 @@ export function elementError(code, sentence) {
   return error;
 }
 
-function blockMismatch(block, playing) {
-  if (playing) return `Playback stopped at block ${block}: it did not pass verification.`;
-  return `This file did not pass verification. Block ${block} does not match the file's fingerprint. Nothing was shown.`;
-}
+// The element's own sentences by their English text, so that a language can word them again.
+const KEY_BY_SENTENCE = new Map([
+  [NO_NODE, 'noNode'],
+  [BAD_NODE, 'badNode'],
+  [INSECURE, 'insecure'],
+  [NO_LINK, 'noLink'],
+  [TOO_LARGE, 'tooLarge'],
+  [DECODE_FAILED, 'decodeFailed'],
+]);
 
-function chunkMissing(block, playing) {
-  if (playing) return `Playback stopped at block ${block}: part of it is missing from the ledger.`;
-  return `Part of this file is missing from the ledger: block ${block} is incomplete. Nothing was shown.`;
+function sentenceIn(sentence, strings) {
+  const key = KEY_BY_SENTENCE.get(sentence);
+  return key === undefined ? sentence : strings[key];
 }
 
 /**
- * The one short sentence the visitor sees. The reader's own messages are for developers and never
- * reach the page; `playing` is set when video was already on screen, where "Nothing was shown" would be false.
+ * The one short sentence the visitor sees, in `lang` (English by default; the element passes its own).
+ * The reader's own messages are for developers and never reach the page; `playing` is set when video was
+ * already on screen, where "Nothing was shown" would be false.
  */
-export function messageFor(error, { playing = false } = {}) {
-  if (typeof error?.sentence === 'string') return error.sentence;
-  if (!(error instanceof XrplFileError)) return GENERIC;
+export function messageFor(error, { playing = false, lang = 'en' } = {}) {
+  const s = stringsFor(lang);
+  if (typeof error?.sentence === 'string') return sentenceIn(error.sentence, s);
+  if (!(error instanceof XrplFileError)) return s.generic;
   switch (error.code) {
-    case 'InvalidLink': return 'This is not an xrpl-file link.';
-    case 'ManifestNotFound': return 'This file is not on the ledger.';
-    case 'NodeLacksHistory': return 'The node does not have the history this file needs.';
-    case 'CorruptManifest': return "This file's description on the ledger is damaged.";
-    case 'ListMismatch': return "This file did not pass verification. Its block list does not match the file's fingerprint. Nothing was shown.";
-    case 'BlockMismatch': return blockMismatch(error.block, playing);
-    case 'ChunkMissing': return chunkMissing(error.block, playing);
-    case 'TooLarge': return 'This file is too large to save in this browser.';
-    case 'NodeUnreachable': return 'The node is not answering. Try again later.';
-    default: return GENERIC;
+    case 'InvalidLink': return s.invalidLink;
+    case 'ManifestNotFound': return s.manifestNotFound;
+    case 'NodeLacksHistory': return s.nodeLacksHistory;
+    case 'CorruptManifest': return s.corruptManifest;
+    case 'ListMismatch': return s.listMismatch;
+    case 'BlockMismatch': return playing ? s.blockMismatchPlaying(error.block) : s.blockMismatch(error.block);
+    case 'ChunkMissing': return playing ? s.chunkMissingPlaying(error.block) : s.chunkMissing(error.block);
+    case 'TooLarge': return s.tooLarge;
+    case 'NodeUnreachable': return s.nodeUnreachable;
+    default: return s.generic;
   }
 }
 
-const SHORT_BY_SENTENCE = new Map([
-  [NO_NODE, 'No node'],
-  [BAD_NODE, 'Bad node'],
-  [INSECURE, 'Not secure'],
-  [NO_LINK, 'No link'],
+const SHORT_KEY_BY_SENTENCE = new Map([
+  [NO_NODE, 'shortNoNode'],
+  [BAD_NODE, 'shortBadNode'],
+  [INSECURE, 'shortNotSecure'],
+  [NO_LINK, 'shortNoLink'],
 ]);
 
 /**
@@ -60,21 +73,22 @@ const SHORT_BY_SENTENCE = new Map([
  * accessible text and in the tooltip. The element's own sentences are told apart by the sentence,
  * since they share codes with reader errors (NO_NODE is a NodeUnreachable).
  */
-export function shortTitleFor(error) {
-  const known = typeof error?.sentence === 'string' ? SHORT_BY_SENTENCE.get(error.sentence) : undefined;
-  if (known) return known;
-  if (!(error instanceof XrplFileError)) return 'Error';
+export function shortTitleFor(error, lang = 'en') {
+  const s = stringsFor(lang);
+  const known = typeof error?.sentence === 'string' ? SHORT_KEY_BY_SENTENCE.get(error.sentence) : undefined;
+  if (known) return s[known];
+  if (!(error instanceof XrplFileError)) return s.shortError;
   switch (error.code) {
-    case 'InvalidLink': return 'Bad link';
-    case 'ManifestNotFound': return 'Not found';
-    case 'NodeLacksHistory': return 'No history';
-    case 'CorruptManifest': return 'Damaged';
+    case 'InvalidLink': return s.shortBadLink;
+    case 'ManifestNotFound': return s.shortNotFound;
+    case 'NodeLacksHistory': return s.shortNoHistory;
+    case 'CorruptManifest': return s.shortDamaged;
     case 'ListMismatch':
-    case 'BlockMismatch': return 'Not verified';
-    case 'ChunkMissing': return 'Incomplete';
-    case 'TooLarge': return 'Too large';
-    case 'NodeUnreachable': return 'No answer';
-    default: return 'Error';
+    case 'BlockMismatch': return s.shortNotVerified;
+    case 'ChunkMissing': return s.shortIncomplete;
+    case 'TooLarge': return s.shortTooLarge;
+    case 'NodeUnreachable': return s.shortNoAnswer;
+    default: return s.shortError;
   }
 }
 
@@ -83,22 +97,24 @@ export function shortTitleFor(error) {
  * view-level wording ("Nothing was shown") would be false; a block that failed verification is still
  * named, since that is a statement about the file and not about the save.
  */
-export function saveMessageFor(error) {
-  if (typeof error?.sentence === 'string') return error.sentence;
+export function saveMessageFor(error, lang = 'en') {
+  const s = stringsFor(lang);
+  if (typeof error?.sentence === 'string') return sentenceIn(error.sentence, s);
   if (error instanceof XrplFileError) {
     switch (error.code) {
-      case 'BlockMismatch': return `Saving stopped at block ${error.block}: it did not pass verification.`;
-      case 'ChunkMissing': return `Saving stopped at block ${error.block}: part of it is missing from the ledger.`;
-      case 'NodeUnreachable': return messageFor(error);
+      case 'BlockMismatch': return s.saveBlockMismatch(error.block);
+      case 'ChunkMissing': return s.saveChunkMissing(error.block);
+      case 'NodeUnreachable': return messageFor(error, { lang });
       default: break;
     }
   }
-  return 'The file could not be saved.';
+  return s.saveFailed;
 }
 
 /**
  * The `detail` of the `error` event: the error name from the shared set (null when it has none) and the
- * sentence shown, which for a video that was already playing is the `playing` one.
+ * sentence shown, which for a video that was already playing is the `playing` one. Always English: the
+ * event is API, and a page that matches on the text must not depend on the language it is shown in.
  */
 export function detailFor(error, { playing = false } = {}) {
   const name = error instanceof XrplFileError ? (error.code ?? null) : null;

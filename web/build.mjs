@@ -1,5 +1,6 @@
 // Builds the <xrpl-file> element into web/dist/<version>/: one classic script, the vendored mp4box
-// (wrapped so it leaks no globals) beside it, and the SHA-384 hashes a page puts in its `integrity` attributes.
+// (wrapped so it leaks no globals) beside it, the browser reader as one ES module for pages that read
+// files themselves, and the SHA-384 hashes a page puts in its `integrity` attributes.
 //
 // The bundler is a module registry, not a general bundler. It handles exactly the import/export
 // forms web/src uses and fails the build on anything else, so a new form is a decision, not a
@@ -11,7 +12,9 @@ import { dirname, join, posix } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ENTRY = 'src/element/define.mjs';
+const READER_ENTRY = 'src/reader-entry.mjs';
 const BUNDLE_NAME = 'xrpl-file-element.js';
+const READER_NAME = 'xrpl-file-reader.mjs';
 const MP4BOX_NAME = 'mp4box.min.js';
 const LICENSE_NAME = 'mp4box-LICENSE.txt';
 const MP4BOX_SOURCE = 'vendor/mp4box-0.5.4.min.js';
@@ -176,22 +179,42 @@ function renderModule(path, { source, entries }) {
 // The page's encoding must not matter to a script served from elsewhere.
 const asciiOnly = (text) => text.replace(/[^\x00-\x7f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 
+// Both bundles run the same registry, so a module's body is the same bytes in either.
+const REGISTRY = [
+  `const __factories = new Map();\n`,
+  `const __loaded = new Map();\n`,
+  `function __define(path, factory) { __factories.set(path, factory); }\n`,
+  `function __import(path) {\n`,
+  `  let exports = __loaded.get(path);\n`,
+  `  if (exports) return exports;\n`,
+  `  exports = {};\n`,
+  `  __loaded.set(path, exports);\n`,
+  `  __factories.get(path)(__import, (names) => Object.defineProperties(exports, Object.getOwnPropertyDescriptors(names)));\n`,
+  `  return exports;\n`,
+  `}\n`,
+];
+
+// A real ES module with no imports: the registry is module-scoped, import.meta.url is the module's own
+// URL, and the entry's exports are re-exported by name.
+function assembleReader(version, modules) {
+  const names = modules.at(-1).module.entries.map((entry) => entry.name);
+  const parts = [
+    `/*! xrpl-file reader ${version} | MIT */\n`,
+    `const __scriptUrl = import.meta.url;\n`,
+    ...REGISTRY,
+    ...modules.map(({ path, module }) => renderModule(path, module)),
+    `const { ${names.join(', ')} } = __import('${READER_ENTRY}');\n`,
+    `export { ${names.join(', ')} };\n`,
+  ];
+  return asciiOnly(parts.join(''));
+}
+
 function assemble(version, modules, mp4boxIntegrity) {
   const parts = [
     `/*! xrpl-file element ${version} | MIT */\n`,
     `(function () {\n'use strict';\n`,
     `const __scriptUrl = document.currentScript && document.currentScript.src;\n`,
-    `const __factories = new Map();\n`,
-    `const __loaded = new Map();\n`,
-    `function __define(path, factory) { __factories.set(path, factory); }\n`,
-    `function __import(path) {\n`,
-    `  let exports = __loaded.get(path);\n`,
-    `  if (exports) return exports;\n`,
-    `  exports = {};\n`,
-    `  __loaded.set(path, exports);\n`,
-    `  __factories.get(path)(__import, (names) => Object.defineProperties(exports, Object.getOwnPropertyDescriptors(names)));\n`,
-    `  return exports;\n`,
-    `}\n`,
+    ...REGISTRY,
     ...modules.map(({ path, module }) => renderModule(path, module)),
     `__import('${ENTRY}');\n`,
     `})();\n`,
@@ -220,7 +243,7 @@ async function readIfExists(file) {
  *
  * @param {object} options
  * @param {string} options.webDir the `web/` directory
- * @param {string} options.outDir where `xrpl-file-element.js`, `mp4box.min.js`, `mp4box-LICENSE.txt` and `integrity.json` go
+ * @param {string} options.outDir where `xrpl-file-element.js`, `xrpl-file-reader.mjs`, `mp4box.min.js`, `mp4box-LICENSE.txt` and `integrity.json` go
  * @param {string} options.version the package version, written into the banner and the directory name
  * @param {boolean} [options.force] overwrite files that differ; for a version that has not been released
  * @returns {Promise<{ integrity: Record<string, string> }>}
@@ -235,12 +258,14 @@ export async function build({ webDir, outDir, version, force = false }) {
 
   const modules = await collect(webDir, ENTRY);
   const bundle = Buffer.from(assemble(version, modules, mp4boxIntegrity), 'utf8');
-  const integrity = { [BUNDLE_NAME]: sri(bundle), [MP4BOX_NAME]: mp4boxIntegrity };
+  const reader = Buffer.from(assembleReader(version, await collect(webDir, READER_ENTRY)), 'utf8');
+  const integrity = { [BUNDLE_NAME]: sri(bundle), [MP4BOX_NAME]: mp4boxIntegrity, [READER_NAME]: sri(reader) };
 
   const files = new Map([
     [BUNDLE_NAME, bundle],
     [MP4BOX_NAME, mp4box],
     [LICENSE_NAME, license],
+    [READER_NAME, reader],
     ['integrity.json', Buffer.from(`${JSON.stringify(integrity, null, 2)}\n`, 'utf8')],
   ]);
 

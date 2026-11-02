@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xrpl-file: store a file in the XRP Ledger</title>
+<meta name="description" content="xrpl-file writes a file into the XRP Ledger and reads it back checked against its fingerprint. Keep a token’s picture and metadata in the same ledger as the token.">
+<!--@chrome:head-->
+<script type="module" src="/js/home.mjs"></script>
+</head>
+<body>
+<!--@chrome:header-->
+<main id="main">
+<section class="hero container" aria-labelledby="hero-title">
+<div class="hero__text">
+<h1 id="hero-title">Store a file in the XRP Ledger</h1>
+<p class="lead">Your token’s picture or any other file, written into the same ledger as the token and read back checked against its fingerprint.</p>
+<form id="check-link" class="check" novalidate>
+<label for="check-link-input">Check a link</label>
+<div class="check__row">
+<input id="check-link-input" class="field" type="text" name="link" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xrpl-file://testnet/…">
+<button class="button" type="submit">Open</button>
+</div>
+<p id="check-link-error" class="check__error" role="alert"></p>
+</form>
+<div class="publisher">
+<button id="publisher" class="button button--quiet" type="button" disabled aria-describedby="publisher-hint"><span data-label>Download the publisher</span> <span class="tag">soon</span></button>
+<p id="publisher-hint" class="hint">The Windows app that writes your files into the ledger.</p>
+</div>
+</div>
+<figure class="hero__figure">
+<div class="hero-cloud ticks">
+<canvas id="hero-cloud" class="cloud" role="img" aria-label="Point cloud of a stretch of the XRP Ledger. The file is being read from the ledger"></canvas>
+<div id="co-file" class="callout" aria-hidden="true"></div>
+<div id="co-link" class="callout" aria-hidden="true"></div>
+<div id="hero-card" class="hero-card" hidden></div>
+</div>
+<figcaption id="hero-caption" class="cloud-caption"></figcaption>
+<p id="hero-note" class="cloud-note"></p>
+<p class="cloud-about">The cubes show the chunks of a real file as they are read from the ledger. When every block has been checked against its fingerprint, the file itself appears beside them.</p>
+</figure>
+</section>
+
+<section class="band band--quiet" aria-labelledby="problem-title">
+<div class="container">
+<div class="head">
+<h2 id="problem-title">Links to metadata die</h2>
+<p>When an NFT, an MPT, a DID or a credential keeps its picture and description off the ledger, the ledger entry holds only a link. The file sits on IPFS, on the issuer’s own server or in an S3 bucket.</p>
+</div>
+<ul class="faults">
+<li><strong>IPFS without pinning</strong>Pinning stops being paid for, and the file drops out of IPFS.</li>
+<li><strong>A closed server</strong>The company shuts down or moves, and the address answers with an error.</li>
+<li><strong>A closed bucket</strong>The storage account is closed, and the files go with it.</li>
+</ul>
+<p>That entry stays in the ledger, but the file behind its link can be lost. With xrpl-file the file is written into the same ledger, in transactions that cannot be changed or deleted, and anyone can check it against its fingerprint without trusting a server. The xrpl-file link is 84 bytes, and an NFT’s URI field holds 256.</p>
+</div>
+</section>
+
+<section class="band" aria-labelledby="how-title">
+<div class="container">
+<div class="head">
+<h2 id="how-title">From a file to a link, and back</h2>
+</div>
+<ol class="steps">
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-1"><title id="step-drawing-1">A file on the left; on the right, the chunks it is cut into, drawn as cells.</title><rect class="c" x="4" y="16" width="40" height="56" rx="2"/><path class="line" d="M12 30h24"/><path class="line" d="M12 40h24"/><path class="line" d="M12 50h24"/><path class="line" d="M12 60h24"/><path class="link" d="M52 44h20m-6-5 6 5-6 5"/><rect class="c lit" x="80" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="62" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="62" width="14" height="14" rx="1.5"/></svg>
+<h3>Cut into chunks</h3>
+<p>The file is cut into pieces called chunks, 1000 bytes each.</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-2"><title id="step-drawing-2">Three chunks, each inside its own transaction.</title><rect class="c lit" x="4" y="9" width="14" height="14" rx="1.5"/><path class="link" d="M24 16h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="4" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="9" width="14" height="14" rx="1.5"/><path class="line" d="M80 13h62M80 20h36"/><rect class="c lit" x="4" y="41" width="14" height="14" rx="1.5"/><path class="link" d="M24 48h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="36" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="41" width="14" height="14" rx="1.5"/><path class="line" d="M80 45h62M80 52h36"/><rect class="c lit" x="4" y="73" width="14" height="14" rx="1.5"/><path class="link" d="M24 80h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="68" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="73" width="14" height="14" rx="1.5"/><path class="line" d="M80 77h62M80 84h36"/></svg>
+<h3>Written as transactions</h3>
+<p>Each chunk is written into its own transaction, in the memo field.</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-3"><title id="step-drawing-3">Two groups of chunks, each reduced to one hash. Both hashes lead to a single manifest.</title><rect class="c lit" x="8" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="24" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="40" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="56" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="92" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="108" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="124" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="140" y="4" width="12" height="12" rx="1.5"/><path class="line" d="M8 22h60M92 22h60"/><rect class="c ok" x="32" y="30" width="12" height="12" rx="1.5"/><rect class="c ok" x="116" y="30" width="12" height="12" rx="1.5"/><path class="line" d="M38 46v8h42v6M122 46v8H80v6"/><rect class="c ok" x="70" y="62" width="20" height="20" rx="1.5"/></svg>
+<h3>Fingerprinted</h3>
+<p>Every 1024 chunks form a block, and the block’s hash goes into a block list. One last transaction, the manifest, holds the fingerprint of the whole list. The hash of that transaction is the link.</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-4"><title id="step-drawing-4">A grid of verified chunks that together form a picture.</title><rect class="c ok" x="32" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="72" y="8" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="92" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="112" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="32" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="52" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="72" y="28" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="92" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="112" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="32" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="52" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="72" y="48" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="92" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="112" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="32" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="72" y="68" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="92" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="112" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/></svg>
+<h3>Read and checked</h3>
+<p>Anyone with the link gets the chunks from an XRP Ledger node, assembles the file and checks every block against its fingerprint. A file that does not match its fingerprint is not shown. This site’s server takes no part in it.</p>
+</li>
+</ol>
+</div>
+</section>
+
+<section class="band band--quiet" aria-labelledby="price-title">
+<div class="container">
+<div class="head">
+<h2 id="price-title">What it costs</h2>
+<p>A file goes into the ledger as roughly one transaction per kilobyte. For each file the publisher opens a throwaway account and deletes it when the file is written. There are two kinds of cost. Fees are spent. A reserve is held while the file is written, and most of the reserve comes back.</p>
+</div>
+<div id="price-data" class="price-data"><p class="hint">The price table is not available right now. The figures are also in the data file, <a href="/data/price.json">price.json</a>.</p></div>
+</div>
+</section>
+
+<section class="band" aria-labelledby="permanent-title">
+<div class="container">
+<div class="head">
+<h2 id="permanent-title">Permanent and public</h2>
+</div>
+<div class="facts">
+<div>
+<h3>It cannot be deleted</h3>
+<p>What is written into the ledger stays there. Nobody can delete or change it, you and we included.</p>
+</div>
+<div>
+<h3>Anyone can read it</h3>
+<p>Anyone can read the file. The data of the ledger is open to everyone, and the link is not a secret.</p>
+</div>
+</div>
+<p class="notice">Publish only what you are glad to show the whole world for good: not a password, not personal data, not a picture you have no right to share.</p>
+</div>
+</section>
+
+<section class="band band--quiet" aria-labelledby="developers-title">
+<div class="container">
+<div class="head">
+<h2 id="developers-title">For developers</h2>
+<p>The specification describes the format. The repository has a .NET library and a reader for the browser.</p>
+</div>
+<ul class="devlinks">
+<li><a href="https://github.com/StaticBit-io/xrpl-file/blob/main/docs/spec/xrpl-file-v1.md">Specification</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file">Repository</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file/tree/main/src/XrplFile.Core">.NET library</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file/tree/main/web/src">Browser reader</a></li>
+</ul>
+<h3>Show a file on your page</h3>
+<p>Add the script and the element. The script is pinned to version 1.1.0 and checked against its integrity value: if the file changes, the browser does not run it.</p>
+<div class="snippet">
+<p class="snippet__label">From npm, through jsDelivr</p>
+<pre tabindex="0" aria-label="Embed code: From npm, through jsDelivr"><code id="embed-snippet"><!--@element-snippet--></code></pre>
+<div class="snippet__bar">
+<button id="snippet-copy" class="button button--quiet" type="button" aria-label="Copy the embed code: From npm, through jsDelivr">Copy</button>
+<span id="snippet-status" class="snippet__status" role="status"></span>
+</div>
+</div>
+<div class="snippet">
+<p class="snippet__label">The same file from this site</p>
+<pre tabindex="0" aria-label="Embed code: The same file from this site"><code id="embed-snippet-alt"><!--@element-snippet-alt--></code></pre>
+<div class="snippet__bar">
+<button id="snippet-copy-alt" class="button button--quiet" type="button" aria-label="Copy the embed code: The same file from this site">Copy</button>
+<span id="snippet-status-alt" class="snippet__status" role="status"></span>
+</div>
+</div>
+<p class="attributes"><code>width</code> and <code>height</code> set the size, <code>loading</code> says when reading starts, <code>theme</code> sets the light or dark palette, and <code>node</code> names the node to read from. The full list is in the README: <a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">Embed a file</a>.</p>
+</div>
+</section>
+</main>
+<!--@chrome:footer-->
+</body>
+</html>

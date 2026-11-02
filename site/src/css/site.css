@@ -1,0 +1,1064 @@
+/* Hallmark · shape: Stat-Led (the spec's fixed section order) · genre: modern-minimal · theme: Vantage (by request) · job: try · draw: restyle of the built site, sketch 256282
+ * hero: Split, head and the check field left, the file's own point cloud in a ticked frame right · nav: wordmark left, language and theme switches right · footer: three short groups on a hairline · imagery: none, the file itself as a cube of real bytes per chunk · signature: the point cloud, 123 chunks of the logo file read from the ledger, lime where verified · vantage: object/steel
+ * axes: dark/grotesk-sans/chromatic-lime · posture: restrained · contrast: pass · fold: pass · copy: verbatim (settled by the owner and the copy audit) · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V3 · weakest: V, the section order is fixed by the spec; each section takes a different Vantage device (ruled faults, section cut steps, a ruled price table, a split statement, ruled links) */
+@import url("./tokens.css");
+@import url("./base.css");
+
+/* Corner ticks: a hairline frame drawn only at its four corners, around a measured thing or a panel. */
+.ticks {
+  position: relative;
+}
+
+.ticks::before,
+.notice::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: var(--rule-hair) solid var(--rule-2);
+  -webkit-mask: conic-gradient(at var(--tick) var(--tick), transparent 75%, var(--ink) 0) 0 0 / calc(100% - var(--tick)) calc(100% - var(--tick));
+  mask: conic-gradient(at var(--tick) var(--tick), transparent 75%, var(--ink) 0) 0 0 / calc(100% - var(--tick)) calc(100% - var(--tick));
+}
+
+.skip-link {
+  position: absolute;
+  left: var(--space-3);
+  top: var(--space-3);
+  z-index: var(--z-skip);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-control);
+  background: var(--ink);
+  color: var(--paper);
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  background: var(--paper);
+  border-bottom: var(--rule-hair) solid var(--rule-soft);
+}
+
+.site-header__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-5);
+  min-height: var(--nav-h);
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--target);
+  color: var(--ink);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-label);
+  font-variation-settings: "SHRP" 100;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+
+.wordmark:hover {
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.wordmark__mark {
+  flex: none;
+}
+
+.wordmark__mark rect {
+  fill: none;
+  stroke: var(--ink-muted);
+  stroke-width: 1;
+}
+
+.wordmark__mark .is-lit {
+  fill: var(--ink-2);
+  stroke: var(--ink-2);
+}
+
+.wordmark__mark .is-verified {
+  fill: var(--cell-verified);
+  stroke: var(--cell-verified);
+}
+
+.site-header__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2) var(--space-5);
+}
+
+.lang-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  list-style: none;
+}
+
+.lang-switch a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  padding-inline: var(--space-3);
+  border-bottom: var(--rule-hair) solid transparent;
+  border-radius: 0;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  text-decoration: none;
+}
+
+.lang-switch a:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.lang-switch a[aria-current="page"] {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+  font-weight: var(--weight-label);
+}
+
+/* The header's language control: a native disclosure whose panel is a list of plain links. The button
+   shows the language in use; the list hangs from its right edge so it never leaves a phone's screen. */
+.lang-menu {
+  position: relative;
+}
+
+.lang-menu__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--target);
+  padding-inline: var(--space-4);
+  border: var(--rule-hair) solid var(--rule);
+  border-radius: var(--radius-pill);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  list-style: none;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out);
+}
+
+.lang-menu__button::-webkit-details-marker {
+  display: none;
+}
+
+.lang-menu__button:hover,
+.lang-menu[open] > .lang-menu__button {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.lang-menu__chevron {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  transition: transform var(--dur-micro) var(--ease-out);
+}
+
+.lang-menu[open] .lang-menu__chevron {
+  transform: rotate(180deg);
+}
+
+.lang-menu__list {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 1;
+  min-width: 11rem;
+  padding: var(--space-1);
+  border: var(--rule-hair) solid var(--rule);
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  list-style: none;
+}
+
+.lang-menu__list a {
+  display: flex;
+  align-items: center;
+  min-height: var(--target);
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-cell);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  text-decoration: none;
+}
+
+.lang-menu__list a:hover {
+  background: var(--paper-3);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.lang-menu__list a[aria-current="page"] {
+  box-shadow: inset 2px 0 0 var(--ink);
+  color: var(--ink);
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--target);
+  padding-inline: var(--space-4);
+  border: var(--rule-hair) solid var(--rule);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out);
+}
+
+.theme-toggle:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.theme-toggle[aria-pressed="true"] {
+  background: var(--paper-3);
+  color: var(--ink);
+}
+
+/* The switch is dead without script, so it keeps its place but stays out of sight until chrome.mjs
+   has wired it. */
+.theme-toggle:not([data-ready]) {
+  visibility: hidden;
+}
+
+.theme-toggle__icon rect {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.theme-toggle__icon path {
+  fill: currentColor;
+}
+
+.site-footer {
+  border-top: var(--rule-hair) solid var(--rule-soft);
+}
+
+.site-footer__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-6) var(--gutter);
+  padding-block: var(--space-7) var(--space-8);
+  font-size: var(--text-sm);
+}
+
+.site-footer__label {
+  margin-bottom: var(--space-2);
+  color: var(--ink-muted);
+}
+
+.site-footer__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  list-style: none;
+}
+
+.site-footer__list a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  padding-inline: var(--space-1);
+}
+
+.site-footer .lang-switch a {
+  padding-inline: var(--space-1);
+  margin-inline-end: var(--space-3);
+}
+
+/* On a phone the header keeps one row: the theme switch shrinks to its icon, its name stays for assistive tech. */
+@media (max-width: 32rem) {
+  .site-header__bar,
+  .site-header__tools {
+    flex-wrap: nowrap;
+    gap: var(--space-2);
+  }
+
+  .site-header .lang-menu__button {
+    padding-inline: var(--space-3);
+  }
+
+  .site-header .theme-toggle {
+    padding-inline: var(--space-3);
+  }
+
+  .site-header .theme-toggle span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* The hero: the point cloud in a ticked frame, two callouts that follow the scene, the verified file
+   as a small card, and the lines under the frame. The canvas takes its width from its box; the card and
+   the callouts are placed over it and never move the page. */
+.hero-cloud {
+  overflow: clip;
+  background: var(--paper);
+}
+
+.cloud {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+@media (min-width: 40rem) {
+  .cloud {
+    aspect-ratio: 6 / 5;
+  }
+}
+
+.callout {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: var(--space-1) var(--space-3);
+  background: var(--scrim);
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform;
+}
+
+.callout.on {
+  opacity: 1;
+}
+
+.callout strong {
+  display: block;
+  color: var(--ink);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.callout[data-state="verified"] strong {
+  color: var(--accent);
+}
+
+.callout .u {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-body);
+  color: var(--ink-muted);
+}
+
+/* The file is transparent: the card is a hairline frame on a scrim of the paper (a deliberate Vantage
+   frame, like the callouts), so the mark sits on the ground it was drawn for in both themes. */
+.hero-card {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-3);
+  /* A share of the cloud, not a fixed size: at 11rem the card covered a third of a narrow cloud. */
+  width: clamp(6.5rem, 26%, 11rem);
+  padding: var(--space-2);
+  border: var(--rule-hair) solid var(--rule-2);
+  background: var(--scrim);
+}
+
+/* The logo's pale facets all but vanish on the light ground, so there the frame takes the step darker
+   paper of the quiet bands: still the site's own ground, not a box of another colour. */
+:root[data-theme="light"] .hero-card {
+  background: var(--paper-3);
+}
+
+.hero-card xrpl-file {
+  display: block;
+  width: 100%;
+  --xrpl-file-radius: 0;
+}
+
+.hero-card__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.hero-card__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--accent);
+}
+
+.hero-card__check {
+  flex: none;
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.hero-card__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+}
+
+/* On a phone the card would cover the stacks, so it sits under the cloud, inside the same frame. */
+@media (max-width: 39.99rem) {
+  .hero-card {
+    position: static;
+    width: auto;
+    margin: var(--space-3);
+    display: grid;
+    grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .hero-card__line {
+    flex-direction: column;
+    align-items: flex-start;
+    margin-top: 0;
+    gap: var(--space-1);
+  }
+}
+
+.cloud-caption {
+  min-height: calc(var(--text-sm) * var(--leading-body) + var(--space-3));
+  padding-top: var(--space-3);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.cloud-note {
+  margin-top: var(--space-1);
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+}
+
+/* What the cubes are: it explains the picture, so it sits under it rather than between the headline
+   and the actions. */
+.cloud-about {
+  max-width: var(--measure);
+  margin-top: var(--space-3);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+/* Home page: bands of ground, every second one a step lighter, each opened by a head of a statement
+   and the sentence that explains it. */
+.band {
+  padding-block: var(--section-gap);
+}
+
+.band--quiet {
+  background: var(--paper-2);
+}
+
+.head {
+  display: grid;
+  grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+  gap: var(--space-4) var(--gap-columns);
+  align-items: end;
+  margin-bottom: var(--space-8);
+}
+
+.head h2 {
+  max-width: 18ch;
+}
+
+.head p {
+  color: var(--ink-2);
+  font-size: var(--text-md);
+}
+
+@media (max-width: 60rem) {
+  .head {
+    grid-template-columns: minmax(0, 1fr);
+    margin-bottom: var(--space-7);
+  }
+}
+
+.band > .container > * + * {
+  margin-top: var(--space-5);
+}
+
+.band > .container > .head {
+  margin-top: 0;
+}
+
+.hero {
+  display: grid;
+  /* One shrinkable column on a phone: a long translated button label must wrap, not widen the page. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-7) var(--space-8);
+  align-items: center;
+  padding-block: var(--space-7) 0;
+}
+
+@media (min-width: 56rem) {
+  .hero {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    padding-block-start: var(--space-7);
+  }
+}
+
+.hero h1 {
+  max-width: 14ch;
+  font-size: clamp(2.5rem, 3.6vw + 0.75rem, 4.25rem);
+}
+
+.hero__text > * + * {
+  margin-top: var(--space-5);
+}
+
+.lead {
+  max-width: var(--measure);
+  color: var(--ink-2);
+  font-size: var(--text-lead);
+  line-height: 1.45;
+}
+
+.hero__figure {
+  margin: 0;
+  width: 100%;
+  min-width: 0;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: 3rem;
+  padding: 0 var(--space-5);
+  border: var(--rule-hair) solid var(--accent);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: var(--weight-label);
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-short) var(--ease-out), border-color var(--dur-short) var(--ease-out);
+}
+
+.button:hover {
+  border-color: var(--accent-hi);
+  background: var(--accent-hi);
+  color: var(--accent-ink);
+  text-decoration: none;
+}
+
+.button--quiet {
+  border-color: var(--rule);
+  background: transparent;
+  color: var(--ink);
+}
+
+.button--quiet:hover {
+  border-color: var(--ink-2);
+  background: var(--paper-3);
+  color: var(--ink);
+}
+
+.button:disabled {
+  border-style: dashed;
+  border-color: var(--rule);
+  background: transparent;
+  color: var(--ink-muted);
+}
+
+/* A label on a control that is not available yet, not a status dot or a tracked-capitals badge. */
+.tag {
+  padding: 0 var(--space-2);
+  border: var(--rule-hair) solid currentColor;
+  border-radius: var(--radius-cell);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-label);
+  white-space: nowrap;
+}
+
+.check label {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--ink);
+  font-weight: var(--weight-label);
+}
+
+.check__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* The label is as long as its translation. With the narrower padding the longest one (Russian) still
+   shares the row with the input at 320 px; below that the row wraps and the button takes its own line. */
+.check__row .button {
+  padding-inline: var(--space-4);
+}
+
+.field {
+  flex: 1 1 10rem;
+  min-width: 0;
+  min-height: 3rem;
+  padding: var(--space-2) var(--space-4);
+  border: var(--rule-hair) solid var(--rule);
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.field:hover {
+  border-color: var(--ink-2);
+}
+
+.field::placeholder {
+  color: var(--ink-muted);
+  opacity: 1;
+}
+
+.field:focus-visible {
+  outline-offset: 1px;
+}
+
+.field[aria-invalid="true"] {
+  border-color: var(--error);
+  outline: 1px solid var(--error);
+}
+
+.check__error {
+  margin-top: var(--space-2);
+  color: var(--error);
+}
+
+/* The live region stays in the page; empty, it takes no room. */
+.check__error:empty {
+  margin: 0;
+}
+
+.hint {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.publisher > * + * {
+  margin-top: var(--space-2);
+}
+
+/* The label is as long as its translation, so it may take two lines on a phone. */
+.publisher .button {
+  white-space: normal;
+}
+
+/* Problem: three ruled entries, the way a scan log lists captures. */
+.faults {
+  display: grid;
+  gap: var(--space-5) var(--gap-columns);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  list-style: none;
+}
+
+.faults li {
+  padding-top: var(--space-4);
+  border-top: var(--rule-hair) solid var(--rule-2);
+  color: var(--ink-2);
+}
+
+.faults strong {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--ink);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-label);
+}
+
+/* How: four steps in a row under a hairline, the number before the title. */
+.steps {
+  display: grid;
+  gap: var(--space-7) var(--gap-columns);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  list-style: none;
+  counter-reset: step;
+}
+
+.step {
+  font-size: var(--text-sm);
+  padding-top: var(--space-4);
+  border-top: var(--rule-hair) solid var(--rule-2);
+  counter-increment: step;
+}
+
+.step__drawing {
+  width: 100%;
+  max-width: 14rem;
+  height: auto;
+  margin-bottom: var(--space-5);
+  color: var(--ink-muted);
+}
+
+.step h3::before {
+  content: counter(step);
+  display: block;
+  margin-bottom: var(--space-1);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.step p {
+  margin-top: var(--space-2);
+}
+
+/* The drawings use the mosaic's three cell states, nothing else. */
+.diagram .c {
+  fill: none;
+  stroke: var(--cell);
+  stroke-width: 1.25;
+}
+
+.diagram .lit {
+  fill: var(--cell-lit);
+  stroke: var(--cell-lit);
+}
+
+.diagram .ok {
+  fill: var(--cell-verified);
+  stroke: var(--cell-verified);
+}
+
+.diagram .link {
+  fill: none;
+  stroke: var(--ink-muted);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.diagram .line {
+  fill: none;
+  stroke: var(--rule);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* Price: a ruled table of measured figures in tabular numerals. */
+.price-table__scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.price-table__grid {
+  width: 100%;
+  min-width: 26rem;
+  border-collapse: collapse;
+}
+
+.price-table__grid th,
+.price-table__grid td {
+  padding: var(--space-4) var(--space-4) var(--space-4) 0;
+  border-bottom: var(--rule-hair) solid var(--rule-soft);
+  color: var(--ink-2);
+  font-weight: var(--weight-body);
+  text-align: left;
+}
+
+.price-table__grid thead th {
+  border-bottom-color: var(--rule-2);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-label);
+  /* Chinese headers break after their comma, not inside a word such as 文件大小. */
+  word-break: keep-all;
+  vertical-align: bottom;
+}
+
+/* "10 KB" is one quantity; it does not wrap between the number and its unit. */
+.price-table__grid tbody th {
+  color: var(--ink);
+  font-weight: var(--weight-label);
+  white-space: nowrap;
+}
+
+.price-table__grid .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.price-table__grid th.num,
+.price-table__grid td.num {
+  padding-right: 0;
+  padding-left: var(--space-4);
+}
+
+.price-source {
+  margin-top: var(--space-3);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+/* Permanent and public: two statements divided by a hairline. */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  border-top: var(--rule-hair) solid var(--rule-2);
+}
+
+.facts > div {
+  padding: var(--space-7) var(--space-6) var(--space-6) 0;
+}
+
+.facts > div + div {
+  padding-left: var(--space-6);
+  border-left: var(--rule-hair) solid var(--rule-soft);
+}
+
+.facts h3 {
+  max-width: 14ch;
+  font-size: var(--text-statement);
+  font-weight: var(--weight-display);
+  line-height: 1.05;
+  letter-spacing: var(--tracking-display);
+}
+
+.facts p {
+  margin-top: var(--space-4);
+}
+
+@media (max-width: 48rem) {
+  .facts > div {
+    padding-right: 0;
+  }
+
+  .facts > div + div {
+    padding-left: 0;
+    border-top: var(--rule-hair) solid var(--rule-soft);
+    border-left: 0;
+  }
+}
+
+.notice {
+  position: relative;
+  max-width: var(--measure);
+  padding: var(--space-5) var(--space-6);
+  color: var(--ink);
+}
+
+/* Developers. */
+.devlinks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  border-top: var(--rule-hair) solid var(--rule-2);
+  list-style: none;
+}
+
+.devlinks li {
+  border-bottom: var(--rule-hair) solid var(--rule-soft);
+}
+
+.devlinks a {
+  display: flex;
+  align-items: center;
+  min-height: 3.5rem;
+  padding-block: var(--space-3);
+}
+
+.snippet {
+  margin-top: var(--space-5);
+  max-width: 56rem;
+}
+
+.snippet__label {
+  margin-bottom: var(--space-2);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.snippet__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-3);
+}
+
+.snippet pre {
+  overflow-x: auto;
+  padding: var(--space-5);
+  border: var(--rule-hair) solid var(--rule-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+}
+
+.snippet pre code {
+  font-size: inherit;
+  overflow-wrap: normal;
+  white-space: pre;
+}
+
+.snippet__status {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.attributes {
+  margin-top: var(--space-6);
+}
+
+/* File page: the file in a ticked frame, then its name and Download beside the details and the link. */
+.file {
+  padding-block: var(--space-6) var(--section-gap);
+}
+
+.file__view {
+  padding: var(--space-5);
+  background: var(--paper-2);
+}
+
+.file__view xrpl-file {
+  width: 100%;
+  /* The element keeps the file's aspect ratio at full width; capped in height it letterboxes the picture
+     inside its box, so a square file does not push the name and Download a screen down. */
+  max-height: 60svh;
+}
+
+.file__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: var(--space-7) var(--space-8);
+  align-items: start;
+  margin-top: var(--space-6);
+}
+
+@media (max-width: 60rem) {
+  .file__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.file__title {
+  font-size: clamp(2.25rem, 3vw + 1rem, 3.75rem);
+  overflow-wrap: anywhere;
+}
+
+.file__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-5);
+}
+
+/* The status line keeps its height so a result does not push the page. */
+.file__status {
+  min-height: calc(var(--text-sm) * var(--leading-body));
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.file__status[data-state="error"] {
+  color: var(--error);
+}
+
+.file__facts {
+  border-top: var(--rule-hair) solid var(--rule-2);
+}
+
+.file__details {
+  margin: 0;
+}
+
+.file__details > div,
+.file__link {
+  padding-block: var(--space-3);
+  border-bottom: var(--rule-hair) solid var(--rule-soft);
+}
+
+.file__details dt,
+.file__link-label {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.file__details dd {
+  margin: 0;
+  color: var(--ink);
+}
+
+.file__link-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+
+.file__link-value {
+  min-width: 0;
+  color: var(--ink-2);
+  /* A hash has no break points; break where the line ends rather than at the hyphen of "xrpl-file". */
+  word-break: break-all;
+}
+
+.file__how {
+  max-width: var(--measure);
+  margin-top: var(--space-8);
+  padding-top: var(--space-6);
+  border-top: var(--rule-hair) solid var(--rule-soft);
+}
+
+.file__how > * + * {
+  margin-top: var(--space-4);
+}
+
+.file__how > h2 {
+  font-size: var(--text-title);
+  font-weight: var(--weight-label);
+  letter-spacing: -0.02em;
+}
+
+/* 404 and the field-in-error view of a bad file address. */
+.notice-page {
+  padding-block: var(--space-8) var(--section-gap);
+}
+
+/* The container stays the header's width so the text lines up with it; the content keeps a reading width. */
+.notice-page > * {
+  max-width: 40rem;
+}
+
+.notice-page > * + * {
+  margin-top: var(--space-5);
+}
+
+.notice-page h1 {
+  font-size: var(--text-section);
+}

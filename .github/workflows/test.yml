@@ -17,19 +17,26 @@ jobs:
         with:
           node-version: 24
       - run: dotnet build XrplFile.Libraries.slnf --configuration Release
-      # Every test project in this repository is run by a job: XrplFile.Core.Tests and
-      # XrplFile.Keys.Tests and XrplFile.App.Core.Tests here, the Core suite's Integration-trait
-      # half in the "integration" job below, and web/test/*.test.mjs by the node step. A project
-      # the solution filter merely builds proves nothing: XrplFile.Keys.Tests was built and never
-      # run from the day it was created, so the 217 tests behind this branch's interoperability
-      # claim -- WalletCompatibilityTests above all -- could not fail CI.
+      # Every test project in this repository is run by a job: XrplFile.Core.Tests,
+      # XrplFile.Keys.Tests, XrplFile.App.Core.Tests and XrplFile.SitePrice.Tests here, the Core
+      # suite's Integration-trait half in the "integration" job below, and web/test/*.test.mjs and
+      # site/test/*.test.mjs by the node steps. A project the solution filter merely builds proves
+      # nothing: XrplFile.Keys.Tests was built and never run from the day it was created, so the
+      # 217 tests behind this branch's interoperability claim -- WalletCompatibilityTests above
+      # all -- could not fail CI.
       # Category=Slow is excluded everywhere: the memory test (spec S27) runs for tens of minutes and
       # the 50 MB stand runs (Task 21) for longer. They are run by hand before a release.
       - run: dotnet run --project tests/XrplFile.Core.Tests --configuration Release --no-build -- -trait- "Category=Integration" -trait- "Category=Slow"
       - run: dotnet run --project tests/XrplFile.Keys.Tests --configuration Release --no-build -- -trait- "Category=Integration" -trait- "Category=Slow"
       - run: dotnet run --project tests/XrplFile.App.Core.Tests --configuration Release --no-build -- -trait- "Category=Integration" -trait- "Category=Slow"
+      - run: dotnet run --project tests/XrplFile.SitePrice.Tests --configuration Release --no-build
       - run: node --test test/*.test.mjs
         working-directory: web
+      # The site tests run from the repository root. They build their fixtures themselves; the
+      # build step then proves the site assembles from the element that web/ just produced.
+      - run: node --test site/test/*.test.mjs
+      - run: node web/build.mjs
+      - run: node site/build.mjs
       - name: the committed vectors are what the code produces
         run: |
           dotnet run --project tools/XrplFile.Vectors --configuration Release --no-build -- /tmp/v1.json
