@@ -306,6 +306,306 @@ public sealed class CloseAccountModelTests : VaultHarness
         Assert.Null(Assert.Single(listed, entry => string.Equals(entry.Reference, otherReference, StringComparison.Ordinal)).Closure);
     }
 
+    private async Task<string> StoreOtherAsync(KeyVault vault, CancellationToken token, long balanceDrops = 30_000_000)
+    {
+        XrplWallet other = XrplWallet.Generate();
+        string reference = await vault.StoreAsync(
+            new NewVaultEntry(VaultEntryKind.Generated, "another throwaway", "1", other.ClassicAddress, other.Seed), token);
+        _connections.Ledger.Balances[other.ClassicAddress] = balanceDrops;
+        return reference;
+    }
+
+    private static async Task SelectAndCheckAsync(
+        CloseAccountModel model, string reference, string destination, CancellationToken token)
+    {
+        await model.SelectAsync(reference, token);
+        model.ChooseDestination(destination);
+        await model.PreflightAsync(token);
+        Assert.True(model.CanClose);
+    }
+
+    /// <summary>Starts a close and returns once its AccountDelete is on the (slow) wire.</summary>
+    private async Task<Task> StartSlowCloseAsync(CloseAccountModel model, CancellationToken token, CancellationToken closeToken)
+    {
+        _connections.Sink.SubmitDelay = TimeSpan.FromMilliseconds(400);
+        Task closing = model.CloseAsync(closeToken);
+        while (_connections.Sink.InFlightAtSubmit.Count == 0)
+        {
+            await Task.Delay(5, token);
+        }
+
+        return closing;
+    }
+
+    private static void AssertBlank(CloseAccountModel model)
+    {
+        Assert.Null(model.Closed);
+        Assert.Null(model.Preview);
+        Assert.Null(model.Message);
+        Assert.False(model.CanClose);
+    }
+
+    [Fact]
+    public async Task A_closes_outcome_never_shows_on_another_accounts_screen_and_is_there_when_its_own_is_opened_again()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (CloseAccountModel model, KeyVault vault, string reference, _) = await OpenAsync(token);
+        string otherReference = await StoreOtherAsync(vault, token);
+
+        await SelectAndCheckAsync(model, reference, Home, token);
+        Task closing = await StartSlowCloseAsync(model, token, token);
+
+        // The interleaving a review found untested: SelectAsync on the same instance while a
+        // CloseAsync is in flight. The other screen starts from nothing...
+        await model.SelectAsync(otherReference, token);
+        Assert.Equal(otherReference, model.CurrentReference);
+        AssertBlank(model);
+
+        await closing;
+
+        // ...and the first close finishing writes nothing onto it.
+        Assert.Equal(otherReference, model.CurrentReference);
+        AssertBlank(model);
+
+        // The outcome was not dropped: opening the closed account's own screen again shows it.
+        await model.SelectAsync(reference, token);
+        Assert.Equal(reference, model.CurrentReference);
+        Assert.NotNull(model.Closed);
+        Assert.Equal(Home, model.Closed.Destination);
+        Assert.False(string.IsNullOrEmpty(model.Closed.TxHash));
+        Assert.Equal(CloseErrorMessages.For(DeletionOutcome.Submitted), model.Message);
+    }
+
+    [Fact]
+    public async Task A_vault_failure_warning_with_the_hash_survives_another_account_being_selected()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (CloseAccountModel _, KeyVault vault, string reference, _) = await OpenAsync(token);
+        string otherReference = await StoreOtherAsync(vault, token);
+        CloseAccountModel model = new(new FailingUpdateVault(vault), _connections, TimeProvider.System);
+
+        await SelectAndCheckAsync(model, reference, Home, token);
+        Task closing = await StartSlowCloseAsync(model, token, token);
+        await model.SelectAsync(otherReference, token);
+        await closing;
+
+        AssertBlank(model);
+
+        await model.SelectAsync(reference, token);
+        Assert.Null(model.Closed);
+        Assert.Contains("could not be saved to the vault", model.Message, StringComparison.Ordinal);
+        Assert.Contains(model.Preview!.TxHash, model.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_interrupted_close_leaves_its_warning_on_its_own_account_and_not_on_the_one_selected_meanwhile()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (CloseAccountModel model, KeyVault vault, string reference, _) = await OpenAsync(token);
+        string otherReference = await StoreOtherAsync(vault, token);
+
+        await SelectAndCheckAsync(model, reference, Home, token);
+        using CancellationTokenSource screen = new();
+        Task closing = await StartSlowCloseAsync(model, token, screen.Token);
+
+        // The screen going away: its token is cancelled, and by then someone has opened another account.
+        await model.SelectAsync(otherReference, token);
+        screen.Cancel();
+        await closing;
+
+        AssertBlank(model);
+
+        await model.SelectAsync(reference, token);
+        Assert.Contains("may already have been closed", model.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_preflight_for_one_account_finishing_after_another_was_selected_does_not_reach_it()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (CloseAccountModel model, KeyVault vault, string reference, _) = await OpenAsync(token);
+        string otherReference = await StoreOtherAsync(vault, token);
+
+        await model.SelectAsync(reference, token);
+        model.ChooseDestination(Home);
+
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _connections.BeforeConnect = (_, _) => gate.Task;
+        Task preflight = model.PreflightAsync(token);
+
+        await model.SelectAsync(otherReference, token);
+        gate.SetResult();
+        await preflight;
+
+        Assert.Equal(otherReference, model.CurrentReference);
+        Assert.Null(model.Destination);
+        AssertBlank(model);
+    }
+
+    [Fact]
+    public async Task IsClosing_is_true_for_exactly_as_long_as_a_close_is_in_flight_and_says_when_it_changes()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(token);
+        List<bool> seen = [];
+        model.ClosingChanged += () => seen.Add(model.IsClosing);
+
+        await SelectAndCheckAsync(model, reference, Home, token);
+        Assert.False(model.IsClosing);
+
+        Task closing = await StartSlowCloseAsync(model, token, token);
+        Assert.True(model.IsClosing);
+
+        await closing;
+        Assert.False(model.IsClosing);
+        Assert.Equal([true, false], seen);
+    }
+
+    [Fact]
+    public async Task A_failed_close_also_releases_IsClosing()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(token);
+        _connections.Sink.Throws[0] = new XrplFileException(XrplFileError.NodeUnreachable, "the node vanished mid-submit");
+
+        await SelectAndCheckAsync(model, reference, Home, token);
+        await model.CloseAsync(token);
+
+        Assert.False(model.IsClosing);
+    }
+
+    [Fact]
+    public async Task Closing_a_second_account_while_one_is_in_flight_is_refused_out_loud_and_touches_neither()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (CloseAccountModel model, KeyVault vault, string reference, _) = await OpenAsync(token);
+        string otherReference = await StoreOtherAsync(vault, token);
+
+        await SelectAndCheckAsync(model, reference, Home, token);
+        Task closing = await StartSlowCloseAsync(model, token, token);
+
+        await SelectAndCheckAsync(model, otherReference, Home, token);
+        await model.CloseAsync(token);
+
+        // Said on the account that asked, not swallowed, and not written onto the one closing.
+        Assert.Contains("Another account is being closed", model.Message, StringComparison.Ordinal);
+        Assert.Null(model.Closed);
+        Assert.True(model.CanClose);
+        Assert.Single(_connections.Sink.InFlightAtSubmit);
+
+        await closing;
+
+        IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(token);
+        Assert.NotNull(Assert.Single(listed, entry => entry.Reference == reference).Closure);
+        Assert.Null(Assert.Single(listed, entry => entry.Reference == otherReference).Closure);
+
+        // The refusal was not a verdict on the account: once the first close is done it can be pressed again.
+        _connections.Sink.SubmitDelay = TimeSpan.Zero;
+        await model.CloseAsync(token);
+        Assert.NotNull(model.Closed);
+
+        await model.SelectAsync(reference, token);
+        Assert.NotNull(model.Closed);
+    }
+
+    [Fact]
+    public async Task A_second_press_on_the_account_already_closing_does_nothing_and_submits_once()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(token);
+
+        await SelectAndCheckAsync(model, reference, Home, token);
+        Task closing = await StartSlowCloseAsync(model, token, token);
+
+        await model.CloseAsync(token);
+        Assert.Null(model.Message);
+
+        await closing;
+        Assert.Single(_connections.Sink.InFlightAtSubmit);
+        Assert.NotNull(model.Closed);
+    }
+
+    [Fact]
+    public async Task A_preflight_that_finishes_after_the_recipient_changed_is_dropped()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(token);
+        string anotherHome = XrplWallet.Generate().ClassicAddress;
+        _connections.Ledger.Destinations[anotherHome] =
+            new DestinationState(Exists: true, RequiresDestinationTag: false, AuthorisesDepositors: false);
+        _connections.Ledger.Balances[Home] = 5_000_000;
+
+        await model.SelectAsync(reference, token);
+        model.ChooseDestination(Home);
+
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _connections.BeforeConnect = (_, _) => gate.Task;
+        Task preflight = model.PreflightAsync(token);
+
+        model.ChooseDestination(anotherHome);
+        gate.SetResult();
+        await preflight;
+
+        // A Ready verdict for Home must not arrive on a screen that now names anotherHome.
+        Assert.Equal(anotherHome, model.Destination);
+        Assert.Null(model.Preview);
+        Assert.Equal(0, model.DestinationBalanceDrops);
+        Assert.False(model.CanClose);
+    }
+
+    [Fact]
+    public async Task An_older_preflight_finishing_after_a_newer_one_does_not_replace_it()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(token);
+        string anotherHome = XrplWallet.Generate().ClassicAddress;
+        _connections.Ledger.Destinations[anotherHome] =
+            new DestinationState(Exists: true, RequiresDestinationTag: false, AuthorisesDepositors: false);
+        _connections.Ledger.Balances[Home] = 5_000_000;
+        _connections.Ledger.Balances[anotherHome] = 7_000_000;
+
+        await model.SelectAsync(reference, token);
+        model.ChooseDestination(Home);
+
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        int connects = 0;
+        _connections.BeforeConnect = (_, _) => Interlocked.Increment(ref connects) == 1 ? gate.Task : Task.CompletedTask;
+        Task older = model.PreflightAsync(token);
+
+        model.ChooseDestination(anotherHome);
+        await model.PreflightAsync(token);
+        Assert.True(model.CanClose);
+        Assert.Equal(7_000_000, model.DestinationBalanceDrops);
+
+        gate.SetResult();
+        await older;
+
+        Assert.Equal(anotherHome, model.Destination);
+        Assert.True(model.CanClose);
+        Assert.Equal(7_000_000, model.DestinationBalanceDrops);
+    }
+
+    [Fact]
+    public async Task A_destination_changed_during_a_close_keeps_the_closure_but_not_the_preview_of_the_old_recipient()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (CloseAccountModel model, KeyVault vault, string reference, _) = await OpenAsync(token);
+
+        await SelectAndCheckAsync(model, reference, Home, token);
+        Task closing = await StartSlowCloseAsync(model, token, token);
+
+        model.ChooseDestination(XrplWallet.Generate().ClassicAddress);
+        await closing;
+
+        Assert.Null(model.Preview);
+        Assert.False(model.CanClose);
+        Assert.NotNull(model.Closed);
+        Assert.Equal(Home, model.Closed.Destination);
+
+        IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(token);
+        Assert.Equal(Home, Assert.Single(listed, entry => entry.Reference == reference).Closure!.Destination);
+    }
+
     [Fact]
     public async Task A_vault_failure_after_a_successful_submission_still_reports_the_closure_and_the_hash()
     {

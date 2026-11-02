@@ -9,33 +9,48 @@ namespace XrplFile.App.Core;
 ///
 /// Nothing here ever chooses a destination (design G3), and nothing submits until a preflight has
 /// said it can succeed (design G5).
+///
+/// This is a singleton, and a close outlives the screen that started it by as long as the node takes
+/// to answer, so every call works on the <see cref="CloseState"/> that was selected when it began and
+/// never on whatever is selected by the time an await returns. A close's outcome therefore lands on
+/// its own account, and a state that has attempted a close is kept (see <see cref="SelectAsync"/>), so
+/// the transaction hash and the "may already have been closed" warning are still there when that
+/// account's screen is opened again — they cannot be lost and cannot show on another account's screen.
 /// </summary>
 public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connections, TimeProvider time)
 {
-    private string? _reference;
-    private string? _network;
-    private bool _closing;
+    /// <summary>What the screen reads. Replaced, never reset in place, by <see cref="SelectAsync"/>.</summary>
+    private CloseState _state = new();
+
+    /// <summary>
+    /// Every state that has attempted a close, by reference, kept for the life of the process: a
+    /// handful of small objects, and the only place a close whose screen is gone can report to.
+    /// </summary>
+    private readonly Dictionary<string, CloseState> _attempts = new(StringComparer.Ordinal);
+
+    /// <summary>The state whose close is in flight, if any. At most one: see <see cref="CloseAsync"/>.</summary>
+    private CloseState? _closing;
 
     /// <summary>The vault's other keys, offered as destinations. Never this account itself.</summary>
-    public IReadOnlyList<VaultEntryInfo> Candidates { get; private set; } = [];
+    public IReadOnlyList<VaultEntryInfo> Candidates => _state.Candidates;
 
     /// <summary>
     /// The label of the account being closed — set as soon as <see cref="SelectAsync"/> resolves it,
     /// with no node round trip, so the screen can say which account it is about to destroy before it
     /// has asked anything of a ledger.
     /// </summary>
-    public string? AccountLabel { get; private set; }
+    public string? AccountLabel => _state.AccountLabel;
 
     /// <summary>The address of the account being closed. See <see cref="AccountLabel"/>.</summary>
-    public string? AccountAddress { get; private set; }
+    public string? AccountAddress => _state.AccountAddress;
 
-    public string? Destination { get; private set; }
+    public string? Destination => _state.Destination;
 
     /// <summary>What the destination holds now — how a person recognises the account they meant (design G6).</summary>
-    public long DestinationBalanceDrops { get; private set; }
+    public long DestinationBalanceDrops => _state.DestinationBalanceDrops;
 
     /// <summary>What the deletion would do, as the library computed it. Null until a preflight has run.</summary>
-    public DeletionResult? Preview { get; private set; }
+    public DeletionResult? Preview => _state.Preview;
 
     /// <summary>
     /// How many ledgers remain before a <see cref="DeletionOutcome.NotYet"/> preview becomes
@@ -44,7 +59,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     /// down to (design 5's "how long the wait is, not just when it ends" — a ledger number on its
     /// own gives a person only one of the two numbers the subtraction needs).
     /// </summary>
-    public long? LedgersRemaining { get; private set; }
+    public long? LedgersRemaining => _state.LedgersRemaining;
 
     /// <summary>
     /// Roughly how long <see cref="LedgersRemaining"/> is, in words — "not yet" without a sense of
@@ -55,16 +70,27 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     /// </summary>
     public string? TimeRemainingDescription => LedgerTiming.Describe(LedgerTiming.Estimate(LedgersRemaining));
 
-    public string? Message { get; private set; }
+    public string? Message => _state.Message;
 
     /// <summary>The closure this screen recorded, once one happened.</summary>
-    public AccountClosure? Closed { get; private set; }
+    public AccountClosure? Closed => _state.Closed;
 
-    public bool CanClose => Preview is { Outcome: DeletionOutcome.Ready } && Destination is not null;
+    public bool CanClose => _state.CanClose;
 
     /// <summary>Whether a preflight can be run at all — a destination has been named. The screen
     /// reads this rather than comparing <see cref="Destination"/> to null itself.</summary>
-    public bool CanPreflight => Destination is not null;
+    public bool CanPreflight => _state.Destination is not null;
+
+    /// <summary>
+    /// Whether an <c>AccountDelete</c> is in flight for any account. The shell reads this to keep its
+    /// navigation and Lock disabled: leaving the screen cancels the token the close is awaiting on,
+    /// possibly after the signed deletion is already on the wire, so there is nowhere to go until the
+    /// node has answered. Seconds, not minutes.
+    /// </summary>
+    public bool IsClosing => _closing is not null;
+
+    /// <summary>Raised after <see cref="IsClosing"/> changes, and only then.</summary>
+    public event Action? ClosingChanged;
 
     /// <summary>
     /// The reference every property above actually belongs to — set only once <see cref="SelectAsync"/>
@@ -75,23 +101,27 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     /// rather than trusting that a completed <see cref="SelectAsync"/> call means its own data is on
     /// screen.
     /// </summary>
-    public string? CurrentReference { get; private set; }
+    public string? CurrentReference => _state.Reference;
 
+    /// <summary>
+    /// Selects the account the screen is about to show. An account whose close was attempted in this
+    /// process gets its own state back, outcome and all, without asking the vault again: that outcome
+    /// can be the only trace of a deletion the node accepted. Any other account starts from nothing.
+    /// </summary>
     public async Task SelectAsync(string reference, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(reference);
 
-        Message = null;
-        Preview = null;
-        LedgersRemaining = null;
-        Destination = null;
-        DestinationBalanceDrops = 0;
-        Closed = null;
-        AccountLabel = null;
-        AccountAddress = null;
-        _reference = null;
-        _network = null;
-        CurrentReference = null;
+        if (_attempts.TryGetValue(reference, out CloseState? attempted))
+        {
+            _state = attempted;
+            return;
+        }
+
+        // Written to by this call alone, so a second select that replaces _state while the vault is
+        // being read cannot be handed this one's half-built fields.
+        CloseState state = new();
+        _state = state;
 
         try
         {
@@ -101,21 +131,20 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
 
             if (entry is null)
             {
-                Message = "That key is no longer in the vault.";
+                state.Message = "That key is no longer in the vault.";
                 return;
             }
 
-            _reference = reference;
-            _network = entry.Network;
-            AccountLabel = entry.Label;
-            AccountAddress = entry.Address;
+            state.Network = entry.Network;
+            state.AccountLabel = entry.Label;
+            state.AccountAddress = entry.Address;
 
             // Three ways an offered entry could not actually work as a destination: it is this same
             // account under a second reference, it is on a network this deletion cannot reach, or it
             // has already been closed and so no longer exists to receive anything. The preflight would
             // catch all three and burn no reserve, but a confirmation screen that suggests a
             // destination already known to be unusable is not one worth trusting.
-            Candidates =
+            state.Candidates =
             [
                 .. listed.Where(info =>
                     !string.Equals(info.Reference, reference, StringComparison.Ordinal)
@@ -127,11 +156,11 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             // Assigned last, once every field above it has actually been set: a caller comparing
             // this to the reference it asked for is trusting that a match means all of it belongs
             // to that account, not merely that the lookup found an entry.
-            CurrentReference = reference;
+            state.Reference = reference;
         }
         catch (VaultException ex)
         {
-            Message = VaultErrorMessages.For(ex.Error);
+            state.Message = VaultErrorMessages.For(ex.Error);
         }
     }
 
@@ -141,24 +170,38 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     /// </summary>
     public void ChooseDestination(string address)
     {
-        Destination = string.IsNullOrWhiteSpace(address) ? null : address.Trim();
-        Preview = null;
-        LedgersRemaining = null;
-        DestinationBalanceDrops = 0;
-        Message = null;
+        CloseState state = _state;
+
+        state.Destination = string.IsNullOrWhiteSpace(address) ? null : address.Trim();
+        state.Preview = null;
+        state.LedgersRemaining = null;
+        state.DestinationBalanceDrops = 0;
+        state.Message = null;
+
+        // Whatever preflight is still waiting on the node was asked about the previous destination.
+        state.Generation++;
     }
 
     public async Task PreflightAsync(CancellationToken cancellationToken)
     {
-        Message = null;
-        Preview = null;
-        LedgersRemaining = null;
+        CloseState state = _state;
 
-        if (_reference is not { } reference || _network is not { } network || Destination is not { } destination)
+        state.Message = null;
+        state.Preview = null;
+        state.LedgersRemaining = null;
+
+        if (state.Reference is not { } reference || state.Network is not { } network
+            || state.Destination is not { } destination)
         {
-            Message = "Choose where the remainder should go.";
+            state.Message = "Choose where the remainder should go.";
             return;
         }
+
+        // Taken after the guard above, which returns without asking the node anything. Every write
+        // below checks it again: a destination chosen (or a newer preflight started) while this one
+        // waited for the node makes its answer a statement about a recipient nobody is looking at, and
+        // showing it would put a Ready verdict, and a Close button, on the wrong address.
+        int generation = ++state.Generation;
 
         try
         {
@@ -176,18 +219,20 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             AccountState home = await connection.Source
                 .AccountStateAsync(destination, cancellationToken).ConfigureAwait(false);
 
+            if (generation != state.Generation) return;
+
             // Assigned as soon as the node has actually answered both calls a confirmation needs --
             // before the extra read below, which is a nice-to-have on top of a preflight that is
             // already good. A node that answers these two and then drops the countdown read must not
             // lose the preflight it already gave: the catch around this whole method would otherwise
             // leave Preview null and show a generic error in place of a confirmation the node had
             // already earned.
-            Preview = preview;
-            DestinationBalanceDrops = home.BalanceDrops;
+            state.Preview = preview;
+            state.DestinationBalanceDrops = home.BalanceDrops;
 
             if (preview.Outcome != DeletionOutcome.Ready)
             {
-                Message = CloseErrorMessages.For(preview.Outcome);
+                state.Message = CloseErrorMessages.For(preview.Outcome);
             }
 
             // Mirrors AccountsModel.RefreshFromLedgerAsync's own Math.Max(0, deletableFrom -
@@ -205,44 +250,70 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
                     long current = await connection.Source
                         .CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
 
-                    LedgersRemaining = Math.Max(0, deletableFrom - current);
+                    if (generation == state.Generation)
+                    {
+                        state.LedgersRemaining = Math.Max(0, deletableFrom - current);
+                    }
                 }
                 catch (XrplFileException)
                 {
-                    LedgersRemaining = null;
+                    state.LedgersRemaining = null;
                 }
             }
         }
         catch (XrplFileException ex)
         {
-            Message = PublishErrorMessages.For(ex);
+            if (generation == state.Generation) state.Message = PublishErrorMessages.For(ex);
         }
         catch (VaultException ex)
         {
-            Message = VaultErrorMessages.For(ex.Error);
+            if (generation == state.Generation) state.Message = VaultErrorMessages.For(ex.Error);
         }
     }
 
     /// <summary>
     /// Submits the deletion. Does nothing unless a preflight has said it can succeed — pressing a
-    /// button is not a reason to skip the checks that keep an owner reserve from being burned. Also
-    /// does nothing while a previous call is still in flight, so a double-click cannot sign and
-    /// submit the same deletion twice against the same sequence.
+    /// button is not a reason to skip the checks that keep an owner reserve from being burned. A
+    /// second call for the account already being closed does nothing either, so a double-click cannot
+    /// sign and submit the same deletion twice against the same sequence; the first call's outcome is
+    /// the one that will show.
     /// </summary>
+    /// <remarks>
+    /// One close at a time across accounts. A call for a different account while one is in flight
+    /// says so on that account's own state, rather than doing nothing or touching the account that is
+    /// closing. The screen never gets there — the shell is locked while <see cref="IsClosing"/> — but
+    /// the model does not rely on that.
+    /// </remarks>
     public async Task CloseAsync(CancellationToken cancellationToken)
     {
-        if (_closing) return;
+        // Everything below works from this state and the copies taken from it, never from the
+        // fields: this model is shared, and a SelectAsync for another account can run while an await
+        // here is pending. The closure record above all must land on the account the node actually
+        // deleted, and so must every word the person is told about it.
+        CloseState state = _state;
 
-        Message = null;
+        if (ReferenceEquals(_closing, state)) return;
 
-        if (!CanClose || _reference is not { } reference || _network is not { } network
-            || Destination is not { } destination) return;
+        if (_closing is not null)
+        {
+            state.Message = "Another account is being closed. Wait until that has finished, " +
+                "then close this one.";
+            return;
+        }
 
-        _closing = true;
+        state.Message = null;
 
-        // Everything below works from these copies, never from the fields: this model is shared, and
-        // a SelectAsync for another account can run while an await here is pending. The closure
-        // record above all must land on the account the node actually deleted.
+        if (!state.CanClose || state.Reference is not { } reference || state.Network is not { } network
+            || state.Destination is not { } destination) return;
+
+        _closing = state;
+        _attempts[reference] = state;
+        ClosingChanged?.Invoke();
+
+        // A recipient changed while the node works makes this deletion's Preview a statement about
+        // an address nobody is looking at; the outcome message and the closure still say what happened.
+        int generation = state.Generation;
+
         try
         {
             await using ILedgerConnection connection =
@@ -255,14 +326,14 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
 
             DeletionResult result = await account.DeleteAsync(destination, cancellationToken).ConfigureAwait(false);
 
-            Preview = result;
+            if (generation == state.Generation) state.Preview = result;
 
             // Stale from whatever the last preflight measured against a ledger that has since
             // moved on: CanClose required Ready, which never carries a DeletableFromLedger, so
             // this was already null every time this line runs — cleared explicitly anyway so nothing
             // here depends on that coincidence if DeleteAsync's own internal preview ever disagrees.
-            LedgersRemaining = null;
-            Message = CloseErrorMessages.For(result.Outcome);
+            state.LedgersRemaining = null;
+            state.Message = CloseErrorMessages.For(result.Outcome);
 
             // Recorded only for a deletion a ledger actually took. A queued one has not happened:
             // the account still exists and still holds everything, and the queue may yet drop it.
@@ -281,7 +352,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
                 await vault.UpdateAsync(
                     reference, new VaultEntryEdit(Closure: closure), CancellationToken.None).ConfigureAwait(false);
 
-                Closed = closure;
+                state.Closed = closure;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -291,7 +362,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
                 // the vault's own error — telling somebody the vault is locked about money that is
                 // already gone, and irrecoverably so, is the wrong thing to say. The hash is what
                 // is left to find the closure by, since this screen could not save it.
-                Message = $"{Message} The record of it could not be saved to the vault. " +
+                state.Message = $"{state.Message} The record of it could not be saved to the vault. " +
                     $"Its transaction hash is {result.TxHash} — look the deletion up with that.";
             }
         }
@@ -305,7 +376,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             // blob, only that this call never learned what happened to it. Clearing it forces a
             // fresh preflight either way, which is also the only way to learn what is actually true
             // now.
-            Preview = null;
+            state.Preview = null;
 
             // ThrowawayAccount.DeleteAsync throws XrplFileError.SubmitRefused only after signing and
             // submitting, carrying the node's own engine result: PublishErrorMessages.For's own
@@ -315,13 +386,13 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             // answer was a tec* result; CloseErrorMessages.ClaimsFee is what tells the two apart, so
             // this cannot claim a fee was burned when the node's own answer says otherwise (temDST_IS_SRC
             // above all, which never reaches the ledger and never costs anything).
-            Message = ex.Error == XrplFileError.SubmitRefused
+            state.Message = ex.Error == XrplFileError.SubmitRefused
                 ? CloseErrorMessages.DeletionRefused(CloseErrorMessages.ClaimsFee(ex.EngineResult))
                 : PublishErrorMessages.For(ex);
         }
         catch (VaultException ex)
         {
-            Message = VaultErrorMessages.For(ex.Error);
+            state.Message = VaultErrorMessages.For(ex.Error);
         }
         catch (OperationCanceledException)
         {
@@ -335,13 +406,53 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             // the XrplFileException branch discards it — its Ready conclusion can no longer be
             // trusted either way — and the person is told to check rather than left looking at a
             // screen that simply stopped responding.
-            Preview = null;
-            Message = "The close was interrupted before it could be confirmed either way. Press Check " +
+            state.Preview = null;
+            state.Message = "The close was interrupted before it could be confirmed either way. Press Check " +
                 "again before retrying — the account may already have been closed.";
         }
         finally
         {
-            _closing = false;
+            _closing = null;
+            ClosingChanged?.Invoke();
         }
+    }
+
+    /// <summary>
+    /// Everything the screen shows about one account's close. Private so that nothing outside this
+    /// class can hold the object a call is writing to; the properties above are views of
+    /// <c>_state</c>.
+    /// </summary>
+    private sealed class CloseState
+    {
+        /// <summary>Set last by <see cref="CloseAccountModel.SelectAsync"/>: non-null means resolved.</summary>
+        public string? Reference { get; set; }
+
+        public string? Network { get; set; }
+
+        public string? AccountLabel { get; set; }
+
+        public string? AccountAddress { get; set; }
+
+        public IReadOnlyList<VaultEntryInfo> Candidates { get; set; } = [];
+
+        public string? Destination { get; set; }
+
+        public long DestinationBalanceDrops { get; set; }
+
+        public DeletionResult? Preview { get; set; }
+
+        public long? LedgersRemaining { get; set; }
+
+        public string? Message { get; set; }
+
+        public AccountClosure? Closed { get; set; }
+
+        /// <summary>
+        /// Bumped whenever the destination changes or a preflight starts. A node answer tagged with an
+        /// older value is about a destination or a check nobody is waiting on any more.
+        /// </summary>
+        public int Generation { get; set; }
+
+        public bool CanClose => Preview is { Outcome: DeletionOutcome.Ready } && Destination is not null;
     }
 }
