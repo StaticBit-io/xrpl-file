@@ -337,8 +337,9 @@ else
             {
                 // Nothing observes this task, so a failure is logged here or nowhere. The vault
                 // file could not be read (a sync client holding it, an unplugged volume); NoticeLock
-                // already set Stage to Locked, so the unlock screen is still the right one to draw,
-                // only without the device-unlock offer this read was for.
+                // already set Stage to Locked, so the unlock screen is still the right one to draw.
+                // DeviceUnlockOffered keeps whatever the last successful read left, and a device
+                // unlock that finds no wrap reports that outcome itself.
                 StartupLog.Write("Shell: RefreshAsync after a lock failed", e);
             }
 
