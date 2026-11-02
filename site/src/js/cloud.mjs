@@ -46,6 +46,20 @@ const EDGES = cubeEdgePoints(4);
 
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 
+// After a verified read the scene makes one full turn and stops on the angle where the sway left it.
+// 4.5 s keeps it under the 5 s past which motion that starts on its own needs a pause control
+// (WCAG 2.2.2), and is slow enough for the cubes to be followed round.
+export const TURN_MS = 4500;
+// The figures fade out over the start of the turn and back in over its end, following their cubes
+// meanwhile, so no figure is left pointing at a place its cube has moved away from.
+export const TURN_FADE_MS = 400;
+
+/** The yaw the turn adds `elapsed` ms after it starts: 0 to 2π, eased in and out, so it starts and ends at rest. */
+export function turnOffset(elapsed) {
+  const progress = clamp01(elapsed / TURN_MS);
+  return 2 * Math.PI * progress * progress * (3 - 2 * progress);
+}
+
 /** English placeholders so the cloud works on its own (tests, a page without copy). */
 const DEFAULT_STRINGS = {
   label: (phase, { chunks }) => `Point cloud, ${phase}${chunks === null ? '' : `, ${chunks} chunks`}`,
@@ -173,8 +187,11 @@ export function mountCloud(canvas, options, env = {}) {
   let frameId = null;
   let lastFrameAt = -Infinity;
   let animatedUntil = 0;
-  // The sway stops where it is when the read ends (done or failed): nothing then asks for a frame.
+  // The sway stops where it is when the read ends (done or failed). A verified read then turns the scene
+  // once round to that same angle; after that nothing asks for a frame.
   let swayEnd = Infinity;
+  let turnStart = null;
+  let turnEnd = -Infinity;
   // The camera frame: the whole stretch the scene can use until the manifest names the ledgers, then
   // eased to the ground the file and the manifest actually occupy.
   let frameFrom = FRAME_SPAN;
@@ -226,6 +243,32 @@ export function mountCloud(canvas, options, env = {}) {
     if (caption) caption.dataset.phase = phase;
   }
 
+  function turning(time) {
+    return turnStart !== null && time < turnEnd;
+  }
+
+  /** How visible the figures are: 1 outside the turn, fading out at its start and back in at its end. */
+  function figureAlpha(time) {
+    if (!turning(time)) return 1;
+    const fadeOut = 1 - (time - turnStart) / TURN_FADE_MS;
+    const fadeIn = 1 - (turnStart + TURN_MS - time) / TURN_FADE_MS;
+    return clamp01(Math.max(fadeOut, fadeIn));
+  }
+
+  function startTurn(time) {
+    // Nobody would see it: the scene goes straight to the angle it would have ended on.
+    if (reducedMotion || doc.hidden || !onScreen) return;
+    turnStart = time;
+    turnEnd = time + TURN_MS;
+  }
+
+  /** Ends a running turn on its last frame, which is the angle it started from. */
+  function endTurn() {
+    if (!turning(now())) return;
+    turnEnd = now();
+    requestDraw();
+  }
+
   function currentFrame(time) {
     const eased = timings.zoom > 0 ? clamp01((time - frameStart) / timings.zoom) : 1;
     const smooth = eased * eased * (3 - 2 * eased);
@@ -240,7 +283,8 @@ export function mountCloud(canvas, options, env = {}) {
   function camera(time) {
     const width = canvas.width;
     const height = canvas.height;
-    const yaw = -0.5 + (reducedMotion ? 0 : 0.22 * Math.sin(Math.min(time, swayEnd) / 9000));
+    const sway = reducedMotion ? 0 : 0.22 * Math.sin(Math.min(time, swayEnd) / 9000);
+    const yaw = -0.5 + sway + (turning(time) ? turnOffset(time - turnStart) : 0);
     const elevation = 0.62;
     const [frameLeft, frameRight] = currentFrame(time);
     const spanUnits = frameRight - frameLeft;
@@ -360,7 +404,8 @@ export function mountCloud(canvas, options, env = {}) {
     return cam;
   }
 
-  function drawLeader(ax, ay, topY) {
+  function drawLeader(ax, ay, topY, alpha) {
+    context.globalAlpha = alpha;
     context.strokeStyle = `rgb(${colours.rule.join(',')})`;
     context.lineWidth = dpr;
     context.beginPath();
@@ -371,6 +416,7 @@ export function mountCloud(canvas, options, env = {}) {
     context.beginPath();
     context.arc(ax, ay, 1.5 * dpr, 0, Math.PI * 2);
     context.fill();
+    context.globalAlpha = 1;
   }
 
   // The two figures sit in the top band of the frame, over the sky, one row each, so neither can land on
@@ -380,8 +426,13 @@ export function mountCloud(canvas, options, env = {}) {
   const CALLOUT_ROW_GAP = 8;
 
   /** `side` is the side of its leader the figure's text extends to: 'left' or 'right'. */
-  function placeCallout(element, key, anchor, row, side, cam) {
+  function placeCallout(element, key, anchor, row, side, cam, alpha) {
     if (!element || !anchor) return;
+    element.style.opacity = alpha < 1 ? String(alpha) : '';
+    if (alpha <= 0) {
+      element.classList?.toggle('on', false);
+      return;
+    }
     project(projected, anchor[0], anchor[1], anchor[2], cam);
     const ax = projected[0];
     const ay = projected[1];
@@ -393,7 +444,7 @@ export function mountCloud(canvas, options, env = {}) {
     const size = calloutSizes[key] ?? { w: 0, h: 0 };
     const above = row === 0 ? 0 : (calloutSizes.link?.h ?? 0) + CALLOUT_ROW_GAP;
     const top = canvas.clientHeight * CALLOUT_TOP + above;
-    drawLeader(ax, ay, Math.min(ay, (top + size.h) * dpr));
+    drawLeader(ax, ay, Math.min(ay, (top + size.h) * dpr), alpha);
     const left = canvas.offsetLeft + ax / dpr;
     const flip = side === 'left' || left + size.w > canvas.offsetLeft + canvas.clientWidth - 8;
     const x = Math.max(canvas.offsetLeft + 8, flip ? left - size.w : left);
@@ -406,11 +457,12 @@ export function mountCloud(canvas, options, env = {}) {
     if (!context || !image || canvas.width === 0 || canvas.height === 0) return false;
     const cam = drawScene(time);
     if (layout !== null && callouts) {
-      placeCallout(callouts.file, 'file', timeline.fileAnchor(), 1, 'left', cam);
-      placeCallout(callouts.link, 'link', layout.anchors.manifest, 0, 'right', cam);
+      const alpha = figureAlpha(time);
+      placeCallout(callouts.file, 'file', timeline.fileAnchor(), 1, 'left', cam, alpha);
+      placeCallout(callouts.link, 'link', layout.anchors.manifest, 0, 'right', cam, alpha);
     }
     const swaying = !reducedMotion && time < swayEnd;
-    return swaying || time < animatedUntil;
+    return swaying || turning(time) || time < animatedUntil;
   }
 
   function requestDraw() {
@@ -514,7 +566,10 @@ export function mountCloud(canvas, options, env = {}) {
     onPhase(next) {
       phase = next;
       if (next === 'failed') failedAlpha = FAILED_ALPHA;
-      if ((next === 'done' || next === 'failed') && swayEnd === Infinity) swayEnd = now();
+      if ((next === 'done' || next === 'failed') && swayEnd === Infinity) {
+        swayEnd = now();
+        if (next === 'done') startTurn(swayEnd);
+      }
       setLabel();
     },
     onManifest({ manifest: received, chunks, time }) {
@@ -586,13 +641,19 @@ export function mountCloud(canvas, options, env = {}) {
     ? new IntersectionObserver((entries) => {
       onScreen = entries.at(-1).isIntersecting;
       if (onScreen) requestDraw();
+      else endTurn();
     })
     : null;
   visibilityObserver?.observe(canvas);
   const onVisibility = () => {
-    if (!doc.hidden) requestDraw();
+    if (doc.hidden) endTurn();
+    else requestDraw();
   };
   doc.addEventListener?.('visibilitychange', onVisibility);
+  // Reaching for the cloud or for the card in it stops the turn where it would have ended.
+  const stage = canvas.parentElement ?? canvas;
+  stage.addEventListener?.('pointerdown', endTurn);
+  stage.addEventListener?.('keydown', endTurn);
   resize();
 
   return {
@@ -609,6 +670,8 @@ export function mountCloud(canvas, options, env = {}) {
       visibilityObserver?.disconnect();
       view.removeEventListener?.('resize', resize);
       doc.removeEventListener?.('visibilitychange', onVisibility);
+      stage.removeEventListener?.('pointerdown', endTurn);
+      stage.removeEventListener?.('keydown', endTurn);
     },
   };
 }

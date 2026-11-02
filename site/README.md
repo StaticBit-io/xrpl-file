@@ -281,7 +281,13 @@ and the cube stands on the pad of that ledger) and the 84 bytes of the link come
 more ledgers than ten, a pad stands for a run of neighbouring ledgers and the note under the cloud
 says how many. Drawn: a cube's place within its pad (slots fill in arrival order), the relief of the
 ground and the gap before the manifest's cube (the reader does not report the manifest's own ledger).
-The animation stops when the read is done or has failed.
+The sway stops when the read is done or has failed. A verified read then turns the scene once round,
+eased in and out over `TURN_MS` (4.5 s, under the 5 s past which WCAG 2.2.2 asks for a pause control),
+and it stops on the angle the sway left; a failed read does not turn. The two figures fade out over the
+first 0.4 s and back in over the last, following their cubes meanwhile. There is no turn with reduced
+motion, nor when the cloud is off screen or the tab is hidden at that moment; leaving the screen, hiding
+the tab, or a pointer or key on the cloud ends a running turn on its last frame. After that no frame is
+requested.
 
 A testnet reset, or public nodes without the file's history, breaks it: the cloud then keeps the cubes
 it received and shows a quiet message. That is accepted at launch; to bring the hero back, re-publish
