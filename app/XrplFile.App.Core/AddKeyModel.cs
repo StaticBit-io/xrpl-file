@@ -73,6 +73,17 @@ public sealed record ContainerKeyOption(string Address, string Algorithm, string
 /// </remarks>
 public sealed class AddKeyModel(IKeyVault vault)
 {
+    /// <summary>What <see cref="SelectContainerKey"/> says when a key derives another address than the backup lists.</summary>
+    public const string ContainerAddressMismatchMessage =
+        "This key does not belong to the address the backup lists for it, so it was not imported.";
+
+    /// <summary>
+    /// What <see cref="SelectContainerKey"/> says about a key that signs for its account as a regular
+    /// key: this application signs only with an account's own master key.
+    /// </summary>
+    public const string ContainerRegularKeyMessage =
+        "This key signs for its account as a regular key. Only an account's own master key can be imported here.";
+
     private IReadOnlyList<BackupWalletEntry> _containerWallets = [];
     private NewVaultEntry? _pending;
 
@@ -255,11 +266,21 @@ public sealed class AddKeyModel(IKeyVault vault)
     /// user does not own — that asking instead of guessing avoids.
     /// </param>
     /// <remarks>
+    /// <para>
     /// The address <see cref="ContainerKeyOption.Address"/> already names is not trusted either:
     /// this re-derives it from the container entry's own key material, the same way
-    /// <see cref="Import"/> does for a typed seed, so that a container whose declared address does
-    /// not match its own key is caught here rather than filed away and only surfacing as
-    /// <see cref="VaultError.AddressMismatch"/> the first time it is asked to sign.
+    /// <see cref="Import"/> does for a typed seed, and refuses the key when the two differ. The
+    /// screen names the listed address as the one being imported, so storing the derived one
+    /// instead would file the key under an account the person never chose.
+    /// </para>
+    /// <para>
+    /// One difference is legitimate in the Wallet and still refused here: a wallet that signs with a
+    /// regular key is written with the account as both <c>ClassicAddress</c> and
+    /// <c>MasterAddress</c> and the regular key's seed as <c>KeyValue</c> (the Wallet derives
+    /// <c>masterAddress ?? derived</c>). This application signs only as the address a key derives,
+    /// so such a key would arrive as the regular key's own, usually empty, account. It gets its own
+    /// message rather than the generic mismatch.
+    /// </para>
     /// </remarks>
     /// <returns>
     /// <see langword="true"/> and sets <see cref="Preview"/> on success; otherwise
@@ -293,6 +314,15 @@ public sealed class AddKeyModel(IKeyVault vault)
         catch (FormatException)
         {
             Problem = "This key inside the backup does not look like a valid seed.";
+            return false;
+        }
+
+        // Classic addresses are base58 and compare exactly.
+        if (!string.Equals(derived.ClassicAddress, entry.ClassicAddress, StringComparison.Ordinal))
+        {
+            Problem = string.IsNullOrWhiteSpace(entry.MasterAddress)
+                ? ContainerAddressMismatchMessage
+                : ContainerRegularKeyMessage;
             return false;
         }
 

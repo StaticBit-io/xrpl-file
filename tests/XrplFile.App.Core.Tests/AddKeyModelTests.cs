@@ -586,6 +586,47 @@ public class AddKeyModelTests : VaultHarness
         Assert.NotNull(model.Problem);
     }
 
+    [Fact]
+    public void A_container_key_that_derives_another_address_than_the_backup_lists_is_refused()
+    {
+        // The screen shows the listed address as the one being imported; storing a different one
+        // without a word would file a key under an account the person never chose.
+        XrplWallet listed = XrplWallet.Generate();
+        XrplWallet actual = XrplWallet.Generate();
+        BackupWalletEntry mismatched = EntryFor(actual, "mismatched") with { ClassicAddress = listed.ClassicAddress };
+        byte[] container = BackupContainer.Pack(PayloadOf(mismatched), "p", iterations: 1000);
+        AddKeyModel model = new(NewVault());
+        model.OpenContainer(container, "p");
+
+        Assert.False(model.SelectContainerKey(0, "mine", "testnet"));
+
+        Assert.Null(model.Preview);
+        Assert.Equal(AddKeyModel.ContainerAddressMismatchMessage, model.Problem);
+    }
+
+    [Fact]
+    public void A_container_key_that_signs_for_its_account_as_a_regular_key_is_refused_with_its_own_reason()
+    {
+        // The Wallet writes such an entry with the account as ClassicAddress and MasterAddress and
+        // the regular key's seed as KeyValue. This application signs only with an account's master
+        // key, so the key's own address is not the account the backup is about.
+        XrplWallet account = XrplWallet.Generate();
+        XrplWallet regularKey = XrplWallet.Generate();
+        BackupWalletEntry regular = EntryFor(regularKey, "regular") with
+        {
+            ClassicAddress = account.ClassicAddress,
+            MasterAddress = account.ClassicAddress,
+        };
+        byte[] container = BackupContainer.Pack(PayloadOf(regular), "p", iterations: 1000);
+        AddKeyModel model = new(NewVault());
+        model.OpenContainer(container, "p");
+
+        Assert.False(model.SelectContainerKey(0, "mine", "testnet"));
+
+        Assert.Null(model.Preview);
+        Assert.Equal(AddKeyModel.ContainerRegularKeyMessage, model.Problem);
+    }
+
     // The network a key is stored under is what a link names and what Endpoints.For resolves, so a
     // value that differs only in case or padding must reach the vault in its canonical form, and one
     // no link can name must not reach it at all -- for each of the three ways in.
