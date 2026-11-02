@@ -201,6 +201,8 @@
             return;
         }
 
+        // A problem from an earlier attempt would otherwise outlive a delete that then succeeds.
+        _deleteProblem = null;
         _busy = true;
         StateHasChanged();
         try
