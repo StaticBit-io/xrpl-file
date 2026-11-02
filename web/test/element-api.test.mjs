@@ -250,6 +250,30 @@ test('caption="off" keeps the caption hidden after load, and removing the attrib
   assert.equal(caption.hidden, false, 'any value but off keeps today\'s behaviour');
 });
 
+test('background="transparent" marks the frame, and the mark follows the attribute live', () => {
+  const element = mount(fakeHandle(), { src: LINK, loading: 'eager' });
+  const frame = element.shadowRoot.node('frame');
+  assert.equal(frame.dataset.background, undefined, 'no attribute keeps the theme box');
+
+  element.setAttribute('background', 'transparent');
+  assert.equal(frame.dataset.background, 'transparent');
+  element.setAttribute('background', 'theme');
+  assert.equal(frame.dataset.background, undefined, 'any other value keeps the box');
+  element.setAttribute('background', 'Transparent');
+  assert.equal(frame.dataset.background, 'transparent');
+  element.removeAttribute('background');
+  assert.equal(frame.dataset.background, undefined);
+});
+
+test('background set before the element is built applies from the start', () => {
+  const element = mount(fakeHandle(), { background: 'transparent', src: LINK, loading: 'eager' });
+  assert.equal(element.shadowRoot.node('frame').dataset.background, 'transparent');
+});
+
+test('the background attribute is observed', () => {
+  assert.ok(XrplFileElement.observedAttributes.includes('background'));
+});
+
 test('the caption attribute is observed', () => {
   assert.ok(XrplFileElement.observedAttributes.includes('caption'));
 });

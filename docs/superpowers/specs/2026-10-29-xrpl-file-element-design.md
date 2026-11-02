@@ -159,6 +159,9 @@ with ordinary CSS: classes, `style`, its parent's grid or flex.
 | `loading` | `lazy`, `eager`, `click` | `lazy` | when loading starts (2.3) |
 | `loader` | `true`, `false` | `true` | `false` keeps the reserved space empty until content is ready, for sites that draw their own placeholder |
 | `node` | a `wss://` URL | the built-in endpoints for the link's network | read from this node instead **(builder's call)**. `ws://` is accepted only for `localhost` and `127.0.0.1`, for testing. A link to a network with no built-in endpoints (a numeric network ID) and no `node` shows "This network has no built-in node. Set the node attribute." and fires `error` |
+| `theme` | `dark`, `light`, `auto` | `dark` | the colour palette; `auto` follows the visitor's `prefers-color-scheme` (added in 1.1.0) |
+| `background` | `transparent` | the theme's box | `transparent` drops the box and the empty-box scrim, so a picture sits on the page itself; it wins over `--xrpl-file-background`. Text, video letterbox, cover backing, overlay and caption keep their backing. Text colours still follow `theme`, so the embedder picks the theme that matches its page (added in 1.1.0) |
+| `caption` | `off` | shown | `off` removes the hover caption (added in 1.1.0) |
 
 Styling hooks for the inside:
 

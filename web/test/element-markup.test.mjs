@@ -154,3 +154,20 @@ test('the frame accent does not read the overlay accent', () => {
   assert.match(frame, /--on-accent:\s*var\(--xrpl-file-on-accent,\s*var\(--t-on-accent\)\);/);
   assert.doesNotMatch(frame, /overlay-accent|overlay-on-accent/);
 });
+
+test('a transparent frame drops the box even over --xrpl-file-background, which still sets it without the attribute', () => {
+  const frame = STYLES.slice(STYLES.indexOf('.frame {'), STYLES.indexOf('.frame[data-theme="light"]'));
+  assert.match(frame, /--background:\s*var\(--xrpl-file-background,\s*var\(--t-background\)\);/);
+  assert.match(frame, /\sbackground:\s*var\(--background\);/);
+  const rule = STYLES.match(/\.frame\[data-background="transparent"\] \{([^}]*)\}/)[1];
+  assert.match(rule, /background:\s*transparent;/, 'a literal, not a variable a page could set');
+});
+
+test('a transparent frame turns off the empty-box scrim and nothing that sits on content', () => {
+  const css = STYLES.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.frame\[data-background="transparent"\] \.idle:not\(\.covered\) \.scrim \{\s*background:\s*none;\s*\}/);
+  const rules = [...css.matchAll(/([^{}]*data-background[^{}]*)\{/g)].map((match) => match[1].trim());
+  assert.deepEqual(rules, ['.frame[data-background="transparent"]', '.frame[data-background="transparent"] .idle:not(.covered) .scrim']);
+  assert.match(css, /\.text \{[^}]*background: var\(--text-background\);/, 'the text view keeps its own backing');
+  assert.match(css, /\.idle\.covered \.scrim \{ background: var\(--xrpl-file-scrim,/, 'a cover keeps its scrim');
+});

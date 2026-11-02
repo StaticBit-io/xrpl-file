@@ -8,7 +8,7 @@ import { prepare, loadWhole, progressDetail, loadDetail } from './load.mjs';
 import { pool, PRIORITY } from './page.mjs';
 import { saveFile } from './download.mjs';
 import { copyText, execCopyIn } from './clipboard.mjs';
-import { parseLength, parseLoading, parseLoader, parseTheme, captionHidden, linkText, endpointsFor } from './attributes.mjs';
+import { parseLength, parseLoading, parseLoader, parseTheme, backgroundTransparent, captionHidden, linkText, endpointsFor } from './attributes.mjs';
 import { viewForType, magicAgrees, normalizeType } from './view.mjs';
 import { textPreview, TEXT_LIMIT } from './text.mjs';
 import { VideoView } from './video.mjs';
@@ -62,7 +62,7 @@ function sharedStyles() {
 }
 
 export class XrplFileElement extends HTMLElement {
-  static observedAttributes = ['src', 'width', 'height', 'loading', 'loader', 'node', 'theme', 'caption'];
+  static observedAttributes = ['src', 'width', 'height', 'loading', 'loader', 'node', 'theme', 'background', 'caption'];
 
   #parts = {};
   #connected = false;
@@ -109,6 +109,7 @@ export class XrplFileElement extends HTMLElement {
     this.#wire();
     this.#applySizing();
     this.#applyTheme();
+    this.#applyBackground();
   }
 
   connectedCallback() {
@@ -132,6 +133,9 @@ export class XrplFileElement extends HTMLElement {
         break;
       case 'theme':
         this.#applyTheme();
+        break;
+      case 'background':
+        this.#applyBackground();
         break;
       case 'caption':
         this.#renderCaption();
@@ -203,6 +207,12 @@ export class XrplFileElement extends HTMLElement {
 
   #applyTheme() {
     this.#parts.frame.dataset.theme = parseTheme(this.getAttribute('theme'));
+  }
+
+  #applyBackground() {
+    const { dataset } = this.#parts.frame;
+    if (backgroundTransparent(this.getAttribute('background'))) dataset.background = 'transparent';
+    else delete dataset.background;
   }
 
   #setRatio(stage, width, height) {

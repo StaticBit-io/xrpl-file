@@ -86,6 +86,7 @@ path, so a page that embeds `1.1.0` never changes under itself. The host serves 
 | `loader` | `true` (default), `false` | `false` keeps the reserved space empty until the content is ready, for sites that draw their own placeholder |
 | `node` | a `wss://` URL | read from this node instead of the built-in ones; `ws://` is accepted only for `localhost` and `127.0.0.1`. A numeric network ID has no built-in node and needs this attribute |
 | `theme` | `dark` (default), `light`, `auto` | the colour palette; `auto` follows the visitor's `prefers-color-scheme`, any other value is `dark` |
+| `background` | `transparent` | `transparent` drops the box behind the file and the dark theme's shading of an empty box, so a picture with transparent parts sits on the page itself; it wins over `--xrpl-file-background`. A text file, the bars around a video, the backing of a cover, the overlay and the caption keep theirs. Text colours still follow `theme`: pick the theme that matches your page. Any other value, or none, keeps the box |
 | `caption` | `off` | `off` removes the caption that appears on hover, with its copy button, for a page that shows the name, the link and a download control of its own; any other value, or none, keeps it |
 
 The inside is styled with the `theme` attribute, with the CSS custom properties below, and with
@@ -103,7 +104,7 @@ accent goes together with `--xrpl-file-on-accent`, the text on it. These follow 
 |---|---|---|---|
 | `--xrpl-file-accent` | `#4da3ff` | `#0b62c4` | buttons, progress, spinner, focus ring |
 | `--xrpl-file-on-accent` | `#06121f` | `#ffffff` | text and icons on the accent |
-| `--xrpl-file-background` | `#14161a` | `#f3f4f6` | the box |
+| `--xrpl-file-background` | `#14161a` | `#f3f4f6` | the box, unless `background="transparent"` |
 | `--xrpl-file-foreground` | `#e8e8ea` | `#1b1d22` | names, percentages, the type badge |
 | `--xrpl-file-muted` | `#9a9ca3` | `#5b5f6b` | sizes, progress details, notes, the badge border |
 | `--xrpl-file-track` | `rgba(255,255,255,.15)` | `rgba(0,0,0,.16)` | the unfilled part of the progress bar and spinner |

@@ -119,6 +119,11 @@ export const STYLES = `
 
   .idle.covered { background: var(--media); }
   .idle .scrim { position: absolute; inset: 0; background: var(--xrpl-file-scrim, var(--t-scrim)); }
+  /* background="transparent": the box gives way to the page under it, over any --xrpl-file-background, and the
+     empty-box scrim goes with it, or it would darken the page. What sits on content keeps its own backing:
+     a cover's scrim, the text view, the video letterbox, the overlay and the caption. */
+  .frame[data-background="transparent"] { background: transparent; }
+  .frame[data-background="transparent"] .idle:not(.covered) .scrim { background: none; }
   .idle.covered .scrim { background: var(--xrpl-file-scrim, linear-gradient(to top, rgba(0,0,0,.65), rgba(0,0,0,.15))); }
   .error .message { color: var(--danger); font-size: 14px; font-size: clamp(11px, 4.4cqi, 14px); padding: 0 18px; padding: 0 clamp(8px, 5.6cqi, 18px); max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
   .msg-icon, .msg-short { display: none; }

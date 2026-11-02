@@ -29,6 +29,11 @@ export function parseTheme(value) {
   return THEMES.has(text) ? text : 'dark';
 }
 
+/** The `background` attribute: `transparent` drops the box behind the file; any other value, or none, keeps the theme's. */
+export function backgroundTransparent(value) {
+  return typeof value === 'string' && value.trim().toLowerCase() === 'transparent';
+}
+
 /** The `caption` attribute: `off` hides the hover caption; any other value, or none, keeps it. */
 export function captionHidden(value) {
   return typeof value === 'string' && value.trim().toLowerCase() === 'off';
