@@ -95,13 +95,14 @@ public sealed class PublicationHistory : IPublicationHistory
     /// Set by <see cref="RecordFinishedRuns"/> when it held back a finished publication it could not
     /// add to the list, or <see langword="null"/> when it held back nothing. Unlike
     /// <see cref="Failure"/> it is not reset by later calls: the publications stay held back until
-    /// the next start-up tries again.
+    /// a start-up that can read and write the list records them, however the file came to be
+    /// readable meanwhile.
     /// </summary>
     public string? RecoveryNote { get; private set; }
 
     private const string HeldBackNote =
         "Some publications that finished earlier are not in this list yet, because it could not be updated. "
-        + "Their links are kept and will be added the next time the application starts.";
+        + "Their links are kept and are added when the application starts with a list it can read and write.";
 
     /// <summary>Newest first. An unreadable file reads as empty and sets <see cref="Failure"/>.</summary>
     public IReadOnlyList<PublicationRecord> Read()
