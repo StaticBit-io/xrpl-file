@@ -55,7 +55,7 @@ the root of `dist/`.
 
 | Rule | Meaning | nginx |
 |---|---|---|
-| `/ru/:file /ru/:file 200`, and the same for `/de`, `/es`, `/pt`, `/zh`, `/js`, `/css`, `/data`, `/fonts`, `/img` | Static files in a two-segment folder are served as themselves. The four language folders are listed before they exist (see [Languages](#languages)). | `location ~ ^/(ru\|de\|es\|pt\|zh\|js\|css\|data\|fonts\|img)/ { try_files $uri =404; }` |
+| `/ru/:file /ru/:file 200`, and the same for `/de`, `/es`, `/pt`, `/zh`, `/js`, `/css`, `/data`, `/fonts`, `/img` | Static files in a two-segment folder are served as themselves. All five language folders are listed (see [Languages](#languages)). | `location ~ ^/(ru\|de\|es\|pt\|zh\|js\|css\|data\|fonts\|img)/ { try_files $uri =404; }` |
 | `/:network/:hash /file 200` | A file link path (`/testnet/<HASH>`, `/21338/<HASH>`) is answered by the one static file page (`file.html`), without changing the URL. The page reads the path. The target is the extension-less `/file`: Pages applies its HTML handling to a rewritten target too, so a target spelled `/file.html` is answered with a redirect to `/file` and the link in the path is lost. | `location ~* ^/(mainnet|testnet|devnet|[0-9]+)/[0-9a-f]{64}/?$ { try_files /file.html =404; }` |
 | `/:network/:hash/ /file 200` | The same with a trailing slash. | the `/?` in the pattern above |
 
@@ -178,15 +178,14 @@ The site is built for six languages. A language is a data change: its words, its
 |---|---|---|---|---|
 | `en` | `/` | `en` | `en-GB` | yes, written by hand |
 | `ru` | `/ru/` | `ru` | `ru-RU` | yes, written by hand |
-| `de` | `/de/` | `de` | `de-DE` | not yet |
-| `es` | `/es/` | `es` | `es-ES` | not yet |
-| `pt` | `/pt/` | `pt` | `pt-BR` | not yet |
-| `zh` | `/zh/` | `zh-Hans` | `zh-Hans-CN` | not yet |
+| `de` | `/de/` | `de` | `de-DE` | yes, translated from English, awaiting a native speaker's review |
+| `es` | `/es/` | `es` | `es-ES` | yes, translated from English, awaiting a native speaker's review |
+| `pt` | `/pt/` | `pt` | `pt-BR` | yes, translated from English, awaiting a native speaker's review |
+| `zh` | `/zh/` | `zh-Hans` | `zh-Hans-CN` | yes, translated from English, awaiting a native speaker's review |
 
-German, Spanish, Portuguese and Chinese are translated from the final English text and await a native
-speaker's review; when they ship, they stay marked here until a native speaker has read them. English
-and Russian are written by hand. The locales are chosen for readers, not for a region: English is
-`en-GB` for its "2 November 2026" date, Portuguese is Brazilian, Spanish uses a decimal comma
+Translated from English, awaiting a native speaker's review: de, es, pt, zh. They stay marked here until a
+native speaker has read them. English and Russian are written by hand. The locales are chosen for
+readers, not for a region: English is `en-GB` for its "2 November 2026" date, Portuguese is Brazilian, Spanish uses a decimal comma
 (`es-ES`), and Chinese is Simplified for mainland China, which is why its tag carries the script.
 
 ### The active list
@@ -242,10 +241,10 @@ and leaves the URL alone.
 
 ### Status
 
-German, Spanish, Portuguese and Chinese await translation (the infrastructure is in place and the
-four are not in `ACTIVE_LANGS`). The translator fills the tables above and creates the four home
-pages from the English one. Their texts are translated from English and need a native speaker's review
-before the languages are called done.
+German, Spanish, Portuguese and Chinese are in `ACTIVE_LANGS` and ship, translated from English and
+awaiting a native speaker's review: de, es, pt, zh. A reviewer should start with the terms for ledger,
+chunk, block, manifest, reserve and fee: German keeps "Ledger" and "Chunk", Spanish and Portuguese keep
+"ledger" and say fragmento, and Chinese says 账本, 分片, 数据块, 清单 and 储备金.
 
 ## The hero file and its durability
 

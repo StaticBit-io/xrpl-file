@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xrpl-file: guarde um arquivo no XRP Ledger</title>
+<meta name="description" content="O xrpl-file grava um arquivo no XRP Ledger e o lê de volta conferido pela impressão digital. Guarde a imagem e os metadados de um token no mesmo ledger do token.">
+<!--@chrome:head-->
+<script type="module" src="/js/home.mjs"></script>
+</head>
+<body>
+<!--@chrome:header-->
+<main id="main">
+<section class="hero container" aria-labelledby="hero-title">
+<div class="hero__text">
+<h1 id="hero-title">Guarde um arquivo no XRP Ledger</h1>
+<p class="lead">A imagem do seu token ou qualquer outro arquivo, gravado no mesmo ledger do token e lido de volta com conferência da impressão digital.</p>
+<p>Os cubos mostram os fragmentos de um arquivo real à medida que são lidos do ledger. Quando cada bloco é conferido pela impressão digital, o arquivo aparece ao lado.</p>
+<form id="check-link" class="check" novalidate>
+<label for="check-link-input">Verificar um link</label>
+<div class="check__row">
+<input id="check-link-input" class="field" type="text" name="link" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xrpl-file://testnet/…">
+<button class="button" type="submit">Abrir</button>
+</div>
+<p id="check-link-error" class="check__error" role="alert"></p>
+</form>
+<div class="publisher">
+<button id="publisher" class="button button--quiet" type="button" disabled aria-describedby="publisher-hint"><span data-label>Baixar o aplicativo de publicação</span> <span class="tag">em breve</span></button>
+<p id="publisher-hint" class="hint">O aplicativo para Windows que grava seus arquivos no ledger.</p>
+</div>
+</div>
+<figure class="hero__figure">
+<div class="hero-cloud ticks">
+<canvas id="hero-cloud" class="cloud" role="img" aria-label="Nuvem de pontos de um trecho do XRP Ledger. O arquivo está sendo lido do ledger"></canvas>
+<div id="co-file" class="callout" aria-hidden="true"></div>
+<div id="co-link" class="callout" aria-hidden="true"></div>
+<div id="hero-card" class="hero-card" hidden></div>
+</div>
+<figcaption id="hero-caption" class="cloud-caption"></figcaption>
+<p id="hero-note" class="cloud-note"></p>
+</figure>
+</section>
+
+<section class="band band--quiet" aria-labelledby="problem-title">
+<div class="container">
+<div class="head">
+<h2 id="problem-title">Links para metadados se perdem</h2>
+<p>Quando um NFT, um MPT, um DID ou uma credencial guarda a imagem e a descrição fora do ledger, a entrada do ledger contém apenas um link. O arquivo fica no IPFS, no servidor do próprio emissor ou em um bucket do S3.</p>
+</div>
+<ul class="faults">
+<li><strong>IPFS sem pinning</strong>O pinning deixa de ser pago e o arquivo some do IPFS.</li>
+<li><strong>Um servidor encerrado</strong>A empresa encerra as atividades ou muda, e o endereço passa a responder com erro.</li>
+<li><strong>Um bucket encerrado</strong>A conta de armazenamento é encerrada, e os arquivos vão junto.</li>
+</ul>
+<p>Essa entrada continua no ledger, mas o arquivo por trás do link pode se perder. Com o xrpl-file, o arquivo é gravado no mesmo ledger, em transações que não podem ser alteradas nem excluídas, e qualquer pessoa pode conferi-lo pela impressão digital sem confiar em um servidor. O link do xrpl-file tem 84 bytes, e o campo URI de um NFT comporta 256.</p>
+</div>
+</section>
+
+<section class="band" aria-labelledby="how-title">
+<div class="container">
+<div class="head">
+<h2 id="how-title">Do arquivo ao link e de volta</h2>
+</div>
+<ol class="steps">
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-1"><title id="step-drawing-1">Um arquivo à esquerda; à direita, os fragmentos em que ele é dividido, desenhados como células.</title><rect class="c" x="4" y="16" width="40" height="56" rx="2"/><path class="line" d="M12 30h24"/><path class="line" d="M12 40h24"/><path class="line" d="M12 50h24"/><path class="line" d="M12 60h24"/><path class="link" d="M52 44h20m-6-5 6 5-6 5"/><rect class="c lit" x="80" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="8" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="26" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="116" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="134" y="44" width="14" height="14" rx="1.5"/><rect class="c lit" x="80" y="62" width="14" height="14" rx="1.5"/><rect class="c lit" x="98" y="62" width="14" height="14" rx="1.5"/></svg>
+<h3>Dividido em fragmentos</h3>
+<p>O arquivo é dividido em pedaços de 1000 bytes cada, chamados de fragmentos.</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-2"><title id="step-drawing-2">Três fragmentos, cada um dentro da sua própria transação.</title><rect class="c lit" x="4" y="9" width="14" height="14" rx="1.5"/><path class="link" d="M24 16h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="4" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="9" width="14" height="14" rx="1.5"/><path class="line" d="M80 13h62M80 20h36"/><rect class="c lit" x="4" y="41" width="14" height="14" rx="1.5"/><path class="link" d="M24 48h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="36" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="41" width="14" height="14" rx="1.5"/><path class="line" d="M80 45h62M80 52h36"/><rect class="c lit" x="4" y="73" width="14" height="14" rx="1.5"/><path class="link" d="M24 80h20m-6-5 6 5-6 5"/><rect class="c" x="52" y="68" width="104" height="24" rx="2"/><rect class="c lit" x="58" y="73" width="14" height="14" rx="1.5"/><path class="line" d="M80 77h62M80 84h36"/></svg>
+<h3>Gravado em transações</h3>
+<p>Cada fragmento é gravado em uma transação própria, no campo memo.</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-3"><title id="step-drawing-3">Dois grupos de fragmentos, cada um reduzido a um hash. Os dois hashes levam a um único manifesto.</title><rect class="c lit" x="8" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="24" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="40" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="56" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="92" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="108" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="124" y="4" width="12" height="12" rx="1.5"/><rect class="c lit" x="140" y="4" width="12" height="12" rx="1.5"/><path class="line" d="M8 22h60M92 22h60"/><rect class="c ok" x="32" y="30" width="12" height="12" rx="1.5"/><rect class="c ok" x="116" y="30" width="12" height="12" rx="1.5"/><path class="line" d="M38 46v8h42v6M122 46v8H80v6"/><rect class="c ok" x="70" y="62" width="20" height="20" rx="1.5"/></svg>
+<h3>Com impressão digital</h3>
+<p>A cada 1024 fragmentos forma-se um bloco, e o hash do bloco entra em uma lista de blocos. Uma última transação, o manifesto, guarda a impressão digital da lista inteira. O hash dessa transação é o link.</p>
+</li>
+<li class="step">
+<svg class="step__drawing diagram" viewBox="0 0 160 88" role="img" aria-labelledby="step-drawing-4"><title id="step-drawing-4">Uma grade de fragmentos verificados que, juntos, formam uma imagem.</title><rect class="c ok" x="32" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="72" y="8" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="92" y="8" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="112" y="8" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="32" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="52" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="72" y="28" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="92" y="28" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="112" y="28" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="32" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="52" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="72" y="48" width="16" height="16" rx="1.5" fill-opacity="0.8"/><rect class="c ok" x="92" y="48" width="16" height="16" rx="1.5" fill-opacity="1"/><rect class="c ok" x="112" y="48" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="32" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/><rect class="c ok" x="52" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="72" y="68" width="16" height="16" rx="1.5" fill-opacity="0.5"/><rect class="c ok" x="92" y="68" width="16" height="16" rx="1.5" fill-opacity="0.65"/><rect class="c ok" x="112" y="68" width="16" height="16" rx="1.5" fill-opacity="0.35"/></svg>
+<h3>Lido e verificado</h3>
+<p>Quem tem o link obtém os fragmentos de um nó do XRP Ledger, monta o arquivo e confere cada bloco com a impressão digital. Um arquivo que não bate com a impressão digital não é exibido. O servidor deste site não participa disso.</p>
+</li>
+</ol>
+</div>
+</section>
+
+<section class="band band--quiet" aria-labelledby="price-title">
+<div class="container">
+<div class="head">
+<h2 id="price-title">Quanto custa</h2>
+<p>Um arquivo entra no ledger com cerca de uma transação por quilobyte. Para cada arquivo, o aplicativo de publicação abre uma conta descartável e a exclui quando o arquivo está gravado. Há dois tipos de custo. As taxas são gastas. Uma reserva fica retida enquanto o arquivo é gravado, e a maior parte da reserva volta.</p>
+</div>
+<div id="price-data" class="price-data"><p class="hint">A tabela de preços não está disponível agora. Os valores também estão no arquivo de dados <a href="/data/price.json">price.json</a>.</p></div>
+</div>
+</section>
+
+<section class="band" aria-labelledby="permanent-title">
+<div class="container">
+<div class="head">
+<h2 id="permanent-title">Permanente e público</h2>
+</div>
+<div class="facts">
+<div>
+<h3>Não pode ser excluído</h3>
+<p>O que é gravado no ledger fica lá. Ninguém pode excluir nem alterar, nem você nem nós.</p>
+</div>
+<div>
+<h3>Qualquer pessoa pode ler</h3>
+<p>Qualquer pessoa pode ler o arquivo. Os dados do ledger são abertos a todos, e o link não é segredo.</p>
+</div>
+</div>
+<p class="notice">Publique apenas o que você aceita mostrar ao mundo inteiro para sempre: nada de senhas, dados pessoais ou imagens que você não tem o direito de compartilhar.</p>
+</div>
+</section>
+
+<section class="band band--quiet" aria-labelledby="developers-title">
+<div class="container">
+<div class="head">
+<h2 id="developers-title">Para desenvolvedores</h2>
+<p>A especificação descreve o formato. O repositório tem uma biblioteca .NET e um leitor para o navegador.</p>
+</div>
+<ul class="devlinks">
+<li><a href="https://github.com/StaticBit-io/xrpl-file/blob/main/docs/spec/xrpl-file-v1.md">Especificação</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file">Repositório</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file/tree/main/src/XrplFile.Core">Biblioteca .NET</a></li>
+<li><a href="https://github.com/StaticBit-io/xrpl-file/tree/main/web/src">Leitor para o navegador</a></li>
+</ul>
+<h3>Exibir um arquivo na sua página</h3>
+<p>Adicione o script e o elemento. O script está fixado na versão 1.1.0 e é conferido pelo valor integrity: se o arquivo mudar, o navegador não o executa.</p>
+<div class="snippet">
+<p class="snippet__label">Do npm, pelo jsDelivr</p>
+<pre tabindex="0" aria-label="Código para incorporar: Do npm, pelo jsDelivr"><code id="embed-snippet"><!--@element-snippet--></code></pre>
+<div class="snippet__bar">
+<button id="snippet-copy" class="button button--quiet" type="button" aria-label="Copiar o código para incorporar: Do npm, pelo jsDelivr">Copiar</button>
+<span id="snippet-status" class="snippet__status" role="status"></span>
+</div>
+</div>
+<div class="snippet">
+<p class="snippet__label">O mesmo arquivo, a partir deste site</p>
+<pre tabindex="0" aria-label="Código para incorporar: O mesmo arquivo, a partir deste site"><code id="embed-snippet-alt"><!--@element-snippet-alt--></code></pre>
+<div class="snippet__bar">
+<button id="snippet-copy-alt" class="button button--quiet" type="button" aria-label="Copiar o código para incorporar: O mesmo arquivo, a partir deste site">Copiar</button>
+<span id="snippet-status-alt" class="snippet__status" role="status"></span>
+</div>
+</div>
+<p class="attributes"><code>width</code> e <code>height</code> definem o tamanho, <code>loading</code> diz quando a leitura começa, <code>theme</code> escolhe a paleta clara ou escura e <code>node</code> indica o nó de onde o arquivo é lido. A lista completa está no README: <a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">Incorporar um arquivo</a>.</p>
+</div>
+</section>
+</main>
+<!--@chrome:footer-->
+</body>
+</html>

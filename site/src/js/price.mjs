@@ -5,7 +5,14 @@ import { localeOf } from './languages.mjs';
 const DROPS_PER_XRP = 1_000_000;
 
 /** The size units of the estimate's table, per language. */
-export const SIZE_UNITS = { en: { B: 'B', KB: 'KB', MB: 'MB' }, ru: { B: 'Б', KB: 'КБ', MB: 'МБ' } };
+export const SIZE_UNITS = {
+  en: { B: 'B', KB: 'KB', MB: 'MB' },
+  ru: { B: 'Б', KB: 'КБ', MB: 'МБ' },
+  de: { B: 'B', KB: 'KB', MB: 'MB' },
+  es: { B: 'B', KB: 'KB', MB: 'MB' },
+  pt: { B: 'B', KB: 'KB', MB: 'MB' },
+  zh: { B: 'B', KB: 'KB', MB: 'MB' },
+};
 
 const numberFormats = new Map();
 const dateFormats = new Map();
