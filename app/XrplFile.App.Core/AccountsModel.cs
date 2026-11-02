@@ -16,15 +16,19 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
     /// <summary>What the Balance column says while a node is being asked.</summary>
     public const string CheckingBalance = "Checking…";
 
-    /// <summary>What the Balance column says when the last read of the row failed.</summary>
-    public const string UnreadBalance = "Not available. Press Check to try again.";
+    /// <summary>
+    /// What the Balance column says when the last read of the row failed. Short on purpose: it sits in
+    /// a column sized for an amount, and <see cref="Message"/> above the list already says why and what
+    /// to do.
+    /// </summary>
+    public const string UnreadBalance = "Not read";
 
     /// <summary>
     /// Why a read from a node came back with nothing. Its own sentence, not the publication one:
     /// a balance check spends nothing, so "nothing was spent" would answer a question nobody asked.
     /// </summary>
     public const string ReadFailedMessage =
-        "The node did not answer, so the balance could not be read. Check the node URL in Settings, then press Check to try again.";
+        "The node did not answer, so the balance could not be read. Check the node URL in Settings, then choose Check balance from the account's menu to try again.";
 
     // One gate for _rows, _checking and Rows: the model is a singleton, its continuations run on
     // pool threads (ConfigureAwait(false)) while the renderer and Check clicks touch the same state.

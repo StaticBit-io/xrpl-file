@@ -197,7 +197,7 @@ code { font-family: var(--font-mono); font-size: 0.8125rem; color: var(--text); 
     --bs-table-hover-bg: var(--chips); --bs-table-hover-color: var(--text);
     margin-bottom: 0;
 }
-.table > thead th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); font-weight: 500; }
+.table > thead th { font-size: 0.8125rem; color: var(--text-secondary); font-weight: 500; white-space: nowrap; }
 .xf-kv-table th { color: var(--text-secondary); font-weight: 400; }
 .xf-kv-table td { text-align: right; font-variant-numeric: tabular-nums; }
 
@@ -276,9 +276,161 @@ progress { accent-color: var(--mint); }
 
 /* ---- Pages ---- */
 
-.xf-page { box-sizing: border-box; max-width: 1600px; padding: 20px 26px; min-width: 0; }
-.xf-title { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 14px; }
-.xf-section-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); font-weight: 500; margin: 0 0 12px; }
+/* One measure per page, not per element: the heading row, its buttons and every card share the page's
+   edges, so a button in the heading lines up with the content under it. A page that lists data opts
+   into the wide measure (.xf-page-wide); everything else reads at the narrow one, where a form label
+   stays near its field and a line of prose stays under ~90 characters. */
+.xf-page { box-sizing: border-box; max-width: 800px; padding: 24px 32px 40px; min-width: 0; }
+.xf-page.xf-page-wide { max-width: 1180px; }
+.xf-page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 20px; }
+.xf-page-head .xf-title { margin: 0; }
+.xf-page-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.xf-title { font-size: 1.375rem; font-weight: 600; letter-spacing: -0.015em; margin: 0 0 16px; }
+.xf-lede { color: var(--text-secondary); max-width: 72ch; margin: 0 0 16px; }
+.xf-section-title { font-size: 0.9375rem; color: var(--text); font-weight: 600; letter-spacing: -0.005em; margin: 0 0 10px; }
+
+/* A sub-screen names the screen it returns to above its own title, where a person looks for "back". */
+.xf-back { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; margin: -4px 0 8px -8px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); font: inherit; font-weight: 500; cursor: pointer; }
+.xf-back:hover { color: var(--text); background: var(--chips); }
+.xf-back svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+.xf-section { margin-bottom: 32px; }
+.xf-section-head { margin-bottom: 12px; }
+.xf-section-head h2 { font-size: 1rem; font-weight: 600; margin: 0 0 4px; }
+.xf-section-head p { color: var(--text-secondary); margin: 0; max-width: 90ch; }
+.xf-empty { color: var(--text-secondary); border: 1px dashed var(--dark-gray); border-radius: var(--radius-card); padding: 18px; margin: 0; }
+
+/* ---- Account list ---- */
+
+/* A list, not a table: each account is one row whose parts keep their own line, so a long address or
+   a countdown never pushes the actions out of the card and nothing scrolls sideways. Below 960px the
+   row folds into two lines (who the account is, then its numbers). */
+.xf-card.xf-list { padding: 0; overflow: visible; }
+.xf-list > ul { list-style: none; margin: 0; padding: 0; }
+.xf-account {
+    display: grid; align-items: center; column-gap: 20px; row-gap: 6px; padding: 14px 18px;
+    grid-template-columns: minmax(0, 1.7fr) 88px minmax(110px, 0.8fr) minmax(0, 1.2fr) 132px;
+    grid-template-areas: "id net balance status actions";
+}
+.xf-account + .xf-account { border-top: 1px solid var(--dark-gray); }
+.xf-account-head { padding-top: 10px; padding-bottom: 10px; color: var(--text-secondary); font-size: 0.8125rem; font-weight: 500; }
+.xf-account-head > :nth-child(1) { grid-area: id; }
+.xf-account-head > :nth-child(2) { grid-area: net; }
+.xf-account-head > :nth-child(3) { grid-area: balance; text-align: right; }
+.xf-account-head > :nth-child(4) { grid-area: status; }
+.xf-account-id { grid-area: id; min-width: 0; }
+.xf-account-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 600; }
+.xf-account-address { display: block; margin-top: 2px; color: var(--text-secondary); font-size: 0.8125rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.xf-account-net { grid-area: net; }
+.xf-account-balance { grid-area: balance; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 500; }
+.xf-account-balance.is-unread { color: var(--text-secondary); font-weight: 400; }
+.xf-account-status { grid-area: status; min-width: 0; }
+.xf-account-status small { display: block; margin-top: 3px; color: var(--text-secondary); font-size: 0.75rem; overflow-wrap: anywhere; }
+.xf-account-actions { grid-area: actions; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+
+.xf-net { display: inline-block; padding: 2px 8px; border-radius: 6px; background: var(--chips); color: var(--text-secondary); font-size: 0.75rem; font-weight: 500; }
+.xf-net.is-mainnet { color: var(--beige); background: rgba(235, 175, 142, 0.12); }
+
+.xf-status { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; font-weight: 500; white-space: nowrap; color: var(--text-secondary); }
+.xf-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.xf-status.is-ready { color: var(--mint); }
+.xf-status.is-waiting { color: var(--beige); }
+
+.xf-tag { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 999px; font-size: 0.6875rem; font-weight: 600; line-height: 1.5; }
+.xf-tag-danger { background: rgba(214, 119, 106, 0.16); color: var(--negative); }
+
+@media (max-width: 959.98px) {
+    .xf-account {
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        grid-template-areas: "id id actions" "status net balance";
+    }
+    .xf-account-head { display: none; }
+}
+
+/* ---- Published files ---- */
+
+/* Same row discipline as the account list: the link stays on one line and ends in an ellipsis (its
+   full text is in the title and on the clipboard), so a 100-character link never wraps into a column. */
+.xf-record {
+    display: grid; align-items: center; column-gap: 20px; row-gap: 6px; padding: 14px 18px;
+    grid-template-columns: minmax(0, 1.2fr) 88px minmax(0, 1.6fr) auto;
+}
+.xf-record + .xf-record { border-top: 1px solid var(--dark-gray); }
+.xf-record-id { display: flex; flex-direction: column; min-width: 0; }
+.xf-record-id small { font-size: 0.75rem; }
+.xf-record-link { min-width: 0; color: var(--text-secondary); font-size: 0.8125rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.xf-record-actions { display: flex; gap: 6px; justify-content: flex-end; }
+@media (max-width: 959.98px) {
+    .xf-record { grid-template-columns: minmax(0, 1fr) auto; }
+    .xf-record-net { justify-self: end; }
+    .xf-record-link { grid-column: 1 / -1; }
+    .xf-record-actions { grid-column: 1 / -1; justify-content: flex-start; }
+}
+
+/* ---- Funding ---- */
+
+.xf-fund { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 24px; align-items: start; }
+.xf-fund-qr { background: #FFFFFF; border-radius: var(--radius-chip); padding: 10px; line-height: 0; }
+.xf-fund-info { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.xf-fund-address { font-size: 0.875rem; overflow-wrap: anywhere; }
+.xf-fund-balance { font-size: 1.125rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (max-width: 599.98px) {
+    .xf-fund { grid-template-columns: minmax(0, 1fr); }
+    .xf-fund-qr { justify-self: start; }
+}
+
+/* ---- Choices and pickers ---- */
+
+/* A single-choice list (which account publishes): radio semantics, a row per option with its own mark,
+   so the chosen one reads as chosen and not as a focused text field. */
+.xf-choice-list { display: flex; flex-direction: column; gap: 6px; }
+.xf-choice {
+    display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 8px 14px;
+    text-align: left; background: var(--secondary-dark); color: var(--text); font: inherit;
+    border: 1px solid var(--dark-gray); border-radius: var(--radius-chip); cursor: pointer;
+    transition: border-color var(--ease), background-color var(--ease);
+}
+.xf-choice:hover { border-color: var(--control-line); }
+.xf-choice.is-selected { border-color: var(--mint); background: rgba(100, 207, 149, 0.08); }
+.xf-choice-mark { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--control-line); flex: none; box-sizing: border-box; }
+.xf-choice.is-selected .xf-choice-mark { border: 5px solid var(--mint); }
+.xf-choice-body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.xf-choice-title { font-weight: 600; }
+.xf-choice-sub { color: var(--text-secondary); font-size: 0.8125rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.xf-file-pick { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.xf-file-chosen { display: flex; flex-direction: column; min-width: 0; }
+.xf-file-name { font-weight: 600; overflow-wrap: anywhere; }
+
+/* ---- Row menu ---- */
+
+.xf-menu { position: relative; }
+.xf-menu-backdrop { position: fixed; inset: 0; z-index: 30; }
+.xf-menu-list {
+    position: absolute; right: 0; top: calc(100% + 6px); z-index: 31; min-width: 210px;
+    background: var(--box-bg); border: 1px solid var(--control-line); border-radius: var(--radius-card);
+    padding: 6px; display: flex; flex-direction: column; gap: 1px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+.xf-menu-item { min-height: 38px; text-align: left; padding: 0 12px; background: transparent; border: 0; border-radius: 8px; color: var(--text); font: inherit; font-weight: 500; cursor: pointer; }
+.xf-menu-item:hover:not(:disabled), .xf-menu-item:focus-visible { background: var(--chips); }
+.xf-menu-item:disabled { color: var(--text-secondary); opacity: 0.6; cursor: not-allowed; }
+.xf-menu-item.is-danger { color: var(--negative); }
+.xf-menu-sep { height: 1px; margin: 5px 6px; background: var(--dark-gray); }
+.xf-icon-btn { width: 36px; height: 36px; display: inline-grid; place-items: center; border-radius: 8px; border: 1px solid var(--control-line); background: var(--secondary-dark); color: var(--text); cursor: pointer; }
+.xf-icon-btn:hover, .xf-icon-btn[aria-expanded="true"] { background: var(--chips); border-color: var(--text-secondary); }
+.xf-icon-btn svg { width: 18px; height: 18px; fill: currentColor; }
+
+/* ---- Dialog ---- */
+
+.xf-dialog-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.62); display: grid; place-items: center; padding: 16px; }
+.xf-dialog {
+    width: min(460px, 100%); box-sizing: border-box; background: var(--box-bg); border: 1px solid var(--control-line);
+    border-radius: var(--radius-card); padding: 22px 24px; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+.xf-dialog h2 { font-size: 1.0625rem; margin: 0 0 10px; }
+.xf-dialog p { color: var(--text-secondary); }
+.xf-dialog .xf-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
 .xf-card {
     background: var(--box-bg); border: 1px solid var(--dark-gray); border-radius: var(--radius-card);
     padding: 16px 18px; margin-bottom: 14px; min-width: 0;
@@ -298,19 +450,10 @@ progress { accent-color: var(--mint); }
 .xf-figure { font-variant-numeric: tabular-nums; color: var(--beige); font-weight: 600; }
 .xf-muted { color: var(--text-secondary); }
 
-/* ---- Wide windows ---- */
-
-/* The page grows with the window, but only a card whose own content is a data table uses that width,
-   with the heading row above it so its button lines up with the table's edge: prose, forms and
-   key/value tables keep a 920 px measure, where a line still reads and a label stays near its value. */
-@media (min-width: 1100px) {
-    .xf-page > :not(.xf-page-head, .xf-card:has(> .table:not(.xf-kv-table))) { max-width: 920px; }
-}
-
 /* ---- Medium windows ---- */
 
 @media (max-width: 1099.98px) {
-    .xf-page { max-width: none; padding: 20px 22px; }
+    .xf-page { padding: 20px 22px 32px; }
 }
 
 /* ---- Phone width ---- */

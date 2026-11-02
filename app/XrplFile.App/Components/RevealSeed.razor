@@ -10,7 +10,8 @@
    Model.Shown, after either has happened, actually reaches the screen instead of a stale value
    sitting in markup nothing repainted. *@
 
-<h1 class="xf-title">Reveal seed</h1>
+<BackLink To="Accounts" OnClick="BackAsync" />
+<h1 class="xf-title">Reveal secret</h1>
 
 @if (_problem is { } problem)
 {
@@ -37,7 +38,6 @@ else
 }
 
 <div class="mt-3">
-    <button type="button" class="btn btn-outline-secondary" @onclick="BackAsync"><BackIcon /> Back to accounts</button>
 </div>
 
 @code {

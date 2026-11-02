@@ -62,10 +62,11 @@ else if (Model.Closed is { } closed)
         <p>Transaction hash: <code class="user-select-all xf-mono">@closed.TxHash</code></p>
     </div>
 
-    <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="BackAsync"><BackIcon /> Back to accounts</button>
+    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="BackAsync">Done</button>
 }
 else
 {
+    <BackLink To="Accounts" OnClick="BackAsync" Disabled="_busy" />
     <h1 class="xf-title">Close account</h1>
 
     @if (Model.AccountAddress is { } accountAddress)
@@ -96,13 +97,19 @@ else
 
             @if (Model.Candidates.Count > 0)
             {
-                <div class="list-group mb-2">
+                <div class="xf-choice-list mb-2" role="radiogroup" aria-label="Your accounts">
                     @foreach (VaultEntryInfo candidate in Model.Candidates)
                     {
-                        <button type="button" disabled="@_busy"
-                                class="list-group-item list-group-item-action @(string.Equals(Model.Destination, candidate.Address, StringComparison.Ordinal) ? "active" : "")"
+                        bool chosen = string.Equals(Model.Destination, candidate.Address, StringComparison.Ordinal);
+                        <button type="button" disabled="@_busy" role="radio" aria-checked="@(chosen ? "true" : "false")"
+                                class="xf-choice @(chosen ? "is-selected" : null)"
                                 @onclick="() => Model.ChooseDestination(candidate.Address)">
-                            <span>@candidate.Label &mdash; <span class="xf-mono">@candidate.Address</span> (@candidate.Network)</span>
+                            <span class="xf-choice-mark" aria-hidden="true"></span>
+                            <span class="xf-choice-body">
+                                <span class="xf-choice-title">@candidate.Label</span>
+                                <span class="xf-mono xf-choice-sub">@candidate.Address</span>
+                            </span>
+                            <span class="xf-net @(candidate.Network == "mainnet" ? "is-mainnet" : null)">@candidate.Network</span>
                         </button>
                     }
                 </div>
@@ -158,9 +165,6 @@ else
         }
     }
 
-    <div class="mt-3">
-        <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="BackAsync"><BackIcon /> Back to accounts</button>
-    </div>
 }
 
 @code {
