@@ -1,0 +1,16 @@
+# Cloudflare Pages: when several blocks match, their headers are added together, so the cache
+# policies below must not overlap.
+
+# The published element build is versioned in its path and never changes; embedding sites fetch
+# mp4box from it cross-origin.
+/element/*
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=31536000, immutable
+
+# Pages are revalidated on every load; a page that changes must not be stuck in a cache.
+/
+  Cache-Control: no-cache
+/*.html
+  Cache-Control: no-cache
+/ru/
+  Cache-Control: no-cache

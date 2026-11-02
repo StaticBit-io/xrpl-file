@@ -6,3 +6,4 @@ node_modules/
 run/
 .superpowers/
 web/dist/
+site/dist/
