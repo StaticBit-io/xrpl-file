@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { allRows, failures, renderReport, REPORT_PATH } from '../tools/contrast.mjs';
-import { contrast, parseColor } from '../tools/color.mjs';
+import { contrast, over, parseColor } from '../tools/color.mjs';
 
 test('the contrast arithmetic matches known WCAG values', () => {
   assert.equal(contrast(parseColor('#000000'), parseColor('#ffffff')).toFixed(2), '21.00');
@@ -31,4 +31,21 @@ test('the paper is a soft off-white and a soft near-black, never #fff or #000', 
 
 test('contrast.md is the report for the current tokens', () => {
   assert.equal(readFileSync(REPORT_PATH, 'utf8'), renderReport(allRows()), 'run: node site/tools/contrast.mjs');
+});
+
+test('the element overlay is measured in both themes, over black and over the brightest cover', () => {
+  const rows = allRows().filter((r) => r.label.startsWith('Progress ring and bar, focus ring on the overlay'));
+  assert.equal(rows.length, 4);
+  for (const r of rows) assert.ok(r.pass, `${r.group}: ${r.label} ${r.ratio.toFixed(2)}`);
+});
+
+test('the site accent reaches the element only outside the light theme, where its overlay would fall below 3:1', () => {
+  const css = readFileSync(new URL('../src/css/base.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const overrides = [...css.matchAll(/([^{}]*)\{[^{}]*--xrpl-file-accent:[^{}]*\}/g)].map((m) => m[1].trim());
+  assert.deepEqual(overrides, [':root:not([data-theme="light"]) xrpl-file']);
+  // What a moss accent would give on the brightest overlay: the reason for the scoping.
+  const light = readFileSync(new URL('../src/css/tokens.css', import.meta.url), 'utf8');
+  const moss = /:root\[data-theme="light"\][^}]*--accent:\s*(oklch\([^)]*\))/.exec(light)[1];
+  const bright = over([0, 0, 0], 0.72, parseColor('#ffffff'));
+  assert.ok(contrast(parseColor(moss), bright) < 3);
 });

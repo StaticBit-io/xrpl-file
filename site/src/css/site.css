@@ -751,6 +751,9 @@
 
 .file__view xrpl-file {
   width: 100%;
+  /* The element keeps the file's aspect ratio at full width; capped in height it letterboxes the picture
+     inside its box, so a square file does not push the name and Download a screen down. */
+  max-height: 60svh;
 }
 
 .file__grid {

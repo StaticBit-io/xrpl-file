@@ -132,7 +132,7 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
   element.setAttribute('src', route.link);
   // The page draws its own copy and download controls under the file.
   element.setAttribute('caption', 'off');
-  element.setAttribute('theme', doc.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
+  element.setAttribute('theme', doc.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
   view.append(element);
 
   linkText.textContent = route.link;

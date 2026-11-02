@@ -83,11 +83,16 @@ Result: every required pair passes.
 | Names, percentages, badge | `--xrpl-file-foreground` #1b1d22 | `--xrpl-file-background` #f3f4f6 | 15.32:1 | 4.5:1 | pass |
 | Sizes, progress details, notes | `--xrpl-file-muted` #5b5f6b | `--xrpl-file-background` #f3f4f6 | 5.79:1 | 4.5:1 | pass |
 | Error message | `--xrpl-file-danger` #b3261e | `--xrpl-file-background` #f3f4f6 | 5.93:1 | 4.5:1 | pass |
-| Text on the accent (buttons) | `--xrpl-file-on-accent` #f7faf3 | `--xrpl-file-accent` #336f00 | 5.85:1 | 4.5:1 | pass |
+| Text on the accent (buttons) | `--xrpl-file-on-accent` #ffffff | `--xrpl-file-accent` #0b62c4 | 5.90:1 | 4.5:1 | pass |
 | Text file | `--xrpl-file-text-foreground` #1f2328 | `--xrpl-file-text-background` #ffffff | 15.79:1 | 4.5:1 | pass |
-| Buttons, progress, spinner, focus ring against the box | `--xrpl-file-accent` #336f00 | `--xrpl-file-background` #f3f4f6 | 5.62:1 | 3:1 | pass |
-| Accent against the frame the element sits in (the element is embedded with the page theme) | `--xrpl-file-accent` #336f00 | `site --paper-2 (light)` #dee4e7 | 4.81:1 | 3:1 | pass |
+| Buttons, progress, spinner, focus ring against the box | `--xrpl-file-accent` #0b62c4 | `--xrpl-file-background` #f3f4f6 | 5.36:1 | 3:1 | pass |
+| Accent against the frame the element sits in (the element is embedded with the page theme) | `--xrpl-file-accent` #0b62c4 | `site --paper-2 (light)` #dee4e7 | 4.59:1 | 3:1 | pass |
 | Element box against its frame (a picture frame: not a control, exempt) | `--xrpl-file-background` #f3f4f6 | `site --paper-2 (light)` #dee4e7 | 1.16:1 | exempt | n/a |
+| Progress ring and bar, focus ring on the overlay over black | `--xrpl-file-accent (element default)` #4da3ff | `overlay over black` #000000 | 7.99:1 | 3:1 | pass |
+| Overlay text on the overlay over black | `--xrpl-file-overlay-foreground` #dddddd | `overlay over black` #000000 | 15.46:1 | 4.5:1 | pass |
+| Progress ring and bar, focus ring on the overlay over a white cover | `--xrpl-file-accent (element default)` #4da3ff | `overlay over a white cover` #474747 | 3.51:1 | 3:1 | pass |
+| Overlay text on the overlay over a white cover | `--xrpl-file-overlay-foreground` #dddddd | `overlay over a white cover` #474747 | 6.79:1 | 4.5:1 | pass |
+| Text on the accent button over a cover | `--xrpl-file-on-accent (element default)` #06121f | `--xrpl-file-accent (element default)` #4da3ff | 7.17:1 | 4.5:1 | pass |
 
 ## Element, theme="dark"
 
@@ -101,15 +106,23 @@ Result: every required pair passes.
 | Buttons, progress, spinner, focus ring against the box | `--xrpl-file-accent` #bcf053 | `--xrpl-file-background` #14161a | 13.57:1 | 3:1 | pass |
 | Accent against the frame the element sits in (the element is embedded with the page theme) | `--xrpl-file-accent` #bcf053 | `site --paper-2 (dark)` #091015 | 14.31:1 | 3:1 | pass |
 | Element box against its frame (a picture frame: not a control, exempt) | `--xrpl-file-background` #14161a | `site --paper-2 (dark)` #091015 | 1.05:1 | exempt | n/a |
+| Progress ring and bar, focus ring on the overlay over black | `--xrpl-file-accent (site)` #bcf053 | `overlay over black` #000000 | 15.74:1 | 3:1 | pass |
+| Overlay text on the overlay over black | `--xrpl-file-overlay-foreground` #dddddd | `overlay over black` #000000 | 15.46:1 | 4.5:1 | pass |
+| Progress ring and bar, focus ring on the overlay over a white cover | `--xrpl-file-accent (site)` #bcf053 | `overlay over a white cover` #474747 | 6.92:1 | 3:1 | pass |
+| Overlay text on the overlay over a white cover | `--xrpl-file-overlay-foreground` #dddddd | `overlay over a white cover` #474747 | 6.79:1 | 4.5:1 | pass |
+| Text on the accent button over a cover | `--xrpl-file-on-accent (site)` #0f1703 | `--xrpl-file-accent (site)` #bcf053 | 13.76:1 | 4.5:1 | pass |
 
 ## Notes
 
 - The element is always embedded with the page theme (`chrome.mjs` sets its `theme` attribute with the
   switch), so a light element on a dark paper, or the reverse, does not occur.
-- `base.css` replaces the element's `--xrpl-file-accent` and `--xrpl-file-on-accent` with the site's
-  `--accent` and `--accent-ink`, so the element buttons carry the same signal colour as the page; the
-  other element colours are the documented palette of the README. The "Element" groups below use both.
-- Over a cover and on its caption the element draws on a dark overlay in both themes; those colours
-  are the element's own and are verified with the element (README, "Embed a file").
+- In the dark theme `base.css` replaces the element's `--xrpl-file-accent` and `--xrpl-file-on-accent`
+  with the site's `--accent` and `--accent-ink`, so the element buttons carry the same signal colour as
+  the page. The light theme does not: the element draws that accent on its own dark overlay as well, and
+  a moss accent there falls below 3:1, so light keeps the element's own palette. The other element colours
+  are the documented palette of the README.
+- Over a cover and on its caption the element draws on a dark overlay (rgba(0,0,0,.72)) in both themes.
+  The "overlay over black" and "overlay over a white cover" rows are its two extremes (the second is the
+  overlay composited over pure white, the brightest cover possible).
 - The unread cell is drawn as an outline at 3:1, so an empty mosaic reads as graph paper; the lit and
   verified cells are fills. The mosaic also states its progress in text, so no state depends on colour alone.

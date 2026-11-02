@@ -166,12 +166,18 @@ samp,
   white-space: nowrap;
 }
 
-/* The embedded element follows the site's theme through its `theme` attribute (chrome.mjs). It keeps
-   its own palette (README, "Embed a file") except for its accent, which is the site's, so the Download
-   control inside the file and the page around it share one signal colour; contrast.md measures it. */
+/* The embedded element follows the site's theme through its `theme` attribute (chrome.mjs) and keeps
+   its own palette (README, "Embed a file"), measured in contrast.md. */
 xrpl-file {
   display: block;
   max-width: 100%;
+}
+
+/* In the dark theme the element's accent is the site's lime, so the Download control inside the file and
+   the page share one signal colour. The element also draws this accent on its own dark overlay (the
+   progress ring and bar over a cover), so the override is not applied in the light theme, where a moss
+   accent would fall below 3:1 there: light keeps the element's own blue. */
+:root:not([data-theme="light"]) xrpl-file {
   --xrpl-file-accent: var(--accent);
   --xrpl-file-on-accent: var(--accent-ink);
 }

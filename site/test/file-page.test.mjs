@@ -176,9 +176,11 @@ test('the page renders the element with the link, no caption and the page theme'
   assert.equal(doc.nodes['file-link'].textContent, LINK);
 });
 
-test('the theme is light when the page has not set one', () => {
+test('the theme is dark when the page has not set one, and light only when the page says so', () => {
   const { doc } = open(CANONICAL, { doc: fakeDocument({ theme: '' }) });
-  assert.equal(doc.file.getAttribute('theme'), 'light');
+  assert.equal(doc.file.getAttribute('theme'), 'dark');
+  const light = open(CANONICAL, { doc: fakeDocument({ theme: 'light' }) });
+  assert.equal(light.doc.file.getAttribute('theme'), 'light');
 });
 
 test('name and size come from the load detail', () => {
