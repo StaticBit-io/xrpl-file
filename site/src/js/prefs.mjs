@@ -1,7 +1,7 @@
 // Remembered theme and language. localStorage throws in private windows and with blocked site data
 // (even the property read can), so every access is guarded and a failure only means "not remembered".
-const THEME_KEY = 'xf-theme';
-const LANG_KEY = 'xf-lang';
+export const THEME_KEY = 'xf-theme';
+export const LANG_KEY = 'xf-lang';
 const FILE_PAGE = /^\/[^/]+\/[0-9A-Fa-f]{64}\/?$/;
 
 export function safeLocalStorage() {

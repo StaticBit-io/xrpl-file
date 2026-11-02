@@ -1,0 +1,218 @@
+/* Hallmark · shape: reference page ruled on a cell grid · genre: modern-minimal · theme: custom · job: try · idea: "a file you can verify is drawn as the grid of chunks it is made of, and the page around it is ruled on the same cell" · vibe: "calm, exact, graph paper, verifiable"
+ * paper: oklch(0.945 0.006 258) · accent: oklch(0.508 0.17 256.5) · display: Onest 600 · body: Onest, JetBrains Mono only for real values · hero: the real file's chunk mosaic beside the headline · nav: wordmark left, language and theme switches right · footer: three short groups on a strip of cells · imagery: none, the pictures are made of the file's own bytes · signature: the chunk mosaic
+ * axes: light/grotesk-sans/chromatic-blue · posture: restrained · contrast: pass · fold: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V3 · weakest: V, a cool grey paper with one blue is a common tool palette; kept because the paper is dictated (soft off-white, never white) and the accent is the shipped element's own, so the page and the embedded file read as one */
+/* Hallmark · answered 7: no surface is a pure absolute; paper is oklch L 0.945 light and 0.175 dark */
+@import url("./tokens.css");
+@import url("./base.css");
+
+.skip-link {
+  position: absolute;
+  left: var(--space-3);
+  top: var(--space-3);
+  z-index: var(--z-skip);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-control);
+  background: var(--ink);
+  color: var(--paper);
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+.site-header {
+  position: relative;
+  z-index: var(--z-header);
+  border-bottom: var(--rule-hair) solid var(--rule-soft);
+}
+
+.site-header__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-5);
+  padding-block: var(--space-3);
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--target);
+  color: var(--ink);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-display);
+  letter-spacing: -0.015em;
+  text-decoration: none;
+}
+
+.wordmark:hover {
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.wordmark__mark {
+  flex: none;
+}
+
+.wordmark__mark rect {
+  fill: none;
+  stroke: var(--cell);
+  stroke-width: 1;
+}
+
+.wordmark__mark .is-lit {
+  fill: var(--cell-lit);
+  stroke: var(--cell-lit);
+}
+
+.wordmark__mark .is-verified {
+  fill: var(--cell-verified);
+  stroke: var(--cell-verified);
+}
+
+.site-header__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-5);
+}
+
+.lang-switch {
+  display: flex;
+  gap: var(--space-1);
+  list-style: none;
+}
+
+.lang-switch a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  padding-inline: var(--space-3);
+  border-bottom: 2px solid transparent;
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+
+.lang-switch a:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.lang-switch a[aria-current="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+  font-weight: var(--weight-strong);
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--target);
+  padding-inline: var(--space-4);
+  border: var(--rule-hair) solid var(--rule);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out);
+}
+
+.theme-toggle:hover {
+  background: var(--paper-2);
+}
+
+.theme-toggle[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* The switch is dead without script, so it keeps its place but stays out of sight until chrome.mjs
+   has wired it. */
+.theme-toggle:not([data-ready]) {
+  visibility: hidden;
+}
+
+.theme-toggle__icon rect {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.theme-toggle__icon path {
+  fill: currentColor;
+}
+
+/* A row of cells, for the top of the footer and between sections. */
+.cell-rule {
+  height: var(--unit);
+  background: repeating-linear-gradient(90deg, var(--rule-soft) 0 var(--unit), transparent var(--unit) calc(var(--unit) * 1.5));
+}
+
+.site-footer {
+  margin-top: var(--section-gap);
+}
+
+.site-footer__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-6) var(--gutter);
+  padding-block: var(--space-7) var(--space-8);
+  font-size: var(--text-sm);
+}
+
+.site-footer__label {
+  margin-bottom: var(--space-2);
+  color: var(--ink-muted);
+}
+
+.site-footer__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  list-style: none;
+}
+
+.site-footer__list a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  padding-inline: var(--space-1);
+}
+
+.site-footer .lang-switch a {
+  padding-inline: var(--space-1);
+  margin-inline-end: var(--space-3);
+}
+
+/* On a phone the header keeps one row: the theme switch shrinks to its icon, its name stays for assistive tech. */
+@media (max-width: 32rem) {
+  .site-header__bar,
+  .site-header__tools {
+    flex-wrap: nowrap;
+    gap: var(--space-2);
+  }
+
+  .site-header .lang-switch a {
+    padding-inline: var(--space-2);
+  }
+
+  .site-header .theme-toggle {
+    padding-inline: var(--space-3);
+  }
+
+  .site-header .theme-toggle span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build, MAX_FILE_BYTES } from '../build.mjs';
 
-const GUARDED_REDIRECTS = '/js/:file /js/:file 200\n/data/:file /data/:file 200\n/:network/:hash /file 200\n';
+const GUARDED_REDIRECTS = '/ru/:file /ru/:file 200\n/js/:file /js/:file 200\n/data/:file /data/:file 200\n/:network/:hash /file 200\n';
 
 async function fixture(redirects = GUARDED_REDIRECTS) {
   const root = await mkdtemp(join(tmpdir(), 'xf-site-build-'));
@@ -86,6 +86,85 @@ test('refuses a 200 rule whose destination ends in .html, /index or /index.html'
       await assert.rejects(
         build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' }),
         /\.html|\/index/,
+      );
+      assert.equal(await exists(f.outDir), false);
+    });
+  }
+});
+
+const PAGE = (lang, body, htmlAttributes = '') =>
+  `<!doctype html>\n<html lang="${lang}"${htmlAttributes}>\n<head>\n<!--@chrome:head-->\n</head>\n<body>\n<!--@chrome:header-->\n<main id="main">${body}</main>\n<!--@chrome:footer-->\n</body>\n</html>\n`;
+
+async function buildWithPages(pages, check) {
+  await withFixture(undefined, async (f) => {
+    for (const [name, html] of Object.entries(pages)) {
+      await mkdir(join(f.siteDir, 'src', name.includes('/') ? name.slice(0, name.lastIndexOf('/')) : '.'), { recursive: true });
+      await writeFile(join(f.siteDir, 'src', name), html);
+    }
+    await build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' });
+    await check(f, (name) => readFile(join(f.outDir, name), 'utf8'));
+  });
+}
+
+test('inlines the shared head, header and footer into a page and takes the language from <html lang>', () =>
+  buildWithPages({ 'index.html': PAGE('en', 'Hello'), 'ru/index.html': PAGE('ru', 'Привет') }, async (f, read) => {
+    const en = await read('index.html');
+    assert.ok(!en.includes('<!--@chrome:'), 'no marker is left behind');
+    assert.match(en, /<link rel="stylesheet" href="\/css\/site\.css">/);
+    assert.match(en, /<a class="wordmark" href="\/"/);
+    assert.match(en, /data-lang-link="en" href="\/" lang="en" hreflang="en" aria-current="true"/);
+    assert.match(en, /data-lang-link="ru" href="\/ru\/"/);
+    assert.match(en, /<main id="main">Hello<\/main>/);
+    assert.ok(en.includes('Repository'));
+
+    const ru = await read('ru/index.html');
+    assert.match(ru, /<a class="wordmark" href="\/ru\/"/);
+    assert.match(ru, /data-lang-link="ru" href="\/ru\/" lang="ru" hreflang="ru" aria-current="true"/);
+    assert.ok(ru.includes('Репозиторий'));
+    assert.ok(ru.includes('/fonts/onest-cyrillic.woff2'));
+  }));
+
+test('a page marked data-lang-source="storage" gets one URL for both languages and in-place chrome text', () =>
+  buildWithPages({ 'file.html': PAGE('en', 'file', ' data-lang-source="storage"') }, async (f, read) => {
+    const html = await read('file.html');
+    assert.match(html, /data-i18n="repository"/);
+    assert.match(html, /data-lang-link="en" href="\/"/);
+    assert.match(html, /data-lang-link="ru" href="\/ru\/"/);
+    assert.ok(!/aria-current/.test(html), 'chrome.mjs marks the current language once it knows the stored one');
+  }));
+
+test('derives the equivalent-language links from the page URL, with pretty URLs for .html pages', () =>
+  buildWithPages({ 'about.html': PAGE('en', 'x'), 'ru/about.html': PAGE('ru', 'x') }, async (f, read) => {
+    const en = await read('about.html');
+    assert.match(en, /data-lang-link="en" href="\/about"/);
+    assert.match(en, /data-lang-link="ru" href="\/ru\/about"/);
+    const ru = await read('ru/about.html');
+    assert.match(ru, /data-lang-link="en" href="\/about"/);
+    assert.match(ru, /data-lang-link="ru" href="\/ru\/about"/);
+  }));
+
+test('leaves a page without markers untouched', () =>
+  buildWithPages({ 'plain.html': '<!doctype html><title>x</title>' }, async (f, read) => {
+    assert.equal(await read('plain.html'), '<!doctype html><title>x</title>');
+  }));
+
+test('ships no partials and does not rewrite the element build', () =>
+  buildWithPages({ 'index.html': PAGE('en', 'x') }, async (f) => {
+    assert.equal(await exists(join(f.outDir, 'partials')), false);
+    assert.equal(await readFile(join(f.outDir, 'element', '1.1.0', 'xrpl-file-reader.mjs'), 'utf8'), '// reader');
+  }));
+
+test('refuses a marker on a page without a usable <html lang>, or an unknown marker, and leaves no output', async () => {
+  for (const html of [
+    '<!doctype html><html><head><!--@chrome:head--></head></html>',
+    '<!doctype html><html lang="de"><head><!--@chrome:head--></head></html>',
+    '<!doctype html><html lang="en"><head><!--@chrome:sidebar--></head></html>',
+  ]) {
+    await withFixture(undefined, async (f) => {
+      await writeFile(join(f.siteDir, 'src', 'bad.html'), html);
+      await assert.rejects(
+        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' }),
+        /bad\.html/,
       );
       assert.equal(await exists(f.outDir), false);
     });

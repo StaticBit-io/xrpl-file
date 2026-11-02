@@ -1,13 +1,16 @@
 // Assembles the deployable site into site/dist:
-//   site/src/**                  -> /            (pages, scripts, styles, _redirects, _headers)
+//   site/src/**                  -> /            (pages, scripts, styles, fonts, _redirects, _headers)
+//                                   with <!--@chrome:head|header|footer--> markers in a page replaced by
+//                                   the shared markup of chrome-markup.mjs
 //   web/dist/<version>/*         -> /element/<version>/   (the element and the reader bundle)
 //   site/data/price.json         -> /data/price.json
 // The site loads the element and the reader from that one copy; nothing else carries reader code.
 //
 //   node site/build.mjs            (run `cd web && node build.mjs` first)
-import { cp, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { renderChrome } from './chrome-markup.mjs';
 import { findHtmlRewriteTargets, findShadowed, parseRedirects } from './redirects.mjs';
 
 export const ELEMENT_VERSION = '1.1.0';
@@ -36,6 +39,43 @@ async function listFiles(root, dir = root) {
 function isInside(parent, child) {
   const rel = relative(resolve(parent), resolve(child));
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+/** The URL a page is served at: index.html is its folder, other pages lose the .html (Pages' pretty URLs). */
+export function pagePathOf(relativeFile) {
+  const path = `/${relativeFile.split(sep).join('/')}`;
+  if (path === '/index.html') return '/';
+  if (path.endsWith('/index.html')) return path.slice(0, -'index.html'.length);
+  return path.replace(/\.html$/, '');
+}
+
+const CHROME_MARKER = /<!--@chrome:([a-z-]+)-->/g;
+
+async function inlineChrome(outDir) {
+  for (const file of await listFiles(outDir)) {
+    const relative_ = relative(outDir, file);
+    // The element build is published as is; a marker-looking string in it is not ours to rewrite.
+    if (!file.endsWith('.html') || relative_.split(sep)[0] === 'element') continue;
+    const html = await readFile(file, 'utf8');
+    if (!CHROME_MARKER.test(html)) continue;
+    CHROME_MARKER.lastIndex = 0;
+    const lang = /<html\b[^>]*\blang="([^"]*)"/i.exec(html)?.[1];
+    if (lang !== 'en' && lang !== 'ru') {
+      throw new Error(`${relative_.split(sep).join('/')} uses a chrome marker but its <html> has no lang="en" or lang="ru"`);
+    }
+    const page = {
+      lang,
+      pagePath: pagePathOf(relative_),
+      langFromStorage: /<html\b[^>]*\bdata-lang-source="storage"/i.test(html),
+    };
+    let rendered;
+    try {
+      rendered = html.replace(CHROME_MARKER, (_, part) => renderChrome(part, page));
+    } catch (error) {
+      throw new Error(`${relative_.split(sep).join('/')}: ${error.message}`);
+    }
+    await writeFile(file, rendered);
+  }
 }
 
 async function checkSizes(outDir, maxFileBytes) {
@@ -95,6 +135,7 @@ export async function build({ siteDir, webDistDir, outDir, elementVersion = ELEM
   await rm(outDir, { recursive: true, force: true });
   try {
     await cp(join(siteDir, 'src'), outDir, { recursive: true });
+    await inlineChrome(outDir);
     await cp(elementDir, join(outDir, 'element', elementVersion), { recursive: true });
     await mkdir(join(outDir, 'data'), { recursive: true });
     await cp(priceFile, join(outDir, 'data', 'price.json'));

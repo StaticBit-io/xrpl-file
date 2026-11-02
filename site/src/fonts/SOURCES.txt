@@ -1,0 +1,13 @@
+Self-hosted web fonts. Both are licensed under the SIL Open Font License 1.1 (see the *-OFL.txt files).
+The .woff2 files are Google's own latin and cyrillic subsets, unmodified; the licence texts are from
+https://github.com/google/fonts (ofl/onest, ofl/jetbrainsmono).
+
+onest-latin.woff2, onest-cyrillic.woff2 (variable, wght 100-900)
+  https://fonts.gstatic.com/s/onest/v11/gNMKW3F-SZuj7xmf-HY.woff2
+  https://fonts.gstatic.com/s/onest/v11/gNMKW3F-SZuj7xmb-HY6EQ.woff2
+  Onest, https://github.com/googlefonts/onest
+
+jetbrains-mono-latin.woff2, jetbrains-mono-cyrillic.woff2 (400)
+  https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKxTOlOV.woff2
+  https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKxTPlOVgaY.woff2
+  JetBrains Mono, https://github.com/JetBrains/JetBrainsMono

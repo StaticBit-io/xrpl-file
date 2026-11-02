@@ -6,11 +6,13 @@ and translating two files (see [Host files](#host-files-redirects-and-headers)).
 
 ```
 site/
-  src/            everything that is published as is (pages, js/, css/, _redirects, _headers)
+  src/            everything that is published (pages, js/, css/, fonts/, _redirects, _headers)
   data/           price.json, the price table (generated, committed)
   build.mjs       assembles site/dist
   serve.mjs       dev server for site/dist
   redirects.mjs   evaluator for the _redirects subset the site uses (build check and dev server)
+  chrome-markup.mjs  build-time markup of the shared head, header and footer
+  tools/          contrast.mjs: the contrast report and its check (not published)
   test/           node:test suites
   dist/           build output, git-ignored
 ```
@@ -119,6 +121,42 @@ do not overlap. Pages also applies redirects before headers: a request that a `_
 rewrites (the file page) gets Pages' default headers, not the ones above. In
 nginx, an `add_header` in a `location` replaces the ones inherited from the server block; repeat
 every header in each location that needs it.
+
+## Visual system and the shared header and footer
+
+`src/css/tokens.css` holds every colour, face, size and space the pages use, `base.css` the element
+defaults, `site.css` the header and footer (its first lines are the design stamp). A page links
+nothing itself: the head marker below brings `site.css`, which imports the other two. A page's own CSS
+styles only with the tokens. Colours are on `:root[data-theme="light"]` (also the default without the
+attribute) and `:root[data-theme="dark"]`: `--paper`, `--paper-2`, `--ink`, `--ink-muted`, `--rule`,
+`--rule-soft`, `--accent`, `--accent-ink`, `--focus`, `--error` and the mosaic's `--cell`,
+`--cell-lit`, `--cell-verified`. Text is Onest for everything and JetBrains Mono (`code`, `.value`)
+only for real values; both are self-hosted in `src/fonts/` with their OFL licences and download
+sources (`SOURCES.txt`), latin and cyrillic subsets, no request leaves the site. Neither font has a
+check mark or an arrow glyph: draw them (SVG) instead of typing U+2713 or U+2192.
+
+A page uses the shared chrome by putting three markers in its source; `build.mjs` replaces them:
+
+```html
+<html lang="en">                      <!-- or lang="ru"; add data-lang-source="storage" on a page with one URL for both languages -->
+<head> ... <!--@chrome:head-->        <!-- pre-paint theme script, font preloads, site.css, chrome.mjs -->
+<body> <!--@chrome:header-->          <!-- skip link (targets #main), wordmark, language and theme switches -->
+  <main id="main"> ... </main>
+  <!--@chrome:footer-->               <!-- repository, specification, language, theme -->
+```
+
+The language comes from `<html lang>`. On `/` and `/ru/` the language links point at the equivalent
+page. The file page and `404.html` have one URL for both languages and are marked
+`data-lang-source="storage"`: there `chrome.mjs` takes the language from the stored choice (then the
+browser's), switches the header and footer text in place on a click, stores the choice and dispatches
+`xf-langchange` (`detail.lang`) on `document`, so the page's own text can follow. The theme switch sets
+`data-theme` on `<html>` and the `theme` attribute of every `<xrpl-file>` that exists at that time: a
+page that creates the element later must copy `document.documentElement.dataset.theme` into it.
+
+Contrast is computed, not eyeballed: `node site/tools/contrast.mjs` rewrites
+`docs/superpowers/reports/2026-11-02-site/contrast.md` from the tokens and the element palettes in the
+repository README, and `test/contrast.test.mjs` fails when a required pair misses WCAG AA or the report
+is out of date.
 
 ## The hero file and its durability
 
