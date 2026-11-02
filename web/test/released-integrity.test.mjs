@@ -39,3 +39,13 @@ test('the package version builds to the integrity recorded when it was released'
       + `or, for a version that has not been released, update web/integrity/${version}.json deliberately`,
   );
 });
+
+// The README's snippet is copied by hand into pages; a stale hash there makes the browser refuse the script.
+test('the README snippet carries the integrity recorded for the package version', async () => {
+  const { version } = JSON.parse(await readFile(join(webDir, 'package.json'), 'utf8'));
+  const record = JSON.parse(await readFile(join(webDir, 'integrity', `${version}.json`), 'utf8'));
+  const readme = await readFile(join(webDir, '..', 'README.md'), 'utf8');
+  const snippet = new RegExp(`/${version.replaceAll('.', '\.')}/xrpl-file-element\.js" integrity="([^"]+)"`).exec(readme);
+  assert.ok(snippet, `README.md has no snippet for ${version}`);
+  assert.equal(snippet[1], record['xrpl-file-element.js'], `update the integrity in README.md to web/integrity/${version}.json`);
+});
