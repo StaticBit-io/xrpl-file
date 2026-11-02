@@ -1,7 +1,8 @@
 # Deploy note: xrpl-file.staticbit.io (Task 10, step 1)
 
-Status: prepared, **not deployed**. Every step below publishes something publicly and runs only on
-the owner's explicit command.
+Status: prepared, **not deployed**. The package `xrpl-file-element@1.1.0` is published (2026-11-02).
+Every step below publishes something publicly; a merge into `main` is one of them, since it deploys
+the site, so `main` moves only on the owner's explicit command.
 
 ## What a deploy does
 
@@ -32,21 +33,35 @@ a snippet that answers 404.
 
 ## Cloudflare Pages
 
+Work lands on `dev`; a merge into `main` deploys the site. The `deploy-site` job in
+`.github/workflows/test.yml` runs on every push to `main` after the `unit` job passes (it runs the
+web and site suites and both builds), builds `site/dist` and uploads it with
+`wrangler pages deploy` (direct upload; the Pages project is not connected to Git). Its first run
+creates the project.
+
 | Setting | Value |
 |---|---|
 | Project name | `xrpl-file-site` |
-| Production branch | the branch the owner merges this work into (`main`) |
-| Build command | `node web/build.mjs && node site/build.mjs` |
+| Production branch | `main` |
+| Deployed by | the `deploy-site` job, wrangler `4.151.1` |
 | Build output directory | `site/dist` |
-| Node version | 22 or newer (`NODE_VERSION=22` in the project's environment variables) |
 | Custom domain | `xrpl-file.staticbit.io` |
+
+The job needs two repository secrets, set once by the owner:
+
+| Secret | Value |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | an API token of the account that holds the `staticbit.io` zone, with the account permission **Cloudflare Pages: Edit** |
+| `CLOUDFLARE_ACCOUNT_ID` | that account's ID (the dashboard's account home, or the URL `dash.cloudflare.com/<id>`) |
+
+Without them the job fails on its first step and names the missing secrets.
 
 Notes:
 
 - `web/build.mjs` refuses to overwrite an existing `web/dist/<version>` with different content. A
-  clean Pages build starts without `web/dist`, so no `--force` is needed there.
-- Direct upload instead of a Git-connected build: `node web/build.mjs && node site/build.mjs`
-  locally, then `npx wrangler pages deploy site/dist --project-name xrpl-file-site`.
+  clean runner starts without `web/dist`, so no `--force` is needed there.
+- A manual deploy, for example while CI is unavailable: `node web/build.mjs && node site/build.mjs`
+  locally, then `npx wrangler@4.151.1 pages deploy site/dist --project-name xrpl-file-site --branch main`.
 - `_redirects` and `_headers` are in `site/src` and are copied into `site/dist`; `site/README.md`
   explains each rule and its nginx equivalent.
 
