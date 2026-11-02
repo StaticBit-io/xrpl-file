@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { build, MAX_FILE_BYTES } from '../build.mjs';
+import { fileURLToPath } from 'node:url';
+import { build, checkElementVersion, elementVersionsIn, ELEMENT_VERSION, MAX_FILE_BYTES } from '../build.mjs';
 import { ELEMENT_PACKAGE, SITE_ORIGIN } from '../src/js/config.mjs';
 import { ACTIVE_LANGS, LANGS, htmlLang } from '../src/js/languages.mjs';
 
@@ -299,5 +300,34 @@ test('refuses a language-folder page that would be shadowed because _redirects h
         new RegExp(`/${lang}/index\\.html`),
       );
     });
+  }
+});
+
+test('elementVersionsIn finds the version in absolute and relative element paths', () => {
+  assert.deepEqual(elementVersionsIn('src="/element/1.1.0/a.js" from "../element/2.0.0-rc.1/b.mjs" and /elements/9/'), ['1.1.0', '2.0.0-rc.1']);
+});
+
+test('refuses a source that names another element version and says which', () =>
+  withFixture(undefined, async (f) => {
+    await writeFile(join(f.siteDir, 'src', 'js', 'b.mjs'), "import '../element/1.0.0/xrpl-file-reader.mjs';");
+    await assert.rejects(
+      build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' }),
+      /js\/b\.mjs names \/element\/1\.0\.0\//,
+    );
+    assert.equal(await exists(f.outDir), false);
+  }));
+
+test('every /element/<version>/ path in the shipped sources is the version the build serves', async () => {
+  const src = fileURLToPath(new URL('../src', import.meta.url));
+  await checkElementVersion(src, ELEMENT_VERSION);
+});
+
+test('every home page names the pinned element version in its prose', async () => {
+  const src = fileURLToPath(new URL('../src', import.meta.url));
+  for (const lang of LANGS) {
+    const file = lang === 'en' ? join(src, 'index.html') : join(src, lang, 'index.html');
+    const html = await readFile(file, 'utf8').catch(() => null);
+    if (html === null) continue;
+    assert.ok(html.includes(ELEMENT_VERSION), `${lang} home does not mention version ${ELEMENT_VERSION}`);
   }
 });

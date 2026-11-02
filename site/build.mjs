@@ -142,6 +142,33 @@ async function inlineSnippet(outDir, elementDir, elementVersion) {
   }
 }
 
+const TEXT_FILE = /\.(?:html|mjs|js|css)$/;
+const ELEMENT_PATH = /\/element\/([0-9A-Za-z][0-9A-Za-z.+-]*)\//g;
+
+/** The versions named by `/element/<version>/` paths in a text. */
+export function elementVersionsIn(text) {
+  return [...text.matchAll(ELEMENT_PATH)].map((match) => match[1]);
+}
+
+/**
+ * The element version is spelled out in several sources (the file page's script tag, the cloud and
+ * the reader specifier) because a page cannot import a build constant. A bump that misses one would
+ * ship a page loading a version the site no longer serves, so the build compares them all.
+ */
+export async function checkElementVersion(root, elementVersion) {
+  const stale = [];
+  for (const file of await listFiles(root)) {
+    const name = relative(root, file).split(sep).join('/');
+    if (!TEXT_FILE.test(name) || name.startsWith('element/')) continue;
+    for (const version of new Set(elementVersionsIn(await readFile(file, 'utf8')))) {
+      if (version !== elementVersion) stale.push(`${name} names /element/${version}/`);
+    }
+  }
+  if (stale.length > 0) {
+    throw new Error(`these sources do not name the element version ${elementVersion} the build serves: ${stale.join(', ')}`);
+  }
+}
+
 async function checkSizes(outDir, maxFileBytes) {
   const tooBig = [];
   for (const file of await listFiles(outDir)) {
@@ -200,6 +227,7 @@ export async function build({ siteDir, webDistDir, outDir, elementVersion = ELEM
   try {
     await cp(join(siteDir, 'src'), outDir, { recursive: true });
     await checkLanguagePages(outDir);
+    await checkElementVersion(outDir, elementVersion);
     await inlineChrome(outDir);
     await inlineSnippet(outDir, elementDir, elementVersion);
     await cp(elementDir, join(outDir, 'element', elementVersion), { recursive: true });

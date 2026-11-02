@@ -44,7 +44,8 @@ The site reaches the reader through one module, `src/js/xrpl.mjs`, which re-expo
 tests that specifier is redirected to `web/src` by a resolve hook
 (`test/support/reader-hook.mjs`); a test imports `./support/register-reader.mjs` first and loads
 site modules with a dynamic `import()` afterwards. When the element version changes, update the
-specifier in `xrpl.mjs`, the constant in `build.mjs` and the hook.
+specifier in `xrpl.mjs`, the constant in `build.mjs`, the hook, the script path in `src/js/cloud.mjs` and the script tag in `src/file.html`, and the prose that names the version on each home page.
+The build refuses any `/element/<version>/` path in `src/` that differs from the constant (`checkElementVersion`).
 
 ## Host files: `_redirects` and `_headers`
 
