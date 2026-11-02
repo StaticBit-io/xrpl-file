@@ -10,6 +10,26 @@ the owner's explicit command.
 - `npm publish` makes the element package public and permanent for that version: a published
   version cannot be replaced, only deprecated.
 
+## Order of operations
+
+The site and the package depend on each other in one direction: the site's main snippet loads the
+element from jsDelivr, which serves the npm package. A site deployed before the package exists shows
+a snippet that answers 404.
+
+1. **Owner decision: the package name.** `xrpl-file-element` (default in `site/src/js/config.mjs`)
+   or `@staticbit/xrpl-file-element`. Change `ELEMENT_PACKAGE` if needed.
+2. Rebuild and run the tests: `node web/build.mjs && node web/pack.mjs && node site/build.mjs`, then
+   `cd web && npm test` and `node --test site/test/*.test.mjs`. Version `1.1.0` has not been released,
+   and the package README cannot be corrected after publishing, so read `web/npm/1.1.0/README.md` once.
+3. **Owner decision: publish the package first (or in the same sitting as the deploy), never
+   after it.** `npm publish web/npm/1.1.0 --access public` is permanent for that version. Verify
+   the jsDelivr URL as described under "npm package" below before step 4.
+4. Deploy the site (Cloudflare Pages below). The site's alternative URL under `/element/1.1.0/`
+   works as soon as the site is up; the main snippet works only after step 3.
+5. Attach the custom domain (DNS below), then run the checks after the deploy.
+6. Once `1.1.0` is released, `web/integrity/1.1.0.json` is its permanent record: a later change to
+   `web/src` needs a new version in `web/package.json`, or the web test fails.
+
 ## Cloudflare Pages
 
 | Setting | Value |
@@ -52,15 +72,13 @@ Notes:
 6. The snippet's alternative URL (`https://xrpl-file.staticbit.io/element/1.1.0/…`) works from a
    page on another origin (for example JSFiddle) with its `integrity` attribute.
 
-## npm package (same command, separate step)
+## npm package (step 3 of the order above)
 
-1. The owner picks the package name: `xrpl-file-element` (current default in
-   `site/src/js/config.mjs`) or `@staticbit/xrpl-file-element`. Change `ELEMENT_PACKAGE` if needed,
-   then rebuild: `node web/build.mjs && node web/pack.mjs && node site/build.mjs`.
+1. Rebuild with the chosen package name: `node web/build.mjs && node web/pack.mjs && node site/build.mjs`.
 2. Publish: `npm publish web/npm/1.1.0 --access public` (logged in as the owner's npm account).
 3. Verify `https://cdn.jsdelivr.net/npm/<package>@1.1.0/xrpl-file-element.js`: served as
    JavaScript, `access-control-allow-origin: *`, and its SHA-384 equals the `integrity` in the
    site's snippet.
 
-Until the package is published, the site's main snippet (jsDelivr) does not load; the alternative
+Deploying the site before this step leaves its main snippet (jsDelivr) answering 404; the alternative
 URL on the site works as soon as the site is deployed.
