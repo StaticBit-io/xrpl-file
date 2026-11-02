@@ -456,6 +456,15 @@
   font-size: var(--text-xs);
 }
 
+/* What the cubes are: it explains the picture, so it sits under it rather than between the headline
+   and the actions. */
+.cloud-about {
+  max-width: var(--measure);
+  margin-top: var(--space-3);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
 /* Home page: bands of ground, every second one a step lighter, each opened by a head of a statement
    and the sentence that explains it. */
 .band {

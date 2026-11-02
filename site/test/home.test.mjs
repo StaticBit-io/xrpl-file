@@ -143,8 +143,14 @@ test('the price intro has the same structure in English and Russian: short sente
   assert.equal(sentences(intro(pages.en)), sentences(intro(pages.ru)));
 });
 
-test('the hero paragraph describes what the visitor sees: cubes while reading, then the file beside them', () => {
-  const paragraph = (html) => /<p class="lead">[^<]*<\/p>\s*<p>([^<]*)<\/p>/.exec(html)[1];
+test('the hero text is a headline, one sentence and the actions; the explanation of the cubes sits under the figure', () => {
+  for (const [lang, html] of Object.entries(pages)) {
+    assert.match(html, /<h1 id="hero-title">[^<]*<\/h1>\s*<p class="lead">[^<]*<\/p>\s*<form id="check-link"/, lang);
+  }
+});
+
+test('the figure explains what the visitor sees: cubes while reading, then the file beside them', () => {
+  const paragraph = (html) => /<p class="cloud-about">([^<]*)<\/p>\s*<\/figure>/.exec(html)[1];
   assert.equal(
     paragraph(pages.en),
     'The cubes show the chunks of a real file as they are read from the ledger. When every block has been checked against its fingerprint, the file itself appears beside them.',
