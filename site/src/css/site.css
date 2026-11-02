@@ -647,3 +647,102 @@
 .attributes {
   margin-top: var(--space-5);
 }
+
+/* File page: the file full width, then its Download, name, details, link and the note. */
+.file {
+  padding-block: var(--space-6) 0;
+}
+
+.file__view xrpl-file {
+  width: 100%;
+}
+
+.file__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.file__actions .button:disabled {
+  background: transparent;
+  border-color: var(--rule);
+}
+
+/* The status line keeps its height so a result does not push the page. */
+.file__status {
+  min-height: calc(var(--text-sm) * var(--leading-body));
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.file__status[data-state="error"] {
+  color: var(--error);
+}
+
+.file__title {
+  margin-top: var(--space-6);
+  font-size: var(--text-title);
+  overflow-wrap: anywhere;
+}
+
+.file__details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-7);
+  margin: var(--space-3) 0 0;
+}
+
+.file__details dt,
+.file__link-label {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.file__details dd {
+  margin: 0;
+}
+
+.file__link {
+  margin-top: var(--space-5);
+}
+
+.file__link-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+
+.file__link-value {
+  min-width: 0;
+  /* A hash has no break points; break where the line ends rather than at the hyphen of "xrpl-file". */
+  word-break: break-all;
+}
+
+.file__how {
+  max-width: var(--measure);
+}
+
+.file__how > h2 {
+  font-size: var(--text-title);
+}
+
+/* 404 and the field-in-error view of a bad file address. */
+.notice-page {
+  padding-block: var(--space-8) 0;
+}
+
+/* The container stays the header's width so the text lines up with it; the content keeps a reading width. */
+.notice-page > * {
+  max-width: 40rem;
+}
+
+.notice-page > * + * {
+  margin-top: var(--space-5);
+}
+
+.notice-page h1 {
+  font-size: var(--text-section);
+}

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-lang-source="storage">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page not found · xrpl-file</title>
+<meta name="description" content="There is no page at this address. Paste an xrpl-file link to open its file, or go to the home page.">
+<!--@chrome:head-->
+<script type="module" src="/js/file-page.mjs"></script>
+</head>
+<body data-page="not-found">
+<!--@chrome:header-->
+<main id="main">
+<div class="notice-page container">
+<h1 data-s="notFoundTitle">Page not found</h1>
+<p data-s="notFoundText">There is no page at this address.</p>
+<form id="check-link" class="check" novalidate>
+<label for="check-link-input" data-s="checkLabel">Paste an xrpl-file link to open its file</label>
+<div class="check__row">
+<input id="check-link-input" class="field" type="text" name="link" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xrpl-file://testnet/…">
+<button class="button" type="submit" data-s="checkOpen">Open</button>
+</div>
+<p id="check-link-error" class="check__error" role="alert"></p>
+</form>
+<p><a href="/" data-home data-s="homeLink">Go to the home page</a></p>
+</div>
+</main>
+<!--@chrome:footer-->
+</body>
+</html>

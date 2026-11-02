@@ -15,6 +15,8 @@ const REANNOUNCE_DELAY_MS = 50;
  * @param {{ empty: string, invalid: string }} parts.strings
  * @param {(path: string) => void} [parts.navigate]
  * @param {(callback: () => void) => void} [parts.defer] runs `callback` after the re-announce delay
+ * @returns {{ showError(text: string): void }} `showError` puts a message in the live region the way a
+ *   failed submit does, for a page that opens with the field already in error
  */
 export function initCheckLink({
   form,
@@ -58,4 +60,6 @@ export function initCheckLink({
   });
 
   input.addEventListener('input', clear);
+
+  return { showError: fail };
 }
