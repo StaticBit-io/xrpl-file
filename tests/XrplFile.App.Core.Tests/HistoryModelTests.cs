@@ -36,6 +36,27 @@ public sealed class HistoryModelTests : IDisposable
     }
 
     [Fact]
+    public void Finished_publications_held_back_from_an_unreadable_list_are_mentioned()
+    {
+        string historyPath = Path.Combine(_directory, "publications.json");
+        File.WriteAllText(historyPath, "{ this is not json");
+        string stateDirectory = Path.Combine(_directory, "runs");
+        Directory.CreateDirectory(stateDirectory);
+        new PublicationState(
+            PublicationState.CurrentVersion, "testnet", "rWriter", "key-1", "text/plain", "done.txt", 2500,
+            MemoLayout.ChunkBytes, "AB", 42, "done", Strategy: "sequence", ManifestHash: new string('A', 64))
+            .Save(Path.Combine(stateDirectory, "1-done.json"));
+        PublicationHistory history = new(historyPath);
+        history.RecordFinishedRuns(stateDirectory);
+
+        HistoryModel model = new(history, _clipboard);
+        model.Refresh();
+
+        Assert.NotNull(history.RecoveryNote);
+        Assert.Contains(history.RecoveryNote, model.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Copying_a_link_does_not_put_it_on_a_clearing_timer()
     {
         History.Append(Record("xrpl-file://testnet/ABC"));

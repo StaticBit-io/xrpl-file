@@ -293,6 +293,35 @@ public sealed class PublicationHistoryTests : IDisposable
     }
 
     [Fact]
+    public void Start_up_recovery_leaves_an_unreadable_history_and_the_finished_state_alone()
+    {
+        // Append replaces an unreadable file on purpose, for a run that just finished and would
+        // otherwise lose its link. Recovery has no such hurry: the state file keeps the link, so it
+        // can wait for a readable list instead of quietly wiping every earlier entry at start-up.
+        byte[] garbage = Encoding.UTF8.GetBytes("{ this is not json");
+        File.WriteAllBytes(HistoryPath, garbage);
+        string statePath = FinishedState("1-done.json", new string('E', 64));
+        PublicationHistory history = new(HistoryPath);
+
+        Assert.Equal(0, history.RecordFinishedRuns(StateDirectory));
+
+        Assert.Equal(garbage, File.ReadAllBytes(HistoryPath));
+        Assert.True(File.Exists(statePath));
+        Assert.NotNull(history.RecoveryNote);
+    }
+
+    [Fact]
+    public void A_recovery_that_had_nothing_to_wait_for_leaves_no_note()
+    {
+        File.WriteAllBytes(HistoryPath, Encoding.UTF8.GetBytes("{ this is not json"));
+        PublicationHistory history = new(HistoryPath);
+
+        history.RecordFinishedRuns(StateDirectory);
+
+        Assert.Null(history.RecoveryNote);
+    }
+
+    [Fact]
     public void A_recovered_record_is_written_so_an_older_application_still_reads_the_list()
     {
         FinishedState("1-done.json", new string('D', 64));

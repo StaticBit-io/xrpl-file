@@ -15,7 +15,13 @@ public sealed class HistoryModel(PublicationHistory history, IClipboardService c
     public void Refresh()
     {
         Records = history.Read();
-        Message = history.Failure;
+        Message = (history.Failure, history.RecoveryNote) switch
+        {
+            (null, null) => null,
+            ({ } failure, null) => failure,
+            (null, { } note) => note,
+            ({ } failure, { } note) => failure + " " + note,
+        };
     }
 
     public Task CopyLinkAsync(PublicationRecord record, CancellationToken cancellationToken)

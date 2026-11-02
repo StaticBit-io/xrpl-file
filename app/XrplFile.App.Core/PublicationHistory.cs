@@ -91,6 +91,18 @@ public sealed class PublicationHistory : IPublicationHistory
     /// </summary>
     public string? Failure { get; private set; }
 
+    /// <summary>
+    /// Set by <see cref="RecordFinishedRuns"/> when it held back a finished publication it could not
+    /// add to the list, or <see langword="null"/> when it held back nothing. Unlike
+    /// <see cref="Failure"/> it is not reset by later calls: the publications stay held back until
+    /// the next start-up tries again.
+    /// </summary>
+    public string? RecoveryNote { get; private set; }
+
+    private const string HeldBackNote =
+        "Some publications that finished earlier are not in this list yet, because it could not be updated. "
+        + "Their links are kept and will be added the next time the application starts.";
+
     /// <summary>Newest first. An unreadable file reads as empty and sets <see cref="Failure"/>.</summary>
     public IReadOnlyList<PublicationRecord> Read()
     {
@@ -108,7 +120,9 @@ public sealed class PublicationHistory : IPublicationHistory
     /// call — but the person still needs to be told their earlier entries are gone, which is what
     /// <see cref="HistoryAppendResult.Note"/> is for on an otherwise-successful append.
     /// </summary>
-    public HistoryAppendResult Append(PublicationRecord record)
+    public HistoryAppendResult Append(PublicationRecord record) => AppendCore(record, replaceUnreadable: true);
+
+    private HistoryAppendResult AppendCore(PublicationRecord record, bool replaceUnreadable)
     {
         ArgumentNullException.ThrowIfNull(record);
 
@@ -116,6 +130,12 @@ public sealed class PublicationHistory : IPublicationHistory
         {
             IReadOnlyList<PublicationRecord> existing = ReadCore();
             bool replacedAnUnreadableFile = Failure is not null;
+
+            if (replacedAnUnreadableFile && !replaceUnreadable)
+            {
+                // ReadCore's own sentence stays true: the file has been left as it is.
+                return new HistoryAppendResult(Recorded: false, Failure);
+            }
 
             SaveCore([.. existing, record]);
 
@@ -143,11 +163,19 @@ public sealed class PublicationHistory : IPublicationHistory
     /// Called once at start-up. A state that cannot be read or named as a link is left alone. Returns
     /// how many records were added.
     /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="Append"/>, this never replaces a history it cannot read. Append does so to
+    /// save the link of a run that has just finished and exists nowhere else; here the state file
+    /// still holds the link, so waiting costs nothing, while replacing would silently wipe every
+    /// earlier entry at start-up with nobody watching. The states stay on disk for the next start,
+    /// and <see cref="RecoveryNote"/> says so.
+    /// </remarks>
     public int RecordFinishedRuns(string stateDirectory)
     {
         if (!Directory.Exists(stateDirectory)) return 0;
 
         HashSet<string> known = new(Read().Select(record => record.Link), StringComparer.Ordinal);
+        bool historyUnreadable = Failure is not null;
         int recorded = 0;
 
         foreach (string path in Directory.EnumerateFiles(stateDirectory, "*.json"))
@@ -171,11 +199,25 @@ public sealed class PublicationHistory : IPublicationHistory
 
             if (!known.Contains(link))
             {
-                HistoryAppendResult appended = Append(new PublicationRecord(
-                    link, state.Name ?? Path.GetFileName(path), state.Size, state.Type, state.Network, state.Writer,
-                    0, 0, File.GetLastWriteTimeUtc(path), state.Payer, Recovered: true));
+                if (historyUnreadable)
+                {
+                    RecoveryNote = HeldBackNote;
+                    continue;
+                }
 
-                if (!appended.Recorded) continue;
+                HistoryAppendResult appended = AppendCore(
+                    new PublicationRecord(
+                        link, state.Name ?? Path.GetFileName(path), state.Size, state.Type, state.Network, state.Writer,
+                        0, 0, File.GetLastWriteTimeUtc(path), state.Payer, Recovered: true),
+                    replaceUnreadable: false);
+
+                if (!appended.Recorded)
+                {
+                    // Either the write failed or the file stopped being readable since the first
+                    // read; in both cases the state is kept and retried at the next start-up.
+                    RecoveryNote = HeldBackNote;
+                    continue;
+                }
 
                 known.Add(link);
                 recorded++;
