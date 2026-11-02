@@ -116,6 +116,24 @@ public class ExportContainerTests : VaultTestHarness
     }
 
     [Fact]
+    public async Task An_export_returns_to_its_caller_before_the_container_password_is_stretched()
+    {
+        // The caller is an event handler on the user interface's dispatcher, and a million PBKDF2
+        // iterations run inline there freeze the window before the busy state is even painted. A
+        // task that is already finished when the call returns is the sign the work ran inline:
+        // the gate is uncontended here, so nothing else would have made the method yield.
+        CancellationToken token = TestContext.Current.CancellationToken;
+        KeyVault vault = NewVault();
+        await vault.CreateAsync(Password("open sesame"), token);
+        string reference = await vault.StoreAsync(Entry("one"), token);
+
+        Task<byte[]> export = vault.ExportAsync(reference, Password(ContainerPassword), token);
+
+        Assert.False(export.IsCompleted);
+        Open(await export);
+    }
+
+    [Fact]
     public async Task ExportAsync_on_a_locked_vault_throws_Locked()
     {
         CancellationToken token = TestContext.Current.CancellationToken;

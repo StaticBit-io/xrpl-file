@@ -689,9 +689,16 @@ public sealed class KeyVault : IKeyVault, IAsyncDisposable
             try
             {
                 VaultEntry entry = ReadEntryOrThrow(dataKey, reference, FindEntry(record, reference));
+                BackupPayload payload = ToBackupPayload(entry);
 
-                byte[] container = BackupContainer.PackWithPassword(
-                    ToBackupPayload(entry), containerPassword.Span, Pbkdf2Kdf.DefaultIterations);
+                // Off the caller's thread for the reason DerivePasswordKeyAsync gives: the caller is
+                // a dispatcher, and the container's password is stretched a million times. The
+                // memory, not its span, crosses into the work item; the caller erases it only once
+                // this await has returned.
+                byte[] container = await Task.Run(
+                    () => BackupContainer.PackWithPassword(
+                        payload, containerPassword.Span, Pbkdf2Kdf.DefaultIterations),
+                    cancellationToken).ConfigureAwait(false);
 
                 EnsureStillOpen(generation);
                 return container;
