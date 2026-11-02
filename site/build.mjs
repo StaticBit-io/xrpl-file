@@ -13,6 +13,7 @@ import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promi
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderChrome } from './chrome-markup.mjs';
+import { ACTIVE_LANGS, DEFAULT_LANG, LANGS, htmlLang, langFromTag } from './src/js/languages.mjs';
 import { ELEMENT_FILE, alternativeSnippetHtml, snippetHtml } from './snippet.mjs';
 import { findHtmlRewriteTargets, findShadowed, parseRedirects } from './redirects.mjs';
 
@@ -54,6 +55,25 @@ export function pagePathOf(relativeFile) {
 
 const CHROME_MARKER = /<!--@chrome:([a-z-]+)-->/g;
 
+/**
+ * Every active language has its home page, and no language folder is built for a language that is not
+ * active: such a page would ship without a menu entry or an alternate, and the language list says it
+ * is not ready.
+ */
+async function checkLanguagePages(outDir) {
+  for (const lang of LANGS) {
+    if (lang === DEFAULT_LANG) continue;
+    const active = ACTIVE_LANGS.includes(lang);
+    const home = join(outDir, lang, 'index.html');
+    if (active && !(await stat(home).then((s) => s.isFile(), () => false))) {
+      throw new Error(`"${lang}" is in ACTIVE_LANGS but site/src/${lang}/index.html does not exist`);
+    }
+    if (!active && (await isDirectory(join(outDir, lang)))) {
+      throw new Error(`site/src/${lang}/ exists but "${lang}" is not in ACTIVE_LANGS (site/src/js/languages.mjs); add it there or remove the folder`);
+    }
+  }
+}
+
 async function inlineChrome(outDir) {
   for (const file of await listFiles(outDir)) {
     const relative_ = relative(outDir, file);
@@ -62,20 +82,30 @@ async function inlineChrome(outDir) {
     const html = await readFile(file, 'utf8');
     if (!CHROME_MARKER.test(html)) continue;
     CHROME_MARKER.lastIndex = 0;
-    const lang = /<html\b[^>]*\blang="([^"]*)"/i.exec(html)?.[1];
-    if (lang !== 'en' && lang !== 'ru') {
-      throw new Error(`${relative_.split(sep).join('/')} uses a chrome marker but its <html> has no lang="en" or lang="ru"`);
+    const segments = relative_.split(sep);
+    const name = segments.join('/');
+    const tag = /<html\b[^>]*\blang="([^"]*)"/i.exec(html)?.[1];
+    const lang = langFromTag(tag);
+    if (lang === null || htmlLang(lang) !== tag) {
+      const tags = ACTIVE_LANGS.map((code) => `lang="${htmlLang(code)}"`).join(', ');
+      throw new Error(`${name} uses a chrome marker but its <html> has none of ${tags}`);
     }
-    const page = {
-      lang,
-      pagePath: pagePathOf(relative_),
-      langFromStorage: /<html\b[^>]*\bdata-lang-source="storage"/i.test(html),
-    };
+    if (!ACTIVE_LANGS.includes(lang)) {
+      throw new Error(`${name} is written in "${lang}", which is not in ACTIVE_LANGS (site/src/js/languages.mjs)`);
+    }
+    const langFromStorage = /<html\b[^>]*\bdata-lang-source="storage"/i.test(html);
+    // A page in a language folder must say it is in that language. A copied page that kept the old lang
+    // is the usual mistake, and it would ship with the wrong chrome and the wrong alternates.
+    const expected = LANGS.includes(segments[0]) && segments.length > 1 ? segments[0] : segments.length === 1 ? DEFAULT_LANG : null;
+    if (!langFromStorage && expected !== null && lang !== expected) {
+      throw new Error(`${name} is in ${expected === DEFAULT_LANG ? 'the site root' : `the ${expected}/ folder`} but its <html> says lang="${tag}"`);
+    }
+    const page = { lang, pagePath: pagePathOf(relative_), langFromStorage };
     let rendered;
     try {
       rendered = html.replace(CHROME_MARKER, (_, part) => renderChrome(part, page));
     } catch (error) {
-      throw new Error(`${relative_.split(sep).join('/')}: ${error.message}`);
+      throw new Error(`${name}: ${error.message}`);
     }
     await writeFile(file, rendered);
   }
@@ -169,6 +199,7 @@ export async function build({ siteDir, webDistDir, outDir, elementVersion = ELEM
   await rm(outDir, { recursive: true, force: true });
   try {
     await cp(join(siteDir, 'src'), outDir, { recursive: true });
+    await checkLanguagePages(outDir);
     await inlineChrome(outDir);
     await inlineSnippet(outDir, elementDir, elementVersion);
     await cp(elementDir, join(outDir, 'element', elementVersion), { recursive: true });

@@ -4,6 +4,7 @@ import { HERO_ASPECT, HERO_LINK, PUBLISHER_URL } from './config.mjs';
 import { initCheckLink } from './check-link.mjs';
 import { initCopyButton } from './copy-button.mjs';
 import { CHECK_LINK_STRINGS, COPY_STRINGS, PRICE_STRINGS, cloudStrings } from './home-strings.mjs';
+import { activeLang, pageLang } from './languages.mjs';
 import { mountCloud } from './cloud.mjs';
 import { formatDate, formatXrp, priceRows, reserveSummary } from './price.mjs';
 import { pathFromLink } from './route.mjs';
@@ -11,7 +12,7 @@ import { pathFromLink } from './route.mjs';
 const PRICE_URL = '/data/price.json';
 
 function langOf(document) {
-  return document.documentElement.lang === 'ru' ? 'ru' : 'en';
+  return activeLang(pageLang(document.documentElement.lang));
 }
 
 function element(document, tag, text, className) {

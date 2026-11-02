@@ -100,6 +100,7 @@
 
 .lang-switch {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-1);
   list-style: none;
 }
@@ -125,6 +126,84 @@
   border-bottom-color: var(--ink);
   color: var(--ink);
   font-weight: var(--weight-label);
+}
+
+/* The header's language control: a native disclosure whose panel is a list of plain links. The button
+   shows the language in use; the list hangs from its right edge so it never leaves a phone's screen. */
+.lang-menu {
+  position: relative;
+}
+
+.lang-menu__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--target);
+  padding-inline: var(--space-4);
+  border: var(--rule-hair) solid var(--rule);
+  border-radius: var(--radius-pill);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  list-style: none;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out);
+}
+
+.lang-menu__button::-webkit-details-marker {
+  display: none;
+}
+
+.lang-menu__button:hover,
+.lang-menu[open] > .lang-menu__button {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.lang-menu__chevron {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  transition: transform var(--dur-micro) var(--ease-out);
+}
+
+.lang-menu[open] .lang-menu__chevron {
+  transform: rotate(180deg);
+}
+
+.lang-menu__list {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 1;
+  min-width: 11rem;
+  padding: var(--space-1);
+  border: var(--rule-hair) solid var(--rule);
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  list-style: none;
+}
+
+.lang-menu__list a {
+  display: flex;
+  align-items: center;
+  min-height: var(--target);
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-cell);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  text-decoration: none;
+}
+
+.lang-menu__list a:hover {
+  background: var(--paper-3);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.lang-menu__list a[aria-current="true"] {
+  box-shadow: inset 2px 0 0 var(--ink);
+  color: var(--ink);
 }
 
 .theme-toggle {
@@ -212,8 +291,8 @@
     gap: var(--space-2);
   }
 
-  .site-header .lang-switch a {
-    padding-inline: var(--space-2);
+  .site-header .lang-menu__button {
+    padding-inline: var(--space-3);
   }
 
   .site-header .theme-toggle {
@@ -422,6 +501,8 @@
 
 .hero {
   display: grid;
+  /* One shrinkable column on a phone: a long translated button label must wrap, not widen the page. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-7) var(--space-8);
   align-items: center;
   padding-block: var(--space-7) 0;
@@ -572,6 +653,11 @@
 
 .publisher > * + * {
   margin-top: var(--space-2);
+}
+
+/* The label is as long as its translation, so it may take two lines on a phone. */
+.publisher .button {
+  white-space: normal;
 }
 
 /* Problem: three ruled entries, the way a scan log lists captures. */

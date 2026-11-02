@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { parseRedirects, applyRedirects, findShadowed, findHtmlRewriteTargets } from '../redirects.mjs';
+import { LANGS } from '../src/js/languages.mjs';
 
 const HASH = '32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59';
 const rules = parseRedirects(await readFile(new URL('../src/_redirects', import.meta.url), 'utf8'));
@@ -59,4 +60,21 @@ test('findHtmlRewriteTargets reports 200 rules that point at .html, /index or /i
   ));
   assert.deepEqual(found.map((rule) => rule.source), ['/a', '/b', '/c']);
   assert.deepEqual(findHtmlRewriteTargets(rules), []);
+});
+
+test('every language folder, active or not yet, is passed through to its own files', () => {
+  for (const lang of LANGS.filter((code) => code !== 'en')) {
+    for (const path of [`/${lang}/index.html`, `/${lang}/page.html`]) {
+      assert.deepEqual(applyRedirects(path, rules), { status: 200, path }, path);
+    }
+    assert.equal(applyRedirects(`/${lang}/`, rules), null, `the ${lang} home is a directory URL`);
+  }
+});
+
+test('every language home is revalidated on every load, like the English one', async () => {
+  const headers = await readFile(new URL('../src/_headers', import.meta.url), 'utf8');
+  const blocks = headers.split(/\r?\n/).filter((line) => /^\//.test(line));
+  for (const lang of LANGS.filter((code) => code !== 'en')) {
+    assert.ok(blocks.includes(`/${lang}/`), `_headers has no block for /${lang}/`);
+  }
 });

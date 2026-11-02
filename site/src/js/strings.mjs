@@ -1,8 +1,7 @@
 // The words of the file page and the 404 page. The two pages have one URL for both languages, so
 // their text is switched in place; the header and footer words are in chrome-strings.mjs.
 import { CHECK_LINK_STRINGS, COPY_STRINGS } from './home-strings.mjs';
-
-export const LANGS = ['en', 'ru'];
+import { localeOf } from './languages.mjs';
 
 const EN = {
   fileTitle: 'File',
@@ -121,7 +120,7 @@ export function formatSize(bytes, lang) {
     unit += 1;
     digits = 1;
   }
-  const number = new Intl.NumberFormat(lang === 'ru' ? 'ru-RU' : 'en-US', {
+  const number = new Intl.NumberFormat(localeOf(lang), {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(value);

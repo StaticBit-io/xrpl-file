@@ -5,10 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>xrpl-file: храните файл в XRP Ledger</title>
 <meta name="description" content="xrpl-file записывает файл в XRP Ledger и читает его обратно с проверкой по отпечатку. Храните картинку и метаданные токена в том же реестре, что и сам токен.">
-<link rel="canonical" href="https://xrpl-file.staticbit.io/ru/">
-<link rel="alternate" hreflang="en" href="https://xrpl-file.staticbit.io/">
-<link rel="alternate" hreflang="ru" href="https://xrpl-file.staticbit.io/ru/">
-<link rel="alternate" hreflang="x-default" href="https://xrpl-file.staticbit.io/">
 <!--@chrome:head-->
 <script type="module" src="/js/home.mjs"></script>
 </head>
@@ -19,7 +15,7 @@
 <div class="hero__text">
 <h1 id="hero-title">Храните файл в XRP Ledger</h1>
 <p class="lead">Картинка вашего токена или любой другой файл записываются в тот же реестр, что и токен, а читаются с проверкой по отпечатку.</p>
-<p>Картинка на этой странице взята из реестра: это настоящий файл. Браузер показывает её, только когда каждая часть проверена по отпечатку.</p>
+<p>Кубы изображают фрагменты настоящего файла и появляются по мере чтения из реестра. Когда каждый блок проверен по отпечатку, рядом появляется сам файл.</p>
 <form id="check-link" class="check" novalidate>
 <label for="check-link-input">Проверить ссылку</label>
 <div class="check__row">
@@ -49,7 +45,7 @@
 <div class="container">
 <div class="head">
 <h2 id="problem-title">Ссылки на метаданные умирают</h2>
-<p>Если NFT, MPT, DID или удостоверение хранит картинку и описание вне реестра, в нём есть только ссылка. Сам файл лежит в IPFS, на сервере эмитента или в корзине S3.</p>
+<p>Если NFT, MPT, DID или удостоверение хранит картинку и описание вне реестра, в записи есть только ссылка. Сам файл лежит в IPFS, на сервере эмитента или в корзине S3.</p>
 </div>
 <ul class="faults">
 <li><strong>IPFS без закрепления</strong>Закрепление перестают оплачивать, и файл пропадает из IPFS.</li>

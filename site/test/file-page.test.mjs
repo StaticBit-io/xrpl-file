@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises';
 import './support/register-reader.mjs';
 
 const { initFilePage, initNotFoundPage } = await import('../src/js/file-page.mjs');
-const { t, formatSize, networkName, LANGS } = await import('../src/js/strings.mjs');
+const { t, formatSize, networkName } = await import('../src/js/strings.mjs');
+const { ACTIVE_LANGS: LANGS, homePath, localeOf } = await import('../src/js/languages.mjs');
 const strings = await import('../src/js/strings.mjs');
 
 const HASH = '32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59';
@@ -127,7 +128,7 @@ test('every key exists in both languages', () => {
 
 test('a missing key or language throws', () => {
   assert.throws(() => t('noSuchKey', 'en'), /noSuchKey/);
-  assert.throws(() => t('download', 'de'), /de/);
+  assert.throws(() => t('download', 'xx'), /xx/);
 });
 
 test('t fills {placeholders} and rejects a missing value', () => {
@@ -454,4 +455,26 @@ test('the 404 page carries the check field and a way home', async () => {
   assert.match(html, /<a [^>]*data-home[^>]*href="\/"|<a [^>]*href="\/"[^>]*data-home/);
   assert.match(html, /<body data-page="not-found">/);
   assert.match(html, /<script type="module" src="\/js\/file-page\.mjs"><\/script>/);
+});
+
+test('the way home on a page with one URL leads to the home of the language in use, for every active language', () => {
+  const { doc } = open(CANONICAL);
+  for (const lang of LANGS) {
+    doc.switchLanguage(lang);
+    assert.equal(doc.home.getAttribute('href'), homePath(lang), lang);
+  }
+});
+
+test('a language the site does not offer falls back to English instead of throwing', () => {
+  const { doc } = open(CANONICAL, { lang: 'xx' });
+  assert.equal(doc.heading.textContent, 'How this works');
+  doc.switchLanguage('fr');
+  assert.equal(doc.heading.textContent, 'How this works');
+});
+
+test('sizes take their separators from the language locale', () => {
+  for (const lang of LANGS) {
+    const decimal = new Intl.NumberFormat(localeOf(lang), { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(4.2);
+    assert.equal(formatSize(4200, lang), t('sizeKB', lang, { value: decimal }), lang);
+  }
 });

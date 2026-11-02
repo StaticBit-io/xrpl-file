@@ -4,6 +4,7 @@
 // come from the element's `load` event and `save()`, never from a second read of the ledger.
 import { initCheckLink } from './check-link.mjs';
 import { initCopyButton } from './copy-button.mjs';
+import { activeLang, homePath } from './languages.mjs';
 import { getLang } from './prefs.mjs';
 import { linkFromPath } from './route.mjs';
 import { formatSize, networkName, t } from './strings.mjs';
@@ -31,13 +32,13 @@ function saveErrorKey(error) {
 }
 
 function normalise(lang) {
-  return lang === 'ru' ? 'ru' : 'en';
+  return activeLang(lang);
 }
 
 function localizeStatic(doc, lang) {
   for (const node of doc.querySelectorAll('[data-s]')) node.textContent = t(node.dataset.s, lang);
   for (const node of doc.querySelectorAll('[data-s-label]')) node.setAttribute('aria-label', t(node.dataset.sLabel, lang));
-  for (const node of doc.querySelectorAll('[data-home]')) node.setAttribute('href', lang === 'ru' ? '/ru/' : '/');
+  for (const node of doc.querySelectorAll('[data-home]')) node.setAttribute('href', homePath(lang));
 }
 
 /** The "Check a link" field, in the language the page has now. */

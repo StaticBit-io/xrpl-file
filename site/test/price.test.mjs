@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { formatDate, formatSize, formatXrp, keptDrops, priceRows, reserveSummary } from '../src/js/price.mjs';
+import { SIZE_UNITS, formatDate, formatSize, formatXrp, keptDrops, priceRows, reserveSummary } from '../src/js/price.mjs';
+import { ACTIVE_LANGS } from '../src/js/languages.mjs';
 
 const json = JSON.parse(await readFile(new URL('../data/price.json', import.meta.url), 'utf8'));
 
@@ -55,4 +56,43 @@ test('reserveSummary reports one held, returned and kept figure only when the ro
   assert.deepEqual(reserveSummary(json), { heldDrops: 1_000_000, returnedDrops: 800_000, keptDrops: 200_000 });
   assert.equal(reserveSummary({ rows: [{ heldDrops: 10, returnedDrops: 8 }, { heldDrops: 12, returnedDrops: 10 }] }), null);
   assert.equal(reserveSummary({ rows: [{ heldDrops: 10, returnedDrops: 8 }, { heldDrops: 10, returnedDrops: 7 }] }), null);
+});
+
+// The expectations come from Intl for the locale the language is documented to use, never from a
+// table of separators written here.
+const BIG_DROPS = 1_234_567_890_123;
+const SMALL_DROPS = 1_234_500;
+
+test('amounts follow the language: decimal and grouping separators come from its locale', () => {
+  for (const [lang, locale] of [['en', 'en-GB'], ['ru', 'ru-RU'], ['de', 'de-DE'], ['es', 'es-ES'], ['pt', 'pt-BR'], ['zh', 'zh-Hans-CN']]) {
+    const expected = new Intl.NumberFormat(locale, { maximumFractionDigits: 6, minimumFractionDigits: 0 });
+    assert.equal(formatXrp(SMALL_DROPS, lang), expected.format(1.2345), lang);
+    assert.equal(formatXrp(BIG_DROPS, lang), expected.format(BIG_DROPS / 1_000_000), `${lang} big`);
+  }
+  assert.equal(formatXrp(SMALL_DROPS, 'de'), '1,2345', 'German writes a decimal comma');
+  assert.ok(formatXrp(BIG_DROPS, 'de').startsWith('1.234.567'), 'and groups with dots');
+  assert.equal(formatXrp(SMALL_DROPS, 'zh'), '1.2345', 'Chinese writes a decimal point');
+  assert.ok(formatXrp(BIG_DROPS, 'zh').startsWith('1,234,567'), 'and groups with commas');
+});
+
+test('dates follow the language and always spell UTC out', () => {
+  const iso = '2026-11-02T01:01:27+00:00';
+  for (const [lang, locale] of [['de', 'de-DE'], ['es', 'es-ES'], ['pt', 'pt-BR'], ['zh', 'zh-Hans-CN']]) {
+    const expected = new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(iso));
+    assert.equal(formatDate(iso, lang), `${expected} UTC`, lang);
+  }
+  assert.ok(formatDate(iso, 'de').includes('November'));
+  assert.ok(formatDate(iso, 'zh').includes('2026'));
+});
+
+test('a language the site does not have is formatted as English', () => {
+  assert.equal(formatXrp(SMALL_DROPS, 'xx'), formatXrp(SMALL_DROPS, 'en'));
+  assert.equal(formatDate('2026-11-02T00:00:00Z', 'xx'), formatDate('2026-11-02T00:00:00Z', 'en'));
+  assert.equal(formatSize(184_320, 'xx'), formatSize(184_320, 'en'));
+});
+
+test('every active language has size units for the estimate table', () => {
+  for (const lang of ACTIVE_LANGS) {
+    assert.deepEqual(Object.keys(SIZE_UNITS[lang]).sort(), ['B', 'KB', 'MB'], lang);
+  }
 });

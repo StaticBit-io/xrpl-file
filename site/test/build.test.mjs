@@ -4,9 +4,15 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build, MAX_FILE_BYTES } from '../build.mjs';
-import { ELEMENT_PACKAGE } from '../src/js/config.mjs';
+import { ELEMENT_PACKAGE, SITE_ORIGIN } from '../src/js/config.mjs';
+import { ACTIVE_LANGS, LANGS, htmlLang } from '../src/js/languages.mjs';
 
-const GUARDED_REDIRECTS = '/ru/:file /ru/:file 200\n/js/:file /js/:file 200\n/data/:file /data/:file 200\n/:network/:hash /file 200\n';
+// A pass-through rule for every language folder the build can ship, as the real _redirects has.
+const FOLDER_RULES = LANGS.filter((lang) => lang !== 'en').map((lang) => `/${lang}/:file /${lang}/:file 200\n`).join('');
+const GUARDED_REDIRECTS = `${FOLDER_RULES}/js/:file /js/:file 200\n/data/:file /data/:file 200\n/:network/:hash /file 200\n`;
+
+// The language folders the build must find; tests that care about a page's content overwrite it.
+const ACTIVE_FOLDERS = ACTIVE_LANGS.filter((lang) => lang !== 'en');
 
 async function fixture(redirects = GUARDED_REDIRECTS) {
   const root = await mkdtemp(join(tmpdir(), 'xf-site-build-'));
@@ -16,6 +22,10 @@ async function fixture(redirects = GUARDED_REDIRECTS) {
   await mkdir(join(siteDir, 'data'), { recursive: true });
   await mkdir(join(webDistDir, '1.1.0'), { recursive: true });
   await writeFile(join(siteDir, 'src', 'index.html'), '<!doctype html>');
+  for (const lang of ACTIVE_FOLDERS) {
+    await mkdir(join(siteDir, 'src', lang), { recursive: true });
+    await writeFile(join(siteDir, 'src', lang, 'index.html'), '<!doctype html>');
+  }
   await writeFile(join(siteDir, 'src', 'js', 'a.mjs'), 'export {};');
   await writeFile(join(siteDir, 'src', '_redirects'), redirects);
   await writeFile(join(siteDir, 'data', 'price.json'), '{"rows":[]}');
@@ -162,7 +172,7 @@ test('ships no partials and does not rewrite the element build', () =>
 test('refuses a marker on a page without a usable <html lang>, or an unknown marker, and leaves no output', async () => {
   for (const html of [
     '<!doctype html><html><head><!--@chrome:head--></head></html>',
-    '<!doctype html><html lang="de"><head><!--@chrome:head--></head></html>',
+    '<!doctype html><html lang="xx"><head><!--@chrome:head--></head></html>',
     '<!doctype html><html lang="en"><head><!--@chrome:sidebar--></head></html>',
   ]) {
     await withFixture(undefined, async (f) => {
@@ -209,3 +219,85 @@ test('refuses a snippet marker when integrity.json has no value for the element 
     );
     assert.equal(await exists(f.outDir), false);
   }));
+
+const prefixOf = (lang) => (lang === 'en' ? '' : `/${lang}`);
+const homeFile = (lang) => (lang === 'en' ? 'index.html' : `${lang}/index.html`);
+
+test('every active language page gets its canonical, an alternate for each active language and x-default, from the language list', () => {
+  const pages = Object.fromEntries(ACTIVE_LANGS.map((lang) => [homeFile(lang), PAGE(htmlLang(lang), lang)]));
+  return buildWithPages(pages, async (f, read) => {
+    for (const lang of ACTIVE_LANGS) {
+      const html = await read(homeFile(lang));
+      assert.ok(html.includes(`<link rel="canonical" href="${SITE_ORIGIN}${prefixOf(lang)}/">`), `canonical on ${lang}`);
+      for (const target of ACTIVE_LANGS) {
+        assert.ok(
+          html.includes(`<link rel="alternate" hreflang="${htmlLang(target)}" href="${SITE_ORIGIN}${prefixOf(target)}/">`),
+          `${lang} page names ${target}`,
+        );
+      }
+      assert.ok(html.includes(`<link rel="alternate" hreflang="x-default" href="${SITE_ORIGIN}/">`));
+      assert.equal(html.match(/hreflang="[^"]+" href/g).length, ACTIVE_LANGS.length + 1, 'and no language that is not active');
+    }
+  });
+});
+
+test('a page with one URL for every language is built without hreflang or a canonical', () =>
+  buildWithPages({ 'file.html': PAGE('en', 'file', ' data-lang-source="storage"') }, async (f, read) => {
+    const html = await read('file.html');
+    assert.ok(!html.includes('rel="alternate"') && !html.includes('rel="canonical"'));
+  }));
+
+test('refuses a built language folder whose language is not active, and says how to enable it', async () => {
+  const inactive = LANGS.find((lang) => !ACTIVE_LANGS.includes(lang));
+  if (inactive === undefined) return;
+  await withFixture(undefined, async (f) => {
+    await mkdir(join(f.siteDir, 'src', inactive), { recursive: true });
+    await writeFile(join(f.siteDir, 'src', inactive, 'index.html'), '<!doctype html>');
+    await assert.rejects(
+      build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' }),
+      new RegExp(`${inactive}.*ACTIVE_LANGS`),
+    );
+    assert.equal(await exists(f.outDir), false);
+  });
+});
+
+test('refuses an active language that has no home page and names the missing file', async () => {
+  for (const lang of ACTIVE_FOLDERS) {
+    await withFixture(undefined, async (f) => {
+      await rm(join(f.siteDir, 'src', lang), { recursive: true, force: true });
+      await assert.rejects(
+        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' }),
+        new RegExp(`${lang}/index\.html`),
+      );
+      assert.equal(await exists(f.outDir), false);
+    });
+  }
+});
+
+test('refuses a page whose <html lang> is not the language of its folder', async () => {
+  for (const [name, html] of [
+    ['index.html', PAGE('ru', 'x')],
+    ...ACTIVE_FOLDERS.map((lang) => [`${lang}/index.html`, PAGE('en', 'x')]),
+  ]) {
+    await withFixture(undefined, async (f) => {
+      await writeFile(join(f.siteDir, 'src', name), html);
+      await assert.rejects(
+        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' }),
+        new RegExp(name.replace('.', '\.')),
+        name,
+      );
+    });
+  }
+});
+
+test('refuses a language-folder page that would be shadowed because _redirects has no pass-through rule for it', async () => {
+  const rules = '/js/:file /js/:file 200\n/data/:file /data/:file 200\n/:network/:hash /file 200\n';
+  for (const lang of ACTIVE_FOLDERS) {
+    await withFixture(rules, async (f) => {
+      await assert.rejects(
+        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.1.0' }),
+        new RegExp(`/${lang}/index\.html`),
+      );
+    });
+  }
+});

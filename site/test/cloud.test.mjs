@@ -177,7 +177,8 @@ test('nothing is claimed while the read has not started to answer: no card, no c
   assert.equal(parts.canvas.attrs['aria-label'], 'label:reading:null');
   assert.equal(parts.caption.attrs['aria-live'], 'polite');
   assert.equal(parts.caption.attrs.role, 'status');
-  assert.equal(parts.note.textContent, 'note:null:null:false', 'what is true before any answer');
+  assert.equal(parts.note.textContent, '', 'no cube exists yet, so nothing is said about cubes');
+  assert.equal(parts.note.hidden, true, 'an empty note takes no room');
   cloud.destroy();
 });
 
@@ -288,6 +289,7 @@ test('a stalled read settles into the quiet failure state within 20 s and keeps 
   assert.equal(parts.caption.dataset.phase, 'failed');
   assert.equal(parts.canvas.attrs['aria-label'], 'label:failed:123');
   assert.equal(parts.card.hidden, true, 'no verified file to show');
+  assert.equal(parts.note.textContent, 'note:8:1:false', 'the cubes read so far stay, and so does what the note says about them');
   assert.equal(reader.closed, 1);
   assert.equal(clock.activePolls(), 0);
   assert.doesNotThrow(() => clock.flushFrames(), 'the frame after a failure still draws');
@@ -299,6 +301,8 @@ test('a rejected read shows the message for its code, and a network without a no
   const cloud = mount(parts, clock, readerThat(async () => { throw new XrplFileError('NodeLacksHistory', 'no history'); }));
   await cloud.done;
   assert.equal(textOf(parts.caption), 'failed:NodeLacksHistory');
+  assert.equal(parts.note.textContent, '', 'a read that failed before any cube has no note about cubes');
+  assert.equal(parts.note.hidden, true);
 
   const second = page();
   const other = mountCloud(second.canvas, { link: `xrpl-file://21338/${HASH}`, caption: second.caption, strings, reducedMotion: true }, fakeEnv().env);
@@ -402,6 +406,7 @@ test('the note is written again when the manifest names the ledger range, and sa
   mount(exact, fakeEnv(), verifiedRead({ hold: new Promise(() => {}) }));
   await tick();
   assert.equal(exact.note.textContent, 'note:8:1:false');
+  assert.equal(exact.note.hidden, false);
 
   const wide = page();
   mount(wide, fakeEnv(), readerThat(async (_link, _progress, hooks) => {

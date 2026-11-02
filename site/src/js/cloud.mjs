@@ -116,8 +116,8 @@ function defaultLoadElement(doc) {
  *   defaults to whether this browser session has already seen the hero (sessionStorage `xf-mosaic-seen`)
  * @param {HTMLElement} [options.caption] role="status", a polite live region: empty while reading, then
  *   the line for a finished read or the quiet failure message. It carries data-phase.
- * @param {HTMLElement} [options.note] gets the sentence saying what is real and what is drawn; written
- *   at once and again when the manifest names the ledger range
+ * @param {HTMLElement} [options.note] gets the sentence saying what is real and what is drawn; empty and
+ *   hidden until the manifest names the ledger range, since there is nothing to describe before that
  * @param {{ file: HTMLElement, link: HTMLElement }} [options.callouts] the two figures with leaders;
  *   each is filled and shown when its data exists
  * @param {HTMLElement} [options.card] holds the verified file and its line; hidden until every block
@@ -125,7 +125,7 @@ function defaultLoadElement(doc) {
  * @param {object} [options.strings] all visible and spoken text, supplied by the caller (see
  *   DEFAULT_STRINGS for the shape): label(phase, { chunks }), caption({ chunks, firstLedger,
  *   lastLedger }), failed(code), fileLinkLabel, verified, note({ ledgers, ledgersPerPad, capped }) (a
- *   string also works; ledgers is null before the manifest), fileCallout(chunks) and linkCallout(bytes),
+ *   string also works; it is called once the manifest is known), fileCallout(chunks) and linkCallout(bytes),
  *   each callout giving { caption, value, unit }
  * @param {object} [env] seams for tests; defaults are the browser's own
  * @returns {{ done: Promise<void>, destroy: () => void, readonly phase: string }} `done` settles, and
@@ -194,10 +194,15 @@ export function mountCloud(canvas, options, env = {}) {
     caption.setAttribute('role', 'status');
     caption.setAttribute('aria-live', 'polite');
   }
+  // The note describes the cubes, so it stays empty (and takes no room) until the manifest names the
+  // ledgers and the cubes can exist; a read that fails before that never says anything about them.
   function writeNote(detail) {
-    if (note) note.textContent = typeof strings.note === 'function' ? strings.note(detail) : strings.note;
+    if (!note) return;
+    const text = detail === null ? '' : typeof strings.note === 'function' ? strings.note(detail) : strings.note;
+    note.textContent = text;
+    note.hidden = text === '';
   }
-  writeNote({ ledgers: null, ledgersPerPad: null, capped: false });
+  writeNote(null);
 
   function readColours() {
     const style = view.getComputedStyle(doc.documentElement);

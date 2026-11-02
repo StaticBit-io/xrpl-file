@@ -55,7 +55,7 @@ the root of `dist/`.
 
 | Rule | Meaning | nginx |
 |---|---|---|
-| `/ru/:file /ru/:file 200`, and the same for `/js`, `/css`, `/data`, `/fonts`, `/img` | Static files in a two-segment folder are served as themselves. | `location ~ ^/(ru\|js\|css\|data\|fonts\|img)/ { try_files $uri =404; }` |
+| `/ru/:file /ru/:file 200`, and the same for `/de`, `/es`, `/pt`, `/zh`, `/js`, `/css`, `/data`, `/fonts`, `/img` | Static files in a two-segment folder are served as themselves. The four language folders are listed before they exist (see [Languages](#languages)). | `location ~ ^/(ru\|de\|es\|pt\|zh\|js\|css\|data\|fonts\|img)/ { try_files $uri =404; }` |
 | `/:network/:hash /file 200` | A file link path (`/testnet/<HASH>`, `/21338/<HASH>`) is answered by the one static file page (`file.html`), without changing the URL. The page reads the path. The target is the extension-less `/file`: Pages applies its HTML handling to a rewritten target too, so a target spelled `/file.html` is answered with a redirect to `/file` and the link in the path is lost. | `location ~* ^/(mainnet|testnet|devnet|[0-9]+)/[0-9a-f]{64}/?$ { try_files /file.html =404; }` |
 | `/:network/:hash/ /file 200` | The same with a trailing slash. | the `/?` in the pattern above |
 
@@ -64,7 +64,7 @@ claims (`/foo/bar`) to the file page, which then shows its "not a link" state; n
 it, because the pattern only matches a network name or NetworkID and a 64-digit hash. `~*` keeps the
 match case-insensitive, as the spec requires (`/TESTNET/<hash>` is accepted and canonicalised by the page).
 
-Language pages are plain files: `/` is `index.html`, `/ru/` is `ru/index.html`; no rule is needed.
+Language pages are plain files: `/` is `index.html`, `/ru/` is `ru/index.html`, `/de/` is `de/index.html` and so on; no rule is needed for the home pages themselves.
 
 Canonical casing (`/testnet/<UPPER-HASH>`) is not done by the host: the file page script moves a
 non-canonical URL to `linkFromPath(location.pathname).canonicalPath` (see `src/js/route.mjs`).
@@ -113,7 +113,7 @@ every unknown path with `index.html`. The site needs a real `404.html`.
 | Block | Meaning | nginx |
 |---|---|---|
 | `/element/*`: `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` | The element build is versioned in its path and never changes. Embedding sites fetch `mp4box.min.js` from it cross-origin. | `location /element/ { add_header Access-Control-Allow-Origin "*" always; add_header Cache-Control "public, max-age=31536000, immutable" always; }` |
-| `/`, `/ru/`, `/*.html`: `Cache-Control: no-cache` | Pages are revalidated on every load. | `location = / { add_header Cache-Control "no-cache" always; }` and the same for `= /ru/` and `~ \.html$` |
+| `/`, `/ru/`, `/de/`, `/es/`, `/pt/`, `/zh/`, `/*.html`: `Cache-Control: no-cache` | Pages are revalidated on every load. | `location = / { add_header Cache-Control "no-cache" always; }` and the same for `= /ru/` and the other language homes, and `~ \.html$` |
 
 Pages joins the values of a header that several matching blocks set with a comma
 ([Pages, Headers](https://developers.cloudflare.com/pages/configuration/headers/)), so the blocks above
@@ -148,15 +148,17 @@ and `site/test/contrast.test.mjs` fails when a pair misses its threshold.
 A page uses the shared chrome by putting three markers in its source; `build.mjs` replaces them:
 
 ```html
-<html lang="en">                      <!-- or lang="ru"; add data-lang-source="storage" on a page with one URL for both languages -->
-<head> ... <!--@chrome:head-->        <!-- pre-paint theme script, font preloads, site.css, chrome.mjs -->
-<body> <!--@chrome:header-->          <!-- skip link (targets #main), wordmark, language and theme switches -->
+<html lang="en">                      <!-- the page's own language (zh-Hans for Chinese); add data-lang-source="storage" on a page with one URL for every language -->
+<head> ... <!--@chrome:head-->        <!-- canonical and hreflang alternates, pre-paint theme script, font preloads, site.css, chrome.mjs -->
+<body> <!--@chrome:header-->          <!-- skip link (targets #main), wordmark, language menu, theme switch -->
   <main id="main"> ... </main>
-  <!--@chrome:footer-->               <!-- repository, specification, language, theme -->
+  <!--@chrome:footer-->               <!-- repository, specification, the languages as links, theme -->
 ```
 
-The language comes from `<html lang>`. On `/` and `/ru/` the language links point at the equivalent
-page. The file page and `404.html` have one URL for both languages and are marked
+The language comes from `<html lang>`. The header's language control is a native disclosure (`<details>`)
+of plain links, one per active language in its own name, and the footer lists the same links; on a
+fixed-language page they point at the equivalent page and work without script. `chrome.mjs` adds Escape
+and click-outside closing. The file page and `404.html` have one URL for every language and are marked
 `data-lang-source="storage"`: there `chrome.mjs` takes the language from the stored choice (then the
 browser's), switches the header and footer text in place on a click, stores the choice and dispatches
 `xf-langchange` (`detail.lang`) on `document`, so the page's own text can follow. The theme switch sets
@@ -167,6 +169,76 @@ Contrast is computed, not eyeballed: `node site/tools/contrast.mjs` rewrites
 `docs/superpowers/reports/2026-11-02-site/contrast.md` from the tokens and the element palettes in the
 repository README, and `test/contrast.test.mjs` fails when a required pair misses WCAG AA or the report
 is out of date.
+
+## Languages
+
+The site is built for six languages. A language is a data change: its words, its tags and its home page.
+
+| Code | Home | `<html lang>` and hreflang | Number and date locale | Shipped |
+|---|---|---|---|---|
+| `en` | `/` | `en` | `en-GB` | yes, written by hand |
+| `ru` | `/ru/` | `ru` | `ru-RU` | yes, written by hand |
+| `de` | `/de/` | `de` | `de-DE` | not yet |
+| `es` | `/es/` | `es` | `es-ES` | not yet |
+| `pt` | `/pt/` | `pt` | `pt-BR` | not yet |
+| `zh` | `/zh/` | `zh-Hans` | `zh-Hans-CN` | not yet |
+
+German, Spanish, Portuguese and Chinese are translated from the final English text and await a native
+speaker's review; when they ship, they stay marked here until a native speaker has read them. English
+and Russian are written by hand. The locales are chosen for readers, not for a region: English is
+`en-GB` for its "2 November 2026" date, Portuguese is Brazilian, Spanish uses a decimal comma
+(`es-ES`), and Chinese is Simplified for mainland China, which is why its tag carries the script.
+
+### The active list
+
+`src/js/languages.mjs` holds `LANGS` (every language the site is built for, in menu order) and
+`ACTIVE_LANGS` (the ones it ships). Only an active language gets a menu entry, an `hreflang` alternate
+and a page in the build, and only an active language is chosen by `getLang` (the stored choice, else
+the first language of `navigator.languages` whose primary subtag is active: `zh-TW` is Chinese,
+`pt-BR` Portuguese, `es-419` Spanish; else English). Tests loop over `ACTIVE_LANGS`, so flipping the
+list is what turns the checks on for a new language. The build refuses a `src/<lang>/` folder for a
+language that is not active, and an active language without its `src/<lang>/index.html`.
+
+### Adding a language
+
+Do all of these, then add the code to `ACTIVE_LANGS`:
+
+1. `src/js/chrome-strings.mjs`: a `STRINGS.<lang>` table with the same keys as `en`.
+2. `src/js/strings.mjs`: a `TABLES.<lang>` table (the file page and the 404) with the same keys, and
+   the same `{placeholders}` in each string.
+3. `src/js/home-strings.mjs`: `CHECK_LINK_STRINGS`, `COPY_STRINGS`, `PRICE_STRINGS`, `NETWORK_NAMES` and
+   `NETWORK_SHORT` entries, and a `CLOUD_STRINGS.<lang>` function with the same shape as `en`. Counts
+   use `plural(lang, n, forms)`, which asks `Intl.PluralRules`; give the forms the language has.
+4. `src/js/price.mjs`: `SIZE_UNITS.<lang>` (B, KB, MB as the language writes them).
+5. `src/<lang>/index.html`: copy the English page, translate its text, and set `<html lang>` to the tag
+   in the table. Keep every `id`, the three chrome markers and the two snippet markers; write no
+   `canonical`, `alternate` or `hreflang` link, because the build writes them. Translate the
+   description, the four drawings' `<title>`s, the `aria-label`s and the button labels too.
+6. `src/_redirects` and `src/_headers` already list all five non-English folders; the build check
+   fails if a built page is not covered.
+7. `node --test site/test/*.test.mjs` and `node site/build.mjs`. The tests check that every table has
+   the same keys in every active language, that each home page has the English page's ids and its own
+   `<html lang>`, that the menu and the alternates list the language, and that formats come from the
+   language's locale.
+
+Fonts: Geologica's Latin subset covers German, Spanish and Portuguese. Chinese uses the system CJK
+faces named in `--font-body`.
+
+### hreflang and canonical
+
+Every fixed-language page (the home pages) gets, from `chrome-markup.mjs` at build time, a canonical
+link to itself, one `rel="alternate"` per active language and an `x-default` that points at the English
+page. The file page (`/<network>/<HASH>`) and the 404 have one URL for every language and render in the
+visitor's stored language, so they declare no alternates and no canonical: an alternate must name a
+page that is in one language, and these are not. The language menu on them switches the text in place
+and leaves the URL alone.
+
+### Status
+
+German, Spanish, Portuguese and Chinese await translation (the infrastructure is in place and the
+four are not in `ACTIVE_LANGS`). The translator fills the tables above and creates the four home
+pages from the English one. Their texts are translated from English and need a native speaker's review
+before the languages are called done.
 
 ## The hero file and its durability
 

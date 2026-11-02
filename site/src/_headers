@@ -14,3 +14,11 @@
   Cache-Control: no-cache
 /ru/
   Cache-Control: no-cache
+/de/
+  Cache-Control: no-cache
+/es/
+  Cache-Control: no-cache
+/pt/
+  Cache-Control: no-cache
+/zh/
+  Cache-Control: no-cache

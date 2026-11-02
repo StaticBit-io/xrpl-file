@@ -1,15 +1,14 @@
 // Formatting for the price table. The figures come from data/price.json, written by the publisher's
 // own estimate; nothing here computes a price, it only spells the numbers for a reader.
+import { localeOf } from './languages.mjs';
+
 const DROPS_PER_XRP = 1_000_000;
-const LOCALES = { en: 'en-GB', ru: 'ru-RU' };
-const UNITS = { en: { B: 'B', KB: 'KB', MB: 'MB' }, ru: { B: 'Б', KB: 'КБ', MB: 'МБ' } };
+
+/** The size units of the estimate's table, per language. */
+export const SIZE_UNITS = { en: { B: 'B', KB: 'KB', MB: 'MB' }, ru: { B: 'Б', KB: 'КБ', MB: 'МБ' } };
 
 const numberFormats = new Map();
 const dateFormats = new Map();
-
-function localeOf(lang) {
-  return LOCALES[lang] ?? LOCALES.en;
-}
 
 function numberFormat(lang) {
   let format = numberFormats.get(lang);
@@ -28,7 +27,7 @@ export function formatXrp(drops, lang) {
 
 /** A byte count as the publisher's estimate labels sizes: 1024-based KB and MB. */
 export function formatSize(bytes, lang) {
-  const units = UNITS[lang] ?? UNITS.en;
+  const units = SIZE_UNITS[lang] ?? SIZE_UNITS.en;
   const number = new Intl.NumberFormat(localeOf(lang), { maximumFractionDigits: 1 });
   if (bytes >= 1024 * 1024) return `${number.format(bytes / (1024 * 1024))} ${units.MB}`;
   if (bytes >= 1024) return `${number.format(bytes / 1024)} ${units.KB}`;

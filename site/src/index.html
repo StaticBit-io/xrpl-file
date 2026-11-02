@@ -5,10 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>xrpl-file: store a file in the XRP Ledger</title>
 <meta name="description" content="xrpl-file writes a file into the XRP Ledger and reads it back checked against its fingerprint. Keep a token’s picture and metadata in the same ledger as the token.">
-<link rel="canonical" href="https://xrpl-file.staticbit.io/">
-<link rel="alternate" hreflang="en" href="https://xrpl-file.staticbit.io/">
-<link rel="alternate" hreflang="ru" href="https://xrpl-file.staticbit.io/ru/">
-<link rel="alternate" hreflang="x-default" href="https://xrpl-file.staticbit.io/">
 <!--@chrome:head-->
 <script type="module" src="/js/home.mjs"></script>
 </head>
@@ -19,7 +15,7 @@
 <div class="hero__text">
 <h1 id="hero-title">Store a file in the XRP Ledger</h1>
 <p class="lead">Your token’s picture or any other file, written into the same ledger as the token and read back checked against its fingerprint.</p>
-<p>The picture on this page is a real file from the ledger. Your browser shows it only after every piece has been checked against its fingerprint.</p>
+<p>The cubes show the chunks of a real file as they are read from the ledger. When every block has been checked against its fingerprint, the file itself appears beside them.</p>
 <form id="check-link" class="check" novalidate>
 <label for="check-link-input">Check a link</label>
 <div class="check__row">
@@ -49,7 +45,7 @@
 <div class="container">
 <div class="head">
 <h2 id="problem-title">Links to metadata die</h2>
-<p>When an NFT, an MPT, a DID or a credential keeps its picture and description off the ledger, it holds only a link. The file sits on IPFS, on the issuer’s own server or in an S3 bucket.</p>
+<p>When an NFT, an MPT, a DID or a credential keeps its picture and description off the ledger, the ledger entry holds only a link. The file sits on IPFS, on the issuer’s own server or in an S3 bucket.</p>
 </div>
 <ul class="faults">
 <li><strong>IPFS without pinning</strong>Pinning stops being paid for, and the file drops out of IPFS.</li>
@@ -94,7 +90,7 @@
 <div class="container">
 <div class="head">
 <h2 id="price-title">What it costs</h2>
-<p>A file goes into the ledger as roughly one transaction per kilobyte. For each file the publisher opens a throwaway account and deletes it when the file is written. There are two costs: fees, which are spent, and a reserve, which is held while the file is written and mostly comes back.</p>
+<p>A file goes into the ledger as roughly one transaction per kilobyte. For each file the publisher opens a throwaway account and deletes it when the file is written. There are two kinds of cost. Fees are spent. A reserve is held while the file is written, and most of the reserve comes back.</p>
 </div>
 <div id="price-data" class="price-data"><p class="hint">The price table is not available right now. The figures are also in the data file, <a href="/data/price.json">price.json</a>.</p></div>
 </div>

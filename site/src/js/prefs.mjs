@@ -1,6 +1,10 @@
 // Remembered theme and language. localStorage throws in private windows and with blocked site data
 // (even the property read can), so every access is guarded and a failure only means "not remembered".
 export const THEME_KEY = 'xf-theme';
+import { ACTIVE_LANGS, LANGS, isActive, langFromTag, pathPrefix } from './languages.mjs';
+
+export { ACTIVE_LANGS, LANGS };
+
 export const LANG_KEY = 'xf-lang';
 const FILE_PAGE = /^\/[^/]+\/[0-9A-Fa-f]{64}\/?$/;
 
@@ -37,23 +41,46 @@ export function setTheme(theme, storage = safeLocalStorage()) {
   writeItem(storage, THEME_KEY, theme === 'light' ? 'light' : 'dark');
 }
 
-export function getLang(storage = safeLocalStorage(), navigatorLanguage = globalThis.navigator?.language) {
+function browserLanguages() {
+  const navigator = globalThis.navigator;
+  return navigator?.languages?.length ? navigator.languages : navigator?.language;
+}
+
+/**
+ * The stored choice if it is an active language, else the first browser language the site offers
+ * (matched by primary subtag: zh-TW is Chinese, pt-BR Portuguese), else English. `browserLanguages` is
+ * navigator.languages or a single tag.
+ */
+export function getLang(storage = safeLocalStorage(), browserLangs = browserLanguages()) {
   const stored = readItem(storage, LANG_KEY);
-  if (stored === 'en' || stored === 'ru') return stored;
-  return String(navigatorLanguage ?? '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
+  if (isActive(stored)) return stored;
+  const tags = Array.isArray(browserLangs) ? browserLangs : [browserLangs];
+  for (const tag of tags) {
+    const lang = langFromTag(tag);
+    if (lang !== null && isActive(lang)) return lang;
+  }
+  return 'en';
 }
 
 export function setLang(lang, storage = safeLocalStorage()) {
-  writeItem(storage, LANG_KEY, lang === 'ru' ? 'ru' : 'en');
+  writeItem(storage, LANG_KEY, isActive(lang) ? lang : 'en');
 }
 
-/** The same page in the other language: / <-> /ru/ and /x.html <-> /ru/x.html. A file page has one URL. */
+/**
+ * The same page in another language: / <-> /ru/ <-> /de/ and /x.html <-> /ru/x.html. A file page has
+ * one URL. Every known prefix is stripped, active or not, so a stray /de/ path still maps back.
+ */
 export function equivalentPath(pathname, lang) {
   if (FILE_PAGE.test(pathname)) return pathname;
-  const inRu = pathname === '/ru' || pathname.startsWith('/ru/');
-  if (lang === 'ru') return inRu ? pathname : `/ru${pathname}`;
-  if (!inRu) return pathname;
-  return pathname.slice('/ru'.length) || '/';
+  let rest = pathname;
+  for (const known of LANGS) {
+    const prefix = pathPrefix(known);
+    if (prefix !== '' && (rest === prefix || rest.startsWith(`${prefix}/`))) {
+      rest = rest.slice(prefix.length) || '/';
+      break;
+    }
+  }
+  return `${pathPrefix(lang)}${rest}`;
 }
 
 export function applyTheme(doc, theme) {

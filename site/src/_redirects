@@ -2,8 +2,15 @@
 # followed whether or not a static asset exists at the path, and a :placeholder matches any single
 # segment, so the file-page rule below would also swallow /ru/index.html, /js/route.mjs and so on.
 # Each two-segment folder of static files therefore gets a pass-through rule ABOVE it (a 200 rule to
-# the same path serves the asset itself). build.mjs fails when a built file is not covered.
+# the same path serves the asset itself). build.mjs fails when a built file is not covered. The five
+# language folders after /ru are listed before they exist (site/README.md, "Languages"): a rule for a
+# folder with no files matches nothing, and the build check cannot see a missing one until the folder
+# is there.
 /ru/:file /ru/:file 200
+/de/:file /de/:file 200
+/es/:file /es/:file 200
+/pt/:file /pt/:file 200
+/zh/:file /zh/:file 200
 /js/:file /js/:file 200
 /css/:file /css/:file 200
 /data/:file /data/:file 200

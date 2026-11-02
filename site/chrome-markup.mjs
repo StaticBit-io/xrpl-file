@@ -1,12 +1,12 @@
 // Build-time markup for the shared head, header and footer. build.mjs replaces a marker comment in a
 // page with the matching part, so no page repeats this markup and none can drift from another.
+import { SITE_ORIGIN } from './src/js/config.mjs';
+import { ACTIVE_LANGS, LANGUAGE_NAMES, htmlLang, homePath } from './src/js/languages.mjs';
 import { equivalentPath, THEME_KEY } from './src/js/prefs.mjs';
-import { LANGUAGE_NAMES, STRINGS } from './src/js/chrome-strings.mjs';
+import { STRINGS } from './src/js/chrome-strings.mjs';
 
 export const REPOSITORY_URL = 'https://github.com/StaticBit-io/xrpl-file';
 export const SPECIFICATION_URL = 'https://github.com/StaticBit-io/xrpl-file/blob/main/docs/spec/xrpl-file-v1.md';
-
-const LANGS = ['en', 'ru'];
 
 /**
  * Runs in <head> before first paint so the page never flashes the wrong theme. The same rule as
@@ -26,9 +26,9 @@ function escapeHtml(text) {
 
 /**
  * @param {'head'|'header'|'footer'} part
- * @param {{ lang: 'en'|'ru', pagePath: string, langFromStorage: boolean }} page
- *   pagePath is the page's own URL path; langFromStorage marks a page with one URL for both
- *   languages, whose chrome text chrome.mjs switches in place.
+ * @param {{ lang: string, pagePath: string, langFromStorage: boolean }} page
+ *   lang is a site language code (en, ru, ...); pagePath is the page's own URL path; langFromStorage
+ *   marks a page with one URL for every language, whose chrome text chrome.mjs switches in place.
  */
 export function renderChrome(part, page) {
   if (part === 'head') return renderHead(page);
@@ -37,10 +37,27 @@ export function renderChrome(part, page) {
   throw new Error(`unknown chrome part: ${part}`);
 }
 
-function renderHead({ lang, langFromStorage }) {
+/**
+ * The canonical link and the hreflang alternates of a page that exists in several languages, one per
+ * language plus x-default (the English page, which is where a visitor with no matching language
+ * belongs). Written at build time from the language list, so no page spells them by hand.
+ */
+export function languageAlternates(pagePath, langs = ACTIVE_LANGS) {
+  const url = (lang) => `${SITE_ORIGIN}${equivalentPath(pagePath, lang)}`;
+  return [
+    `<link rel="canonical" href="${SITE_ORIGIN}${pagePath}">`,
+    ...langs.map((lang) => `<link rel="alternate" hreflang="${htmlLang(lang)}" href="${url(lang)}">`),
+    `<link rel="alternate" hreflang="x-default" href="${url('en')}">`,
+  ].join('\n');
+}
+
+function renderHead({ lang, pagePath, langFromStorage }) {
   const preloads = ['geologica-latin'];
   if (lang === 'ru' && !langFromStorage) preloads.push('geologica-cyrillic');
   return [
+    // A page with one URL for every language (the file page, the 404) belongs to no single language,
+    // so it declares neither a canonical nor alternates.
+    ...(langFromStorage ? [] : [languageAlternates(pagePath)]),
     `<script>${prePaintScript()}</script>`,
     ...preloads.map((name) => `<link rel="preload" href="/fonts/${name}.woff2" as="font" type="font/woff2" crossorigin>`),
     '<link rel="stylesheet" href="/css/site.css">',
@@ -57,13 +74,26 @@ function labels(page) {
 }
 
 function langLinks(page) {
-  return LANGS.map((lang) => {
-    // No script: a stored-language page falls back to the two homes; with script chrome.mjs
-    // replaces both hrefs with the page's own URL.
-    const href = page.langFromStorage ? (lang === 'ru' ? '/ru/' : '/') : equivalentPath(page.pagePath, lang);
+  return ACTIVE_LANGS.map((lang) => {
+    // No script: a stored-language page falls back to the home pages; with script chrome.mjs
+    // replaces every href with the page's own URL.
+    const href = page.langFromStorage ? homePath(lang) : equivalentPath(page.pagePath, lang);
     const current = !page.langFromStorage && lang === page.lang ? ' aria-current="true"' : '';
-    return `<li><a data-lang-link="${lang}" href="${href}" lang="${lang}" hreflang="${lang}"${current}>${LANGUAGE_NAMES[lang]}</a></li>`;
+    return `<li><a data-lang-link="${lang}" href="${href}" lang="${htmlLang(lang)}" hreflang="${htmlLang(lang)}"${current}>${LANGUAGE_NAMES[lang]}</a></li>`;
   }).join('\n');
+}
+
+// A disclosure (<details>) of plain links rather than a <select>: the links work without script and
+// can be followed by a crawler, the summary is a native button that opens with Enter or Space, and the
+// current language is shown on the button. chrome.mjs only adds closing on Escape and on leaving.
+function langMenu(page) {
+  const { text, i18n } = labels(page);
+  return `<details class="lang-menu" data-lang-menu>
+<summary class="lang-menu__button"><span class="visually-hidden"${i18n('languageLabel')}>${text('languageLabel')}</span> <span data-lang-current>${LANGUAGE_NAMES[page.lang]}</span><svg class="lang-menu__chevron" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 3.5 5 7l3.5-3.5"/></svg></summary>
+<ul class="lang-menu__list">
+${langLinks(page)}
+</ul>
+</details>`;
 }
 
 function themeToggle(page) {
@@ -93,17 +123,13 @@ function wordmarkMark() {
 
 function renderHeader(page) {
   const { text, i18n, i18nLabel } = labels(page);
-  const home = page.lang === 'ru' ? '/ru/' : '/';
+  const home = homePath(page.lang);
   return `<a class="skip-link" href="#main"${i18n('skip')}>${text('skip')}</a>
 <header class="site-header">
 <div class="container site-header__bar">
 <a class="wordmark" href="${home}" aria-label="${text('homeLabel')}"${i18nLabel('homeLabel')}>${wordmarkMark()}<span aria-hidden="true">xrpl-file</span></a>
 <div class="site-header__tools">
-<nav aria-label="${text('languageLabel')}"${i18nLabel('languageLabel')}>
-<ul class="lang-switch">
-${langLinks(page)}
-</ul>
-</nav>
+${langMenu(page)}
 ${themeToggle(page)}
 </div>
 </div>

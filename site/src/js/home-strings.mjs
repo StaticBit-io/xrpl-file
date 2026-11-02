@@ -1,38 +1,90 @@
 // The words the home page's scripts put on the page: the hero's status lines, callouts, the "Check a link"
-// errors, the price table and the copy button. The page's own prose is in index.html and ru/index.html.
-// Every function here is called with whatever the page has and must not throw.
+// errors, the price table and the copy button. The page's own prose is in index.html and <lang>/index.html.
+// Every function here is called with whatever the page has and must not throw. Each table is keyed by
+// language with the same keys in every language; test/languages.test.mjs checks that for the active ones.
 
-const NETWORK_NAMES = {
+export const NETWORK_NAMES = {
   en: { mainnet: 'the XRP Ledger mainnet', testnet: 'the XRP Ledger test network' },
   ru: { mainnet: 'основной сети XRP Ledger', testnet: 'тестовой сети XRP Ledger' },
 };
 
 // The caption names the network in a few words; a network without an entry keeps its own name.
-const NETWORK_SHORT = {
+export const NETWORK_SHORT = {
   en: {},
   ru: { mainnet: 'основной сети', testnet: 'тестовой сети' },
 };
 
-const russianPlurals = new Intl.PluralRules('ru');
+const pluralRules = new Map();
 
-function ruCount(count, one, few, many) {
-  const form = russianPlurals.select(count);
-  return `${count} ${form === 'one' ? one : form === 'few' ? few : many}`;
-}
-
-function enChunks(count) {
-  return `${count} ${count === 1 ? 'chunk' : 'chunks'}`;
+/**
+ * The noun form a count takes by the language's own plural rules (Intl.PluralRules). `forms` has the
+ * categories the language uses (one, few, many, other) and `other` is the fallback. The count is not
+ * included, so a language can place it where it likes.
+ */
+export function plural(lang, count, forms) {
+  let rules = pluralRules.get(lang);
+  if (!rules) {
+    rules = new Intl.PluralRules(lang);
+    pluralRules.set(lang, rules);
+  }
+  return forms[rules.select(count)] ?? forms.other;
 }
 
 function ledgerRange(first, last, word) {
   return first === last ? `${word.one} ${first}` : `${word.many} ${first}–${last}`;
 }
 
-/** `network` is the hero file's network, e.g. "testnet": the caption names where the file was read. */
-export function cloudStrings(lang, network) {
-  if (lang === 'ru') {
+const EN_CHUNKS = { one: 'chunk', other: 'chunks' };
+const RU_CHUNKS = { one: 'фрагмент', few: 'фрагмента', many: 'фрагментов', other: 'фрагмента' };
+const RU_BYTES = { one: 'байт', few: 'байта', many: 'байт', other: 'байта' };
+const RU_LEDGERS = { one: 'версию реестра', few: 'версии реестра', many: 'версий реестра', other: 'версии реестра' };
+
+// One entry per language, each a function of the hero file's network ("testnet": the caption names
+// where the file was read). A language is a data change: add an entry with the same shape.
+const CLOUD_STRINGS = {
+  en: (network) => {
+    const chunksOf = (count) => `${count} ${plural('en', count, EN_CHUNKS)}`;
+    const ledgers = { one: 'ledger', many: 'ledgers' };
+    return {
+      label: (phase, { chunks }) => {
+        const count = chunks === null ? '' : `, ${chunksOf(chunks)}`;
+        return {
+          reading: `Point cloud of a stretch of the XRP Ledger. The file's chunks appear in it as cubes while they are read${count}`,
+          developing: `Point cloud of a stretch of the XRP Ledger. Every block is being checked${count}`,
+          done: `Point cloud of a stretch of the XRP Ledger. The file is read from the ledger and checked${count}`,
+          failed: 'The file could not be read from the ledger just now',
+        }[phase];
+      },
+      caption: ({ chunks, firstLedger, lastLedger }) =>
+        `read from ${NETWORK_SHORT.en[network] ?? network} · ${chunksOf(chunks)} · ${ledgerRange(firstLedger, lastLedger, ledgers)}`,
+      failed: (code) => {
+        if (code === 'NodeUnreachable' || code === 'Stalled') return 'The XRP Ledger node did not answer. Reload the page to try again.';
+        if (code === 'BlockMismatch' || code === 'DecodeFailed') return 'The file did not pass the check, so it is not shown.';
+        if (['NodeLacksHistory', 'ManifestNotFound', 'ChunkMissing', 'Incomplete'].includes(code)) {
+          return 'This file is not available from the ledger right now.';
+        }
+        return 'The file could not be read just now.';
+      },
+      fileLinkLabel: 'Open the file page',
+      verified: 'verified',
+      // Nothing is said before the manifest names the ledgers: until then there are no cubes to describe.
+      note: ({ ledgers: span, ledgersPerPad, capped }) => {
+        if (span === null) return '';
+        return capped
+          ? `Each cube is one chunk of the file, standing on the ledger it was written in; the file spans ${span} ledgers, so each strip of ground covers up to ${ledgersPerPad} of them. Drawn, not measured: the cube's place within its strip, the ground and the gap before the manifest's cube.`
+          : "Each cube is one chunk of the file, standing on the ledger it was written in. Drawn, not measured: the cube's place within its ledger, the ground and the gap before the manifest's cube.";
+      },
+      fileCallout: (chunks) => ({ caption: 'The file', value: String(chunks), unit: plural('en', chunks, EN_CHUNKS) }),
+      linkCallout: (bytes) => ({
+        caption: "The link, the manifest's hash",
+        value: String(bytes),
+        unit: plural('en', bytes, { one: 'byte', other: 'bytes' }),
+      }),
+    };
+  },
+  ru: (network) => {
+    const chunksOf = (count) => `${count} ${plural('ru', count, RU_CHUNKS)}`;
     const ledgers = { one: 'версия реестра', many: 'версии реестра' };
-    const chunksOf = (count) => ruCount(count, 'фрагмент', 'фрагмента', 'фрагментов');
     return {
       label: (phase, { chunks }) => {
         const count = chunks === null ? '' : `, ${chunksOf(chunks)}`;
@@ -56,59 +108,33 @@ export function cloudStrings(lang, network) {
       fileLinkLabel: 'Страница файла',
       verified: 'проверено',
       // Real: the version of the ledger each chunk was written in. Drawn: the place inside it, the
-      // surface and the gap before the manifest's cube.
-      note: ({ ledgers: span, ledgersPerPad, capped }) => (capped
-        ? `Каждый куб — один фрагмент файла, он стоит на своей версии реестра; файл занимает ${ruCount(span, 'версию реестра', 'версии реестра', 'версий реестра')}, поэтому каждая полоса поверхности охватывает до ${ledgersPerPad} из них. Нарисованы, а не измерены: место куба внутри полосы, поверхность и расстояние до куба манифеста.`
-        : 'Каждый куб — один фрагмент файла, он стоит на той версии реестра, в которой фрагмент записан. Нарисованы, а не измерены: место куба внутри версии, поверхность и расстояние до куба манифеста.'),
-      fileCallout: (chunks) => {
-        const [value, ...unit] = chunksOf(chunks).split(' ');
-        return { caption: 'Файл', value, unit: unit.join(' ') };
+      // surface and the gap before the manifest's cube. Nothing is said before the manifest names the
+      // ledgers: until then there are no cubes to describe.
+      note: ({ ledgers: span, ledgersPerPad, capped }) => {
+        if (span === null) return '';
+        return capped
+          ? `Каждый куб — один фрагмент файла, он стоит на своей версии реестра; файл занимает ${span} ${plural('ru', span, RU_LEDGERS)}, поэтому каждая полоса поверхности охватывает до ${ledgersPerPad} из них. Нарисованы, а не измерены: место куба внутри полосы, поверхность и расстояние до куба манифеста.`
+          : 'Каждый куб — один фрагмент файла, он стоит на той версии реестра, в которой фрагмент записан. Нарисованы, а не измерены: место куба внутри версии, поверхность и расстояние до куба манифеста.';
       },
-      linkCallout: (bytes) => {
-        const [value, ...unit] = ruCount(bytes, 'байт', 'байта', 'байт').split(' ');
-        return { caption: 'Ссылка — хэш манифеста', value, unit: unit.join(' ') };
-      },
+      fileCallout: (chunks) => ({ caption: 'Файл', value: String(chunks), unit: plural('ru', chunks, RU_CHUNKS) }),
+      linkCallout: (bytes) => ({ caption: 'Ссылка — хэш манифеста', value: String(bytes), unit: plural('ru', bytes, RU_BYTES) }),
     };
-  }
-  const ledgers = { one: 'ledger', many: 'ledgers' };
-  return {
-    label: (phase, { chunks }) => {
-      const count = chunks === null ? '' : `, ${enChunks(chunks)}`;
-      return {
-        reading: `Point cloud of a stretch of the XRP Ledger. The file's chunks appear in it as cubes while they are read${count}`,
-        developing: `Point cloud of a stretch of the XRP Ledger. Every block is being checked${count}`,
-        done: `Point cloud of a stretch of the XRP Ledger. The file is read from the ledger and checked${count}`,
-        failed: 'The file could not be read from the ledger just now',
-      }[phase];
-    },
-    caption: ({ chunks, firstLedger, lastLedger }) =>
-      `read from ${network} · ${enChunks(chunks)} · ${ledgerRange(firstLedger, lastLedger, ledgers)}`,
-    failed: (code) => {
-      if (code === 'NodeUnreachable' || code === 'Stalled') return 'The XRP Ledger node did not answer. Reload the page to try again.';
-      if (code === 'BlockMismatch' || code === 'DecodeFailed') return 'The file did not pass the check, so it is not shown.';
-      if (['NodeLacksHistory', 'ManifestNotFound', 'ChunkMissing', 'Incomplete'].includes(code)) {
-        return 'This file is not available from the ledger right now.';
-      }
-      return 'The file could not be read just now.';
-    },
-    fileLinkLabel: 'Open the file page',
-    verified: 'verified',
-    note: ({ ledgers: span, ledgersPerPad, capped }) => (capped
-      ? `Each cube is one chunk of the file, standing on the ledger it was written in; the file spans ${span} ledgers, so each strip of ground covers up to ${ledgersPerPad} of them. Drawn, not measured: the cube's place within its strip, the ground and the gap before the manifest's cube.`
-      : "Each cube is one chunk of the file, standing on the ledger it was written in. Drawn, not measured: the cube's place within its ledger, the ground and the gap before the manifest's cube."),
-    fileCallout: (chunks) => ({ caption: 'The file', value: String(chunks), unit: chunks === 1 ? 'chunk' : 'chunks' }),
-    linkCallout: (bytes) => ({ caption: "The link, the manifest's hash", value: String(bytes), unit: bytes === 1 ? 'byte' : 'bytes' }),
-  };
+  },
+};
+
+/** `network` is the hero file's network, e.g. "testnet". A language without an entry gets English. */
+export function cloudStrings(lang, network) {
+  return (CLOUD_STRINGS[lang] ?? CLOUD_STRINGS.en)(network);
 }
 
 export const CHECK_LINK_STRINGS = {
   en: {
     empty: 'Paste a link first.',
-    invalid: 'This is not an xrpl-file link. A link looks like xrpl-file://testnet/ followed by 64 hexadecimal characters (0-9, A-F).',
+    invalid: 'This is not an xrpl-file link. A link looks like xrpl-file://testnet/ followed by 64 hexadecimal characters.',
   },
   ru: {
     empty: 'Сначала вставьте ссылку.',
-    invalid: 'Это не ссылка xrpl-file. Ссылка выглядит так: xrpl-file://testnet/ и 64 шестнадцатеричных символа (0-9, A-F).',
+    invalid: 'Это не ссылка xrpl-file. Ссылка выглядит так: xrpl-file://testnet/ и 64 шестнадцатеричных символа.',
   },
 };
 
