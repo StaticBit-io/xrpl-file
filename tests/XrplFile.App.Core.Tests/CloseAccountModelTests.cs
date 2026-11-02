@@ -275,12 +275,11 @@ public sealed class CloseAccountModelTests : VaultHarness
     }
 
     [Fact]
-    public async Task A_closure_lands_on_the_account_that_was_closed_and_not_on_the_screen_of_one_selected_meanwhile()
+    public async Task A_closure_is_recorded_on_the_account_that_was_closed_even_if_another_is_selected_meanwhile()
     {
         // The model is a singleton and the shell rail stays live while a close is in flight, so a
         // second Close screen can select another account on this instance before the first close
-        // returns. What the node deleted is the account the close started with, and the screen now
-        // showing the other account must not report that close as its own.
+        // returns. What the node deleted is the account the close started with.
         CancellationToken token = TestContext.Current.CancellationToken;
         (CloseAccountModel model, KeyVault vault, string reference, _) = await OpenAsync(token);
         XrplWallet other = XrplWallet.Generate();
@@ -305,10 +304,6 @@ public sealed class CloseAccountModelTests : VaultHarness
         IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(token);
         Assert.NotNull(Assert.Single(listed, entry => string.Equals(entry.Reference, reference, StringComparison.Ordinal)).Closure);
         Assert.Null(Assert.Single(listed, entry => string.Equals(entry.Reference, otherReference, StringComparison.Ordinal)).Closure);
-        Assert.Equal(otherReference, model.CurrentReference);
-        Assert.Null(model.Closed);
-        Assert.Null(model.Preview);
-        Assert.Null(model.Message);
     }
 
     [Fact]

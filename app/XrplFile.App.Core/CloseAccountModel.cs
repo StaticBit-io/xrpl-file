@@ -77,13 +77,6 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     /// </summary>
     public string? CurrentReference { get; private set; }
 
-    /// <summary>
-    /// Whether the account a preflight or close started with is still the one selected. The model is
-    /// shared by every Close screen, so an answer that arrives after another account was selected
-    /// must not be written into what that account's screen reads.
-    /// </summary>
-    private bool Shows(string reference) => string.Equals(_reference, reference, StringComparison.Ordinal);
-
     public async Task SelectAsync(string reference, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(reference);
@@ -183,8 +176,6 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             AccountState home = await connection.Source
                 .AccountStateAsync(destination, cancellationToken).ConfigureAwait(false);
 
-            if (!Shows(reference)) return;
-
             // Assigned as soon as the node has actually answered both calls a confirmation needs --
             // before the extra read below, which is a nice-to-have on top of a preflight that is
             // already good. A node that answers these two and then drops the countdown read must not
@@ -214,17 +205,13 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
                     long current = await connection.Source
                         .CurrentLedgerAsync(cancellationToken).ConfigureAwait(false);
 
-                    if (Shows(reference)) LedgersRemaining = Math.Max(0, deletableFrom - current);
+                    LedgersRemaining = Math.Max(0, deletableFrom - current);
                 }
                 catch (XrplFileException)
                 {
-                    if (Shows(reference)) LedgersRemaining = null;
+                    LedgersRemaining = null;
                 }
             }
-        }
-        catch (Exception ex) when ((ex is XrplFileException or VaultException) && !Shows(reference))
-        {
-            // Another account is on screen now; this answer was about one that no longer is.
         }
         catch (XrplFileException ex)
         {
@@ -268,20 +255,14 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
 
             DeletionResult result = await account.DeleteAsync(destination, cancellationToken).ConfigureAwait(false);
 
-            // The closure below is still recorded when another account has been selected meanwhile;
-            // only what this screen shows is left to the account now on it.
-            if (Shows(reference))
-            {
-                Preview = result;
+            Preview = result;
 
-                // Stale from whatever the last preflight measured against a ledger that has since
-                // moved on: CanClose required Ready, which never carries a DeletableFromLedger, so
-                // this was already null every time this line runs — cleared explicitly anyway so
-                // nothing here depends on that coincidence if DeleteAsync's own internal preview ever
-                // disagrees.
-                LedgersRemaining = null;
-                Message = CloseErrorMessages.For(result.Outcome);
-            }
+            // Stale from whatever the last preflight measured against a ledger that has since
+            // moved on: CanClose required Ready, which never carries a DeletableFromLedger, so
+            // this was already null every time this line runs — cleared explicitly anyway so nothing
+            // here depends on that coincidence if DeleteAsync's own internal preview ever disagrees.
+            LedgersRemaining = null;
+            Message = CloseErrorMessages.For(result.Outcome);
 
             // Recorded only for a deletion a ledger actually took. A queued one has not happened:
             // the account still exists and still holds everything, and the queue may yet drop it.
@@ -300,12 +281,10 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
                 await vault.UpdateAsync(
                     reference, new VaultEntryEdit(Closure: closure), CancellationToken.None).ConfigureAwait(false);
 
-                if (Shows(reference)) Closed = closure;
+                Closed = closure;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                if (!Shows(reference)) return;
-
                 // The node has already accepted the deletion: the account is gone and the balance
                 // has already moved. That fact outranks whatever went wrong recording it here, so
                 // the message must keep saying the account was closed rather than being replaced by
@@ -315,12 +294,6 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
                 Message = $"{Message} The record of it could not be saved to the vault. " +
                     $"Its transaction hash is {result.TxHash} — look the deletion up with that.";
             }
-        }
-        catch (Exception ex) when ((ex is XrplFileException or VaultException or OperationCanceledException)
-            && !Shows(reference))
-        {
-            // Another account is on screen now, and its own state must not be touched. The entry this
-            // close was about is the place to look: an account that did close has its closure there.
         }
         catch (XrplFileException ex)
         {
