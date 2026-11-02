@@ -1,0 +1,44 @@
+{
+  "network": "mainnet",
+  "takenAt": "2026-11-02T01:01:27.1337123+00:00",
+  "node": "wss://xrplcluster.com",
+  "fees": {
+    "openLedgerFeeDrops": 10,
+    "baseReserveDrops": 1000000,
+    "ownerReserveDrops": 200000
+  },
+  "rows": [
+    {
+      "bytes": 10240,
+      "transactions": 14,
+      "feeDrops": 270,
+      "heldDrops": 1000000,
+      "returnedDrops": 800000,
+      "method": "batch"
+    },
+    {
+      "bytes": 51200,
+      "transactions": 60,
+      "feeDrops": 1110,
+      "heldDrops": 1000000,
+      "returnedDrops": 800000,
+      "method": "batch"
+    },
+    {
+      "bytes": 184320,
+      "transactions": 210,
+      "feeDrops": 3870,
+      "heldDrops": 1000000,
+      "returnedDrops": 800000,
+      "method": "batch"
+    },
+    {
+      "bytes": 1048576,
+      "transactions": 1183,
+      "feeDrops": 21705,
+      "heldDrops": 1000000,
+      "returnedDrops": 800000,
+      "method": "batch"
+    }
+  ]
+}
