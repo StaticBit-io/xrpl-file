@@ -119,10 +119,10 @@ the page, so they stay dark in both themes. These are the same in both themes:
 |---|---|---|
 | `--xrpl-file-media-background` | `#000` | around a video, behind a cover |
 | `--xrpl-file-overlay` | `rgba(0,0,0,.72)` | the caption, the play button, a failed video |
-| `--xrpl-file-overlay-foreground` | `#ddd` | text on the overlay, over a cover and over a video |
+| `--xrpl-file-overlay-foreground` | `#ddd` | text on the overlay, over a cover and over a video; the ring around the play button |
 | `--xrpl-file-overlay-accent` | `--xrpl-file-accent`, else `#4da3ff` | buttons, progress and focus ring on the overlay, over a cover and on the caption |
 | `--xrpl-file-overlay-on-accent` | `--xrpl-file-on-accent`, else `#06121f` | text and icons on the overlay accent |
-| `--xrpl-file-overlay-border` | `rgba(255,255,255,.4)` | the caption's copy button |
+| `--xrpl-file-overlay-border` | `rgba(255,255,255,.6)` | the caption's copy button |
 | `--xrpl-file-overlay-track` | `rgba(255,255,255,.15)` | the progress track over a video |
 | `--xrpl-file-overlay-success` | `#6fd08c` | the verified mark, "Copied" |
 | `--xrpl-file-overlay-danger` | `#ffa0a0` | "Copy failed", a failed video |

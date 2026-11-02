@@ -100,6 +100,9 @@ export const STYLES = `
   .btn { display: inline-block; margin-top: 10px; padding: 6px 14px; padding: clamp(4px, 1.9cqi, 6px) clamp(10px, 4.4cqi, 14px); border: 0; border-radius: 6px; background: var(--accent); color: var(--on-accent); font: inherit; font-size: 13px; font-size: clamp(11px, 4cqi, 13px); font-weight: 600; cursor: pointer; }
   .btn:disabled { opacity: 0.6; cursor: default; }
   .btn.play { width: 56px; height: 56px; width: clamp(24px, 30cqmin, 56px); height: clamp(24px, 30cqmin, 56px); padding: 0; border-radius: 50%; background: var(--overlay); color: var(--overlay-foreground); font-size: 22px; font-size: clamp(11px, 9cqmin, 22px); line-height: 56px; line-height: clamp(24px, 30cqmin, 56px); }
+  /* The dark fill alone vanishes on a dark cover (1.2:1); a light ring around it keeps the button at 3:1
+     on any picture, since one of the two edges always stands out. */
+  .btn.play { box-shadow: 0 0 0 2px var(--overlay-foreground); }
   button:focus-visible, pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .status { margin-top: 6px; min-height: 1.6em; font-size: 12.5px; font-size: clamp(11px, 3.9cqi, 12.5px); }
   .btn .ico { display: none; width: 1.25em; height: 1.25em; vertical-align: -0.25em; }
@@ -142,7 +145,7 @@ export const STYLES = `
   .caption .side { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .caption .net { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .caption .ok { color: var(--success); }
-  .caption button { padding: 1px 8px; border: 1px solid var(--xrpl-file-overlay-border, rgba(255,255,255,.4)); border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  .caption button { padding: 1px 8px; border: 1px solid var(--xrpl-file-overlay-border, rgba(255,255,255,.6)); border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
   .caption button[data-state="copied"] { border-color: var(--success); color: var(--success); }
   .caption button[data-state="failed"] { border-color: var(--danger); color: var(--danger); }
   .caption .cp-ico, .caption .cp-mark { display: none; }
