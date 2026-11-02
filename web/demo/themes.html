@@ -1,0 +1,129 @@
+<!doctype html>
+<!--
+  The <xrpl-file> themes on a light and on a dark page. The switches change the page background and
+  the `theme` attribute of every element in place: a theme change restyles, it does not read again.
+  The links are the testnet fixtures of index.html; after a testnet reset they are replaced the same way.
+
+  Build the element with `cd web && npm run build`, serve it with `node web/demo/serve.mjs 8790`
+  and open http://127.0.0.1:8790/demo/themes.html (`?page=dark&theme=light` preselects the switches).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xrpl-file element: themes</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; padding: 20px; max-width: 1100px; margin-inline: auto; }
+  body.light { background: #ffffff; color: #1b1d22; color-scheme: light; }
+  body.dark { background: #0d0f12; color: #e8e8ea; color-scheme: dark; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 17px; margin: 32px 0 8px; }
+  .note { font-size: 13px; margin: 0 0 12px; opacity: .8; }
+  fieldset { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 16px 12px 0; border: 1px solid #8886; border-radius: 6px; }
+  label { cursor: pointer; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 24px; }
+  .grid xrpl-file { height: 200px; }
+  .sizes { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px 24px; }
+  figure { margin: 0; min-width: 0; }
+  figcaption { font: 12px ui-monospace, Consolas, monospace; margin-top: 6px; opacity: .75; overflow-wrap: anywhere; }
+</style>
+<script src="load.js"></script>
+</head>
+<body class="light">
+<h1>&lt;xrpl-file&gt; themes</h1>
+<p class="note">
+  <code>theme="dark"</code> is the default; <code>light</code> is the light palette; <code>auto</code> follows
+  the visitor's <code>prefers-color-scheme</code>. The caption, the loader over a video and the view over a
+  cover stay dark in every theme: they sit on the picture, not on the page.
+</p>
+
+<form id="switches">
+  <fieldset>
+    <legend>Page</legend>
+    <label><input type="radio" name="page" value="light" checked> light</label>
+    <label><input type="radio" name="page" value="dark"> dark</label>
+  </fieldset>
+  <fieldset>
+    <legend>theme</legend>
+    <label><input type="radio" name="theme" value="dark" checked> dark</label>
+    <label><input type="radio" name="theme" value="light"> light</label>
+    <label><input type="radio" name="theme" value="auto"> auto</label>
+  </fieldset>
+</form>
+
+<h2>Full size</h2>
+<div class="grid">
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/CAE00EF2575E0F95E225C31E76C9B6F44F3ACCEDEB0A5F9EA42DCA59C651448E" loading="eager"></xrpl-file>
+    <figcaption>large: the loader</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59"></xrpl-file>
+    <figcaption>picture: hover for the caption</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/F1C980073EDE371B8F54C5D5CB81598A9787176789E1E0E67B2D18455517AB39"></xrpl-file>
+    <figcaption>text-large: the text view and its bar</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/01327E188DFEDB1FD579E8A87D6D2839D0E002758A3D26A14F97BEA939E0DDDD"></xrpl-file>
+    <figcaption>svg: the download view</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/0000000000000000000000000000000000000000000000000000000000000000"></xrpl-file>
+    <figcaption>a link to nothing: the error</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/47C0274B0C88211B2D945C4ECCD9E2FE9CCF158B9E45323370B3A6D939FD40EB" loading="click"></xrpl-file>
+    <figcaption>mp4-cover, click: the view over a cover</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/BACE4938098AE5ECD4EF82FB18B0EACAB34441B93834FD301DD6E70CE0E3F2FB" loading="click"></xrpl-file>
+    <figcaption>html, click: the view without a cover</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/CE45643F1A200CD7DA42D9D1A0EBDBE55489D10B1256383E7D695EFFAF3BF7B5"></xrpl-file>
+    <figcaption>webm: a video</figcaption>
+  </figure>
+</div>
+
+<h2>Small sizes</h2>
+<div class="sizes">
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/01327E188DFEDB1FD579E8A87D6D2839D0E002758A3D26A14F97BEA939E0DDDD" width="200"></xrpl-file>
+    <figcaption>200px: compact</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/01327E188DFEDB1FD579E8A87D6D2839D0E002758A3D26A14F97BEA939E0DDDD" width="100"></xrpl-file>
+    <figcaption>100px: icon</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59" width="200"></xrpl-file>
+    <figcaption>200px picture</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/0000000000000000000000000000000000000000000000000000000000000000" width="100"></xrpl-file>
+    <figcaption>100px error</figcaption>
+  </figure>
+  <figure>
+    <xrpl-file src="xrpl-file://testnet/01327E188DFEDB1FD579E8A87D6D2839D0E002758A3D26A14F97BEA939E0DDDD" width="300" height="48"></xrpl-file>
+    <figcaption>300 × 48: under 56px high</figcaption>
+  </figure>
+</div>
+
+<script>
+  const form = document.getElementById('switches');
+  const query = new URLSearchParams(location.search);
+  for (const name of ['page', 'theme']) {
+    const input = form.querySelector(`input[name="${name}"][value="${query.get(name)}"]`);
+    if (input) input.checked = true;
+  }
+  function apply() {
+    document.body.className = form.elements.page.value;
+    for (const element of document.querySelectorAll('xrpl-file')) element.setAttribute('theme', form.elements.theme.value);
+  }
+  form.addEventListener('change', apply);
+  apply();
+</script>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!doctype html>
+<!--
+  Dev only: every view of the element in every theme, drawn from the real TEMPLATE and STYLES with
+  fixed content, for screenshots and for the contrast table in
+  docs/superpowers/reports/2026-11-02-element-light-theme/report.md. Nothing is read from the ledger.
+
+  Serve with `node web/demo/serve.mjs 8790` and open
+  http://127.0.0.1:8790/demo/themes-harness.html?themes=dark,light,auto&sizes=320x180,200x150,100x100,300x48&page=light
+  (`states=` picks views by name). Then, in the console:
+  `await eval(await (await fetch('themes-measure.js')).text())` returns one row per text and UI pair.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>theme harness</title>
+<style>
+  body { margin: 0; padding: 12px; font: 12px system-ui; }
+  body.light { background: #fff; color: #111; }
+  body.dark { background: #0d0f12; color: #eee; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; align-items: flex-start; }
+  .cell { display: flex; flex-direction: column; gap: 2px; }
+  .host { position: relative; display: block; }
+</style>
+</head>
+<body class="light">
+<div id="out"></div>
+<script type="module">
+import { STYLES, TEMPLATE } from '../src/element/template.mjs';
+
+const sheet = new CSSStyleSheet();
+sheet.replaceSync(STYLES);
+const query = new URLSearchParams(location.search);
+document.body.className = query.get('page') ?? 'light';
+
+function picture(colour) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 320; canvas.height = 180;
+  const g = canvas.getContext('2d');
+  if (colour === 'photo') {
+    const grad = g.createLinearGradient(0, 0, 320, 180);
+    grad.addColorStop(0, '#d9c7a1'); grad.addColorStop(0.5, '#3e6b8a'); grad.addColorStop(1, '#f2efe8');
+    g.fillStyle = grad;
+  } else g.fillStyle = colour;
+  g.fillRect(0, 0, 320, 180);
+  return canvas.toDataURL();
+}
+
+const STATES = {
+  loading(p) {
+    p.loading.hidden = false; p.percent.textContent = '42%';
+    p.progressBytes.textContent = '127.0 of 302.4 MB'; p.progressBlocks.textContent = ' · 124 of 296 blocks verified';
+    p.barFill.style.width = '42%';
+  },
+  download(p) {
+    p.download.hidden = false; p.dlName.textContent = 'page.html'; p.dlType.textContent = 'text/html · ';
+    p.dlSize.textContent = '18.2 KB'; p.dlNet.textContent = ' · testnet'; p.dlBadge.textContent = 'HTML';
+    p.dlLabel.textContent = 'page.html'; p.dlNote.hidden = false; p.dlNote.textContent = 'This type is not shown on the page.';
+    p.dlStatus.textContent = 'Saved.';
+  },
+  error(p) {
+    p.error.hidden = false; p.msgFull.textContent = 'The file was not found on testnet.'; p.msgShort.textContent = 'Not found';
+  },
+  idle(p) {
+    p.idle.hidden = false; p.idleName.textContent = 'page.html'; p.idleMeta.textContent = '18.2 KB';
+  },
+  idleplay(p) {
+    STATES.idle(p); p.open.classList.add('play'); p.open.textContent = '▶'; p.frame.classList.add('video');
+  },
+  coverwhite(p) {
+    STATES.idleplay(p); p.idle.classList.add('covered'); p.cover.src = picture('#ffffff'); p.cover.hidden = false;
+  },
+  coverphoto(p) {
+    STATES.idleplay(p); p.idle.classList.add('covered'); p.cover.src = picture('photo'); p.cover.hidden = false;
+  },
+  text(p) {
+    p.text.hidden = false; p.textBar.hidden = false; p.textNote.textContent = 'Showing the first 1 MB of 1.1 MB.';
+    p.textStatus.textContent = 'Saved.';
+    p.pre.textContent = Array.from({ length: 12 }, (_, i) => `line ${i + 1} — строка ${i + 1}`).join('\n');
+  },
+  captionwhite(p) { caption(p, '#ffffff'); },
+  captionblack(p) { caption(p, '#000000'); },
+  copied(p) { caption(p, '#ffffff'); p.copy.dataset.state = 'copied'; p.copyText.textContent = 'Copied'; },
+  copyfailed(p) { caption(p, '#ffffff'); p.copy.dataset.state = 'failed'; p.copyText.textContent = 'Copy failed'; },
+  overlay(p) { p.video.hidden = false; p.video.prepend(document.createElement('video')); p.overlay.hidden = false; p.overlayText.textContent = 'Buffering…'; },
+  overlayfailed(p) { STATES.overlay(p); p.overlay.classList.add('failed'); p.overlayText.textContent = 'This video cannot be played here.'; },
+};
+
+function caption(p, colour) {
+  p.image.hidden = false; p.img.src = picture(colour);
+  p.caption.hidden = false; p.frame.classList.add('tapped'); p.caption.classList.add('verified');
+  p.capName.textContent = 'picture.jpg'; p.capMark.textContent = '✓ '; p.capWord.textContent = 'verified · ';
+  p.capNetwork.textContent = 'testnet'; p.capNet.classList.add('ok');
+}
+
+const themes = (query.get('themes') ?? 'dark,light').split(',');
+const sizes = (query.get('sizes') ?? '320x180').split(',').map((s) => s.split('x').map(Number));
+const states = (query.get('states') ?? Object.keys(STATES).join(',')).split(',');
+const out = document.getElementById('out');
+window.hosts = [];
+for (const theme of themes) {
+  for (const [w, h] of sizes) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    for (const state of states) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      const host = document.createElement('div');
+      host.className = 'host';
+      host.style.width = `${w}px`; host.style.height = `${h}px`;
+      const root = host.attachShadow({ mode: 'open' });
+      root.innerHTML = TEMPLATE;
+      root.adoptedStyleSheets = [sheet];
+      const p = {};
+      for (const element of root.querySelectorAll('[id]')) p[element.id] = element;
+      p.frame.dataset.theme = theme;
+      STATES[state](p);
+      host.dataset.label = `${theme} ${w}x${h} ${state}`;
+      const label = document.createElement('span');
+      label.textContent = host.dataset.label;
+      cell.append(host, label);
+      row.append(cell);
+      window.hosts.push(host);
+    }
+    out.append(row);
+  }
+}
+</script>
+</body>
+</html>
