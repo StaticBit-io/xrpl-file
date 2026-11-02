@@ -205,6 +205,16 @@ export const STYLES = `
   @container (height < 52px) {
     .badge { display: none; }
   }
+
+  /* A short box keeps at least a line of a cut-short text: wrapped, and with paddings that follow the
+     width, the bar above it took the whole box. The note and the status give way first; both keep their
+     full text as a tooltip, and the status is still announced whole. */
+  @container (height < 120px) {
+    .textbar { flex-wrap: nowrap; padding: 2px 8px; }
+    .textbar .btn { flex: none; padding: 0 8px; line-height: 1.4; }
+    .textbar .text-note, .textbar .status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .text pre { padding: 2px 8px; }
+  }
 `;
 
 export const TEMPLATE = `
@@ -240,7 +250,7 @@ export const TEMPLATE = `
   </div>
   <div class="view text" id="text" hidden>
     <div class="textbar" id="textBar" hidden>
-      <span id="textNote"></span>
+      <span class="text-note" id="textNote"></span>
       <button type="button" class="btn" id="textDownload">Download</button>
       <span class="status" id="textStatus" role="status"></span>
     </div>

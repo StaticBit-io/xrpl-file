@@ -91,6 +91,18 @@ test('the icon tier carries what a short box needs: the compact and icon blocks 
   assert.match(iconBlock, /\.btn:focus-visible \{ outline-offset: -2px; \}/);
 });
 
+test('in a box under 120 pixels high the bar over a cut-short text keeps to one line and tightens, so a line of the text shows', () => {
+  assert.match(STYLES, /\.textbar \{ display: flex; flex-wrap: wrap;/, 'a taller box keeps every word of the bar');
+  assert.match(TEMPLATE, /class="text-note" id="textNote"/);
+  const start = STYLES.indexOf('@container (height < 120px) {');
+  assert.ok(start > 0, 'the short-box block exists');
+  const short = STYLES.slice(start, STYLES.indexOf('\n  }\n', start));
+  assert.match(short, /\.textbar \{ flex-wrap: nowrap; padding:/);
+  assert.match(short, /\.textbar \.btn \{ flex: none; padding:/);
+  assert.match(short, /\.textbar \.text-note, \.textbar \.status \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
+  assert.match(short, /\.text pre \{ padding:/);
+});
+
 test('every container-unit declaration in the full tier has a fixed one before it', () => {
   const full = STYLES.slice(0, STYLES.indexOf('@container'));
   for (const rule of full.match(/[^{}]+\{[^{}]*\}/g)) {

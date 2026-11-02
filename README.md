@@ -134,6 +134,9 @@ The layout follows the element's own width, whatever the page's. From 240 px it 
 120 to 239 px a compact one (one line per text, a "Save" button, a caption of "✓ testnet" with a copy icon);
 under 120 px, or under 56 px of height, an icon one (a type badge and a download icon, a warning icon for an
 error, a small ✓ that copies the link). The full error sentence stays available to screen readers and as a tooltip in every tier.
+In a box under 120 px high, the bar above a text file cut short to its first megabyte keeps to one line,
+its note and save status shortened with an ellipsis (each keeps its full text as a tooltip), and the margins
+tighten, so that at least one line of the text shows.
 
 ```js
 const element = document.querySelector('xrpl-file');

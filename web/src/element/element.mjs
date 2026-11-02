@@ -534,7 +534,11 @@ export class XrplFileElement extends HTMLElement {
     p.pre.textContent = text;
     p.pre.scrollTop = 0;
     p.textBar.hidden = !truncated;
-    if (truncated) p.textNote.textContent = `Showing the first 1 MB of ${formatBytes(manifest.size)}.`;
+    if (truncated) {
+      p.textNote.textContent = `Showing the first 1 MB of ${formatBytes(manifest.size)}.`;
+      // A short box cuts the note with an ellipsis; the tooltip keeps all of it.
+      p.textNote.title = p.textNote.textContent;
+    }
     this.#showPhase('text');
     this.#emit('load');
   }
@@ -747,6 +751,7 @@ export class XrplFileElement extends HTMLElement {
   #showSaving(text) {
     this.#parts.dlStatus.textContent = text;
     this.#parts.textStatus.textContent = text;
+    this.#parts.textStatus.title = text;
   }
 
   // Events
