@@ -5,8 +5,9 @@
 // the same reason on the markup side; this script only owns the pixels.
 //
 // matrix is a row-major bool[][] built in C# (see XrplFile.App/QrMatrix.cs) from text already
-// Base45-encoded and capped at error correction level H — this script does not decide the payload,
-// the level, or whether a code should be drawn at all; it only paints the grid it is handed.
+// Base45-encoded and capped at error correction level H. It carries no quiet zone of its own, so
+// the border drawn below is the only one. This script does not decide the payload, the level, or
+// whether a code should be drawn at all; it only paints the grid it is handed.
 function drawQrMatrix(canvas, matrix) {
     if (!canvas || !matrix || matrix.length === 0) {
         return;

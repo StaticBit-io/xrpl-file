@@ -24,9 +24,17 @@ namespace XrplFile.App;
 public static class QrMatrix
 {
     /// <summary>
+    /// The light border <c>QRCoder</c> already puts around every <see cref="QRCodeData.ModuleMatrix"/>,
+    /// in modules on each side. Its renderers drop it on request; this class copies the matrix
+    /// directly, so it drops it here.
+    /// </summary>
+    private const int EncoderQuietZoneModules = 4;
+
+    /// <summary>
     /// Encodes <paramref name="text"/> at error correction level H and returns the module grid,
-    /// <see langword="true"/> for a dark module, row-major, with no quiet zone added — a caller that
-    /// draws one adds its own border.
+    /// <see langword="true"/> for a dark module, row-major, with no quiet zone: the grid is the code
+    /// itself, 17 + 4 × version modules wide. A caller that draws it adds its own border, as
+    /// <c>wwwroot/qr.js</c> does.
     /// </summary>
     public static bool[][] Build(string text)
     {
@@ -35,15 +43,15 @@ public static class QrMatrix
         QRCodeGenerator generator = new();
         QRCodeData data = generator.CreateQrCode(text, QRCodeGenerator.ECCLevel.H);
 
-        int size = data.ModuleMatrix.Count;
+        int size = data.ModuleMatrix.Count - 2 * EncoderQuietZoneModules;
         bool[][] matrix = new bool[size][];
         for (int row = 0; row < size; row++)
         {
-            System.Collections.BitArray line = data.ModuleMatrix[row];
+            System.Collections.BitArray line = data.ModuleMatrix[row + EncoderQuietZoneModules];
             bool[] destination = new bool[size];
             for (int column = 0; column < size; column++)
             {
-                destination[column] = line[column];
+                destination[column] = line[column + EncoderQuietZoneModules];
             }
 
             matrix[row] = destination;
