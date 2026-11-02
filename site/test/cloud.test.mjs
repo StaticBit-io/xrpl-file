@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import './support/register-reader.mjs';
 
-const { mountCloud } = await import('../src/js/cloud.mjs');
+const { mountCloud, TURN_MS, TURN_FADE_MS, turnOffset } = await import('../src/js/cloud.mjs');
 const { XrplFileError } = await import('../src/js/xrpl.mjs');
 
 const HASH = '2AEB485BB0FAECA2DF4B60F196D5199042288FEB124ED8D95F4313CF06200DB4';
@@ -472,5 +472,129 @@ test('the visibility observer follows its last entry', async () => {
     assert.equal(clock.pendingFrames(), 1, 'it came back: drawing resumes');
   } finally {
     globalThis.IntersectionObserver = saved;
+  }
+});
+
+// A verified read with motion, run to done; `offScreenAtDone` takes the cloud off screen just before.
+async function turnRun({ offScreenAtDone = false, reducedMotion = false } = {}) {
+  const observers = [];
+  const saved = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe() {}
+    disconnect() {}
+  };
+  try {
+    const parts = page();
+    const listeners = {};
+    parts.canvas.parentElement = { addEventListener: (type, listener) => { listeners[type] = listener; }, removeEventListener() {} };
+    const clock = fakeEnv();
+    const cloud = mount(parts, clock, verifiedRead(), { reducedMotion, fast: true });
+    await tick();
+    clock.advance(50);
+    clock.flushFrames();
+    if (offScreenAtDone) observers[0].callback([{ isIntersecting: false }]);
+    clock.firePending();
+    await cloud.done;
+    assert.equal(cloud.phase, 'done');
+    return { parts, clock, listeners, observer: observers[0] };
+  } finally {
+    globalThis.IntersectionObserver = saved;
+  }
+}
+
+/** Steps the clock in frame-sized steps, flushing frames, for `ms`. */
+function play(clock, ms) {
+  for (let elapsed = 0; elapsed < ms; elapsed += 50) {
+    clock.advance(50);
+    clock.flushFrames();
+  }
+}
+
+const lastImage = (parts) => Buffer.from(parts.log.last.data);
+
+test('the turn is one eased round: it adds nothing at its start and a whole turn at its end, within 5 s', () => {
+  assert.ok(TURN_MS <= 5000, 'WCAG 2.2.2: longer motion that starts on its own needs a pause control');
+  assert.equal(turnOffset(0), 0);
+  assert.equal(turnOffset(TURN_MS), 2 * Math.PI);
+  assert.equal(turnOffset(TURN_MS * 2), 2 * Math.PI);
+  assert.ok(turnOffset(10) < 1e-4, 'it starts from rest, so the sway does not jump');
+  assert.ok(2 * Math.PI - turnOffset(TURN_MS - 10) < 1e-4, 'it comes to rest at the end');
+  for (let t = 0; t < TURN_MS; t += 100) assert.ok(turnOffset(t + 100) >= turnOffset(t));
+});
+
+test('a verified read turns the scene once and ends on the frame it would have stopped on without the turn', async () => {
+  const turned = await turnRun();
+  const skipped = await turnRun({ offScreenAtDone: true });
+
+  play(turned.clock, TURN_MS / 2);
+  play(skipped.clock, TURN_MS / 2);
+  skipped.observer.callback([{ isIntersecting: true }]);
+  skipped.clock.flushFrames();
+  assert.ok(!lastImage(turned.parts).equals(lastImage(skipped.parts)), 'half way the scene is turned away');
+  assert.equal(turned.parts.callouts.file.style.opacity, '0', 'the figures are faded out while it turns');
+
+  play(turned.clock, TURN_MS / 2 + 500);
+  play(skipped.clock, TURN_MS / 2 + 500);
+  skipped.observer.callback([{ isIntersecting: true }]);
+  skipped.clock.flushFrames();
+  assert.ok(lastImage(turned.parts).equals(lastImage(skipped.parts)), 'the last frame is the resting angle');
+  assert.equal(turned.parts.callouts.file.style.opacity, '', 'the figures are back');
+  assert.equal(turned.clock.pendingFrames(), 0, 'no frame is asked for after the turn');
+});
+
+test('the figures stay with their cubes while they fade: half faded at the middle of the fade', async () => {
+  const run = await turnRun();
+  play(run.clock, TURN_FADE_MS / 2);
+  const opacity = Number(run.parts.callouts.file.style.opacity);
+  assert.ok(opacity > 0.3 && opacity < 0.7, String(opacity));
+  assert.ok(run.parts.log.strokes > 0, 'the leaders are still drawn');
+});
+
+test('a failed read does not turn: the sway stops where it is', async () => {
+  const parts = page();
+  const clock = fakeEnv();
+  const failed = mount(parts, clock, readerThat(() => new Promise(() => {})), { reducedMotion: false, fast: true });
+  clock.advance(100);
+  clock.flushFrames();
+  clock.advance(20_000);
+  clock.pollOnce();
+  await failed.done;
+  play(clock, 200);
+  assert.equal(clock.pendingFrames(), 0, 'nothing turns after a failure');
+});
+
+test('with reduced motion there is no turn', async () => {
+  const run = await turnRun({ reducedMotion: true });
+  run.clock.flushFrames();
+  run.clock.advance(100);
+  run.clock.flushFrames();
+  assert.equal(run.clock.pendingFrames(), 0);
+});
+
+test('off screen when the read ends, the scene goes straight to its last frame', async () => {
+  const run = await turnRun({ offScreenAtDone: true });
+  play(run.clock, 1000);
+  run.observer.callback([{ isIntersecting: true }]);
+  run.clock.flushFrames();
+  run.clock.advance(50);
+  run.clock.flushFrames();
+  assert.equal(run.clock.pendingFrames(), 0, 'back on screen a second later, nothing is turning');
+});
+
+test('leaving the screen, a pointer or a key on the cloud ends the turn on its last frame', async () => {
+  for (const interrupt of ['offscreen', 'pointerdown', 'keydown']) {
+    const run = await turnRun();
+    play(run.clock, 1000);
+    assert.equal(run.clock.pendingFrames(), 1, `${interrupt}: turning`);
+    if (interrupt === 'offscreen') {
+      run.observer.callback([{ isIntersecting: false }]);
+      run.observer.callback([{ isIntersecting: true }]);
+    } else {
+      run.listeners[interrupt]();
+    }
+    play(run.clock, 100);
+    assert.equal(run.clock.pendingFrames(), 0, `${interrupt}: the turn is over`);
+    assert.equal(run.parts.callouts.file.style.opacity, '', `${interrupt}: the figures are back`);
   }
 });
