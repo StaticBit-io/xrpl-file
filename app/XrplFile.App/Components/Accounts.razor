@@ -175,6 +175,10 @@
     {
         await Model.RefreshAsync(_lifetime.Token);
 
+        // The refresh swallows a vault failure rather than honouring the token, so a screen left
+        // (or locked away) while it ran gets here after Dispose, which found no timer to stop yet.
+        if (_disposed) return;
+
         // Not awaited: the list draws as soon as the vault has answered, and the balances arrive
         // into it afterwards.
         _ = ReadBalancesAsync();

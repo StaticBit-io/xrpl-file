@@ -103,6 +103,9 @@ else
         await Model.RefreshKeysAsync(_lifetime.Token);
         await Model.RefreshPayerAsync(_lifetime.Token);
 
+        // A screen left while the refreshes ran gets here after Dispose, which found no timer to stop.
+        if (_disposed) return;
+
         // Started only once the first refresh has run, matching Shell.razor's own reasoning: a tick
         // can then never race the first render.
         _pollTimer = new Timer(OnPollTick, state: null, PollInterval, PollInterval);
