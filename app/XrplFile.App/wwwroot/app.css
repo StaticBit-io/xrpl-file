@@ -337,7 +337,7 @@ progress { accent-color: var(--mint); }
 @media (min-width: 1100px) {
     /* overflow-wrap: anywhere lets table auto-layout shrink a column to one character, so an address
        that is a cell's own content is kept whole where a data table's card has the page's width.
-       Below 1100px it wraps again: kept whole there, an address alone pushed the Keys table out of
+       Below 1100px it wraps again: kept whole there, an address alone pushed the Accounts table out of
        its card at 900px. Addresses inside a sentence in a cell keep wrapping (a long one would push
        the actions column out of the card), and .xf-link is left alone: a published link must keep
        wrapping anywhere. */

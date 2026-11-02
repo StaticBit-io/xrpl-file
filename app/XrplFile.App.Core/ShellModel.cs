@@ -3,7 +3,6 @@ namespace XrplFile.App.Core;
 /// <summary>The tabs the shell shows once the vault is open.</summary>
 public enum AppTab
 {
-    Keys,
     Accounts,
     Publish,
     Read,
@@ -20,13 +19,13 @@ public enum AppTab
 public sealed class ShellModel
 {
     /// <summary>
-    /// The tab the shell draws. It starts at <see cref="AppTab.Keys"/>, which is where the shell
-    /// has always opened, and only <see cref="Show"/> moves it.
+    /// The tab the shell draws. It starts at <see cref="AppTab.Accounts"/>, where the shell opens
+    /// and where the keys now live alongside the accounts, and only <see cref="Show"/> moves it.
     /// </summary>
-    public AppTab Tab { get; private set; } = AppTab.Keys;
+    public AppTab Tab { get; private set; } = AppTab.Accounts;
 
     /// <summary>
-    /// Whether the phone-width More menu (Accounts, Settings) is open. Only <see cref="ToggleMore"/>
+    /// Whether the phone-width More menu (Settings) is open. Only <see cref="ToggleMore"/>
     /// opens it; choosing any tab, <see cref="CloseMore"/>, and the window widening past the phone
     /// layout close it (design 2026-10-13, section 4).
     /// </summary>
@@ -36,7 +35,7 @@ public sealed class ShellModel
     /// Whether the More entry is the one to mark current: the tab showing is one More holds. A phone
     /// user who chose Settings from More would otherwise see no entry marked at all.
     /// </summary>
-    public bool IsMoreCurrent => Tab is AppTab.Accounts or AppTab.Settings;
+    public bool IsMoreCurrent => Tab is AppTab.Settings;
 
     /// <summary>Shows <paramref name="tab"/> and closes the More menu.</summary>
     /// <param name="tab">

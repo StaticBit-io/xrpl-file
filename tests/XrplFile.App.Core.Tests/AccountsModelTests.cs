@@ -16,7 +16,7 @@ public sealed class AccountsModelTests : VaultHarness
     }
 
     [Fact]
-    public async Task Only_generated_keys_are_listed()
+    public async Task Generated_and_imported_keys_are_both_listed_each_in_its_own_section()
     {
         (AccountsModel model, KeyVault vault) = await OpenAsync(TestContext.Current.CancellationToken);
         await vault.StoreAsync(Entry("imported", VaultEntryKind.Imported), TestContext.Current.CancellationToken);
@@ -24,7 +24,81 @@ public sealed class AccountsModelTests : VaultHarness
 
         await model.RefreshAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal("generated", Assert.Single(model.Rows).Label);
+        Assert.Equal(2, model.Rows.Count);
+        AccountRow throwaway = Assert.Single(model.ThrowawayRows);
+        Assert.Equal("generated", throwaway.Label);
+        Assert.Equal(VaultEntryKind.Generated, throwaway.Kind);
+        AccountRow imported = Assert.Single(model.ImportedRows);
+        Assert.Equal("imported", imported.Label);
+        Assert.Equal(VaultEntryKind.Imported, imported.Kind);
+    }
+
+    [Fact]
+    public async Task An_imported_key_gets_its_balance_and_its_closing_stage_like_a_generated_one()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        NewVaultEntry imported = GeneratedOn("theirs", "testnet") with { Kind = VaultEntryKind.Imported };
+        NewVaultEntry generated = GeneratedOn("ours", "testnet");
+        string importedReference = await vault.StoreAsync(imported, token);
+        await vault.StoreAsync(generated, token);
+        _connections.Ledger.Balances[imported.Address] = 40_000_000;
+        _connections.Ledger.Balances[generated.Address] = 25_000_000;
+        await model.RefreshAsync(token);
+
+        await model.RefreshAllFromLedgerAsync(token);
+
+        AccountRow importedRow = RowOf(model, "theirs");
+        Assert.Equal(XrpAmount.Format(40_000_000), model.BalanceTextOf(importedRow));
+        Assert.True(importedRow.HasActions);
+        Assert.True(model.ShowsStatus(importedRow));
+        Assert.Contains(importedRow.Stage, new[] { AccountStage.Funded, AccountStage.Closable });
+        Assert.NotNull(importedRow.DeletableFromLedger);
+        Assert.Equal(XrpAmount.Format(25_000_000), model.BalanceTextOf(RowOf(model, "ours")));
+
+        // A single Check goes through the same path.
+        _connections.Ledger.Balances[imported.Address] = 41_000_000;
+        await model.RefreshFromLedgerAsync(importedReference, token);
+
+        Assert.Equal(XrpAmount.Format(41_000_000), model.BalanceTextOf(RowOf(model, "theirs")));
+    }
+
+    [Fact]
+    public async Task An_imported_account_that_was_closed_stays_in_its_section_as_closed()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        string reference = await vault.StoreAsync(Entry("theirs", VaultEntryKind.Imported), token);
+        AccountClosure closure = new(DateTimeOffset.UnixEpoch, "rHome", 28_800_000, "ABC");
+        await vault.UpdateAsync(reference, new VaultEntryEdit(Closure: closure), token);
+
+        await model.RefreshAsync(token);
+        await model.RefreshAllFromLedgerAsync(token);
+
+        AccountRow row = Assert.Single(model.ImportedRows);
+        Assert.Empty(model.ThrowawayRows);
+        Assert.Equal(AccountStage.Closed, row.Stage);
+        Assert.False(row.HasActions);
+        Assert.Equal(0, _connections.Connections);
+    }
+
+    [Fact]
+    public async Task Only_a_generated_key_that_was_never_exported_needs_exporting()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (AccountsModel model, KeyVault vault) = await OpenAsync(token);
+        string generated = await vault.StoreAsync(Entry("generated", VaultEntryKind.Generated), token);
+        await vault.StoreAsync(Entry("imported", VaultEntryKind.Imported), token);
+
+        await model.RefreshAsync(token);
+
+        Assert.True(RowOf(model, "generated").NeedsExporting);
+        Assert.False(RowOf(model, "imported").NeedsExporting);
+
+        await vault.UpdateAsync(generated, new VaultEntryEdit(Exported: true), token);
+        await model.RefreshAsync(token);
+
+        Assert.False(RowOf(model, "generated").NeedsExporting);
     }
 
     [Fact]
@@ -180,7 +254,7 @@ public sealed class AccountsModelTests : VaultHarness
     public void HasActions_is_true_for_every_stage_except_closed()
     {
         static AccountRow Row(AccountStage stage) =>
-            new("ref", "label", "rAddress", "1", stage, null, null, null, null);
+            new("ref", "label", "rAddress", "1", stage, null, null, null, null, VaultEntryKind.Generated);
 
         Assert.True(Row(AccountStage.Unknown).HasActions);
         Assert.True(Row(AccountStage.KeyOnly).HasActions);
@@ -192,8 +266,8 @@ public sealed class AccountsModelTests : VaultHarness
     [Fact]
     public void TimeRemainingDescription_follows_LedgersRemaining()
     {
-        AccountRow noCountdown = new("ref", "label", "rAddress", "1", AccountStage.Closable, 0, 264, 0, null);
-        AccountRow counting = new("ref", "label", "rAddress", "1", AccountStage.Funded, 5_000_000, 264, 64, null);
+        AccountRow noCountdown = new("ref", "label", "rAddress", "1", AccountStage.Closable, 0, 264, 0, null, VaultEntryKind.Generated);
+        AccountRow counting = new("ref", "label", "rAddress", "1", AccountStage.Funded, 5_000_000, 264, 64, null, VaultEntryKind.Generated);
 
         Assert.Equal(LedgerTiming.Describe(LedgerTiming.Estimate(0)), noCountdown.TimeRemainingDescription);
         Assert.Equal(LedgerTiming.Describe(LedgerTiming.Estimate(64)), counting.TimeRemainingDescription);

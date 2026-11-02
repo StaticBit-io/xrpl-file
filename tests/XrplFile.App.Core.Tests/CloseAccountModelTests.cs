@@ -45,6 +45,56 @@ public sealed class CloseAccountModelTests : VaultHarness
     }
 
     [Fact]
+    public async Task Closing_an_imported_key_warns_that_it_may_be_an_account_still_in_use()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (CloseAccountModel model, KeyVault vault, _, _) = await OpenAsync(token);
+        XrplWallet theirs = XrplWallet.Generate();
+        string reference = await vault.StoreAsync(
+            new NewVaultEntry(VaultEntryKind.Imported, "theirs", "1", theirs.ClassicAddress, theirs.Seed), token);
+
+        await model.SelectAsync(reference, token);
+
+        Assert.Equal(CloseAccountModel.ImportedWarningText, model.ImportedWarning);
+        Assert.Contains("imported", model.ImportedWarning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Closing_a_generated_account_carries_no_imported_warning()
+    {
+        (CloseAccountModel model, _, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+
+        Assert.Null(model.ImportedWarning);
+    }
+
+    [Fact]
+    public async Task An_imported_key_closes_like_a_generated_one_to_an_explicitly_named_destination()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (CloseAccountModel model, KeyVault vault, _, _) = await OpenAsync(token);
+        XrplWallet theirs = XrplWallet.Generate();
+        string reference = await vault.StoreAsync(
+            new NewVaultEntry(VaultEntryKind.Imported, "theirs", "1", theirs.ClassicAddress, theirs.Seed), token);
+        _connections.Ledger.Balances[theirs.ClassicAddress] = 30_000_000;
+        await model.SelectAsync(reference, token);
+
+        // No destination is ever defaulted, whichever kind of key this is.
+        Assert.Null(model.Destination);
+        Assert.False(model.CanClose);
+
+        model.ChooseDestination(Home);
+        await model.PreflightAsync(token);
+        Assert.True(model.CanClose);
+
+        await model.CloseAsync(token);
+
+        Assert.NotNull(model.Closed);
+        Assert.Equal(Home, model.Closed!.Destination);
+    }
+
+    [Fact]
     public async Task With_no_destination_chosen_it_will_not_close()
     {
         (CloseAccountModel model, _, string reference, _) = await OpenAsync(TestContext.Current.CancellationToken);

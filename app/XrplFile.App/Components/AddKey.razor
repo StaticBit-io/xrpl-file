@@ -3,14 +3,16 @@
 @inject IFilePickerService FilePicker
 @inject NetworkChoices Choices
 
-@* Design 8: generate a key, import a typed seed, or open a backup container and choose keys out of
-   it. Every validation and every derivation lives in AddKeyModel; this component only routes the
-   three input shapes to Generate / Import / SelectContainerKey and shows whatever Model.Preview or
-   Model.Problem already says. The one exception design 6 calls for explicitly -- offering export
-   immediately after a generated key is stored, not as a menu item elsewhere -- is handled by
-   embedding ExportKey directly below rather than returning to the key list first. *@
+@* Design 8: import a typed seed, or open a backup container and choose keys out of it. Generating a
+   key is not here -- the Accounts screen's New account does that -- so this screen only brings in
+   keys that already exist elsewhere. Every validation and every derivation lives in AddKeyModel; this
+   component only routes the two input shapes to Import / SelectContainerKey and shows whatever
+   Model.Preview or Model.Problem already says. The one exception design 6 calls for explicitly --
+   offering export immediately after a key that exists nowhere else is stored (a backup this
+   application wrote for a generated key, opened again), not as a menu item elsewhere -- is handled
+   by embedding ExportKey directly below rather than returning to the accounts list first. *@
 
-@if (_justGeneratedReference is { } reference)
+@if (_unexportedReference is { } reference)
 {
     <div class="alert alert-success">
         This key exists nowhere but this vault until it is exported.
@@ -22,9 +24,6 @@ else
     <h1 class="xf-title">Add a key</h1>
 
     <ul class="nav nav-tabs mb-3">
-        <li class="nav-item">
-            <button type="button" class="nav-link @(_mode == Mode.Generate ? "active" : "")" @onclick="() => SwitchMode(Mode.Generate)">Generate</button>
-        </li>
         <li class="nav-item">
             <button type="button" class="nav-link @(_mode == Mode.Import ? "active" : "")" @onclick="() => SwitchMode(Mode.Import)">Import a seed</button>
         </li>
@@ -41,18 +40,6 @@ else
     <section class="xf-card">
         @switch (_mode)
         {
-            case Mode.Generate:
-                <div class="mb-3">
-                    <label for="add-generate-label" class="form-label">Label</label>
-                    <input id="add-generate-label" class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
-                </div>
-                <div class="mb-3">
-                    <label for="add-generate-network" class="form-label">Network</label>
-                    <NetworkSelect Id="add-generate-network" @bind-Value="_network" Disabled="_busy" />
-                </div>
-                <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoGenerate">Generate</button>
-                break;
-
             case Mode.Import:
                 <div class="mb-3">
                     <label for="add-import-label" class="form-label">Label</label>
@@ -152,7 +139,7 @@ else
     }
 
     <div class="mt-3">
-        <button type="button" class="btn btn-outline-secondary" @onclick="FinishAsync"><BackIcon /> Back to keys</button>
+        <button type="button" class="btn btn-outline-secondary" @onclick="FinishAsync"><BackIcon /> Back to accounts</button>
     </div>
 }
 
@@ -162,13 +149,12 @@ else
 
     private enum Mode
     {
-        Generate,
         Import,
         Container,
     }
 
     private readonly ScreenLifetime _lifetime = new();
-    private Mode _mode = Mode.Generate;
+    private Mode _mode = Mode.Import;
 
     private string _label = string.Empty;
     private string _network = string.Empty;
@@ -179,7 +165,7 @@ else
     private string _selectLabel = string.Empty;
     private string _selectNetwork = string.Empty;
 
-    private string? _justGeneratedReference;
+    private string? _unexportedReference;
     private string? _stored;
     private bool _busy;
 
@@ -200,8 +186,6 @@ else
         // -- switching away from it and back should not force reopening the file.
         Model.ClearPreview();
     }
-
-    private void DoGenerate() => Model.Generate(_label, _network);
 
     private void DoImport()
     {
@@ -286,11 +270,11 @@ else
 
             // The entry's own kind, through the model, not the tab this screen happens to be on:
             // a container this application wrote for a generated key, re-imported through the
-            // "Open a backup file" tab, is a Generated entry that the key list flags and that the
+            // "Open a backup file" tab, is a Generated entry that the accounts list flags and that the
             // import route used to walk past without ever offering the export step.
             if (Model.LastStoredNeedsExporting)
             {
-                _justGeneratedReference = reference;
+                _unexportedReference = reference;
                 return;
             }
 
@@ -308,7 +292,7 @@ else
 
     private async Task FinishAsync()
     {
-        _justGeneratedReference = null;
+        _unexportedReference = null;
         await OnDone.InvokeAsync();
     }
 
@@ -318,7 +302,7 @@ else
         // and whatever SelectContainerKey most recently prepared from them, must not simply wait on
         // the garbage collector once the add-key screen is dismissed -- whichever way it is dismissed,
         // since Dispose runs regardless of which button sent it away. CloseContainer also resets any
-        // stray Preview or Problem left from the Generate or Import routes (see its own remarks), so
+        // stray Preview or Problem left from the Import route (see its own remarks), so
         // this is a clean slate for the next time the screen opens, not just the container route.
         Model.CloseContainer();
         _lifetime.End();

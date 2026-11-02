@@ -3,7 +3,9 @@ using XrplFile.Keys;
 namespace XrplFile.App.Core;
 
 /// <summary>
-/// One throwaway account as the Accounts tab shows it. <see cref="BalanceDrops"/> is
+/// One account as the Accounts tab shows it — a throwaway this application generated or a key the
+/// person imported (<see cref="Kind"/>), which differ in how they are listed and not in what can be
+/// done to them on the ledger. <see cref="BalanceDrops"/> is
 /// <see langword="null"/> until a node has actually answered — a cached
 /// <see cref="DeletableFromLedger"/> left over from an earlier session is not itself an answer, so
 /// it never manufactures a balance on its own (<see cref="AccountStage.Unknown"/>). Once populated,
@@ -20,8 +22,23 @@ public sealed record AccountRow(
     long? BalanceDrops,
     long? DeletableFromLedger,
     long? LedgersRemaining,
-    AccountClosure? Closure)
+    AccountClosure? Closure,
+    VaultEntryKind Kind)
 {
+    /// <summary>
+    /// Whether this is a throwaway account the application generated, as opposed to a key the
+    /// person imported. The Accounts screen's two sections follow it, so the split is the model's
+    /// decision and not something the markup compares <see cref="Kind"/> to.
+    /// </summary>
+    public bool IsThrowaway => Kind == VaultEntryKind.Generated;
+
+    /// <summary>
+    /// Whether this key exists only in this vault right now (<see cref="ExportNeed"/>'s rule): the
+    /// row wears the "exists only here" badge. Re-read
+    /// from the vault on every refresh, because an export changes it without a node being involved.
+    /// </summary>
+    public bool NeedsExporting { get; init; }
+
     /// <summary>
     /// Whether the last read of this row from a node failed. Cleared by the next read that gets an
     /// answer; the balance and stage the row carries are from the last answer, not from the failure.

@@ -6,9 +6,13 @@
    address both only ever reach Model.ChooseDestination, and nothing is confirmable before
    Model.PreflightAsync has actually run (G5).
 
+   An imported key may be an account the person still uses, so the model supplies one extra warning
+   line for it (ImportedWarning, null for a generated one), shown above the destination choice and so
+   before any confirm step; the recipient is named explicitly for both kinds, with no default.
+
    The account this whole screen is about to destroy is named up front -- label and address, from
    Model.AccountLabel/AccountAddress, plus its balance once a preflight has read it -- because this
-   is reached from a list of near-identical throwaway rows and the destination side alone being done
+   is reached from a list of near-identical account rows and the destination side alone being done
    properly does not tell a person which source account they are looking at.
 
    CloseAccountModel is a singleton, like FundingModel, and can still be holding a PREVIOUS account's
@@ -74,6 +78,11 @@ else
                 <span> (currently holds @XrpAmount.Format(holding.BalanceDrops))</span>
             }
         </div>
+    }
+
+    @if (Model.ImportedWarning is { } importedWarning)
+    {
+        <div class="alert alert-warning">@importedWarning</div>
     }
 
     <p>

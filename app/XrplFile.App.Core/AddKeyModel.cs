@@ -49,21 +49,23 @@ public sealed record AddKeyPreview(string Address, string Algorithm);
 public sealed record ContainerKeyOption(string Address, string Algorithm, string? Label, string? Network);
 
 /// <summary>
-/// The model behind adding a key to the vault (design 8): a generated key, a typed seed, or a key
-/// chosen out of an imported backup container. Every branch the add-key screen can take lives
+/// The model behind adding a key to the vault (design 8): a typed seed, or a key chosen out of an
+/// imported backup container. Generating a key is not here — a new throwaway account comes from
+/// <see cref="NewAccountModel"/> — so everything this model stores arrives from outside the
+/// application. Every branch the add-key screen can take lives
 /// here, reachable from a test with no operating system in the loop.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="Generate"/>, <see cref="Import"/> and <see cref="SelectContainerKey"/> only prepare
+/// <see cref="Import"/> and <see cref="SelectContainerKey"/> only prepare
 /// and validate; <see cref="StoreAsync"/> is the one call that writes. Nothing reaches the vault
 /// until an address has been derived and shown as <see cref="Preview"/> — a mistyped seed that
 /// happens to derive a valid-looking address the user does not own is the failure this order
-/// prevents, and it holds for all three routes in, including the one where the container already
+/// prevents, and it holds for both routes in, including the one where the container already
 /// claims an address of its own (see <see cref="SelectContainerKey"/>).
 /// </para>
 /// <para>
-/// <see cref="OpenContainer"/> is the third route, not in the original design: the format that
+/// <see cref="OpenContainer"/> is the second route, not in the original design: the format that
 /// carries a key between this application and the Wallet moves in both directions, and an export
 /// nobody can import back is only half of that feature. Opening a container is a separate step
 /// from choosing a key out of it, because a container can hold several — <see cref="ContainerKeys"/>
@@ -88,8 +90,7 @@ public sealed class AddKeyModel(IKeyVault vault)
     private NewVaultEntry? _pending;
 
     /// <summary>
-    /// The address and algorithm most recently derived by <see cref="Generate"/>,
-    /// <see cref="Import"/> or <see cref="SelectContainerKey"/> — or <see langword="null"/> before
+    /// The address and algorithm most recently derived by <see cref="Import"/> or <see cref="SelectContainerKey"/> — or <see langword="null"/> before
     /// any of them has succeeded, or after the most recent call to any of them failed.
     /// </summary>
     public AddKeyPreview? Preview { get; private set; }
@@ -108,7 +109,7 @@ public sealed class AddKeyModel(IKeyVault vault)
     /// before any store has succeeded, and unchanged by one that failed.
     /// </summary>
     /// <remarks>
-    /// The rule is <see cref="ExportNeed"/>'s, the same one <see cref="VaultListModel"/> already
+    /// The rule is <see cref="ExportNeed"/>'s, the same one <see cref="AccountsModel"/> already
     /// applies to decide whether a row wears the red badge. The add-key screen used to decide this
     /// for itself, from which tab it was on: a container written by this application for a
     /// generated key re-imported through the "Open a backup file" tab produced an entry whose kind
@@ -126,27 +127,6 @@ public sealed class AddKeyModel(IKeyVault vault)
     /// again.
     /// </summary>
     public IReadOnlyList<ContainerKeyOption> ContainerKeys { get; private set; } = [];
-
-    /// <summary>Prepares a freshly generated key, ed25519, for storing as <see cref="VaultEntryKind.Generated"/>.</summary>
-    /// <returns>
-    /// <see langword="true"/> and sets <see cref="Preview"/> when <paramref name="label"/> and
-    /// <paramref name="network"/> are both given; otherwise <see langword="false"/> with
-    /// <see cref="Problem"/> set and nothing prepared.
-    /// </returns>
-    public bool Generate(string label, string network)
-    {
-        Preview = null;
-        _pending = null;
-
-        if (!ValidateLabelAndNetwork(label, network, out string? canonicalNetwork))
-        {
-            return false;
-        }
-
-        XrplWallet wallet = XrplWallet.Generate();
-        Prepare(VaultEntryKind.Generated, label, canonicalNetwork, wallet.ClassicAddress, wallet.Seed, XrplWallet.Ed25519);
-        return true;
-    }
 
     /// <summary>Prepares a key typed in by the user, for storing as <see cref="VaultEntryKind.Imported"/>.</summary>
     /// <remarks>
@@ -348,8 +328,8 @@ public sealed class AddKeyModel(IKeyVault vault)
     /// <see cref="string"/> elsewhere in this model already has.
     /// </para>
     /// <para>
-    /// Closing is scoped to the container route: <see cref="Generate"/> and <see cref="Import"/>
-    /// remain callable afterwards, and a later <see cref="OpenContainer"/> call opens a fresh
+    /// Closing is scoped to the container route: <see cref="Import"/>
+    /// remains callable afterwards, and a later <see cref="OpenContainer"/> call opens a fresh
     /// container as if this one had never been opened. A key <see cref="SelectContainerKey"/>
     /// prepared but that was never passed to <see cref="StoreAsync"/> is discarded along with it —
     /// an index into <see cref="ContainerKeys"/> obtained before this call is no longer valid
@@ -367,7 +347,7 @@ public sealed class AddKeyModel(IKeyVault vault)
     }
 
     /// <summary>
-    /// Drops whatever <see cref="Generate"/>, <see cref="Import"/> or <see cref="SelectContainerKey"/>
+    /// Drops whatever <see cref="Import"/> or <see cref="SelectContainerKey"/>
     /// most recently prepared, without touching <see cref="ContainerKeys"/> or the container route's
     /// open state — unlike <see cref="CloseContainer"/>, which resets both. The add-key screen calls
     /// this when it switches away from whichever input route prepared the current <see cref="Preview"/>,
@@ -382,8 +362,8 @@ public sealed class AddKeyModel(IKeyVault vault)
     }
 
     /// <summary>
-    /// Writes whatever <see cref="Generate"/>, <see cref="Import"/> or
-    /// <see cref="SelectContainerKey"/> most recently prepared.
+    /// Writes whatever <see cref="Import"/> or <see cref="SelectContainerKey"/> most
+    /// recently prepared.
     /// </summary>
     /// <remarks>
     /// A duplicate address or a locked vault are reported through <see cref="Problem"/> rather
@@ -399,7 +379,7 @@ public sealed class AddKeyModel(IKeyVault vault)
     /// entry that was just stored is one the screen must offer to export.
     /// </returns>
     /// <exception cref="InvalidOperationException">
-    /// Nothing has been prepared: none of <see cref="Generate"/>, <see cref="Import"/> or
+    /// Nothing has been prepared: neither <see cref="Import"/> nor
     /// <see cref="SelectContainerKey"/> has succeeded since the last successful
     /// <see cref="StoreAsync"/> call.
     /// </exception>
@@ -408,7 +388,7 @@ public sealed class AddKeyModel(IKeyVault vault)
         if (_pending is null)
         {
             throw new InvalidOperationException(
-                "Nothing has been prepared to store. Call Generate, Import or SelectContainerKey first.");
+                "Nothing has been prepared to store. Call Import or SelectContainerKey first.");
         }
 
         try

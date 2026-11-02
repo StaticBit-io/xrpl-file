@@ -57,6 +57,45 @@ public sealed class FundingModelTests : VaultHarness
     }
 
     [Fact]
+    public async Task An_imported_key_that_is_already_an_account_is_funded_by_address_and_shows_its_balance()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        (FundingModel model, _, _, KeyVault vault) = await OpenAsync(token);
+        NewVaultEntry imported = Entry("theirs", VaultEntryKind.Imported);
+        string reference = await vault.StoreAsync(imported, token);
+        _connections.Ledger.Balances[imported.Address] = 75_000_000;
+
+        await model.SelectAsync(reference, token);
+
+        // Before any node has answered, an account that may well exist is not called unfunded.
+        Assert.False(model.BalanceKnown);
+        Assert.DoesNotContain("Not funded", model.BalanceLine, StringComparison.Ordinal);
+
+        await model.RefreshAsync(token);
+
+        Assert.Equal(imported.Address, model.QrPayload);
+        Assert.True(model.BalanceKnown);
+        Assert.True(model.AccountExists);
+        Assert.Equal($"Balance: {XrpAmount.Format(75_000_000)}", model.BalanceLine);
+        Assert.DoesNotContain("reserve", model.InstructionText, StringComparison.Ordinal);
+        Assert.False(model.ShouldPoll);
+    }
+
+    [Fact]
+    public async Task An_address_nobody_funded_says_so_only_after_a_node_has_said_so()
+    {
+        (FundingModel model, string reference, _, _) = await OpenAsync(TestContext.Current.CancellationToken);
+
+        await model.SelectAsync(reference, TestContext.Current.CancellationToken);
+        Assert.Equal("Checking the ledger…", model.BalanceLine);
+
+        await model.RefreshAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("Not funded yet.", model.BalanceLine);
+        Assert.Contains("reserve", model.InstructionText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Copying_the_address_does_not_put_it_on_a_clearing_timer()
     {
         (FundingModel model, string reference, NewVaultEntry entry, _) = await OpenAsync(TestContext.Current.CancellationToken);

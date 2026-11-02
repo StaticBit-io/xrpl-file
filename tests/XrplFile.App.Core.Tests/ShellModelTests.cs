@@ -5,9 +5,19 @@ namespace XrplFile.App.Core.Tests;
 public sealed class ShellModelTests
 {
     [Fact]
-    public void The_keys_tab_is_where_the_application_opens()
+    public void The_accounts_tab_is_where_the_application_opens()
     {
-        Assert.Equal(AppTab.Keys, new ShellModel().Tab);
+        Assert.Equal(AppTab.Accounts, new ShellModel().Tab);
+    }
+
+    /// <summary>
+    /// Keys and accounts are one screen: a tab for the keys alone is what confused people, so the
+    /// enum must not carry one for a rail or tab bar to draw.
+    /// </summary>
+    [Fact]
+    public void There_is_no_tab_of_keys_apart_from_accounts()
+    {
+        Assert.DoesNotContain("Keys", Enum.GetNames<AppTab>());
     }
 
     [Fact]
@@ -55,7 +65,7 @@ public sealed class ShellModelTests
         int raised = 0;
         model.Changed += () => raised++;
 
-        model.Show(AppTab.Keys);
+        model.Show(AppTab.Accounts);
 
         Assert.Equal(0, raised);
     }
@@ -149,9 +159,8 @@ public sealed class ShellModelTests
     }
 
     [Theory]
-    [InlineData(AppTab.Accounts, true)]
     [InlineData(AppTab.Settings, true)]
-    [InlineData(AppTab.Keys, false)]
+    [InlineData(AppTab.Accounts, false)]
     [InlineData(AppTab.Publish, false)]
     [InlineData(AppTab.Read, false)]
     [InlineData(AppTab.History, false)]

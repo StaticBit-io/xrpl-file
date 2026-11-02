@@ -4,7 +4,8 @@ namespace XrplFile.App.Core;
 
 /// <summary>
 /// The funding screen (design 4.1): the address to send to, a QR of it, and what the account holds
-/// now. It computes no target amount — what a publication needs depends on the file, and C2's
+/// now. It serves a generated throwaway and an imported key alike — funding is only ever by address,
+/// from a wallet the person already has, so nothing here asks for or moves their main account. It computes no target amount — what a publication needs depends on the file, and C2's
 /// estimate screen already answers that exactly, against the real bytes (design G10).
 /// </summary>
 public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections, IClipboardService clipboard)
@@ -34,6 +35,26 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
 
     /// <summary>Whether the ledger carries this account at all. An address nobody funded is not on it.</summary>
     public bool AccountExists { get; private set; }
+
+    /// <summary>
+    /// Whether a node has answered about the selected account since it was selected. Until it has,
+    /// <see cref="AccountExists"/> being <see langword="false"/> is only its starting value: an
+    /// imported key is usually an account that exists already, and "not funded yet" over it, even
+    /// for the moment before the first answer, would be a statement nobody had read off a ledger
+    /// (design G8).
+    /// </summary>
+    public bool BalanceKnown { get; private set; }
+
+    /// <summary>What the screen's first line asks the person to do, which differs once the account exists.</summary>
+    public string InstructionText => AccountExists
+        ? "Send XRP to the address below, from any wallet."
+        : "Send XRP to the address below, from any wallet. The account appears on the ledger once it holds its reserve.";
+
+    /// <summary>What the screen says about the balance: a reading, or honestly that there is none yet.</summary>
+    public string BalanceLine =>
+        !BalanceKnown ? (Message is null ? "Checking the ledger…" : "Balance not read yet.")
+        : AccountExists ? $"Balance: {XrpAmount.Format(BalanceDrops)}"
+        : "Not funded yet.";
 
     public string? Message { get; private set; }
 
@@ -99,6 +120,7 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
         Network = entry.Network;
         BalanceDrops = 0;
         AccountExists = false;
+        BalanceKnown = false;
         CurrentReference = reference;
     }
 
@@ -199,6 +221,7 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
 
             BalanceDrops = state.BalanceDrops;
             AccountExists = state.BalanceDrops > 0;
+            BalanceKnown = true;
         }
         catch (XrplFileException ex)
         {

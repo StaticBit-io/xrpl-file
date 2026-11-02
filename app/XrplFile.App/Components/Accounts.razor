@@ -1,8 +1,21 @@
 @implements IDisposable
 @inject AccountsModel Model
+@inject VaultListModel VaultList
+@inject DeleteKeyModel DeleteModel
 
-@* Design 4.1: the throwaway-account list, and the three screens it opens into. Every word on a row
-   comes from AccountRow -- label, address, network and, from its own Stage, exactly one of five
+@* Design 4.1 and 6: every account the vault holds, in two sections -- the throwaway accounts this
+   application generated, and the keys the person imported -- and the screens each row opens into.
+   The two sections differ in what they are for and nothing else: both read their balance, check,
+   fund and close the same way (an account made outside the application and imported to publish with
+   is closed here too; CloseAccount warns once more for an imported one), and both carry the key
+   actions Reveal, Export and Delete, which used to live on a tab of their own. Which section a row
+   is in comes from AccountsModel (ThrowawayRows / ImportedRows), not from this markup.
+
+   Damage found when the vault was opened is shown by the Damage panel above the sections, read from
+   VaultListModel exactly as the key list used to; a damaged entry has no readable address, label or
+   kind, so it has no row here and the panel is where it is named.
+
+   Every word on a row comes from AccountRow -- label, address, network and, from its own Stage, exactly one of five
    lines this markup switches on but never derives. AccountStage.Unknown is its own line rather than
    folded into "the balance": AccountsModel's own remarks are explicit that a cached
    DeletableFromLedger is not an answer, and showing zero for a balance nobody has actually read
@@ -30,9 +43,14 @@
         case SubView.List:
             <div class="xf-page-head d-flex justify-content-between align-items-center mb-3">
                 <h1 class="xf-title mb-0">Accounts</h1>
-                <button type="button" class="btn btn-primary" @onclick="() => _view = SubView.New">
-                    New account
-                </button>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-primary" @onclick="() => _view = SubView.New">
+                        New account
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => _view = SubView.AddKey">
+                        Add key
+                    </button>
+                </div>
             </div>
 
             @if (Model.Message is not null)
@@ -40,13 +58,111 @@
                 <div class="alert alert-warning">@Model.Message</div>
             }
 
-            @if (Model.Rows.Count == 0)
+            @if (VaultList.IsDegraded)
             {
-                <p>No throwaway accounts yet.</p>
+                <Damage OnChanged="StateHasChanged" />
+            }
+
+            @Section("Publishing accounts",
+                "Throwaway accounts this app created for publishing. Close one to delete it from the ledger and get its reserve back.",
+                "No publishing accounts yet.",
+                Model.ThrowawayRows)
+
+            @Section("Your keys",
+                "Accounts you imported to sign publications. Close one only if you no longer need it on the ledger.",
+                "No imported keys.",
+                Model.ImportedRows)
+
+            @if (_pendingDeleteRow is { } pending)
+            {
+                <div class="alert alert-danger">
+                    <p>
+                        Delete <code class="xf-mono">@pending.Address</code> (@pending.Label)?
+                        @if (_deleteWarning is { NeverExported: true })
+                        {
+                            <strong>
+                                This key has never been exported. Nothing else holds its secret, so
+                                deleting it loses access to that account for good.
+                            </strong>
+                        }
+                    </p>
+                    @if (_deleteProblem is { } deleteProblem)
+                    {
+                        <p>@deleteProblem</p>
+                    }
+                    <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="ConfirmDeleteAsync">
+                        Delete permanently
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="CancelDelete">
+                        Cancel
+                    </button>
+                </div>
+            }
+            else if (_deleteProblem is { } prepareProblem)
+            {
+                @* A failed preparation leaves no pending row, so the block above cannot carry it. *@
+                <div class="alert alert-warning">
+                    <p>@prepareProblem</p>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CancelDelete">Dismiss</button>
+                </div>
+            }
+            break;
+
+        case SubView.New:
+            <NewAccount OnDone="ReturnToListAsync" />
+            break;
+
+        case SubView.AddKey:
+            <AddKey OnDone="ReturnToListAsync" />
+            break;
+
+        case SubView.Export:
+            <ExportKey Reference="@(_activeReference!)" OnBack="ReturnToListAsync" />
+            break;
+
+        case SubView.Reveal:
+            <RevealSeed Reference="@(_activeReference!)" OnBack="ReturnToListAsync" />
+            break;
+
+        case SubView.Funding:
+            <Funding Reference="@(_activeReference!)" OnBack="ReturnToListAsync" />
+            break;
+
+        case SubView.Close:
+            <CloseAccount Reference="@(_activeReference!)" OnBack="ReturnToListAsync" />
+            break;
+    }
+</div>
+
+@code {
+    private enum SubView
+    {
+        List,
+        New,
+        AddKey,
+        Export,
+        Reveal,
+        Funding,
+        Close,
+    }
+
+    /// <summary>
+    /// One section of the list: a heading, one line saying what its accounts are, then the table or
+    /// its own empty-state line. Both sections go through here so they cannot drift apart in columns
+    /// or actions; their differences are the text passed in and the rows the model sorted into them.
+    /// </summary>
+    private RenderFragment Section(string title, string description, string emptyText, IReadOnlyList<AccountRow> rows) =>
+        @<section class="mb-4">
+            <h2 class="h5">@title</h2>
+            <p class="xf-muted">@description</p>
+
+            @if (rows.Count == 0)
+            {
+                <p>@emptyText</p>
             }
             else
             {
-                <section class="xf-card">
+                <div class="xf-card">
                     <table class="table align-middle">
                         <thead>
                             <tr>
@@ -59,10 +175,16 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (AccountRow row in Model.Rows)
+                            @foreach (AccountRow row in rows)
                             {
                                 <tr>
-                                    <td>@row.Label</td>
+                                    <td>
+                                        @row.Label
+                                        @if (row.NeedsExporting)
+                                        {
+                                            <span class="badge text-bg-danger ms-2">Exists only here &mdash; not exported</span>
+                                        }
+                                    </td>
                                     <td><code class="xf-mono">@row.Address</code></td>
                                     <td>@row.Network</td>
                                     <td>@Model.BalanceTextOf(row)</td>
@@ -129,37 +251,26 @@
                                                 </button>
                                             </div>
                                         }
+                                        @* The key actions stay on a closed account: its seed still controls an address
+                                           that can be funded back into existence. *@
+                                        <div class="btn-group btn-group-sm ms-2">
+                                            <button type="button" class="btn btn-outline-secondary"
+                                                    @onclick="() => OpenReveal(row.Reference)">Reveal</button>
+                                            <button type="button" class="btn btn-outline-secondary"
+                                                    disabled="@VaultList.WritesAreRefused"
+                                                    @onclick="() => OpenExport(row.Reference)">Export</button>
+                                            <button type="button" class="btn btn-outline-danger"
+                                                    disabled="@VaultList.WritesAreRefused"
+                                                    @onclick="() => PrepareDeleteAsync(row)">Delete</button>
+                                        </div>
                                     </td>
                                 </tr>
                             }
                         </tbody>
                     </table>
-                </section>
+                </div>
             }
-            break;
-
-        case SubView.New:
-            <NewAccount OnDone="ReturnToListAsync" />
-            break;
-
-        case SubView.Funding:
-            <Funding Reference="@(_activeReference!)" OnBack="ReturnToListAsync" />
-            break;
-
-        case SubView.Close:
-            <CloseAccount Reference="@(_activeReference!)" OnBack="ReturnToListAsync" />
-            break;
-    }
-</div>
-
-@code {
-    private enum SubView
-    {
-        List,
-        New,
-        Funding,
-        Close,
-    }
+        </section>;
 
     /// <summary>How often this screen forces a render so the countdown on its rows moves. See the
     /// remarks at the top of this file for why this differs from Shell.razor's and Publish.razor's own interval.</summary>
@@ -170,10 +281,14 @@
     private bool _disposed;
     private SubView _view = SubView.List;
     private string? _activeReference;
+    private AccountRow? _pendingDeleteRow;
+    private DeleteWarning? _deleteWarning;
+    private string? _deleteProblem;
+    private bool _busy;
 
     protected override async Task OnInitializedAsync()
     {
-        await Model.RefreshAsync(_lifetime.Token);
+        await RefreshVaultAsync();
 
         // The refresh swallows a vault failure rather than honouring the token, so a screen left
         // (or locked away) while it ran gets here after Dispose, which found no timer to stop yet.
@@ -200,6 +315,36 @@
                 StateHasChanged();
             }
         });
+    }
+
+    /// <summary>
+    /// Re-reads the vault for both models: the accounts list, and the damage panel's own view of the
+    /// same vault. The list swallows a vault failure into its Message; the damage read is allowed to
+    /// fail the same quiet way, since the list already says why.
+    /// </summary>
+    private async Task RefreshVaultAsync()
+    {
+        await Model.RefreshAsync(_lifetime.Token);
+
+        try
+        {
+            await VaultList.RefreshAsync(_lifetime.Token);
+        }
+        catch (VaultException)
+        {
+        }
+    }
+
+    private void OpenReveal(string reference)
+    {
+        _activeReference = reference;
+        _view = SubView.Reveal;
+    }
+
+    private void OpenExport(string reference)
+    {
+        _activeReference = reference;
+        _view = SubView.Export;
     }
 
     private void OpenFunding(string reference)
@@ -230,11 +375,62 @@
     {
         _activeReference = null;
         _view = SubView.List;
-        await Model.RefreshAsync(_lifetime.Token);
+        await RefreshVaultAsync();
 
         // What a funding or a closing changed shows in the balances; a row a read is still busy
         // with is skipped by the model, not read twice.
         _ = ReadBalancesAsync();
+    }
+
+    private async Task PrepareDeleteAsync(AccountRow row)
+    {
+        _deleteProblem = null;
+        try
+        {
+            _deleteWarning = await DeleteModel.PrepareAsync(row.Reference, _lifetime.Token);
+            _pendingDeleteRow = row;
+        }
+        catch (VaultException ex)
+        {
+            _pendingDeleteRow = null;
+            _deleteWarning = null;
+            _deleteProblem = VaultErrorMessages.For(ex.Error);
+        }
+    }
+
+    private void CancelDelete()
+    {
+        _pendingDeleteRow = null;
+        _deleteWarning = null;
+        _deleteProblem = null;
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_pendingDeleteRow is not { } pending || _busy)
+        {
+            return;
+        }
+
+        // A problem from an earlier attempt would otherwise outlive a delete that then succeeds.
+        _deleteProblem = null;
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            await DeleteModel.DeleteAsync(pending.Reference, _lifetime.Token);
+            _pendingDeleteRow = null;
+            _deleteWarning = null;
+            await RefreshVaultAsync();
+        }
+        catch (VaultException ex)
+        {
+            _deleteProblem = VaultErrorMessages.For(ex.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private async Task ReadBalancesAsync()

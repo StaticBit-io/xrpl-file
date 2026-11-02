@@ -7,8 +7,8 @@ namespace XrplFile.App.Core;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="VaultListModel"/> asks it of every row, to decide which entries wear the "exists only
-/// here" badge and which trigger the extra warning before deletion.
+/// <see cref="AccountsModel"/> asks it of every row, to decide which entries wear the "exists only
+/// here" badge.
 /// <see cref="AddKeyModel.LastStoredNeedsExporting"/> asks it of an entry that has just been
 /// written, to decide whether the add-key screen offers the export step before moving on (design
 /// section 6, "Adding a key": "immediately after generating, the screen offers to export — not a

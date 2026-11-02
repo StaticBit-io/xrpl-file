@@ -16,9 +16,9 @@
 
 @* Both branches share this wrapper -- ChangePassword used to render outside any width- or
    padding-constrained container when reached from here, the one screen in this file (unlike
-   KeyList, which wraps its own AddKey / ExportKey / RevealSeed sub-views the same way) that had
+   Accounts, which wraps its own AddKey / ExportKey / RevealSeed sub-views the same way) that had
    its own top-level container instead of relying on a parent's. Wrapping both branches in the
-   same div is what KeyList already does for its own children; this brings Settings in line with
+   same div is what Accounts already does for its own children; this brings Settings in line with
    it rather than leaving ChangePassword to full-bleed edge to edge. *@
 <div class="xf-page">
     @if (_showChangePassword)

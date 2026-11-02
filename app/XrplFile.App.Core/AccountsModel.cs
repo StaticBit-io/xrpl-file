@@ -3,7 +3,10 @@ using XrplFile.Keys;
 namespace XrplFile.App.Core;
 
 /// <summary>
-/// The Accounts tab's list (design 4.1). Listing asks the vault only, so the list draws with no
+/// The Accounts tab's list (design 4.1): the throwaway accounts this application generated and the
+/// keys the person imported, side by side, read from a node and closed the same way — a throwaway
+/// account made outside the application and imported to publish with is closed here too. Listing
+/// asks the vault only, so the list draws with no
 /// network at all. A row learns its balance and its deletable ledger from a node afterwards: for
 /// every row once when the screen opens, with one connection per network
 /// (<see cref="RefreshAllFromLedgerAsync"/>), and for one row when somebody presses Check.
@@ -31,6 +34,12 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
     private readonly HashSet<string> _checking = new(StringComparer.Ordinal);
 
     public IReadOnlyList<AccountRow> Rows { get; private set; } = [];
+
+    /// <summary>The "Publishing accounts" section: the accounts this application generated.</summary>
+    public IReadOnlyList<AccountRow> ThrowawayRows => [.. Rows.Where(row => row.IsThrowaway)];
+
+    /// <summary>The "Your keys" section: the keys the person imported.</summary>
+    public IReadOnlyList<AccountRow> ImportedRows => [.. Rows.Where(row => !row.IsThrowaway)];
 
     /// <summary>Why the last read from a node came back with nothing, when it did.</summary>
     public string? Message { get; private set; }
@@ -60,7 +69,7 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
             lock (_gate)
             {
                 List<AccountRow> rows = [];
-                foreach (VaultEntryInfo info in listed.Where(entry => entry.Kind == VaultEntryKind.Generated))
+                foreach (VaultEntryInfo info in listed)
                 {
                     // A row already refreshed from a node keeps what it learned. A new one — or one no
                     // node has ever been asked about — starts as Unknown: a cached DeletableFromLedger may
@@ -70,11 +79,14 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
                     // the one stage the vault gets to declare outright — a closure is a fact it owns, and
                     // no node is needed to confirm it.
                     rows.Add(_rows.TryGetValue(info.Reference, out AccountRow? known) && info.Closure is null
-                        ? known with { Label = info.Label, Closure = info.Closure }
+                        ? known with { Label = info.Label, Closure = info.Closure, NeedsExporting = ExportNeed.For(info) }
                         : new AccountRow(
                             info.Reference, info.Label, info.Address, info.Network,
                             info.Closure is null ? AccountStage.Unknown : AccountStage.Closed,
-                            null, info.DeletableFromLedger, null, info.Closure));
+                            null, info.DeletableFromLedger, null, info.Closure, info.Kind)
+                        {
+                            NeedsExporting = ExportNeed.For(info),
+                        });
                 }
 
                 _rows.Clear();

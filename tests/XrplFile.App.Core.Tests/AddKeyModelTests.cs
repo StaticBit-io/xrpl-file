@@ -31,27 +31,12 @@ public class AddKeyModelTests : VaultHarness
             Network: network,
             Kind: kind);
 
+    // Generating a key belongs to New account (NewAccountModel). Offering it here as well was one of
+    // the two ways to make a throwaway that confused people, so this model no longer has the method.
     [Fact]
-    public async Task A_generated_key_previews_an_address_and_stores_as_generated()
+    public void This_model_has_no_way_to_generate_a_key()
     {
-        KeyVault vault = NewVault();
-        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
-        AddKeyModel model = new(vault);
-
-        Assert.True(model.Generate("mine", "testnet"));
-
-        Assert.NotNull(model.Preview);
-        Assert.Equal(XrplWallet.Ed25519, model.Preview!.Algorithm);
-        string previewedAddress = model.Preview.Address;
-        Assert.Null(model.Problem);
-
-        string reference = await model.StoreAsync(TestContext.Current.CancellationToken);
-
-        Assert.NotEqual(string.Empty, reference);
-        Assert.Null(model.Preview);
-        VaultEntryInfo info = Assert.Single(await vault.ListAsync(TestContext.Current.CancellationToken));
-        Assert.Equal(VaultEntryKind.Generated, info.Kind);
-        Assert.Equal(previewedAddress, info.Address);
+        Assert.Null(typeof(AddKeyModel).GetMethod("Generate"));
     }
 
     [Fact]
@@ -115,7 +100,7 @@ public class AddKeyModelTests : VaultHarness
     {
         AddKeyModel model = new(NewVault());
 
-        Assert.False(model.Generate(label, network));
+        Assert.False(model.Import(new AddKeyDraft(label, network, XrplWallet.Generate().Seed, null)));
 
         Assert.Null(model.Preview);
         Assert.NotNull(model.Problem);
@@ -149,7 +134,7 @@ public class AddKeyModelTests : VaultHarness
         await vault.LockAsync();
 
         AddKeyModel model = new(vault);
-        Assert.True(model.Generate("mine", "testnet"));
+        Assert.True(model.Import(new AddKeyDraft("mine", "testnet", XrplWallet.Generate().Seed, null)));
 
         string reference = await model.StoreAsync(TestContext.Current.CancellationToken);
 
@@ -331,10 +316,10 @@ public class AddKeyModelTests : VaultHarness
     {
         KeyVault sourceVault = NewVault();
         await sourceVault.CreateAsync(Password("source password"), TestContext.Current.CancellationToken);
-        AddKeyModel sourceModel = new(sourceVault);
-        Assert.True(sourceModel.Generate("throwaway", "testnet"));
-        string reference = await sourceModel.StoreAsync(TestContext.Current.CancellationToken);
-        Assert.NotEqual(string.Empty, reference);
+        XrplWallet throwaway = XrplWallet.Generate();
+        string reference = await sourceVault.StoreAsync(
+            new NewVaultEntry(VaultEntryKind.Generated, "throwaway", "testnet", throwaway.ClassicAddress, throwaway.Seed),
+            TestContext.Current.CancellationToken);
 
         byte[] container = await sourceVault.ExportAsync(
             reference, Password("container password"), TestContext.Current.CancellationToken);
@@ -382,19 +367,6 @@ public class AddKeyModelTests : VaultHarness
     }
 
     // ---- what the screen must offer next --------------------------------------------------------
-
-    [Fact]
-    public async Task A_generated_key_is_reported_as_one_that_still_needs_exporting()
-    {
-        KeyVault vault = NewVault();
-        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
-        AddKeyModel model = new(vault);
-
-        Assert.True(model.Generate("fresh", "testnet"));
-        await model.StoreAsync(TestContext.Current.CancellationToken);
-
-        Assert.True(model.LastStoredNeedsExporting);
-    }
 
     [Fact]
     public async Task An_imported_seed_is_not_reported_as_one_that_needs_exporting()
@@ -510,10 +482,10 @@ public class AddKeyModelTests : VaultHarness
             () => model.StoreAsync(TestContext.Current.CancellationToken));
     }
 
-    // Closing is scoped to the container route: the model itself stays alive, and the two other
-    // routes in still work afterwards -- this is what "leaves the model usable" means in practice.
+    // Closing is scoped to the container route: the model itself stays alive, and the other route
+    // in still works afterwards -- this is what "leaves the model usable" means in practice.
     [Fact]
-    public void Closing_a_container_leaves_the_other_two_routes_usable()
+    public void Closing_a_container_leaves_the_other_route_usable()
     {
         byte[] container = BackupContainer.Pack(
             PayloadOf(EntryFor(XrplWallet.Generate(), "a key")), "p", iterations: 1000);
@@ -521,9 +493,6 @@ public class AddKeyModelTests : VaultHarness
         model.OpenContainer(container, "p");
 
         model.CloseContainer();
-
-        Assert.True(model.Generate("mine", "testnet"));
-        Assert.NotNull(model.Preview);
 
         XrplWallet imported = XrplWallet.Generate();
         Assert.True(model.Import(new AddKeyDraft("typed", "testnet", imported.Seed, XrplWallet.Ed25519)));
@@ -555,7 +524,7 @@ public class AddKeyModelTests : VaultHarness
     public async Task Clearing_the_preview_leaves_nothing_prepared_to_store()
     {
         AddKeyModel model = new(NewVault());
-        Assert.True(model.Generate("mine", "testnet"));
+        Assert.True(model.Import(new AddKeyDraft("mine", "testnet", XrplWallet.Generate().Seed, null)));
 
         model.ClearPreview();
 
@@ -654,14 +623,6 @@ public class AddKeyModelTests : VaultHarness
     [Theory]
     [InlineData("TESTNET", "testnet")]
     [InlineData(" testnet ", "testnet")]
-    [InlineData("Devnet", "devnet")]
-    [InlineData("1", "1")]
-    public async Task Generate_stores_the_canonical_network(string typed, string expected) =>
-        Assert.Equal(expected, await StoredNetworkAsync(model => model.Generate("mine", typed)));
-
-    [Theory]
-    [InlineData("TESTNET", "testnet")]
-    [InlineData(" testnet ", "testnet")]
     [InlineData("1", "1")]
     public async Task Import_stores_the_canonical_network(string typed, string expected) =>
         Assert.Equal(
@@ -688,24 +649,6 @@ public class AddKeyModelTests : VaultHarness
     [InlineData("foo")]
     [InlineData("main net")]
     [InlineData("-1")]
-    public async Task Generate_refuses_a_network_no_link_can_name_and_stores_nothing(string typed)
-    {
-        KeyVault vault = NewVault();
-        await vault.CreateAsync(Password("p"), TestContext.Current.CancellationToken);
-        AddKeyModel model = new(vault);
-
-        Assert.False(model.Generate("mine", typed));
-
-        Assert.Null(model.Preview);
-        Assert.Contains($"'{typed}'", model.Problem);
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => model.StoreAsync(TestContext.Current.CancellationToken));
-        Assert.Empty(await vault.ListAsync(TestContext.Current.CancellationToken));
-    }
-
-    [Theory]
-    [InlineData("foo")]
-    [InlineData("main net")]
     public async Task Import_refuses_a_network_no_link_can_name_and_stores_nothing(string typed)
     {
         KeyVault vault = NewVault();
@@ -740,7 +683,7 @@ public class AddKeyModelTests : VaultHarness
     {
         AddKeyModel model = new(NewVault());
 
-        Assert.False(model.Generate("mine", ""));
+        Assert.False(model.Import(new AddKeyDraft("mine", "", XrplWallet.Generate().Seed, null)));
 
         Assert.Equal("Choose a network.", model.Problem);
     }

@@ -3,7 +3,7 @@ using XrplFile.Keys;
 namespace XrplFile.App.Core;
 
 /// <summary>
-/// Closing a throwaway account (design 5). The most careful screen in this application: an
+/// Closing an account (design 5), a generated throwaway or an imported key alike. The most careful screen in this application: an
 /// <c>AccountDelete</c> sends everything the account holds and cannot be undone, and its fee is one
 /// owner reserve, which a refused submission keeps.
 ///
@@ -43,6 +43,20 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
 
     /// <summary>The address of the account being closed. See <see cref="AccountLabel"/>.</summary>
     public string? AccountAddress => _state.AccountAddress;
+
+    /// <summary>What <see cref="ImportedWarning"/> says.</summary>
+    public const string ImportedWarningText =
+        "This is an imported key. Closing deletes its account from the ledger for good — " +
+        "make sure it is not an account you still use.";
+
+    /// <summary>
+    /// An extra line for the confirm step when the account being closed is an imported key, and
+    /// <see langword="null"/> for a generated one. An imported key may be an account the person has
+    /// had for years, which a generated one never is; closing both is allowed, but only this one
+    /// needs telling that the deletion removes something they may still be using. Set with the rest
+    /// of the entry, so it is there before any node has been asked.
+    /// </summary>
+    public string? ImportedWarning => _state.Kind == VaultEntryKind.Imported ? ImportedWarningText : null;
 
     public string? Destination => _state.Destination;
 
@@ -136,6 +150,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             }
 
             state.Network = entry.Network;
+            state.Kind = entry.Kind;
             state.AccountLabel = entry.Label;
             state.AccountAddress = entry.Address;
 
@@ -428,6 +443,8 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
         public string? Reference { get; set; }
 
         public string? Network { get; set; }
+
+        public VaultEntryKind? Kind { get; set; }
 
         public string? AccountLabel { get; set; }
 
