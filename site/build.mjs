@@ -100,7 +100,9 @@ async function inlineChrome(outDir) {
     if (!langFromStorage && expected !== null && lang !== expected) {
       throw new Error(`${name} is in ${expected === DEFAULT_LANG ? 'the site root' : `the ${expected}/ folder`} but its <html> says lang="${tag}"`);
     }
-    const page = { lang, pagePath: pagePathOf(relative_), langFromStorage };
+    const title = /<title>([^<]*)<\/title>/i.exec(html)?.[1] ?? null;
+    const description = /<meta name="description" content="([^"]*)">/i.exec(html)?.[1] ?? null;
+    const page = { lang, pagePath: pagePathOf(relative_), langFromStorage, title, description };
     let rendered;
     try {
       rendered = html.replace(CHROME_MARKER, (_, part) => renderChrome(part, page));

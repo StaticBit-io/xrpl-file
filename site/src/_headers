@@ -19,6 +19,8 @@
   Cache-Control: public, max-age=604800
 /apple-touch-icon.png
   Cache-Control: public, max-age=604800
+/og-banner.png
+  Cache-Control: public, max-age=604800
 
 # Pages are revalidated on every load; a page that changes must not be stuck in a cache.
 /

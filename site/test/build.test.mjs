@@ -368,3 +368,44 @@ test('every built page of the real site carries the icon links, and the icons ar
     await rm(f.root, { recursive: true, force: true });
   }
 });
+
+const CARD_HEAD = '<title>A &amp; "B"</title>\n<meta name="description" content="One line about the page.">\n';
+const CARD_PAGE = (lang, htmlAttributes = '') => PAGE(lang, 'Hello', htmlAttributes).replace('<head>\n', `<head>\n${CARD_HEAD}`);
+
+test('a page with a title and a description gets Open Graph and Twitter card tags from them', () =>
+  buildWithPages({ 'index.html': CARD_PAGE('en'), 'ru/index.html': CARD_PAGE('ru') }, async (f, read) => {
+    for (const [name, path] of [['index.html', '/'], ['ru/index.html', '/ru/']]) {
+      const html = await read(name);
+      assert.ok(html.includes('<meta property="og:title" content="A &amp; &quot;B&quot;">'), `og:title on ${name}`);
+      assert.ok(html.includes('<meta property="og:description" content="One line about the page.">'), `og:description on ${name}`);
+      assert.ok(html.includes(`<meta property="og:url" content="${SITE_ORIGIN}${path}">`), `og:url on ${name}`);
+      assert.ok(html.includes(`<meta property="og:image" content="${SITE_ORIGIN}/og-banner.png">`), `og:image on ${name}`);
+      assert.ok(html.includes('<meta property="og:image:width" content="1200">'));
+      assert.ok(html.includes('<meta property="og:image:height" content="630">'));
+      assert.ok(html.includes('<meta name="twitter:card" content="summary_large_image">'));
+    }
+  }));
+
+test('a page with one URL for every language gets card tags but no og:url', () =>
+  buildWithPages({ 'file.html': CARD_PAGE('en', ' data-lang-source="storage"') }, async (f, read) => {
+    const html = await read('file.html');
+    assert.ok(html.includes(`<meta property="og:image" content="${SITE_ORIGIN}/og-banner.png">`));
+    assert.ok(!html.includes('og:url'), 'the file page is served at every file link, so it names none');
+  }));
+
+test('every built page of the real site carries a link card, and the banner is in the output', async () => {
+  const f = await fixture();
+  try {
+    const siteDir = fileURLToPath(new URL('..', import.meta.url));
+    await build({ siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.2.0' });
+    for (const page of (await htmlFiles(f.outDir)).filter((name) => !name.startsWith('element/'))) {
+      const html = await readFile(join(f.outDir, page), 'utf8');
+      for (const tag of ['og:title', 'og:description', 'og:image', 'twitter:card']) {
+        assert.ok(html.includes(`"${tag}"`), `${page} lacks ${tag}`);
+      }
+    }
+    assert.ok((await stat(join(f.outDir, 'og-banner.png'))).size > 0, 'og-banner.png is not in the output');
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});

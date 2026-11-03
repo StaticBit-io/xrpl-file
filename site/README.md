@@ -185,6 +185,21 @@ the favicon an empty cell is a filled dark square rather than an outline: at 16 
 pixel wide, its hole closes, and the empty cells look like the lit ones. The 180 px touch icon keeps the
 outlines. `renderHead` puts the three links (`ICON_LINKS`) on every page.
 
+Link cards (Telegram, X and other previews) come from Open Graph tags that `renderHead` writes from the
+page's own `<title>` and `<meta name="description">` (`cardTags` in `chrome-markup.mjs`), so a page
+states its card once; a page without both gets no card tags. Every card shows `src/og-banner.png`,
+1200 × 630: the wordmark beside the hero's point cloud, photographed from the real scene reading the
+real hero file. Redraw it after changing the hero file, the mark or the palette:
+
+```bash
+node web/build.mjs && node site/build.mjs && node site/tools/og-banner.mjs
+```
+
+The tool serves `site/dist`, renders it in headless Chrome or Edge (`CHROME` overrides the path) and
+waits for the read to verify before the shot, so it needs the network. The result is not byte-stable,
+so `test/og-banner.test.mjs` checks only the size. Telegram and X cache a card by URL: give a new
+banner a new file name, or refresh a Telegram preview through @WebpageBot.
+
 ## Languages
 
 The site is built for six languages. A language is a data change: its words, its tags and its home page.

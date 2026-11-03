@@ -83,13 +83,38 @@ export const ICON_LINKS = [
   '<link rel="apple-touch-icon" href="/apple-touch-icon.png">',
 ];
 
-function renderHead({ lang, pagePath, langFromStorage }) {
+/** The card banner every page names; site/tools/og-banner.mjs draws it at this size. */
+export const CARD_IMAGE = { path: '/og-banner.png', width: 1200, height: 630 };
+
+/**
+ * Open Graph and Twitter card tags, from the page's own <title> and description so no page states its
+ * card twice. `title` is the <title> text as written (entities kept), `description` the attribute value
+ * as written. Twitter falls back to og:title, og:description and og:image, so only twitter:card is its own.
+ */
+export function cardTags({ title, description, pagePath, langFromStorage }) {
+  return [
+    '<meta property="og:type" content="website">',
+    '<meta property="og:site_name" content="xrpl-file">',
+    `<meta property="og:title" content="${title.replace(/"/g, '&quot;')}">`,
+    `<meta property="og:description" content="${description}">`,
+    // The file page is served at every file link and the 404 at every missing one: neither has a URL of its own.
+    ...(langFromStorage ? [] : [`<meta property="og:url" content="${SITE_ORIGIN}${pagePath}">`]),
+    `<meta property="og:image" content="${SITE_ORIGIN}${CARD_IMAGE.path}">`,
+    `<meta property="og:image:width" content="${CARD_IMAGE.width}">`,
+    `<meta property="og:image:height" content="${CARD_IMAGE.height}">`,
+    '<meta property="og:image:alt" content="xrpl-file">',
+    '<meta name="twitter:card" content="summary_large_image">',
+  ].join('\n');
+}
+
+function renderHead({ lang, pagePath, langFromStorage, title = null, description = null }) {
   const preloads = ['geologica-latin'];
   if (lang === 'ru' && !langFromStorage) preloads.push('geologica-cyrillic');
   return [
     // A page with one URL for every language (the file page, the 404) belongs to no single language,
     // so it declares neither a canonical nor alternates.
     ...(langFromStorage ? [] : [languageAlternates(pagePath)]),
+    ...(title !== null && description !== null ? [cardTags({ title, description, pagePath, langFromStorage })] : []),
     `<script>${prePaintScript()}</script>`,
     ...preloads.map((name) => `<link rel="preload" href="/fonts/${name}.woff2" as="font" type="font/woff2" crossorigin>`),
     // The .ico first for browsers that take the first icon they can read; the svg wins where it is
