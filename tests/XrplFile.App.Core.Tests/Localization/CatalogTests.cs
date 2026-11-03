@@ -42,11 +42,22 @@ public sealed partial class CatalogTests
         {
             if (!english.Phrases.TryGetValue(key, out TextCatalog.Phrase? reference)) continue;
 
-            string expected = string.Join(",", Placeholders(reference));
+            // A plural form may leave its count unprinted ("every second" for one), as English itself
+            // does, so the forms are compared together: none takes a value English lacks, and between
+            // them they take every value English does, `count` aside.
+            string[] expected = Placeholders(reference).Where(name => phrase.Forms is null || name != "count").ToArray();
+            string[] actual = Placeholders(phrase).Where(name => phrase.Forms is null || name != "count").ToArray();
+            if (!expected.SequenceEqual(actual, StringComparer.Ordinal))
+            {
+                wrong.Add($"{key}: [{string.Join(",", actual)}] not [{string.Join(",", expected)}]");
+            }
+
+            if (phrase.Forms is null) continue;
+
             foreach (string text in phrase.Texts)
             {
-                string actual = string.Join(",", Placeholders(text));
-                if (!string.Equals(expected, actual, StringComparison.Ordinal)) wrong.Add($"{key}: [{actual}] not [{expected}]");
+                string[] extra = Placeholders(text).Except(Placeholders(reference), StringComparer.Ordinal).ToArray();
+                if (extra.Length > 0) wrong.Add($"{key}: a form takes [{string.Join(",", extra)}], which English does not");
             }
 
             if ((reference.Forms is null) != (phrase.Forms is null)) wrong.Add($"{key}: plural in one language only");
