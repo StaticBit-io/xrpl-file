@@ -6,11 +6,11 @@
 // lime (moss in the light theme) only when the sweep passes it after its block was verified, and the
 // small <xrpl-file> card with its "verified" line appears only when every block has been verified.
 //
-// The reader wiring, the failure paths and the release of the connection are hero-read.mjs; what is
-// visible at a given time is cloud-scene.mjs. This file is the drawing, the callouts and the card.
-import { formatLink } from './xrpl.mjs';
+// The reader wiring, the failure paths and the release of the connection belong to whoever supplies
+// `env.startRead` (the hero's is hero-read.mjs); what is visible at a given time is cloud-scene.mjs. This
+// file is the drawing, the callouts and the card. It imports neither hero-read.mjs nor xrpl.mjs, so a
+// page that reads through another adapter does not load the hero's reader along with it.
 import { pathFromLink } from './route.mjs';
-import { hasSeenMosaic, startHeroRead } from './hero-read.mjs';
 import {
   CUBE,
   FRAME_SPAN,
@@ -121,13 +121,16 @@ function defaultLoadElement(doc) {
  * @param {HTMLCanvasElement} canvas Sized by its CSS box; it gets role="img" and an aria-label that
  *   follows the phase.
  * @param {object} options
- * @param {string|{network: string, txHash: string}} options.link `xrpl-file://...` text or a parsed link
+ * @param {string} [options.link] `xrpl-file://...` text; without it there is no link figure and the card
+ *   has no link to the file page
  * @param {number} [options.aspect] width / height of the file, so the card keeps its box while the
  *   element loads
  * @param {boolean} [options.reducedMotion] one still frame per change, no sweep, no sway; defaults to
  *   the visitor's prefers-reduced-motion
- * @param {boolean} [options.fast] a replay: everything after the last chunk takes under 300 ms;
- *   defaults to whether this browser session has already seen the hero (sessionStorage `xf-mosaic-seen`)
+ * @param {boolean} [options.fast=false] a replay: everything after the last chunk takes under 300 ms
+ * @param {boolean} [options.turn=true] `false` never turns the scene after a verified read
+ * @param {number} [options.swayFor=Infinity] ms after the mount at which the sway stops, if the end of
+ *   the read has not stopped it before
  * @param {HTMLElement} [options.caption] role="status", a polite live region: empty while reading, then
  *   the line for a finished read or the quiet failure message. It carries data-phase.
  * @param {HTMLElement} [options.note] gets the sentence saying what is real and what is drawn; empty and
@@ -137,36 +140,47 @@ function defaultLoadElement(doc) {
  * @param {HTMLElement} [options.card] holds the verified file and its line; hidden until every block
  *   has been verified
  * @param {object} [options.strings] all visible and spoken text, supplied by the caller (see
- *   DEFAULT_STRINGS for the shape): label(phase, { chunks }), caption({ chunks, firstLedger,
- *   lastLedger }), failed(code), fileLinkLabel, verified, note({ ledgers, ledgersPerPad, capped }) (a
- *   string also works; it is called once the manifest is known), fileCallout(chunks) and linkCallout(bytes),
- *   each callout giving { caption, value, unit }
- * @param {object} [env] seams for tests; defaults are the browser's own
- * @returns {{ done: Promise<void>, destroy: () => void, readonly phase: string }} `done` settles, and
- *   never rejects, once the read is done or failed; `destroy()` stops everything and abandons the read.
+ *   DEFAULT_STRINGS for the shape): label(phase, { chunks, perCube }), caption({ chunks, firstLedger,
+ *   lastLedger }), failed(code), fileLinkLabel, verified, note({ ledgers, ledgersPerPad, capped, perCube })
+ *   (a string also works; it is called once the manifest is known), fileCallout(chunks) and
+ *   linkCallout(bytes), each callout giving { caption, value, unit }. `chunks` is the file's own count
+ *   (`fileChunks`), not the number of cubes. An optional reading({ chunks, perCube, firstLedger,
+ *   lastLedger }) fills the caption from the manifest until the phase changes; without it the caption
+ *   stays empty while reading.
+ * @param {object} env
+ * @param {(options: object, env: object) => { done: Promise<void>, destroy: () => void, readonly phase: string }} env.startRead
+ *   Required. Starts the read and reports it to `options.listener`: onPhase(phase), onManifest({ manifest,
+ *   chunks, fileChunks = chunks, perCube = 1, time }) where `chunks` is the number of cubes, onChunk,
+ *   onBlockVerified, onDeveloping, onDone and onFailed. The other members are seams for tests and are
+ *   passed on to it; defaults are the browser's own.
+ * @returns {{ done: Promise<void>, destroy: () => void, setStrings: (strings: object) => void,
+ *   readonly phase: string }} `done` settles, and never rejects, once the read is done or failed;
+ *   `destroy()` stops everything and abandons the read; `setStrings()` swaps the text, as a language
+ *   switch does, and rewrites the label, the caption, the note and the figures at once.
  */
-export function mountCloud(canvas, options, env = {}) {
+export function mountCloud(canvas, options, env) {
+  if (typeof env?.startRead !== 'function') throw new TypeError('mountCloud needs env.startRead');
   const doc = canvas.ownerDocument;
   const view = doc.defaultView;
   const {
     now = () => performance.now(),
     requestFrame = (callback) => view.requestAnimationFrame(callback),
     cancelFrame = (id) => view.cancelAnimationFrame(id),
-    startRead = startHeroRead,
+    startRead,
     loadElement = defaultLoadElement,
-    storage,
     ...readerEnv
   } = env;
   const { caption = null, note = null, callouts = null, card = null } = options;
-  const strings = { ...DEFAULT_STRINGS, ...options.strings };
+  let strings = { ...DEFAULT_STRINGS, ...options.strings };
   const reducedMotion = options.reducedMotion ?? (view.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
-  const fast = options.fast ?? hasSeenMosaic(storage);
-  const timings = cloudTimings({ fast, reducedMotion });
+  const timings = cloudTimings({ fast: options.fast ?? false, reducedMotion });
+  const turnEnabled = options.turn ?? true;
+  const mountedAt = now();
 
-  const linkText = typeof options.link === 'string' ? options.link.trim() : formatLink(options.link);
+  const linkText = typeof options.link === 'string' ? options.link.trim() : '';
   const filePath = (() => {
     try {
-      return pathFromLink(linkText);
+      return linkText ? pathFromLink(linkText) : null;
     } catch {
       return null;
     }
@@ -179,7 +193,11 @@ export function mountCloud(canvas, options, env = {}) {
   let colours = FALLBACK_COLOURS;
   let layout = null;
   let timeline = null;
-  let chunkCount = null;
+  // What the file has, as the strings tell it; the cube count only sizes the layout.
+  let fileChunks = null;
+  let perCube = 1;
+  let noteDetail = null;
+  let readingShown = false;
   let manifest = null;
   let phase = 'reading';
   let failedAlpha = 1;
@@ -187,9 +205,11 @@ export function mountCloud(canvas, options, env = {}) {
   let frameId = null;
   let lastFrameAt = -Infinity;
   let animatedUntil = 0;
-  // The sway stops where it is when the read ends (done or failed). A verified read then turns the scene
-  // once round to that same angle; after that nothing asks for a frame.
-  let swayEnd = Infinity;
+  // The sway stops where it is when the read ends (done or failed) or when `swayFor` runs out, whichever
+  // comes first. A verified read then turns the scene once round to that same angle; after that nothing
+  // asks for a frame.
+  let swayEnd = (options.swayFor ?? Infinity) + mountedAt;
+  let readEnded = false;
   let turnStart = null;
   let turnEnd = -Infinity;
   // The camera frame: the whole stretch the scene can use until the manifest names the ledgers, then
@@ -214,6 +234,7 @@ export function mountCloud(canvas, options, env = {}) {
   // The note describes the cubes, so it stays empty (and takes no room) until the manifest names the
   // ledgers and the cubes can exist; a read that fails before that never says anything about them.
   function writeNote(detail) {
+    noteDetail = detail;
     if (!note) return;
     const text = detail === null ? '' : typeof strings.note === 'function' ? strings.note(detail) : strings.note;
     note.textContent = text;
@@ -238,7 +259,7 @@ export function mountCloud(canvas, options, env = {}) {
   }
 
   function setLabel() {
-    canvas.setAttribute('aria-label', strings.label(phase, { chunks: chunkCount }));
+    canvas.setAttribute('aria-label', strings.label(phase, { chunks: fileChunks, perCube }));
     canvas.dataset.phase = phase;
     if (caption) caption.dataset.phase = phase;
   }
@@ -257,7 +278,7 @@ export function mountCloud(canvas, options, env = {}) {
 
   function startTurn(time) {
     // Nobody would see it: the scene goes straight to the angle it would have ended on.
-    if (reducedMotion || doc.hidden || !onScreen) return;
+    if (!turnEnabled || reducedMotion || doc.hidden || !onScreen) return;
     turnStart = time;
     turnEnd = time + TURN_MS;
   }
@@ -514,17 +535,35 @@ export function mountCloud(canvas, options, env = {}) {
     element.replaceChildren(label, value);
   }
 
-  function writeCaption() {
-    if (!caption) return;
+  function captionLine(content) {
     const text = doc.createElement('span');
     text.className = 'hero-caption__text';
+    text.textContent = content;
+    caption.replaceChildren(text);
+  }
+
+  function writeCaption() {
+    if (!caption) return;
+    readingShown = false;
     if (phase === 'failed') {
       const code = failure?.code ?? 'Unknown';
-      text.textContent = typeof strings.failed === 'function' ? strings.failed(code) : strings.failed;
+      captionLine(typeof strings.failed === 'function' ? strings.failed(code) : strings.failed);
     } else {
-      text.textContent = strings.caption({ chunks: chunkCount, firstLedger: manifest.firstLedger, lastLedger: manifest.lastLedger });
+      captionLine(strings.caption({ chunks: fileChunks, firstLedger: manifest.firstLedger, lastLedger: manifest.lastLedger }));
     }
-    caption.replaceChildren(text);
+  }
+
+  function writeReading() {
+    if (!caption || typeof strings.reading !== 'function' || manifest === null) return;
+    readingShown = true;
+    captionLine(strings.reading({ chunks: fileChunks, perCube, firstLedger: manifest.firstLedger, lastLedger: manifest.lastLedger }));
+  }
+
+  function fillCallouts() {
+    if (fileChunks === null) return;
+    fillCallout(callouts?.file, strings.fileCallout(fileChunks));
+    if (linkText) fillCallout(callouts?.link, strings.linkCallout(linkBytes));
+    measureCallouts();
   }
 
   function syncCardTheme() {
@@ -536,7 +575,7 @@ export function mountCloud(canvas, options, env = {}) {
     if (!card || cardShown) return;
     cardShown = true;
     const element = doc.createElement('xrpl-file');
-    element.setAttribute('src', linkText);
+    if (linkText) element.setAttribute('src', linkText);
     element.setAttribute('caption', 'off');
     element.setAttribute('loading', 'eager');
     // The logo is a transparent PNG: it sits on the card, not on the element's own box.
@@ -566,27 +605,34 @@ export function mountCloud(canvas, options, env = {}) {
     onPhase(next) {
       phase = next;
       if (next === 'failed') failedAlpha = FAILED_ALPHA;
-      if ((next === 'done' || next === 'failed') && swayEnd === Infinity) {
-        swayEnd = now();
-        if (next === 'done') startTurn(swayEnd);
+      if ((next === 'done' || next === 'failed') && !readEnded) {
+        readEnded = true;
+        const endedAt = now();
+        swayEnd = Math.min(swayEnd, endedAt);
+        if (next === 'done') startTurn(endedAt);
+      }
+      // The reading line belongs to the reading phase only.
+      if (readingShown && next !== 'reading') {
+        readingShown = false;
+        caption?.replaceChildren();
       }
       setLabel();
     },
-    onManifest({ manifest: received, chunks, time }) {
+    onManifest({ manifest: received, chunks, fileChunks: fileCount = chunks, perCube: cubeSize = 1, time }) {
       manifest = received;
-      chunkCount = chunks;
+      fileChunks = fileCount;
+      perCube = cubeSize;
       const ledgers = received.lastLedger - received.firstLedger + 1;
       layout = layoutCloud({ chunks, ledgers, firstLedger: received.firstLedger });
-      writeNote({ ledgers: layout.ledgers, ledgersPerPad: layout.ledgersPerPad, capped: layout.capped });
+      writeNote({ ledgers: layout.ledgers, ledgersPerPad: layout.ledgersPerPad, capped: layout.capped, perCube });
       timeline = createTimeline({ layout, timings });
       timeline.showManifest(time);
       frameFrom = currentFrame(time);
       frameTo = frameFor(layout);
       frameStart = time;
       animatedUntil = Math.max(animatedUntil, time + Math.max(timings.lit, timings.zoom));
-      fillCallout(callouts?.file, strings.fileCallout(chunks));
-      fillCallout(callouts?.link, strings.linkCallout(linkBytes));
-      measureCallouts();
+      fillCallouts();
+      if (phase === 'reading') writeReading();
       setLabel();
       requestDraw();
     },
@@ -623,7 +669,7 @@ export function mountCloud(canvas, options, env = {}) {
 
   const read = startRead(
     { link: options.link, listener, developDelay: () => timeline?.settleDelay(now()) ?? 0 },
-    { now, storage, ...readerEnv },
+    { now, ...readerEnv },
   );
 
   const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(resize) : null;
@@ -660,6 +706,22 @@ export function mountCloud(canvas, options, env = {}) {
     done: read.done,
     get phase() {
       return read.phase;
+    },
+    setStrings(next) {
+      strings = { ...DEFAULT_STRINGS, ...next };
+      setLabel();
+      if (phase === 'done' || phase === 'failed') writeCaption();
+      else if (phase === 'reading') {
+        // The new strings may have no reading line at all.
+        if (readingShown) {
+          readingShown = false;
+          caption?.replaceChildren();
+        }
+        writeReading();
+      }
+      writeNote(noteDetail);
+      fillCallouts();
+      requestDraw();
     },
     destroy() {
       destroyed = true;

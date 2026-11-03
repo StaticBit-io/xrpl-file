@@ -4,6 +4,7 @@ import './support/register-reader.mjs';
 
 const { mountCloud, TURN_MS, TURN_FADE_MS, turnOffset } = await import('../src/js/cloud.mjs');
 const { XrplFileError } = await import('../src/js/xrpl.mjs');
+const { startHeroRead } = await import('../src/js/hero-read.mjs');
 
 const HASH = '2AEB485BB0FAECA2DF4B60F196D5199042288FEB124ED8D95F4313CF06200DB4';
 const LINK = `xrpl-file://testnet/${HASH}`;
@@ -140,7 +141,7 @@ function mount(parts, clock, reader, extra = {}) {
   return mountCloud(
     canvas,
     { link: LINK, aspect: 1422 / 1231, caption, note, callouts, card, strings, reducedMotion: true, ...extra },
-    { ...clock.env, createReader: () => reader },
+    { ...clock.env, startRead: startHeroRead, createReader: () => reader },
   );
 }
 
@@ -306,7 +307,7 @@ test('a rejected read shows the message for its code, and a network without a no
   assert.equal(parts.note.hidden, true);
 
   const second = page();
-  const other = mountCloud(second.canvas, { link: `xrpl-file://21338/${HASH}`, caption: second.caption, strings, reducedMotion: true }, fakeEnv().env);
+  const other = mountCloud(second.canvas, { link: `xrpl-file://21338/${HASH}`, caption: second.caption, strings, reducedMotion: true }, { ...fakeEnv().env, startRead: startHeroRead });
   await other.done;
   assert.equal(textOf(second.caption), 'failed:UnsupportedNetwork');
 });
@@ -476,7 +477,7 @@ test('the visibility observer follows its last entry', async () => {
 });
 
 // A verified read with motion, run to done; `offScreenAtDone` takes the cloud off screen just before.
-async function turnRun({ offScreenAtDone = false, reducedMotion = false } = {}) {
+async function turnRun({ offScreenAtDone = false, reducedMotion = false, extra = {} } = {}) {
   const observers = [];
   const saved = globalThis.IntersectionObserver;
   globalThis.IntersectionObserver = class {
@@ -489,7 +490,7 @@ async function turnRun({ offScreenAtDone = false, reducedMotion = false } = {}) 
     const listeners = {};
     parts.canvas.parentElement = { addEventListener: (type, listener) => { listeners[type] = listener; }, removeEventListener() {} };
     const clock = fakeEnv();
-    const cloud = mount(parts, clock, verifiedRead(), { reducedMotion, fast: true });
+    const cloud = mount(parts, clock, verifiedRead(), { reducedMotion, fast: true, ...extra });
     await tick();
     clock.advance(50);
     clock.flushFrames();
@@ -597,4 +598,144 @@ test('leaving the screen, a pointer or a key on the cloud ends the turn on its l
     assert.equal(run.clock.pendingFrames(), 0, `${interrupt}: the turn is over`);
     assert.equal(run.parts.callouts.file.style.opacity, '', `${interrupt}: the figures are back`);
   }
+});
+
+test('the cloud imports neither the hero reader nor the reader door, so a page can bring its own reader', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../src/js/cloud.mjs', import.meta.url), 'utf8');
+  const specifiers = [...source.matchAll(/^import\s[^;]*?from\s+'([^']+)'/gms)].map((match) => match[1]);
+  assert.ok(specifiers.length > 0, 'the pattern finds the imports');
+  for (const specifier of specifiers) assert.ok(!/hero-read\.mjs|xrpl\.mjs/.test(specifier), specifier);
+});
+
+test('a read is required: the cloud does not pick one for itself', () => {
+  const parts = page();
+  assert.throws(() => mountCloud(parts.canvas, { link: LINK, strings }, fakeEnv().env), /startRead/);
+});
+
+test('turn: false never turns after done: the figures stay and no frame is asked for', async () => {
+  const run = await turnRun({ extra: { turn: false } });
+  for (let elapsed = 0; elapsed < TURN_MS; elapsed += 50) {
+    run.clock.advance(50);
+    run.clock.flushFrames();
+    assert.equal(run.parts.callouts.file.style.opacity ?? '', '', 'the figures never fade for a turn');
+  }
+  assert.equal(run.clock.pendingFrames(), 0);
+});
+
+test('swayFor stops the sway at mount + swayFor, before the read ends', () => {
+  const parts = page();
+  const clock = fakeEnv();
+  mount(parts, clock, readerThat(() => new Promise(() => {})), { reducedMotion: false, fast: false, swayFor: 5000 });
+  clock.advance(4000);
+  clock.flushFrames();
+  assert.equal(clock.pendingFrames(), 1, 'still swaying inside the window');
+  clock.advance(1100);
+  clock.flushFrames();
+  assert.equal(clock.pendingFrames(), 0, 'past mount + 5000 ms the read is idle and no frame is asked for');
+});
+
+// A read the test drives by hand, to feed the cloud what a reader adapter other than the hero's would.
+function drivenRead() {
+  const driven = { listener: null, destroyed: 0 };
+  driven.startRead = (options) => {
+    driven.listener = options.listener;
+    return { done: new Promise(() => {}), destroy() { driven.destroyed += 1; }, get phase() { return 'reading'; } };
+  };
+  return driven;
+}
+
+function mountDriven(extraStrings = {}, extra = {}) {
+  const parts = page();
+  const clock = fakeEnv();
+  const driven = drivenRead();
+  const cloud = mountCloud(
+    parts.canvas,
+    { link: LINK, caption: parts.caption, note: parts.note, callouts: parts.callouts, card: parts.card, strings: { ...strings, ...extraStrings }, reducedMotion: true, ...extra },
+    { ...clock.env, startRead: driven.startRead },
+  );
+  const manifest = (detail = {}) => driven.listener.onManifest({ manifest: MANIFEST, chunks: 30, time: clock.env.now(), ...detail });
+  return { parts, clock, driven, cloud, manifest };
+}
+
+test('reading() fills the caption at the manifest and gives way when the phase changes', () => {
+  const reading = ({ chunks, perCube, firstLedger, lastLedger }) => `reading:${chunks}:${perCube}:${firstLedger}-${lastLedger}`;
+  const { parts, driven, manifest } = mountDriven({ reading });
+  assert.equal(parts.caption.children.length, 0, 'nothing before the manifest');
+  manifest({ fileChunks: 123, perCube: 4 });
+  assert.equal(textOf(parts.caption), 'reading:123:4:100-107');
+  driven.listener.onPhase('developing');
+  assert.equal(textOf(parts.caption), '', 'the reading line is gone once the phase has changed');
+});
+
+test('without reading() the caption stays empty while reading, as the hero does', () => {
+  const { parts, manifest } = mountDriven();
+  manifest();
+  assert.equal(parts.caption.children.length, 0);
+});
+
+test('perCube and fileChunks reach the note, the label and the file figure', () => {
+  const { parts, manifest } = mountDriven({
+    label: (phase, { chunks, perCube }) => `label:${phase}:${chunks}:${perCube}`,
+    note: ({ ledgers, ledgersPerPad, capped, perCube }) => `note:${ledgers}:${ledgersPerPad}:${capped}:${perCube}`,
+  });
+  assert.equal(parts.canvas.attrs['aria-label'], 'label:reading:null:1');
+  manifest({ fileChunks: 123, perCube: 4 });
+  assert.equal(parts.canvas.attrs['aria-label'], 'label:reading:123:4');
+  assert.equal(parts.note.textContent, 'note:8:1:false:4');
+  assert.equal(textOf(parts.callouts.file), 'file123 chunks');
+});
+
+test('fileChunks and perCube default to chunks and 1: the hero reports neither', () => {
+  const { parts, manifest } = mountDriven({
+    label: (phase, { chunks, perCube }) => `label:${phase}:${chunks}:${perCube}`,
+    note: ({ perCube }) => `note:${perCube}`,
+  });
+  manifest();
+  assert.equal(parts.canvas.attrs['aria-label'], 'label:reading:30:1');
+  assert.equal(parts.note.textContent, 'note:1');
+});
+
+test('setStrings rewrites label, caption and note at once', () => {
+  const { parts, driven, manifest, cloud } = mountDriven();
+  manifest({ fileChunks: 123, perCube: 2 });
+  driven.listener.onPhase('done');
+  driven.listener.onDone({ time: 2000 });
+  assert.equal(textOf(parts.caption), 'caption:123:100-107');
+  assert.equal(parts.canvas.attrs['aria-label'], 'label:done:123');
+  assert.equal(parts.note.textContent, 'note:8:1:false');
+
+  cloud.setStrings({
+    ...strings,
+    label: (phase, { chunks, perCube }) => `etiquette:${phase}:${chunks}:${perCube}`,
+    caption: ({ chunks }) => `legende:${chunks}`,
+    note: ({ perCube }) => `remarque:${perCube}`,
+  });
+  assert.equal(parts.canvas.attrs['aria-label'], 'etiquette:done:123:2');
+  assert.equal(textOf(parts.caption), 'legende:123');
+  assert.equal(parts.note.textContent, 'remarque:2');
+  assert.equal(parts.note.hidden, false);
+  assert.equal(parts.caption.dataset.phase, 'done');
+});
+
+test('setStrings re-renders the reading line and the failure message in the new language', () => {
+  const { parts, driven, manifest, cloud } = mountDriven({ reading: ({ chunks }) => `reading:${chunks}` });
+  manifest({ fileChunks: 7 });
+  cloud.setStrings({ ...strings, reading: ({ chunks }) => `lecture:${chunks}` });
+  assert.equal(textOf(parts.caption), 'lecture:7');
+
+  driven.listener.onPhase('failed');
+  driven.listener.onFailed({ error: new XrplFileError('Stalled', 'stalled') });
+  assert.equal(textOf(parts.caption), 'failed:Stalled');
+  cloud.setStrings({ ...strings, failed: (code) => `echec:${code}` });
+  assert.equal(textOf(parts.caption), 'echec:Stalled');
+});
+
+test('setStrings before the manifest writes the label and leaves the note and caption empty', () => {
+  const { parts, cloud } = mountDriven();
+  cloud.setStrings({ ...strings, label: (phase) => `etiquette:${phase}` });
+  assert.equal(parts.canvas.attrs['aria-label'], 'etiquette:reading');
+  assert.equal(parts.note.textContent, '');
+  assert.equal(parts.note.hidden, true);
+  assert.equal(parts.caption.children.length, 0);
 });

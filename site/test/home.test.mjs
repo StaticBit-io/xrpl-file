@@ -231,3 +231,11 @@ test('the price source line shows the sentence whole when the date is not in it'
   assert.equal(line.textContent, 'Read from mainnet recently.');
   assert.deepEqual(line.children, []);
 });
+
+test('the home page hands the cloud its own reader and replays the hero after the first visit', async () => {
+  const source = await readFile(new URL('../src/js/home.mjs', import.meta.url), 'utf8');
+  assert.match(source, /import \{[^}]*\bstartHeroRead\b[^}]*\} from '\.\/hero-read\.mjs'/);
+  assert.match(source, /import \{[^}]*\bhasSeenMosaic\b[^}]*\} from '\.\/hero-read\.mjs'/);
+  assert.match(source, /fast:\s*hasSeenMosaic\(\)/);
+  assert.match(source, /\{\s*startRead:\s*startHeroRead\s*\}/);
+});
