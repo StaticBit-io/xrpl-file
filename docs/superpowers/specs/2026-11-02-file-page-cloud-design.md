@@ -84,7 +84,7 @@ the CDN snippet together), `cloud.mjs` `ELEMENT_SCRIPT`, `file.html`, `xrpl.mjs`
 ### 2. The cloud on the file page
 
 - **Place.** A canvas in `#file-view`, laid exactly over the element's box, under it. The element
-  gets `loader="off"`, so while it loads its box is bare and the cloud shows through.
+  gets `loader="false"`, so while it loads its box is bare and the cloud shows through.
 - **Feed.** An adapter with the same contract as `startHeroRead` (`site/src/js/hero-read.mjs`):
   `{ done, destroy, phase, state, manifest }` and the same listener callbacks, driven by the
   element's three events. It is passed to `mountCloud` through the existing `env.startRead` seam.
@@ -96,9 +96,11 @@ the CDN snippet together), `cloud.mjs` `ELEMENT_SCRIPT`, `file.html`, `xrpl.mjs`
   verified" may never come before the file is shown.
 - **The manifest cube** appears, lit but not lime, with `xrpl-file-manifest`. It never turns lime on
   this page: the element reports no separate verification of the manifest.
-- **Timings.** Always the fast timings (`cloudTimings({ fast: true })`, or reduced motion when the
-  visitor asks for it): the cloud is there while the file loads and must not lag behind the read.
-  The file page neither reads nor sets the hero's `xf-mosaic-seen`.
+- **Timings.** The home page's normal timings (`cloudTimings({ fast: false })`, or reduced motion
+  when the visitor asks for it, which also drops the hold). The file page neither reads nor sets the
+  hero's `xf-mosaic-seen`. Amended 2026-11-03 by the owner after the browser check: a small file's
+  chunks, block and `load` arrive within ~35 ms, so with fast timings and no hold no cube was ever
+  visible.
 - **Motion.** The sway stops 5 s after mount and the camera stays where it stopped. Cubes keep
   appearing and turning lime for as long as the read lasts: that is the read's progress, the kind of
   preload animation WCAG 2.2.2's understanding text treats as essential, and it ends when the file
@@ -110,13 +112,15 @@ the CDN snippet together), `cloud.mjs` `ELEMENT_SCRIPT`, `file.html`, `xrpl.mjs`
 - **No reader on this page.** `cloud.mjs` stops importing `hero-read.mjs` (and through it the reader
   bundle) itself; the home page passes `startHeroRead` in. The file page loads no reader code of its
   own.
-- **End.** On the element's `load` (image, text, video's first frame, or the download view) or
-  `error`, the cloud fades out (instantly under reduced motion), its canvas is hidden and
+- **End.** On the element's `load` (image, text, video's first frame, or the download view) the
+  element stays hidden (`visibility: hidden`) while the cubes finish lighting up and turning lime,
+  at most 3 s (`HOLD_MAX_MS`), then the cloud fades out; on `error` it fades out at once. Either way
+  the cloud fades out (instantly under reduced motion), its canvas is hidden and
   `destroy()` stops its frames, and the caption is emptied. Hidden, not only covered: a transparent picture is shown on the
   page itself (`background="transparent"`), and the cloud must not show through it.
 - **No turn, no card, no callouts.** `mountCloud` gets an option that turns these off; the home
   page keeps them.
-- **Status for screen readers.** With `loader="off"` the element's progress text is hidden. The
+- **Status for screen readers.** With `loader="false"` the element's progress text is hidden. The
   cloud's caption (`role="status"`, polite) carries the reading line instead, and the canvas keeps
   its phase-following `aria-label`.
 - **Kept from the hero.** Reduced motion (one still frame per change), the pause off-screen and in a
@@ -160,7 +164,8 @@ without grouping, with and without capped pads). Written with the `writing-site-
    frame.
 4. **Events once per load**, deduplicated by the element, rather than "may repeat".
 5. **The sway stops after 5 s**; the cubes keep filling in as the read's progress.
-6. **Fast timings always** on the file page; the manifest cube never turns lime there.
+6. The manifest cube never turns lime on the file page. (The earlier "fast timings always" call was
+   replaced by the owner's hold, see Timings.)
 
 ## Left to the builder
 
