@@ -206,6 +206,14 @@ test('built index.html contains the 1.2.0 snippet with the integrity from integr
     assert.ok(!html.includes('sha384-OTHER'), 'only the value for the element script is used');
   }));
 
+// "xrpl-file-element@1.2.0/xrpl-file-element.js" looks like an address to Cloudflare's email
+// obfuscation, which would serve "[email protected]" inside the snippet.
+test('fences the snippet off from Cloudflare email obfuscation', () =>
+  buildWithPages({ 'index.html': PAGE('en', SNIPPET_BODY) }, async (f, read) => {
+    const html = await read('index.html');
+    assert.match(html, /<pre><code><!--email_off-->&lt;script src="[^"]+@1\.2\.0\/[^<]*<!--\/email_off--><\/code><\/pre>/);
+  }));
+
 test('refuses a snippet marker when integrity.json has no value for the element script', () =>
   withFixture(undefined, async (f) => {
     await writeFile(join(f.webDistDir, '1.2.0', 'integrity.json'), '{}');

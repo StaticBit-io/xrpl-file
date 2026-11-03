@@ -1,6 +1,8 @@
 # Deploy note: xrpl-file.staticbit.io (Task 10, step 1)
 
-Status: prepared, **not deployed**. The package `xrpl-file-element@1.1.0` is published (2026-11-02).
+Status: **deployed** 2026-11-03 from `main` @ `e462eed` with element `1.2.0` (published the same
+day), custom domain attached. The steps below were written for `1.1.0`; the order holds for every
+element version.
 Every step below publishes something publicly; a merge into `main` is one of them, since it deploys
 the site, so `main` moves only on the owner's explicit command.
 
@@ -81,11 +83,17 @@ Notes:
    answers 200 with no `Location` header (the file page is rewritten, not redirected).
 3. `curl -sI https://xrpl-file.staticbit.io/js/route.mjs` answers 200 with a JavaScript type (the
    pass-through rules win over the file-page rule).
-4. `curl -sI https://xrpl-file.staticbit.io/element/1.1.0/xrpl-file-element.js` shows
-   `access-control-allow-origin: *` and `cache-control: public, max-age=31536000, immutable`.
+4. `curl -sI https://xrpl-file.staticbit.io/element/<version>/xrpl-file-element.js` shows
+   `access-control-allow-origin: *` and `cache-control: public, max-age=31536000, immutable`. The
+   site holds only the version in `web/package.json`; older versions answer 404 there and stay on
+   jsDelivr.
 5. `/nope` answers 404 with the site's 404 page.
 6. The snippet (jsDelivr) works from a page on another origin (for example JSFiddle) with its
    `integrity` attribute.
+7. `curl -s https://xrpl-file.staticbit.io/ | grep -c email-protection` prints `0`. The
+   `staticbit.io` zone has Email Address Obfuscation on, which turns `xrpl-file-element@<version>/…`
+   in the snippet into `[email protected]` unless `site/build.mjs` fences it with `email_off`
+   comments. Only the custom domain shows this; `pages.dev` is outside the zone.
 
 ## npm package (step 3 of the order above)
 

@@ -113,9 +113,16 @@ async function inlineChrome(outDir) {
 
 const SNIPPET_MARKER = '<!--@element-snippet-->';
 
+// Cloudflare's Email Address Obfuscation (on for the staticbit.io zone) reads
+// "xrpl-file-element@1.2.0/xrpl-file-element.js" as an address and serves "[email protected]" in its
+// place, restored only by a script it injects. Cloudflare leaves the text between these comments alone,
+// and comments are not part of the textContent the copy button takes.
+const EMAIL_OFF = '<!--email_off-->';
+const EMAIL_ON = '<!--/email_off-->';
+
 /**
  * Fills the embed snippet of a page: the marker gets the escaped snippet with the element's integrity
- * from integrity.json.
+ * from integrity.json, fenced off from Cloudflare's email obfuscation.
  */
 async function inlineSnippet(outDir, elementDir, elementVersion) {
   let integrity = null;
@@ -132,7 +139,7 @@ async function inlineSnippet(outDir, elementDir, elementVersion) {
       }
     }
     const options = { version: elementVersion, integrity };
-    await writeFile(file, html.replaceAll(SNIPPET_MARKER, () => snippetHtml(options)));
+    await writeFile(file, html.replaceAll(SNIPPET_MARKER, () => `${EMAIL_OFF}${snippetHtml(options)}${EMAIL_ON}`));
   }
 }
 
