@@ -19,7 +19,7 @@ public sealed class PublicationDurationTests
         double fixedPart = 106 * 12 + 4 * 1_024 * 0.7 / 400;
         Assert.Equal(1_689_977 / 160.0 + fixedPart + 1_689_810 / 9_000.0, range.Shortest.TotalSeconds, precision: 3);
         Assert.Equal(1_689_977 / 70.0 + fixedPart + 1_689_810 / 4_500.0, range.Longest.TotalSeconds, precision: 3);
-        Assert.Equal("3 h 21 min to 7 h 10 min", DurationText.Of(range));
+        Assert.Equal("3 h 21 min to 7 h 10 min", TestText.En(DurationText.Of(range)));
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public sealed class PublicationDurationTests
 
         Assert.Equal(1_001 / 2.0 + 1_000 * 0.7 / 400, range.Shortest.TotalSeconds, precision: 3);
         Assert.Equal(1_001 / 1.0 + 1_000 * 0.7 / 400, range.Longest.TotalSeconds, precision: 3);
-        Assert.Equal("8 min to 17 min", DurationText.Of(range));
+        Assert.Equal("8 min to 17 min", TestText.En(DurationText.Of(range)));
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public sealed class PublicationDurationTests
 
         Assert.Equal(range.Shortest, range.Longest);
         Assert.Equal(51 * 4 + 50 * 0.7 / 400, range.Longest.TotalSeconds, precision: 3);
-        Assert.Equal("3 min", DurationText.Of(range));
+        Assert.Equal("3 min", TestText.En(DurationText.Of(range)));
     }
 
     [Theory]

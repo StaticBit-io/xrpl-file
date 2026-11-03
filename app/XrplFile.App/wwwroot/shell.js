@@ -1,6 +1,11 @@
 // Phone-width More menu and focus housekeeping for Shell.razor (design 2026-10-13, sections 3–4).
 // The layout itself is pure CSS; this file only reacts when the window crosses the 720 px line.
 window.xfShell = {
+    // The application's language, for the glyphs the engine picks and for screen readers.
+    setLanguage: function (tag) {
+        document.documentElement.lang = tag;
+    },
+
     watchWidth: function (dotnet) {
         window.xfShell.dotnet = dotnet;
         const wide = window.matchMedia('(min-width: 720px)');

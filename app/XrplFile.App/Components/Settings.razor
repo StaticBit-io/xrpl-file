@@ -3,6 +3,7 @@
 @inject VaultLocationModel LocationModel
 @inject IFilePickerService FilePicker
 @inject NodeSettingsModel NodeSettings
+@inject Localizer Localizer
 
 @* Design 6, "Settings": the vault's own path, a button that reveals it in the file manager, opening
    a different vault, and the device-unlock switch. DeviceUnlockModel.IsEnabledAsync is re-read after
@@ -28,6 +29,22 @@
     else
     {
         <h1 class="xf-title">Settings</h1>
+
+        <section class="xf-card">
+            <h2 class="xf-section-title">@T[SettingsText.LanguageTitle]</h2>
+            <label class="form-label" for="xf-language">@T[SettingsText.LanguageLabel]</label>
+            @* Names are in their own language and never translated, so anyone finds theirs whatever is on screen. *@
+            <select id="xf-language" class="form-select xf-language-select" value="@Localizer.Language.Code" @onchange="ChooseLanguage">
+                @foreach (UiLanguage language in Localizer.Choices)
+                {
+                    <option value="@language.Code" lang="@language.HtmlTag">@language.NativeName</option>
+                }
+            </select>
+            @if (_languageNotRemembered)
+            {
+                <div class="alert alert-warning mt-2 mb-0" role="status">@T[SettingsText.LanguageNotRemembered]</div>
+            }
+        </section>
 
         <section class="xf-card">
             <h2 class="xf-section-title">Vault location</h2>
@@ -159,6 +176,7 @@
     private readonly Dictionary<string, string> _nodeEdits = new(StringComparer.Ordinal);
     private readonly HashSet<string> _customRows = new(StringComparer.Ordinal);
     private bool _showChangePassword;
+    private bool _languageNotRemembered;
     private bool _deviceUnlockEnabled;
     private bool _busy;
     private bool _choosingVault;
@@ -190,6 +208,14 @@
             {
                 _customRows.Add(row.Network);
             }
+        }
+    }
+
+    private void ChooseLanguage(ChangeEventArgs args)
+    {
+        if (UiLanguage.FromCode(args.Value as string) is { } language)
+        {
+            _languageNotRemembered = !Localizer.Choose(language);
         }
     }
 

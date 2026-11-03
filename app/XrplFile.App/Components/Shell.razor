@@ -4,6 +4,7 @@
 @inject ShellModel Tabs
 @inject CloseAccountModel Closing
 @inject IJSRuntime JS
+@inject Localizer Localizer
 
 @* One window, no router (design section 6). What renders is entirely the model's own Stage --
    this component switches on it but never sets it, and never composes a word of its own.
@@ -18,6 +19,9 @@
    second -- one property read, no file touched -- and the model, not this markup, is what decides
    that a shut vault behind an unlocked screen means the screen is stale. *@
 
+@* Every screen below reads its words from this cascade; a changed language is a new catalog, which
+   re-renders each of them where it stands, inputs and scroll kept. *@
+<CascadingValue Value="Localizer.Text">
 @if (_failure is not null)
 {
     <div class="xf-vault">
@@ -137,6 +141,7 @@ else
         </section>
     </div>
 }
+</CascadingValue>
 
 @code {
     /// <summary>
@@ -170,6 +175,7 @@ else
     private bool _focusContent;
     private bool _watchingWidth;
     private DotNetObjectReference<Shell>? _self;
+    private string? _documentLanguage;
 
     private static readonly RenderFragment Mark =
         @<svg viewBox="0 0 19 19" width="22" height="22" stroke-width="1"><rect x="0.5" y="0.5" width="5" height="5" rx="0.5" fill="#BDC6CA" stroke="#BDC6CA"/><rect x="7" y="0.5" width="5" height="5" rx="0.5" fill="#BDC6CA" stroke="#BDC6CA"/><rect x="13.5" y="0.5" width="5" height="5" rx="0.5" fill="none" stroke="#89949A"/><rect x="0.5" y="7" width="5" height="5" rx="0.5" fill="none" stroke="#89949A"/><rect x="7" y="7" width="5" height="5" rx="0.5" fill="#BDC6CA" stroke="#BDC6CA"/><rect x="13.5" y="7" width="5" height="5" rx="0.5" fill="#BDC6CA" stroke="#BDC6CA"/><rect x="0.5" y="13.5" width="5" height="5" rx="0.5" fill="none" stroke="#89949A"/><rect x="7" y="13.5" width="5" height="5" rx="0.5" fill="none" stroke="#89949A"/><rect x="13.5" y="13.5" width="5" height="5" rx="0.5" fill="#BCF053" stroke="#BCF053"/></svg>;
@@ -191,6 +197,14 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!string.Equals(_documentLanguage, Localizer.Language.HtmlTag, StringComparison.Ordinal))
+        {
+            // <html lang> picks the glyphs WebView2 draws: without zh-Hans, Han characters can come
+            // out in a Japanese face.
+            _documentLanguage = Localizer.Language.HtmlTag;
+            await JS.InvokeVoidAsync("xfShell.setLanguage", _documentLanguage);
+        }
+
         if (!_watchingWidth && _ready && Model.Stage == UnlockStage.Unlocked)
         {
             _watchingWidth = true;
@@ -265,9 +279,19 @@ else
 
     protected override void OnInitialized()
     {
+        Localizer.Changed += OnLanguageChanged;
         Tabs.Changed += OnTabChanged;
         Closing.ClosingChanged += OnClosingChanged;
     }
+
+    /// <summary>Redraws everything in the new language; the cascade hands each screen the new catalog.</summary>
+    private void OnLanguageChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
+    });
 
     /// <summary>
     /// Redraws the rail and tab bar when an account close starts or ends. They are disabled for as
@@ -373,6 +397,7 @@ else
     {
         // Set before the timer is disposed, for the reason RevealSeed.razor's own Dispose explains.
         _disposed = true;
+        Localizer.Changed -= OnLanguageChanged;
         Tabs.Changed -= OnTabChanged;
         Closing.ClosingChanged -= OnClosingChanged;
         _self?.Dispose();

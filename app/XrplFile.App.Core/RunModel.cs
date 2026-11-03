@@ -174,7 +174,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
                 ? TimeSpan.FromSeconds(ledgers / pace)
                 : LedgerTiming.ApproximateLedgerInterval * ledgers;
 
-            return $"{StageNameOf("fence")} — about {DurationText.Of(wait)}";
+            return $"{StageNameOf("fence")} — about {EnglishUntilConverted(DurationText.Of(wait))}";
         }
 
         string head = HeadOf(progress);
@@ -186,7 +186,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
                 ? TimeSpan.FromSeconds(blocks / blocksPerSecond)
                 : PublicationDuration.Reading(blocks * PublicationDuration.RecordsPerSampledBlock);
 
-            return blocks == 0 ? head + elapsed : $"{head} · about {DurationText.Of(left)} left{elapsed}";
+            return blocks == 0 ? head + elapsed : $"{head} · about {EnglishUntilConverted(DurationText.Of(left))} left{elapsed}";
         }
 
         if (progress.Stage is not ("chunks" or "lists")) return head + elapsed;
@@ -201,12 +201,12 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
 
         if (rate is { } measured && RateText(measured) is { } shown)
         {
-            return $"{head} · {shown} {unit} · about {DurationText.Of(TimeSpan.FromSeconds(remaining / measured) + settles)} left{elapsed}";
+            return $"{head} · {shown} {unit} · about {EnglishUntilConverted(DurationText.Of(TimeSpan.FromSeconds(remaining / measured) + settles))} left{elapsed}";
         }
 
         if (rate is null && snapshot.UsesBatch)
         {
-            return $"{head} · about {DurationText.Of(TimeSpan.FromSeconds(remaining / BatchPriorMemosPerSecond) + settles)} left{elapsed}";
+            return $"{head} · about {EnglishUntilConverted(DurationText.Of(TimeSpan.FromSeconds(remaining / BatchPriorMemosPerSecond) + settles))} left{elapsed}";
         }
 
         return $"{head} · estimating…{elapsed}";
@@ -556,4 +556,8 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
         // genuinely in, and showing its raw name beats showing nothing or crashing the screen.
         _ => stage,
     };
+
+    // Temporary until the run screen's texts are UiText: renders a duration in English as before.
+    private static string EnglishUntilConverted(Localization.UiText text) =>
+        Localization.TextCatalog.For(Localization.UiLanguage.English).Render(text);
 }

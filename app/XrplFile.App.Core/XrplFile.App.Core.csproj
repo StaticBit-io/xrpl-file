@@ -12,6 +12,10 @@
     <PackageReference Include="Xrpl" />
   </ItemGroup>
   <ItemGroup>
+    <!-- One catalog per language; TextCatalog finds each by this exact name. -->
+    <EmbeddedResource Include="Localization\Text\*.json" LogicalName="XrplFile.App.Core.Localization.Text.%(Filename).json" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="XrplFile.App.Core.Tests" />
   </ItemGroup>
 </Project>
