@@ -45,7 +45,7 @@ public sealed class NodeUrlMessageParityTests : VaultHarness
 
         Assert.NotNull(readModel.Message);
         Assert.NotNull(publishModel.Message);
-        Assert.Contains("Settings", readModel.Message, StringComparison.Ordinal);
-        Assert.Equal(TestText.En(publishModel.Message), readModel.Message);
+        Assert.Contains("Settings", TestText.En(readModel.Message), StringComparison.Ordinal);
+        Assert.Equal(TestText.En(publishModel.Message), TestText.En(readModel.Message));
     }
 }

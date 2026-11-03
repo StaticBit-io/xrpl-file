@@ -514,5 +514,47 @@
   "History.ListNotWritten": "The publications file could not be written. Your file is in the ledger and your link is safe, but this history could not be updated. Try again later.",
   "History.ListReplaced": "Your previous publications list could not be read, so it has been replaced. This publication is recorded, but earlier entries may be missing.",
   "History.HeldBack": "Some publications that finished earlier are not in this list yet, because it could not be updated. Their links are kept and are added when the application starts with a list it can read and write.",
-  "History.FailureAndNote": "{failure} {note}"
+  "History.FailureAndNote": "{failure} {note}",
+  "Read.Title": "Read a file",
+  "Read.RunningTitle": "Reading",
+  "Read.ProgressBlocks": {
+    "one": "{done} of {total} block",
+    "other": "{done} of {total} blocks"
+  },
+  "Read.ProgressBytes": {
+    "one": "{done} of {total} byte",
+    "other": "{done} of {total} bytes"
+  },
+  "Read.Succeeded": "Read successfully.",
+  "Read.SucceededNamed": "Read \"{name}\" successfully.",
+  "Read.SaveButton": "Save…",
+  "Read.Saved": "Saved.",
+  "Read.CancelledNote": "Cancelled. Nothing was saved.",
+  "Read.LinkLabel": "Link",
+  "Read.LookUpButton": "Look up",
+  "Read.ReadButton": "Read",
+  "Read.NoName": "(no name)",
+  "Read.ReadTime": "About {duration} to read",
+  "Read.WrittenBy": "Written by {writer}",
+  "Read.Blocks": {
+    "one": "{count} block",
+    "other": "{count} blocks"
+  },
+  "Read.Node": "Node: {url}",
+  "Read.ErrorInvalidLink": "That is not an xrpl-file link.",
+  "Read.ErrorManifestNotFound": "This network has no transaction at that hash. The link may be wrong, or it may belong to a different network.",
+  "Read.ErrorNodeLacksHistory": "This node's history does not reach back far enough to hold the file. A node that keeps more history can read it.",
+  "Read.ErrorCorruptManifest": "There is something at that hash, but it is not a file description this version understands.",
+  "Read.ErrorListMismatch": "The list of the file's blocks does not match what the file's own description says it should be. Nothing was saved.",
+  "Read.ErrorBlockMismatch": "A block of the file does not match what the file's own description says it should be. Nothing was saved.",
+  "Read.ErrorChunkMissing": "Part of the file is not in the ledger. Nothing was saved.",
+  "Read.ErrorTooLarge": "This file is larger than this application will read.",
+  "Read.ErrorNodeUnreachable": "The node did not answer. Check the node URL in Settings and try again.",
+  "Read.ErrorNotCausedByReading": "Something went wrong that reading a file cannot cause. This is a defect in this application, not something you did.",
+  "Read.ErrorWithBlock": "{sentence} (block {block:0})",
+  "Read.ErrorTemporaryWriteFailed": "The file could not be written to a temporary location while it was being read.",
+  "Read.ErrorGeneric": "Something went wrong that this application does not have a specific message for.",
+  "Read.ErrorSaveFailed": "The file could not be opened to save, or could not be written to where you chose.",
+  "Read.ErrorSaveFailedGeneric": "Something went wrong while saving that this application does not have a specific message for.",
+  "Read.NoNodeUrl": "No node URL is known for the network '{network}'. Add one in Settings."
 }

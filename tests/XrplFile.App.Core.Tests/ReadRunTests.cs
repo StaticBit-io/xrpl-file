@@ -241,7 +241,7 @@ public sealed class ReadRunTests : IDisposable
         Assert.False(snapshot.Saved);
         Assert.Equal(
             "The file could not be opened to save, or could not be written to where you chose.",
-            snapshot.Failure);
+            TestText.En(snapshot.Failure));
 
         // The read itself is untouched by a save failure: still the succeeded read it was, still
         // able to be retried.
