@@ -777,3 +777,21 @@ test('an element error before the manifest still writes the failure line', async
   assert.equal(cloud.phase, 'failed');
   assert.equal(textOf(parts.caption), 'failed:NotFound');
 });
+
+test('settleDelay is 0 before the manifest, counts down the sweep, the colour change and the pause, and is 0 after destroy', () => {
+  const { clock, driven, manifest, cloud } = mountDriven({}, { reducedMotion: false, fast: false });
+  assert.equal(cloud.settleDelay(), 0, 'nothing has been drawn yet');
+  manifest();
+  assert.equal(cloud.settleDelay(), 0, 'cubes that are not verified have nothing to settle');
+  for (let index = 0; index < 30; index += 1) driven.listener.onChunk({ ...chunk(index), time: clock.env.now() });
+  driven.listener.onBlockVerified({ firstChunk: 0, lastChunk: 29, time: clock.env.now() });
+  // Normal timings: a 1600 ms sweep, 500 ms to turn lime and a 500 ms pause.
+  assert.equal(cloud.settleDelay(), 2600);
+  clock.advance(1000);
+  assert.equal(cloud.settleDelay(), 1600);
+  clock.advance(5000);
+  assert.equal(cloud.settleDelay(), 0, 'never negative');
+  clock.advance(-6000);
+  cloud.destroy();
+  assert.equal(cloud.settleDelay(), 0, 'a destroyed cloud settles nothing');
+});

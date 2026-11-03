@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import './support/register-reader.mjs';
 
-const { initFilePage, initNotFoundPage } = await import('../src/js/file-page.mjs');
+const { initFilePage, initNotFoundPage, HOLD_MAX_MS } = await import('../src/js/file-page.mjs');
 const { t, formatSize, networkName } = await import('../src/js/strings.mjs');
 const { ACTIVE_LANGS: LANGS, homePath, htmlLang, localeOf } = await import('../src/js/languages.mjs');
 const strings = await import('../src/js/strings.mjs');
@@ -28,7 +28,11 @@ class FakeNode {
     this.focused = false;
     this.parentElement = null;
     this.classes = new Set();
-    this.classList = { add: (name) => this.classes.add(name), contains: (name) => this.classes.has(name) };
+    this.classList = {
+      add: (name) => this.classes.add(name),
+      remove: (name) => this.classes.delete(name),
+      contains: (name) => this.classes.has(name),
+    };
   }
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.has(name) ? this.attributes.get(name) : null; }
@@ -120,6 +124,8 @@ function fakeCloud(doc) {
     mounts: [],
     destroyed: 0,
     strings: [],
+    // What settleDelay() reports; a test sets it before `load`.
+    settle: 0,
     mount(canvas, options, env) {
       cloud.mounts.push({
         canvas,
@@ -132,6 +138,7 @@ function fakeCloud(doc) {
         done: Promise.resolve(),
         phase: 'reading',
         destroy: () => { cloud.destroyed += 1; },
+        settleDelay: () => cloud.settle,
         setStrings: (strings) => cloud.strings.push(strings),
       };
     },
@@ -516,7 +523,7 @@ test('the cloud is mounted before the element reads', () => {
   assert.equal(mount.options.note, doc.nodes['file-cloud-note']);
   assert.equal(mount.options.turn, false);
   assert.equal(mount.options.swayFor, 5000);
-  assert.equal(mount.options.fast, true);
+  assert.equal(mount.options.fast, false, 'the normal timings: the cubes light up and the sweep passes');
   assert.equal(mount.options.callouts, undefined, 'no callouts and no card on this page');
   assert.equal(mount.options.card, undefined);
   const expected = fileCloudStrings('en', 'testnet');
@@ -559,6 +566,69 @@ test('without reduced motion the canvas fades first and goes after 250 ms', asyn
   await new Promise((resolve) => setTimeout(resolve, 400));
   assert.equal(canvas.hidden, true);
   assert.equal(cloud.destroyed, 1);
+});
+
+test('load holds the file while the cloud settles, capped at 3 s', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  assert.equal(HOLD_MAX_MS, 3000);
+
+  const short = open(CANONICAL, { reducedMotion: false });
+  short.cloud.settle = 2000;
+  short.doc.file.load(DETAIL);
+  assert.equal(short.doc.stage.classList.contains('is-settling'), true, 'the file is hidden while the cubes settle');
+  assert.equal(short.doc.nodes['file-title'].textContent, 'photo.webp', 'the name and details do not wait');
+  assert.equal(short.doc.nodes['file-download'].disabled, false);
+  t.mock.timers.tick(1999);
+  assert.equal(short.doc.stage.classList.contains('is-settling'), true);
+  assert.equal(short.doc.nodes['file-cloud'].classList.contains('is-gone'), false);
+  t.mock.timers.tick(1);
+  assert.equal(short.doc.stage.classList.contains('is-settling'), false, 'released when the cubes have settled');
+  assert.equal(short.doc.nodes['file-cloud'].classList.contains('is-gone'), true, 'then the cloud fades');
+  assert.equal(short.doc.nodes['file-cloud'].hidden, false);
+  t.mock.timers.tick(250);
+  assert.equal(short.doc.nodes['file-cloud'].hidden, true);
+  assert.equal(short.cloud.destroyed, 1);
+
+  const long = open(CANONICAL, { reducedMotion: false });
+  long.cloud.settle = 10_000;
+  long.doc.file.load(DETAIL);
+  t.mock.timers.tick(2999);
+  assert.equal(long.doc.stage.classList.contains('is-settling'), true);
+  t.mock.timers.tick(1);
+  assert.equal(long.doc.stage.classList.contains('is-settling'), false, 'a slow sweep is cut at 3 s');
+  assert.equal(long.doc.nodes['file-cloud'].classList.contains('is-gone'), true);
+});
+
+test('a cloud with nothing left to settle does not hold the file', () => {
+  const { doc } = open(CANONICAL, { reducedMotion: false });
+  doc.file.load(DETAIL);
+  assert.equal(doc.stage.classList.contains('is-settling'), false);
+  assert.equal(doc.nodes['file-cloud'].classList.contains('is-gone'), true);
+});
+
+test('reduced motion shows the file at once', () => {
+  const { doc, cloud } = open(CANONICAL, { reducedMotion: true });
+  cloud.settle = 2000;
+  doc.file.load(DETAIL);
+  assert.equal(doc.stage.classList.contains('is-settling'), false);
+  assert.equal(doc.nodes['file-cloud'].hidden, true);
+  assert.equal(cloud.destroyed, 1);
+});
+
+test('error during the hold ends at once', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { doc, cloud } = open(CANONICAL, { reducedMotion: false });
+  cloud.settle = 2000;
+  doc.file.load(DETAIL);
+  assert.equal(doc.stage.classList.contains('is-settling'), true);
+  doc.file.fail();
+  assert.equal(doc.stage.classList.contains('is-settling'), false);
+  assert.equal(doc.nodes['file-cloud'].classList.contains('is-gone'), true);
+  t.mock.timers.tick(250);
+  assert.equal(doc.nodes['file-cloud'].hidden, true);
+  assert.equal(cloud.destroyed, 1);
+  t.mock.timers.tick(5000);
+  assert.equal(cloud.destroyed, 1, 'the abandoned hold timer does nothing');
 });
 
 test('error before the manifest hides the canvas without throwing', () => {

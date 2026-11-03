@@ -959,6 +959,12 @@
   transition: opacity 250ms;
 }
 
+/* After `load` the file is verified, but the cubes may only just have appeared: the element stays out of
+   sight while they light up and settle. visibility keeps its box, so the canvas keeps its size. */
+.file__stage.is-settling xrpl-file {
+  visibility: hidden;
+}
+
 .file__cloud.is-gone {
   opacity: 0;
 }
