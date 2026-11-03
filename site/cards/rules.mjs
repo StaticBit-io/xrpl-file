@@ -3,14 +3,17 @@
 import { coverMagicAgrees } from '../../web/src/cover.mjs';
 
 // Substrings of the user agents of link-preview robots, lower case. A person's browser matches none:
-// they all name a robot product, never "Mozilla" or an engine.
-const ROBOTS = ['telegrambot', 'twitterbot', 'facebookexternalhit', 'discordbot', 'slackbot', 'whatsapp', 'linkedinbot'];
+// they all name a robot product, never an engine.
+const ROBOTS = ['telegrambot', 'twitterbot', 'facebookexternalhit', 'discordbot', 'slackbot', 'linkedinbot'];
+// WhatsApp's in-app browser carries "WhatsApp/<version>" at the end of a browser's user agent; only the
+// link fetcher's user agent begins with it.
+const WHATSAPP_FETCHER = 'whatsapp/';
 
 /** Whether the user agent is a link-preview robot that reads og/twitter tags and runs no script. */
 export function isLinkPreviewRobot(userAgent) {
   if (!userAgent) return false;
   const lower = userAgent.toLowerCase();
-  return ROBOTS.some((robot) => lower.includes(robot));
+  return lower.startsWith(WHATSAPP_FETCHER) || ROBOTS.some((robot) => lower.includes(robot));
 }
 
 // Only the named networks: a NetworkID has no built-in node to read from.

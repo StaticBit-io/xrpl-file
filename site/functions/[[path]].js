@@ -6,6 +6,8 @@ import { ENDPOINTS, LedgerClient } from '../../web/src/ledger.mjs';
 
 export function onRequest(context) {
   const { request } = context;
+  // An exception the handler did not catch serves the static site instead of an error page.
+  context.passThroughOnException();
   // Per data centre; the keys are URLs under the site's own origin that no page links to.
   const cache = caches.default;
   return handleCardRequest(request, {

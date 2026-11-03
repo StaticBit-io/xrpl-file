@@ -85,7 +85,10 @@ async function fakeDeps({ ledger = [], sources = null, ...overrides } = {}) {
         store.set(key, { status: response.status, headers: new Headers(response.headers), body: await response.arrayBuffer() });
       },
     },
-    waitUntil(promise) { pending.push(promise); },
+    waitCalls: 0,
+    clock: 0,
+    now: () => deps.clock,
+    waitUntil(promise) { deps.waitCalls++; pending.push(promise); },
     async settled() {
       while (pending.length > 0) await pending.shift();
     },
@@ -102,8 +105,8 @@ async function fakeDeps({ ledger = [], sources = null, ...overrides } = {}) {
 }
 
 const get = (path, userAgent, init = {}) => new Request(`${ORIGIN}${path}`, { ...init, headers: { 'user-agent': userAgent } });
-const pageKey = (hash) => `${ORIGIN}/__cards/page/mainnet/${hash}`;
-const pictureKey = (hash) => `${ORIGIN}/__cards/picture/mainnet/${hash}`;
+const pageKey = (hash) => `${ORIGIN}/__cards/v1/page/mainnet/${hash}`;
+const pictureKey = (hash) => `${ORIGIN}/__cards/v1/picture/mainnet/${hash}`;
 
 test('a browser gets the static file page and the ledger is never asked', async () => {
   const deps = await fakeDeps({ sources: [() => { throw new Error('node down'); }] });
@@ -125,7 +128,9 @@ test('a robot gets the file card, cached for a year, and the picture read starts
   const response = await handleCardRequest(get(`/mainnet/${png.hash}`, TELEGRAM), deps);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-type'), 'text/html; charset=utf-8');
-  assert.equal(response.headers.get('cache-control'), YEAR);
+  // The robot's copy is not to be kept by anyone downstream: the same URL is a person's page.
+  assert.equal(response.headers.get('cache-control'), 'no-cache');
+  assert.equal(response.headers.get('vary'), 'User-Agent');
   const html = await response.text();
   assert.ok(html.includes('<meta property="og:title" content="logo.png">'));
   assert.ok(html.includes(`<meta property="og:image" content="${ORIGIN}/og/mainnet/${png.hash}">`));
@@ -137,6 +142,8 @@ test('a robot gets the file card, cached for a year, and the picture read starts
   assert.equal(deps.sourceOpened, deps.sourceClosed, 'every source opened is closed');
 
   const again = await handleCardRequest(get(`/mainnet/${png.hash}`, 'Twitterbot/1.0'), deps);
+  assert.equal(again.headers.get('cache-control'), 'no-cache');
+  assert.equal(again.headers.get('vary'), 'User-Agent');
   assert.equal(await again.text(), html);
   assert.equal(deps.sourceOpened, 2, 'the second robot is answered from the cache');
 });
@@ -163,7 +170,6 @@ test('a robot while the node is unreachable gets the generic card, cached for 30
   const response = await handleCardRequest(get(`/mainnet/${hash}`, TELEGRAM), deps);
   assert.equal(response.status, 200);
   assert.equal(await response.text(), deps.filePage);
-  assert.equal(response.headers.get('cache-control'), 'public, max-age=300');
   await deps.settled();
   assert.equal(deps.store.get(pageKey(hash)).headers.get('cache-control'), 'public, max-age=300');
 
@@ -175,8 +181,9 @@ test('a robot while the node is unreachable gets the generic card, cached for 30
 test('a node that fails mid-read is unavailable too', async () => {
   const deps = await fakeDeps({ sources: [{ async transaction() { throw new Error('socket closed'); }, async earliestLedger() { return 1; } }] });
   const hash = 'CE'.repeat(32);
-  const response = await handleCardRequest(get(`/mainnet/${hash}`, TELEGRAM), deps);
-  assert.equal(response.headers.get('cache-control'), 'public, max-age=300');
+  await handleCardRequest(get(`/mainnet/${hash}`, TELEGRAM), deps);
+  await deps.settled();
+  assert.equal(deps.store.get(pageKey(hash)).headers.get('cache-control'), 'public, max-age=300');
   assert.equal(deps.sourceClosed, 1);
 });
 
@@ -185,7 +192,8 @@ test('an unknown hash: generic card cached for 3600 s', async () => {
   const hash = 'EF'.repeat(32);
   const response = await handleCardRequest(get(`/mainnet/${hash}`, TELEGRAM), deps);
   assert.equal(await response.text(), deps.filePage);
-  assert.equal(response.headers.get('cache-control'), 'public, max-age=3600');
+  await deps.settled();
+  assert.equal(deps.store.get(pageKey(hash)).headers.get('cache-control'), 'public, max-age=3600');
 });
 
 test('a robot past the deadline gets the generic card, and the source is closed', async () => {
@@ -193,7 +201,8 @@ test('a robot past the deadline gets the generic card, and the source is closed'
   const deps = await fakeDeps({ sources: [silent], htmlDeadlineMs: 20 });
   const response = await handleCardRequest(get(`/mainnet/${'0F'.repeat(32)}`, TELEGRAM), deps);
   assert.equal(await response.text(), deps.filePage);
-  assert.equal(response.headers.get('cache-control'), 'public, max-age=300');
+  await deps.settled();
+  assert.equal(deps.store.get(pageKey('0F'.repeat(32))).headers.get('cache-control'), 'public, max-age=300');
   assert.equal(deps.sourceClosed, 1);
 });
 
@@ -246,14 +255,15 @@ test('/og/ past its deadline answers the banner (max-age 300) and the read still
   assert.deepEqual(new Uint8Array(deps.store.get(pictureKey(png.hash)).body), PNG);
 });
 
-test('/og/ for a PNG manifest over non-PNG bytes answers the banner, and remembers that briefly', async () => {
+test('/og/ for a PNG manifest over non-PNG bytes answers the banner, and remembers that for a year', async () => {
   const lying = await file({ label: 'h-lie', bytes: PDF, type: 'image/png' });
   const deps = await fakeDeps({ ledger: lying.transactions });
   const response = await handleCardRequest(get(`/og/mainnet/${lying.hash}`, TELEGRAM), deps);
   assert.deepEqual(new Uint8Array(await response.arrayBuffer()), deps.banner);
   assert.equal(response.headers.get('cache-control'), 'public, max-age=300');
   await deps.settled();
-  assert.equal(deps.store.get(pictureKey(lying.hash)).headers.get('cache-control'), 'public, max-age=300');
+  // Verified bytes never change: re-reading them every few minutes would cost CPU for nothing.
+  assert.equal(deps.store.get(pictureKey(lying.hash)).headers.get('cache-control'), YEAR);
 
   const again = await handleCardRequest(get(`/og/mainnet/${lying.hash}`, TELEGRAM), deps);
   assert.deepEqual(new Uint8Array(await again.arrayBuffer()), deps.banner);
@@ -327,4 +337,88 @@ test('a picture read whose source fails to open does not stay joined: the next r
   const second = await handleCardRequest(get(`/og/mainnet/${png.hash}`, TELEGRAM), deps);
   assert.deepEqual(new Uint8Array(await second.arrayBuffer()), PNG);
   assert.equal(deps.sourceOpened, 2);
+  await deps.settled();
+});
+
+test('/og/ remembers an unknown hash for an hour and a node failure for five minutes', async () => {
+  const unknown = 'A1'.repeat(32);
+  const deps = await fakeDeps();
+  await handleCardRequest(get(`/og/mainnet/${unknown}`, TELEGRAM), deps);
+  await deps.settled();
+  assert.equal(deps.store.get(pictureKey(unknown)).headers.get('cache-control'), 'public, max-age=3600');
+
+  const down = 'A2'.repeat(32);
+  const failing = await fakeDeps({ sources: [{ async transaction() { throw new Error('socket closed'); }, async earliestLedger() { return 1; } }] });
+  await handleCardRequest(get(`/og/mainnet/${down}`, TELEGRAM), failing);
+  await failing.settled();
+  assert.equal(failing.store.get(pictureKey(down)).headers.get('cache-control'), 'public, max-age=300');
+});
+
+test('a card whose cover could not be used keeps its banner card for an hour, not a year', async () => {
+  const coverFile = await smallFileLedger({ label: 'h-badcover', bytes: WEBP, type: 'image/webp', firstLedger: 990, writer: 'rSomeoneElse' });
+  const video = await file({ label: 'h-badvideo', bytes: MP4, type: 'video/mp4', cover: coverFile.hash });
+  const deps = await fakeDeps({ ledger: [...coverFile.transactions, ...video.transactions] });
+  const html = await (await handleCardRequest(get(`/mainnet/${video.hash}`, TELEGRAM), deps)).text();
+  assert.ok(html.includes('<meta name="twitter:card" content="summary">'));
+  await deps.settled();
+  assert.equal(deps.store.get(pageKey(video.hash)).headers.get('cache-control'), 'public, max-age=3600');
+});
+
+test('/og/ hands its read to waitUntil at once, so a robot that hangs up does not orphan it', async () => {
+  const png = await file({ label: 'h-wait', bytes: PNG, type: 'image/png' });
+  const deps = await fakeDeps({ ledger: png.transactions });
+  await handleCardRequest(get(`/og/mainnet/${png.hash}`, TELEGRAM), deps);
+  assert.ok(deps.waitCalls >= 1);
+  await deps.settled();
+});
+
+test('a picture read is given up at its ceiling: the source is closed and the failure kept briefly', async () => {
+  const silent = { transaction: () => new Promise(() => {}), earliestLedger: () => new Promise(() => {}) };
+  const hash = 'B1'.repeat(32);
+  const deps = await fakeDeps({ sources: [silent], pictureReadCeilingMs: 30, pictureDeadlineMs: 2000 });
+  const started = Date.now();
+  const response = await handleCardRequest(get(`/og/mainnet/${hash}`, TELEGRAM), deps);
+  assert.ok(Date.now() - started < 1000, 'answered at the ceiling, not the deadline');
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), deps.banner);
+  await deps.settled();
+  assert.equal(deps.sourceClosed, 1);
+  assert.equal(deps.store.get(pictureKey(hash)).headers.get('cache-control'), 'public, max-age=300');
+});
+
+test('a picture read older than the in-flight limit is not joined any more', async () => {
+  const silent = { transaction: () => new Promise(() => {}), earliestLedger: () => new Promise(() => {}) };
+  const png = await file({ label: 'h-stale', bytes: PNG, type: 'image/png' });
+  // The silent first read stands for one whose continuations the platform dropped; the second request
+  // comes while it is still in the map (well before its ceiling), with the clock past the age limit.
+  const deps = await fakeDeps({ sources: [silent, new FakeSource(png.transactions)], pictureReadCeilingMs: 500, pictureDeadlineMs: 20 });
+  const first = await handleCardRequest(get(`/og/mainnet/${png.hash}`, TELEGRAM), deps);
+  assert.deepEqual(new Uint8Array(await first.arrayBuffer()), deps.banner);
+  deps.clock += 31_000;
+  const second = await handleCardRequest(get(`/og/mainnet/${png.hash}`, TELEGRAM), deps);
+  assert.deepEqual(new Uint8Array(await second.arrayBuffer()), PNG);
+  assert.equal(deps.sourceOpened, 2);
+});
+
+test('a cache that throws gives the robot the file page and /og/ the banner, never an error', async () => {
+  const png = await file({ label: 'h-cachefail', bytes: PNG, type: 'image/png', name: 'logo.png' });
+  const deps = await fakeDeps({ ledger: png.transactions });
+  deps.cache = { async match() { throw new Error('cache down'); }, async put() { throw new Error('cache down'); } };
+  const page = await handleCardRequest(get(`/mainnet/${png.hash}`, TELEGRAM), deps);
+  assert.equal(page.status, 200);
+  assert.equal(await page.text(), deps.filePage);
+  const picture = await handleCardRequest(get(`/og/mainnet/${png.hash}`, TELEGRAM), deps);
+  assert.equal(picture.status, 200);
+  assert.deepEqual(new Uint8Array(await picture.arrayBuffer()), deps.banner);
+  await deps.settled();
+});
+
+test('a file page the assets fail to serve is passed on, and no card is built over it or kept', async () => {
+  const png = await file({ label: 'h-assetfail', bytes: PNG, type: 'image/png', name: 'logo.png' });
+  const deps = await fakeDeps({ ledger: png.transactions });
+  const real = deps.assets.fetch;
+  deps.assets = { fetch: (request) => (new URL(request.url).pathname === '/file' ? Promise.resolve(new Response('oops', { status: 503 })) : real(request)) };
+  const response = await handleCardRequest(get(`/mainnet/${png.hash}`, TELEGRAM), deps);
+  assert.equal(response.status, 503);
+  await deps.settled();
+  assert.equal(deps.store.has(pageKey(png.hash)), false);
 });

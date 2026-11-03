@@ -42,7 +42,10 @@ export function describeFile({ type, size }) {
 /**
  * The card of the file whose manifest is `hash` on `network`, and its cover when the cover is the
  * card picture: the cover is read here so the card names a picture the robot will actually get.
- * @returns {Promise<{ card: Card, cover: { bytes: Uint8Array, type: string } | null }>}
+ * `coverUnread` is true when the manifest names a cover that could not be used: readCover cannot tell
+ * a cover that fails its checks from one a node failed to return, so the caller must not keep that
+ * banner card as long as a final one.
+ * @returns {Promise<{ card: Card, cover: { bytes: Uint8Array, type: string } | null, coverUnread: boolean }>}
  */
 export async function readCard(source, { hash }) {
   // One reader per read: its forward history belongs to a single read (see XrplFileReader).
@@ -53,37 +56,55 @@ export async function readCard(source, { hash }) {
   } catch (error) {
     // Only a manifest that is definitely not on the network is "missing"; a node that lacks the
     // history, does not answer or returns garbage may do better next time.
-    return { card: { status: error?.code === 'ManifestNotFound' ? 'missing' : 'unavailable' }, cover: null };
+    return { card: { status: error?.code === 'ManifestNotFound' ? 'missing' : 'unavailable' }, cover: null, coverUnread: false };
   }
   const manifest = record.manifest;
   const words = { status: 'file', title: cardTitle(manifest, hash), description: describeFile(manifest) };
-  if (isFilePictureCandidate(manifest)) return { card: { ...words, picture: 'file' }, cover: null };
+  if (isFilePictureCandidate(manifest)) return { card: { ...words, picture: 'file' }, cover: null, coverUnread: false };
+  if (manifest.cover === null) return { card: { ...words, picture: 'banner' }, cover: null, coverUnread: false };
   const cover = await reader.readCover(record);
-  if (cover === null) return { card: { ...words, picture: 'banner' }, cover: null };
-  return { card: { ...words, picture: 'cover' }, cover: { bytes: cover.bytes, type: cover.type } };
+  if (cover === null) return { card: { ...words, picture: 'banner' }, cover: null, coverUnread: true };
+  return { card: { ...words, picture: 'cover' }, cover: { bytes: cover.bytes, type: cover.type }, coverUnread: false };
 }
 
 /**
+ * @typedef {'final' | 'missing' | 'cover-unread' | 'transient'} PictureOutcome
+ *   final: the answer can never change (verified bytes, or no picture the manifest could give);
+ *   missing: no manifest with that hash on the network; cover-unread: the manifest names a cover
+ *   that could not be used, for a reason readCover does not say; transient: the node failed.
+ */
+
+/**
  * The card picture: the file itself when it is a picture of a card type under the ceiling and its
- * bytes begin as its type says, else its cover, else null.
- * @returns {Promise<{ bytes: Uint8Array, type: string } | null>}
+ * bytes begin as its type says, else its cover, else none; and how long that answer holds.
+ * @returns {Promise<{ picture: { bytes: Uint8Array, type: string } | null, outcome: PictureOutcome }>}
  */
 export async function readPicture(source, { hash }) {
+  const reader = new XrplFileReader(source, { maxBytes: FILE_PICTURE_MAX_BYTES });
+  let record;
   try {
-    const reader = new XrplFileReader(source, { maxBytes: FILE_PICTURE_MAX_BYTES });
-    const record = await reader.manifest({ txHash: hash });
+    record = await reader.manifest({ txHash: hash });
+  } catch (error) {
+    return { picture: null, outcome: error?.code === 'ManifestNotFound' ? 'missing' : 'transient' };
+  }
+  try {
     const manifest = record.manifest;
+    // A file read that fails says nothing lasting: whatever is answered instead holds only briefly.
+    let fileFailed = false;
     if (isFilePictureCandidate(manifest)) {
       try {
         const { bytes } = await reader.read({ txHash: hash });
-        if (pictureMagicAgrees(manifest.type, bytes)) return { bytes, type: manifest.type };
+        if (pictureMagicAgrees(manifest.type, bytes)) return { picture: { bytes, type: manifest.type }, outcome: 'final' };
       } catch {
-        // A file that fails to read or verify still has its cover to offer.
+        fileFailed = true;
       }
     }
+    if (manifest.cover === null) return { picture: null, outcome: fileFailed ? 'transient' : 'final' };
     const cover = await reader.readCover(record);
-    return cover === null ? null : { bytes: cover.bytes, type: cover.type };
+    const picture = cover === null ? null : { bytes: cover.bytes, type: cover.type };
+    if (fileFailed) return { picture, outcome: 'transient' };
+    return { picture, outcome: cover === null ? 'cover-unread' : 'final' };
   } catch {
-    return null;
+    return { picture: null, outcome: 'transient' };
   }
 }

@@ -37,6 +37,11 @@ jobs:
       - run: node --test site/test/*.test.mjs
       - run: node web/build.mjs
       - run: node site/build.mjs
+      # The link-card function is otherwise first bundled by "pages deploy" on main: an import that
+      # does not resolve would surface only at release. Same wrangler pin as deploy-site.
+      - name: the link-card function bundles
+        run: npx --yes wrangler@4.151.1 pages functions build --outdir /tmp/functions-build
+        working-directory: site
       - name: the committed vectors are what the code produces
         run: |
           dotnet run --project tools/XrplFile.Vectors --configuration Release --no-build -- /tmp/v1.json

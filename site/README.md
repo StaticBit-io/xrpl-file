@@ -205,7 +205,8 @@ banner a new file name, or refresh a Telegram preview through @WebpageBot.
 
 A link to one file, `/<network>/<HASH>`, gets a card of its own: the file's name, its type and size
 ("PNG image, 123.0 KB, stored in the XRP Ledger."), and a picture. A Pages Function builds it, only
-for link-preview robots (Telegram, X, Facebook, Discord, Slack, WhatsApp, LinkedIn, by user agent).
+for link-preview robots (Telegram, X, Facebook, Discord, Slack, WhatsApp's link fetcher, LinkedIn,
+by user agent).
 A person's browser gets the static file page with no ledger read and no cache lookup in front of it.
 The design is in `docs/superpowers/specs/2026-11-03-link-cards-design.md`.
 
@@ -224,11 +225,17 @@ most 1 MB whose first bytes match its type, otherwise its cover (section 4.1 of 
 the banner, which a card without a picture names directly. The robot's page request starts the
 picture read in the background, so the picture request that follows usually finds it cached.
 
-| Result | `Cache-Control` (the Cache API keeps it as long) |
+| Result | How long the Cache API keeps it |
 |---|---|
-| a card or picture of a file | `public, max-age=31536000, immutable` |
-| no manifest with that hash on the network | `public, max-age=3600` |
-| anything else: node down, deadline (4 s for the page, 5 s for the picture), no picture | `public, max-age=300` |
+| a card of a file; a picture; verified bytes that are not a picture; a file with no picture to give | a year (`immutable`) |
+| no manifest with that hash on the network; a cover the reader refused (it does not say whether the cover failed its checks or the node failed) | an hour |
+| a node failure, a deadline (4 s for the page, 5 s for the picture) or a picture read past its 25 s ceiling | five minutes |
+
+The robot itself gets the card HTML with `Cache-Control: no-cache` and `Vary: User-Agent`: the
+same URL is a person's page, so nothing downstream may keep the robot's copy. The cache keys carry a
+version (`/__cards/v1/…`); bump `KEY_VERSION` in `cards/handler.mjs` when the card output changes,
+or cached cards keep their old HTML for a year. A picture read that the platform cancels never
+settles, so a read older than 30 s is no longer joined by later requests.
 
 Every failure answers the generic card or the banner, never an error status. Pages applies no
 `_redirects` rule on a path the function owns, so the function serves the file page itself for

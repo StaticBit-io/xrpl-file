@@ -76,15 +76,15 @@ test('a name of only invisible or blank characters counts as no name', () => {
 
 test('an unknown hash is missing; a source that throws is unavailable', async () => {
   const unknown = await readCard(new FakeSource([]), ON('AB'.repeat(32)));
-  assert.deepEqual(unknown, { card: { status: 'missing' }, cover: null });
+  assert.deepEqual(unknown, { card: { status: 'missing' }, cover: null, coverUnread: false });
 
   const broken = {
     async transaction() { throw new XrplFileError('NodeUnreachable', 'down'); },
     async *accountTransactions() { throw new Error('down'); },
     async earliestLedger() { throw new Error('down'); },
   };
-  assert.deepEqual(await readCard(broken, ON('AB'.repeat(32))), { card: { status: 'unavailable' }, cover: null });
-  assert.equal(await readPicture(broken, ON('AB'.repeat(32))), null);
+  assert.deepEqual(await readCard(broken, ON('AB'.repeat(32))), { card: { status: 'unavailable' }, cover: null, coverUnread: false });
+  assert.deepEqual(await readPicture(broken, ON('AB'.repeat(32))), { picture: null, outcome: 'transient' });
 });
 
 test('a node without the history is unavailable, not missing', async () => {
@@ -94,28 +94,28 @@ test('a node without the history is unavailable, not missing', async () => {
 
 test('readPicture: the file itself when it is a picture whose bytes agree', async () => {
   const png = await file({ bytes: PNG, type: 'image/png' });
-  assert.deepEqual(await readPicture(new FakeSource(png.transactions), ON(png.hash)), { bytes: PNG, type: 'image/png' });
+  assert.deepEqual(await readPicture(new FakeSource(png.transactions), ON(png.hash)), { picture: { bytes: PNG, type: 'image/png' }, outcome: 'final' });
 });
 
 test('readPicture: a PNG manifest over non-PNG bytes falls back to the cover, then to null', async () => {
   const coverFile = await smallFileLedger({ label: 'cover', bytes: WEBP, type: 'image/webp', firstLedger: 990 });
   const lying = await file({ bytes: PDF, type: 'image/png', cover: coverFile.hash });
   assert.deepEqual(await readPicture(new FakeSource([...coverFile.transactions, ...lying.transactions]), ON(lying.hash)),
-    { bytes: WEBP, type: 'image/webp' });
+    { picture: { bytes: WEBP, type: 'image/webp' }, outcome: 'final' });
 
   const bare = await file({ bytes: PDF, type: 'image/png' });
-  assert.equal(await readPicture(new FakeSource(bare.transactions), ON(bare.hash)), null);
+  assert.deepEqual(await readPicture(new FakeSource(bare.transactions), ON(bare.hash)), { picture: null, outcome: 'final' }, 'verified bytes do not change');
 });
 
 test('readPicture: an SVG with no cover has no picture', async () => {
   const svg = await file({ bytes: image(ascii('<svg xmlns="http://www.w3.org/2000/svg"/>'), 600), type: 'image/svg+xml' });
-  assert.equal(await readPicture(new FakeSource(svg.transactions), ON(svg.hash)), null);
+  assert.deepEqual(await readPicture(new FakeSource(svg.transactions), ON(svg.hash)), { picture: null, outcome: 'final' });
 });
 
 test('readPicture never reads a file picture over 1 MB', async () => {
   const big = patchManifest(await smallFileLedger({ label: 'big', bytes: PNG, type: 'image/png', firstLedger: 1000 }), { size: 1_000_001 });
   const source = new FakeSource(big.transactions);
-  assert.equal(await readPicture(source, ON(big.hash)), null);
+  assert.deepEqual(await readPicture(source, ON(big.hash)), { picture: null, outcome: 'final' });
   assert.equal(source.accountTransactionsCalls, 0);
 });
 
@@ -128,4 +128,29 @@ test('the description names the kind of file in plain words', () => {
   assert.equal(at('application/zip'), 'File, 999 B, stored in the XRP Ledger.');
   assert.equal(at('image/"><script>alert(1)</script>'), 'Image, 999 B, stored in the XRP Ledger.');
   assert.equal(describeFile({ type: 'video/mp4', size: 4_000_000 }), 'MP4 video, 4.0 MB, stored in the XRP Ledger.');
+});
+
+test('readPicture: an unknown hash is missing', async () => {
+  assert.deepEqual(await readPicture(new FakeSource([]), ON('AB'.repeat(32))), { picture: null, outcome: 'missing' });
+});
+
+test('readPicture: a picture whose chunks the node does not return is transient, not final', async () => {
+  const png = await file({ label: 'gone', bytes: PNG, type: 'image/png' });
+  const manifestOnly = png.transactions.filter((t) => t.hash === png.hash);
+  assert.deepEqual(await readPicture(new FakeSource(manifestOnly), ON(png.hash)), { picture: null, outcome: 'transient' });
+});
+
+test('readPicture: a cover that cannot be used is cover-unread, since readCover cannot tell a bad cover from a failed read', async () => {
+  const coverFile = await smallFileLedger({ label: 'cover', bytes: WEBP, type: 'image/webp', firstLedger: 990, writer: 'rSomeoneElse' });
+  const video = await file({ bytes: MP4, type: 'video/mp4', cover: coverFile.hash });
+  assert.deepEqual(await readPicture(new FakeSource([...coverFile.transactions, ...video.transactions]), ON(video.hash)),
+    { picture: null, outcome: 'cover-unread' });
+});
+
+test('readCard says when the cover named by the manifest could not be used', async () => {
+  const coverFile = await smallFileLedger({ label: 'cover', bytes: WEBP, type: 'image/webp', firstLedger: 990, writer: 'rSomeoneElse' });
+  const video = await file({ bytes: MP4, type: 'video/mp4', cover: coverFile.hash });
+  assert.equal((await readCard(new FakeSource([...coverFile.transactions, ...video.transactions]), ON(video.hash))).coverUnread, true);
+  const pdf = await file({ bytes: PDF, type: 'application/pdf' });
+  assert.equal((await readCard(new FakeSource(pdf.transactions), ON(pdf.hash))).coverUnread, false);
 });

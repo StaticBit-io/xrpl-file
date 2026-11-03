@@ -12,7 +12,9 @@ test('Telegram, X and the common unfurlers are robots; browsers are not', () => 
   }
   for (const ua of [null, '', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36',
     'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1',
-    'Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0']) {
+    'Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0',
+    // WhatsApp's in-app browser names the app too; only its link fetcher starts with it.
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 WhatsApp/2.24.20.0']) {
     assert.equal(isLinkPreviewRobot(ua), false, String(ua));
   }
 });
