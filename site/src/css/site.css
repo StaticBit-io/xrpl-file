@@ -949,7 +949,7 @@
 }
 
 /* The cloud fills the element's box exactly and shows through it while the file is read: the element
-   (positioned, and later in the stage) stands above it with no ground of its own (loader="off"). It is
+   (positioned, and later in the stage) stands above it with no ground of its own (loader="false"). It is
    hidden, not only covered, once the file shows, because a transparent picture lets the page through. */
 .file__cloud {
   position: absolute;

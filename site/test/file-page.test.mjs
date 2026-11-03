@@ -498,9 +498,9 @@ test('a shown save result is re-worded in the new language, an error stays an er
   assert.equal(doc.nodes['file-status'].dataset.state, 'error');
 });
 
-test('the element gets loader="off"', () => {
+test('the element gets loader="false"', () => {
   const { doc } = open(CANONICAL);
-  assert.equal(doc.file.getAttribute('loader'), 'off', 'the cloud is the loader, the element shows only its bare box');
+  assert.equal(doc.file.getAttribute('loader'), 'false', 'the cloud is the loader, the element shows only its bare box');
 });
 
 test('the cloud is mounted before the element reads', () => {
@@ -508,7 +508,7 @@ test('the cloud is mounted before the element reads', () => {
   assert.equal(cloud.mounts.length, 1);
   const [mount] = cloud.mounts;
   assert.equal(mount.elementAppended, false, 'no event can be missed: the element is not in the page yet');
-  assert.equal(mount.loader, 'off');
+  assert.equal(mount.loader, 'false');
   assert.equal(mount.canvas, doc.nodes['file-cloud']);
   assert.equal(mount.env.element, doc.file);
   assert.equal(mount.env.startRead, startElementRead);
