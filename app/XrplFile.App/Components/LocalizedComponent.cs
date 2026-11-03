@@ -17,4 +17,7 @@ public abstract class LocalizedComponent : ComponentBase
 
     /// <summary>The current language's phrases. Shell, above the cascade, reads the service itself.</summary>
     protected TextCatalog T => Cascaded ?? Localizer.Text;
+
+    /// <summary>A sentence with some of its values inside inline elements; see <see cref="TextCatalog.RenderHtml"/>.</summary>
+    protected MarkupString Html(UiText text, params (string Value, string Element)[] wrap) => new(T.RenderHtml(text, wrap));
 }

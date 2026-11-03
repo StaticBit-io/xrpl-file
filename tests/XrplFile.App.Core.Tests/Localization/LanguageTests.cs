@@ -126,6 +126,15 @@ public sealed class LanguageTests : IDisposable
         Assert.Equal("3 min", TestText.En(DurationText.Of(new DurationRange(TimeSpan.FromSeconds(170), TimeSpan.FromSeconds(185)))));
     }
 
+    [Fact]
+    public void A_sentence_with_markup_encodes_everything_and_wraps_only_the_named_value()
+    {
+        UiText text = UiText.Of(CommonText.DurationRange, ("shortest", "<a>"), ("longest", "b & c"));
+
+        Assert.Equal("&lt;a&gt; to <strong>b &amp; c</strong>", TestText.English.RenderHtml(text, ("longest", "strong")));
+        Assert.Throws<ArgumentException>(() => TestText.English.RenderHtml(text, ("longest", "script")));
+    }
+
     private sealed class FailingStore : ILanguageSettingsStore
     {
         public string? Read() => null;
