@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using Xunit;
 
 namespace XrplFile.App.Core.Tests;
@@ -56,8 +57,8 @@ public sealed class EstimateModelTests : IDisposable
             $"This publication needs {XrpAmount.Format(estimate.RequiredDrops)} and the account can spend "
             + $"{XrpAmount.Format(estimate.SpendableDrops)}. Most of it is reserve that comes back as the publication "
             + $"finishes: {XrpAmount.Format(estimate.PeakReserveDrops)} for tickets. Fund it, or publish a smaller file.",
-            model.Message);
-        Assert.DoesNotContain("drops", model.Message, StringComparison.Ordinal);
+            TestText.En(model.Message));
+        Assert.DoesNotContain("drops", TestText.En(model.Message), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -73,10 +74,10 @@ public sealed class EstimateModelTests : IDisposable
         PublicationEstimate estimate = model.Estimate!;
         Assert.True(estimate.PeakReserveDrops > 0);
         Assert.True(estimate.PeakReserveDrops * 2 <= estimate.RequiredDrops);
-        Assert.DoesNotContain("Most of it", model.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Most of it", TestText.En(model.Message), StringComparison.Ordinal);
         Assert.Contains(
             $"Some of it is reserve that comes back as the publication finishes: {XrpAmount.Format(estimate.PeakReserveDrops)} for tickets.",
-            model.Message, StringComparison.Ordinal);
+            TestText.En(model.Message), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -89,7 +90,7 @@ public sealed class EstimateModelTests : IDisposable
 
         Assert.Null(model.Estimate);
         Assert.False(model.CanPublish);
-        Assert.Equal(PublishErrorMessages.For(XrplFileError.NodeUnreachable), model.Message);
+        Assert.Equal(TestText.En(PublishErrorMessages.For(XrplFileError.NodeUnreachable)), TestText.En(model.Message));
     }
 
     [Fact]
@@ -120,7 +121,7 @@ public sealed class EstimateModelTests : IDisposable
 
         Assert.NotNull(model.Estimate);
         Assert.False(model.CanPublish);
-        Assert.Equal("The node is quoting a price this application cannot use. Try a different node.", model.Message);
+        Assert.Equal("The node is quoting a price this application cannot use. Try a different node.", TestText.En(model.Message));
     }
 
     [Fact]
@@ -148,7 +149,7 @@ public sealed class EstimateModelTests : IDisposable
 
         Assert.NotNull(model.Estimate);
         Assert.False(model.CanPublish);
-        Assert.Contains("250", model.Message, StringComparison.Ordinal);
+        Assert.Contains("250", TestText.En(model.Message), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -183,7 +184,7 @@ public sealed class EstimateModelTests : IDisposable
         Assert.NotNull(model.BatchEstimate);
         Assert.Null(model.Estimate);
         Assert.True(model.CanPublish);
-        Assert.Equal("Batch, paid by Payer key.", model.MethodLine);
+        Assert.Equal("Batch, paid by Payer key.", TestText.En(model.MethodLine));
         Assert.Null(model.Message);
     }
 
@@ -199,7 +200,8 @@ public sealed class EstimateModelTests : IDisposable
         Assert.Null(model.BatchEstimate);
         Assert.NotNull(model.Estimate);
         Assert.Null(model.MethodLine);
-        Assert.Equal(EstimateModel.TooSmallForBatchNote, model.Note);
+        Assert.Equal(UiText.Of(EstimateText.TooSmallForBatch), model.Note);
+        Assert.Equal("Too small for Batch — the writer pays its few transactions itself.", TestText.En(model.Note));
         Assert.True(model.CanPublish);
 
         PublishRequest effective = model.Request!;
@@ -267,7 +269,7 @@ public sealed class EstimateModelTests : IDisposable
         Assert.False(model.CanPublish);
         Assert.Equal(
             $"The payer Payer key needs {XrpAmount.Format(estimate.PayerRequiredDrops)} and can spend {XrpAmount.Format(estimate.PayerSpendableDrops)}.",
-            model.Message);
+            TestText.En(model.Message));
     }
 
     [Fact]
@@ -282,7 +284,23 @@ public sealed class EstimateModelTests : IDisposable
         BatchPublicationEstimate estimate = model.BatchEstimate!;
         Assert.Equal(
             $"The writer Writer key needs {XrpAmount.Format(estimate.WriterRequiredDrops)} and can spend {XrpAmount.Format(estimate.WriterSpendableDrops)}.",
-            model.Message);
+            TestText.En(model.Message));
+    }
+
+    [Fact]
+    public async Task Both_accounts_short_are_named_in_one_sentence_each_in_that_order()
+    {
+        _connections.Ledger.Balances["rWriter"] = 0;
+        _connections.Ledger.Balances["rPayer"] = 1_000;
+
+        EstimateModel model = NewModel();
+        await model.EstimateAsync(BatchRequest(), TestContext.Current.CancellationToken);
+
+        BatchPublicationEstimate estimate = model.BatchEstimate!;
+        Assert.Equal(
+            $"The writer Writer key needs {XrpAmount.Format(estimate.WriterRequiredDrops)} and can spend {XrpAmount.Format(estimate.WriterSpendableDrops)}. "
+                + $"The payer Payer key needs {XrpAmount.Format(estimate.PayerRequiredDrops)} and can spend {XrpAmount.Format(estimate.PayerSpendableDrops)}.",
+            TestText.En(model.Message));
     }
 
     [Fact]
@@ -294,7 +312,7 @@ public sealed class EstimateModelTests : IDisposable
         await model.EstimateAsync(BatchRequest(), TestContext.Current.CancellationToken);
 
         Assert.False(model.CanPublish);
-        Assert.Equal(PublishErrorMessages.For(XrplFileError.BatchNotEnabled), model.Message);
+        Assert.Equal(TestText.En(PublishErrorMessages.For(XrplFileError.BatchNotEnabled)), TestText.En(model.Message));
     }
 
     [Fact]

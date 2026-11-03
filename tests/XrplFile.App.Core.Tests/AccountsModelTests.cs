@@ -49,18 +49,18 @@ public sealed class AccountsModelTests : VaultHarness
         await model.RefreshAllFromLedgerAsync(token);
 
         AccountRow importedRow = RowOf(model, "theirs");
-        Assert.Equal(XrpAmount.Format(40_000_000), model.BalanceTextOf(importedRow));
+        Assert.Equal(XrpAmount.Format(40_000_000), TestText.En(model.BalanceTextOf(importedRow)));
         Assert.True(importedRow.HasActions);
         Assert.True(model.ShowsStatus(importedRow));
         Assert.Contains(importedRow.Stage, new[] { AccountStage.Funded, AccountStage.Closable });
         Assert.NotNull(importedRow.DeletableFromLedger);
-        Assert.Equal(XrpAmount.Format(25_000_000), model.BalanceTextOf(RowOf(model, "ours")));
+        Assert.Equal(XrpAmount.Format(25_000_000), TestText.En(model.BalanceTextOf(RowOf(model, "ours"))));
 
         // A single Check goes through the same path.
         _connections.Ledger.Balances[imported.Address] = 41_000_000;
         await model.RefreshFromLedgerAsync(importedReference, token);
 
-        Assert.Equal(XrpAmount.Format(41_000_000), model.BalanceTextOf(RowOf(model, "theirs")));
+        Assert.Equal(XrpAmount.Format(41_000_000), TestText.En(model.BalanceTextOf(RowOf(model, "theirs"))));
     }
 
     [Fact]
@@ -232,7 +232,7 @@ public sealed class AccountsModelTests : VaultHarness
     [Fact]
     public void A_failed_read_does_not_claim_that_nothing_was_spent()
     {
-        Assert.DoesNotContain("spent", AccountsModel.ReadFailedMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("spent", TestText.En(AccountsModel.ReadFailedMessage), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -247,7 +247,7 @@ public sealed class AccountsModelTests : VaultHarness
         // RefreshAsync used to be the one exception, reachable from the tab's own initialisation.
         await model.RefreshAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), TestText.En(model.Message));
     }
 
     [Fact]
@@ -296,12 +296,12 @@ public sealed class AccountsModelTests : VaultHarness
 
         Assert.Equal(["devnet", "testnet"], _connections.ConnectedNetworks.Order(StringComparer.Ordinal));
         Assert.Equal(2, _connections.Connections);
-        Assert.Equal(XrpAmount.Format(25_000_000), model.BalanceTextOf(RowOf(model, "funded")));
-        Assert.Equal(XrpAmount.Format(5_000_000), model.BalanceTextOf(RowOf(model, "other")));
+        Assert.Equal(XrpAmount.Format(25_000_000), TestText.En(model.BalanceTextOf(RowOf(model, "funded"))));
+        Assert.Equal(XrpAmount.Format(5_000_000), TestText.En(model.BalanceTextOf(RowOf(model, "other"))));
 
         // A key with no account yet leaves the Balance cell empty: its Status says so.
         Assert.Equal(AccountStage.KeyOnly, RowOf(model, "unfunded").Stage);
-        Assert.Equal(string.Empty, model.BalanceTextOf(RowOf(model, "unfunded")));
+        Assert.Null(model.BalanceTextOf(RowOf(model, "unfunded")));
     }
 
     [Fact]
@@ -351,7 +351,7 @@ public sealed class AccountsModelTests : VaultHarness
 
         AccountRow read = RowOf(model, "reachable");
         Assert.False(read.CheckFailed);
-        Assert.Equal(XrpAmount.Format(25_000_000), model.BalanceTextOf(read));
+        Assert.Equal(XrpAmount.Format(25_000_000), TestText.En(model.BalanceTextOf(read)));
     }
 
     [Fact]
@@ -369,7 +369,7 @@ public sealed class AccountsModelTests : VaultHarness
         await model.RefreshAllFromLedgerAsync(token);
 
         Assert.Equal(0, _connections.Connections);
-        Assert.Equal(string.Empty, model.BalanceTextOf(Assert.Single(model.Rows)));
+        Assert.Null(model.BalanceTextOf(Assert.Single(model.Rows)));
     }
 
     [Fact]
@@ -426,7 +426,7 @@ public sealed class AccountsModelTests : VaultHarness
         await model.RefreshAsync(token);
         await model.RefreshAllFromLedgerAsync(token);
 
-        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), TestText.En(model.Message));
     }
 
     [Fact]
@@ -448,7 +448,7 @@ public sealed class AccountsModelTests : VaultHarness
 
         Assert.True(RowOf(model, "cut").CheckFailed);
         Assert.NotNull(model.Message);
-        Assert.Equal(XrpAmount.Format(25_000_000), model.BalanceTextOf(RowOf(model, "reachable")));
+        Assert.Equal(XrpAmount.Format(25_000_000), TestText.En(model.BalanceTextOf(RowOf(model, "reachable"))));
         Assert.All(model.Rows, row => Assert.False(model.IsChecking(row.Reference)));
     }
 
@@ -470,7 +470,7 @@ public sealed class AccountsModelTests : VaultHarness
         await model.RefreshAllFromLedgerAsync(token);
 
         Assert.True(RowOf(model, "slow").CheckFailed);
-        Assert.Equal(XrpAmount.Format(25_000_000), model.BalanceTextOf(RowOf(model, "reachable")));
+        Assert.Equal(XrpAmount.Format(25_000_000), TestText.En(model.BalanceTextOf(RowOf(model, "reachable"))));
     }
 
     [Fact]
@@ -602,7 +602,7 @@ public sealed class AccountsModelTests : VaultHarness
         _connections.ConnectThrows = new XrplFileException(XrplFileError.NodeUnreachable, "no answer");
         Task check = model.RefreshFromLedgerAsync(reference, token);
 
-        Assert.Equal(string.Empty, model.UnknownStatusTextOf(RowOf(model, "fresh")));
+        Assert.Null(model.UnknownStatusTextOf(RowOf(model, "fresh")));
 
         // After a failed one, the Balance cell says that.
         gate.SetResult();
@@ -610,7 +610,7 @@ public sealed class AccountsModelTests : VaultHarness
 
         Assert.True(RowOf(model, "fresh").CheckFailed);
         Assert.Equal(AccountStage.Unknown, RowOf(model, "fresh").Stage);
-        Assert.Equal(string.Empty, model.UnknownStatusTextOf(RowOf(model, "fresh")));
+        Assert.Null(model.UnknownStatusTextOf(RowOf(model, "fresh")));
 
         // After an answer the row has left the Unknown stage, and the Status column has its own words.
         _connections.BeforeConnect = null;
@@ -618,7 +618,7 @@ public sealed class AccountsModelTests : VaultHarness
         await model.RefreshFromLedgerAsync(reference, token);
 
         Assert.Equal(AccountStage.KeyOnly, RowOf(model, "fresh").Stage);
-        Assert.Equal(string.Empty, model.UnknownStatusTextOf(RowOf(model, "fresh")));
+        Assert.Null(model.UnknownStatusTextOf(RowOf(model, "fresh")));
     }
 
     [Fact]

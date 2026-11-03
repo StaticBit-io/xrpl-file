@@ -1,3 +1,5 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 public enum ReadState
@@ -28,7 +30,7 @@ public sealed record ReadSnapshot(
     long BytesDone,
     long BytesTotal,
     string? Name,
-    string? Failure,
+    UiText? Failure,
     bool Saved,
     bool Saving)
 {

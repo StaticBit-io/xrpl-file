@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -46,7 +47,7 @@ public sealed class DeviceUnlockModel(IKeyVault vault)
     /// places, one of them markup. A <see langword="bool"/> is not a sentence, and turning it into
     /// one is this model's job.
     /// </remarks>
-    public string? Problem { get; private set; }
+    public UiText? Problem { get; private set; }
 
     /// <summary>
     /// Turns "remember on this device" on for the data key already resident in this vault.
@@ -72,8 +73,7 @@ public sealed class DeviceUnlockModel(IKeyVault vault)
 
         Problem = created
             ? null
-            : "This device could not create a secret to remember the vault with, so it will keep " +
-              "asking for the master password. Nothing about the vault has changed.";
+            : UiText.Of(VaultText.DeviceUnlockNotCreated);
 
         return created;
     }

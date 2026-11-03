@@ -658,7 +658,7 @@ public class AddKeyModelTests : VaultHarness
         Assert.False(model.Import(new AddKeyDraft("mine", typed, XrplWallet.Generate().Seed, null)));
 
         Assert.Null(model.Preview);
-        Assert.Contains($"'{typed}'", model.Problem);
+        Assert.Contains($"'{typed}'", TestText.En(model.Problem));
         Assert.Empty(await vault.ListAsync(TestContext.Current.CancellationToken));
     }
 
@@ -674,7 +674,7 @@ public class AddKeyModelTests : VaultHarness
         Assert.False(model.SelectContainerKey(0, "mine", typed));
 
         Assert.Null(model.Preview);
-        Assert.Contains($"'{typed}'", model.Problem);
+        Assert.Contains($"'{typed}'", TestText.En(model.Problem));
         Assert.Empty(await vault.ListAsync(TestContext.Current.CancellationToken));
     }
 
@@ -685,6 +685,6 @@ public class AddKeyModelTests : VaultHarness
 
         Assert.False(model.Import(new AddKeyDraft("mine", "", XrplWallet.Generate().Seed, null)));
 
-        Assert.Equal("Choose a network.", model.Problem);
+        Assert.Equal("Choose a network.", TestText.En(model.Problem));
     }
 }

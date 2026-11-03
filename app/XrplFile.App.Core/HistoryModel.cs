@@ -1,3 +1,5 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>
@@ -10,7 +12,7 @@ public sealed class HistoryModel(PublicationHistory history, IClipboardService c
     public IReadOnlyList<PublicationRecord> Records { get; private set; } = [];
 
     /// <summary>Why the list is empty, when it is empty for a reason worth showing.</summary>
-    public string? Message { get; private set; }
+    public UiText? Message { get; private set; }
 
     public void Refresh()
     {
@@ -20,7 +22,7 @@ public sealed class HistoryModel(PublicationHistory history, IClipboardService c
             (null, null) => null,
             ({ } failure, null) => failure,
             (null, { } note) => note,
-            ({ } failure, { } note) => failure + " " + note,
+            ({ } failure, { } note) => UiText.Of(HistoryText.FailureAndNote, ("failure", failure), ("note", note)),
         };
     }
 

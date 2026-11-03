@@ -106,7 +106,8 @@ public sealed class NodeSettingsModelTests : IDisposable
 
         Assert.False(saved);
         Assert.NotNull(model.Message);
-        Assert.Contains("mainnet", model.Message, StringComparison.Ordinal);
+        Assert.Contains("mainnet", TestText.En(model.Message), StringComparison.Ordinal);
+        Assert.Equal("'https://example.com' for mainnet is not a ws:// or wss:// URL.", TestText.En(model.Message));
         Assert.Empty(new FileNodeSettingsStore(SettingPath).Read());
     }
 

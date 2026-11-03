@@ -20,10 +20,10 @@ public class UnlockMessageTests
     {
         // WrongPassword and VaultCorrupt cannot be told apart when the record was already damaged,
         // so the message must not claim to know.
-        UnlockMessage message = UnlockMessages.For(VaultUnlockResult.VaultCorrupt);
+        string detail = TestText.En(UnlockMessages.For(VaultUnlockResult.VaultCorrupt).Detail);
 
-        Assert.DoesNotContain("password is correct", message.Detail, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("not the password", message.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("password is correct", detail, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("not the password", detail, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -38,8 +38,8 @@ public class UnlockMessageTests
     {
         UnlockMessage message = UnlockMessages.For(result);
 
-        Assert.False(string.IsNullOrWhiteSpace(message.Headline));
-        Assert.False(string.IsNullOrWhiteSpace(message.Detail));
+        Assert.False(string.IsNullOrWhiteSpace(TestText.En(message.Headline)));
+        Assert.False(string.IsNullOrWhiteSpace(TestText.En(message.Detail)));
     }
 
     [Fact]
@@ -47,6 +47,6 @@ public class UnlockMessageTests
     {
         VaultUnlockResult[] all = Enum.GetValues<VaultUnlockResult>();
 
-        Assert.Equal(all.Length, all.Select(r => UnlockMessages.For(r).Headline).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(all.Length, all.Select(r => TestText.En(UnlockMessages.For(r).Headline)).Distinct(StringComparer.Ordinal).Count());
     }
 }

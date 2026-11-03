@@ -1,3 +1,5 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>
@@ -26,7 +28,7 @@ public sealed record ReadLookupSnapshot(
     XrplFileLink? Parsed,
     ManifestRecord? Manifest,
     string? NodeUrl,
-    string? Message)
+    UiText? Message)
 {
     /// <summary>Whether there is a manifest in hand and nothing wrong with it.</summary>
     public bool CanRead => Manifest is not null && Message is null;

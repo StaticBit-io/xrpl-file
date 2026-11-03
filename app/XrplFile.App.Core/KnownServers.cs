@@ -1,14 +1,16 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>A public server Settings can point a network at.</summary>
 /// <param name="Url">The WebSocket URL saved as the network's override.</param>
 /// <param name="Label">What the person reads: the host, plus a caveat when the server is not a full-history node.</param>
 /// <param name="FullHistory">Whether the server keeps full ledger history, which reading a file needs.</param>
-public sealed record KnownServer(string Url, string Label, bool FullHistory);
+public sealed record KnownServer(string Url, UiText Label, bool FullHistory);
 
 /// <summary>One entry of a network's server drop-down in Settings.</summary>
 /// <param name="Value">Empty for the built-in endpoint, a server's URL, or <see cref="KnownServers.CustomValue"/>.</param>
-public sealed record ServerOption(string Value, string Label);
+public sealed record ServerOption(string Value, UiText Label);
 
 /// <summary>
 /// The servers Settings offers per network, so a person picks one instead of typing a URL.
@@ -26,12 +28,10 @@ public static class KnownServers
     /// <summary>The <see cref="ServerOption.Value"/> that reveals the free-text URL box.</summary>
     public const string CustomValue = "custom";
 
-    private const string RecentHistoryOnly = " — recent history only";
-
     private static readonly IReadOnlyDictionary<string, KnownServer[]> Extra =
         new Dictionary<string, KnownServer[]>(StringComparer.Ordinal)
         {
-            ["mainnet"] = [new KnownServer("wss://s1.ripple.com", "s1.ripple.com" + RecentHistoryOnly, FullHistory: false)],
+            ["mainnet"] = [new KnownServer("wss://s1.ripple.com", UiText.Of(SettingsText.ServerRecentHistoryOnly, ("host", "s1.ripple.com")), FullHistory: false)],
         };
 
     /// <summary>Whether <paramref name="network"/> has a catalogue here -- a row of any other network keeps only its text box.</summary>
@@ -42,7 +42,7 @@ public static class KnownServers
     {
         List<KnownServer> servers =
         [
-            .. Endpoints.For(network).Select(url => new KnownServer(url, HostOf(url), FullHistory: true)),
+            .. Endpoints.For(network).Select(url => new KnownServer(url, UiText.Of(SettingsText.ServerHost, ("host", HostOf(url))), FullHistory: true)),
         ];
 
         if (Extra.TryGetValue(network, out KnownServer[]? extra))
@@ -64,11 +64,11 @@ public static class KnownServers
 
         if (servers.Count > 0)
         {
-            options.Add(new ServerOption(string.Empty, $"Built-in ({servers[0].Label})"));
+            options.Add(new ServerOption(string.Empty, UiText.Of(SettingsText.ServerBuiltIn, ("server", servers[0].Label))));
             options.AddRange(servers.Skip(1).Select(server => new ServerOption(server.Url, server.Label)));
         }
 
-        options.Add(new ServerOption(CustomValue, "Custom URL…"));
+        options.Add(new ServerOption(CustomValue, SettingsText.ServerCustom));
         return options;
     }
 

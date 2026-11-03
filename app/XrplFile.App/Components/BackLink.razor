@@ -1,14 +1,15 @@
 @* The way back from a sub-screen, above its title where a person looks for it, naming the screen it
-   returns to. Every sub-screen uses this one, so "back" sits in the same place everywhere. *@
+   returns to. Every sub-screen uses this one, so "back" sits in the same place everywhere. The name is
+   the tab's, in the current language. *@
 <button type="button" class="xf-back" disabled="@Disabled" @onclick="OnClick">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5" /><path d="M11 6l-6 6 6 6" /></svg>
-    @To
+    @T[ShellModel.NameOf(To)]
 </button>
 
 @code {
-    /// <summary>The name of the screen this returns to, e.g. "Accounts".</summary>
+    /// <summary>The screen this returns to, e.g. <c>AppTab.Accounts</c>; its name is what the link says.</summary>
     [Parameter, EditorRequired]
-    public string To { get; set; } = string.Empty;
+    public AppTab To { get; set; }
 
     [Parameter]
     public EventCallback OnClick { get; set; }

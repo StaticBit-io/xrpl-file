@@ -124,7 +124,7 @@ public sealed class HeldSourceTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.Equal($"The file at {request.SourcePath} could not be read while it was being published. Make it available again and resume the run.", run.Snapshot.Failure);
+        Assert.Equal($"The file at {request.SourcePath} could not be read while it was being published. Make it available again and resume the run.", TestText.En(run.Snapshot.Failure));
         Assert.True(File.Exists(run.Snapshot.StatePath));
         Assert.True(RunModel.IsResumable(run.Snapshot));
     }
@@ -138,7 +138,7 @@ public sealed class HeldSourceTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.Equal($"The file at {request.SourcePath} could not be read. Make it available and publish it again.", run.Snapshot.Failure);
+        Assert.Equal($"The file at {request.SourcePath} could not be read. Make it available and publish it again.", TestText.En(run.Snapshot.Failure));
         Assert.Null(run.Snapshot.StatePath);
         Assert.False(RunModel.IsResumable(run.Snapshot));
     }
@@ -174,7 +174,7 @@ public sealed class HeldSourceTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.StartsWith(PublishErrorMessages.For(XrplFileError.ResumeMismatch), run.Snapshot.Failure, StringComparison.Ordinal);
+        Assert.StartsWith(TestText.En(PublishErrorMessages.For(XrplFileError.ResumeMismatch)), TestText.En(run.Snapshot.Failure), StringComparison.Ordinal);
         Assert.False(run.HasRejectedSource(statePath));
     }
 
@@ -189,7 +189,7 @@ public sealed class HeldSourceTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.Equal($"The file at {request.SourcePath} could not be read. Choose it again.", run.Snapshot.Failure);
+        Assert.Equal($"The file at {request.SourcePath} could not be read. Choose it again.", TestText.En(run.Snapshot.Failure));
         Assert.Equal(0, _connections.Connections);
         Assert.False(run.HasRejectedSource(statePath));
     }

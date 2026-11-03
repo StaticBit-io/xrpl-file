@@ -45,59 +45,58 @@
 
 @if (Model.Message is not null)
 {
-    <div class="alert alert-warning">@Model.Message</div>
+    <div class="alert alert-warning">@T[Model.Message]</div>
 }
 
 @if (!Ready)
 {
-    <p>Loading&hellip;</p>
+    <p>@T[ShellText.Loading]</p>
 }
 else if (Model.Closed is { } closed)
 {
     <div class="alert alert-success">
-        <p>
-            Account closed. <strong>@XrpAmount.Format(closed.ArrivedDrops)</strong> was sent to
-            <span class="user-select-all"><span class="xf-mono">@closed.Destination</span></span>.
+        <p class="xf-pick-code">
+            @Html(UiText.Of(CloseText.ClosedSummary, ("amount", new XrpAmount(closed.ArrivedDrops)), ("destination", closed.Destination)), ("amount", "strong"), ("destination", "code"))
         </p>
-        <p>Transaction hash: <code class="user-select-all xf-mono">@closed.TxHash</code></p>
+        <p class="xf-pick-code">@Html(UiText.Of(CloseText.TransactionHash, ("hash", closed.TxHash)), ("hash", "code"))</p>
     </div>
 
-    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="BackAsync">Done</button>
+    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="BackAsync">@T[CommonText.Done]</button>
 }
 else
 {
-    <BackLink To="Accounts" OnClick="BackAsync" Disabled="_busy" />
-    <h1 class="xf-title">Close account</h1>
+    <BackLink To="AppTab.Accounts" OnClick="BackAsync" Disabled="_busy" />
+    <h1 class="xf-title">@T[CloseText.Title]</h1>
 
     @if (Model.AccountAddress is { } accountAddress)
     {
         <div class="alert alert-secondary">
-            <strong>Closing:</strong> @Model.AccountLabel &mdash;
+            <strong>@T[CloseText.Closing]</strong> @Model.AccountLabel &mdash;
             <span class="user-select-all"><span class="xf-mono">@accountAddress</span></span>
             @if (Model.Preview is { } holding)
             {
-                <span> (currently holds @XrpAmount.Format(holding.BalanceDrops))</span>
+                <span> @T[UiText.Of(CloseText.CurrentlyHolds, ("amount", new XrpAmount(holding.BalanceDrops)))]</span>
             }
         </div>
     }
 
     @if (Model.ImportedWarning is { } importedWarning)
     {
-        <div class="alert alert-warning">@importedWarning</div>
+        <div class="alert alert-warning">@T[importedWarning]</div>
     }
 
     <p>
-        Closing sends everything this account holds to a destination you choose.
-        <strong>The account will cease to exist, and this cannot be undone.</strong>
+        @T[CloseText.Intro]
+        <strong>@T[CloseText.IntroWarning]</strong>
     </p>
 
     <section class="xf-card">
         <div class="mb-3">
-            <label class="form-label">Send the remainder to</label>
+            <label class="form-label">@T[CloseText.SendRemainderLabel]</label>
 
             @if (Model.Candidates.Count > 0)
             {
-                <div class="xf-choice-list mb-2" role="radiogroup" aria-label="Your accounts">
+                <div class="xf-choice-list mb-2" role="radiogroup" aria-label="@T[CloseText.YourAccountsLabel]">
                     @foreach (VaultEntryInfo candidate in Model.Candidates)
                     {
                         bool chosen = string.Equals(Model.Destination, candidate.Address, StringComparison.Ordinal);
@@ -115,33 +114,31 @@ else
                 </div>
             }
 
-            <input class="form-control" placeholder="Or type an address" disabled="@_busy"
+            <input class="form-control" placeholder="@T[CloseText.AddressPlaceholder]" disabled="@_busy"
                    value="@Model.Destination" @oninput="e => Model.ChooseDestination((string)e.Value!)" />
         </div>
 
         <button type="button" class="btn btn-outline-primary" disabled="@(!Model.CanPreflight || _busy)"
                 @onclick="PreflightAsync">
-            Check
+            @T[CloseText.CheckButton]
         </button>
     </section>
 
     @if (Model.Preview is { Outcome: DeletionOutcome.Ready } ready)
     {
         <div class="alert alert-info mt-3">
-            <p>
-                This will send everything this account holds to
-                <strong class="user-select-all"><span class="xf-mono">@Model.Destination</span></strong>, which currently holds
-                @XrpAmount.Format(Model.DestinationBalanceDrops).
+            <p class="xf-pick-code xf-bold-code">
+                @Html(UiText.Of(CloseText.ConfirmSend, ("destination", Model.Destination ?? string.Empty), ("balance", new XrpAmount(Model.DestinationBalanceDrops))), ("destination", "code"))
             </p>
             <table class="table mb-2 xf-kv-table">
                 <tbody>
-                    <tr><th>Fee</th><td>@XrpAmount.Format(ready.FeeDrops)</td></tr>
-                    <tr><th>Arriving</th><td>@XrpAmount.Format(ready.ArrivingDrops)</td></tr>
+                    <tr><th>@T[CloseText.FeeLabel]</th><td>@T.Xrp(ready.FeeDrops)</td></tr>
+                    <tr><th>@T[CloseText.ArrivingLabel]</th><td>@T.Xrp(ready.ArrivingDrops)</td></tr>
                 </tbody>
             </table>
-            <p><strong>The account will cease to exist once this is sent. This cannot be undone.</strong></p>
+            <p><strong>@T[CloseText.ConfirmWarning]</strong></p>
             <button type="button" class="btn btn-danger" disabled="@(!Model.CanClose || _busy)" @onclick="CloseAsync">
-                Close permanently
+                @T[CloseText.ClosePermanentlyButton]
             </button>
         </div>
     }
@@ -150,14 +147,17 @@ else
         @if (notYet.DeletableFromLedger is { } deletableFrom)
         {
             <div class="alert alert-secondary mt-3">
-                <p>It cannot be closed yet. It becomes possible from ledger <strong>@deletableFrom</strong>.</p>
+                <p>@Html(UiText.Of(CloseText.NotYetLedger, ("ledger", deletableFrom)), ("ledger", "strong"))</p>
                 @if (Model.LedgersRemaining is { } remaining)
                 {
                     <p>
-                        About @remaining.ToString("N0") ledgers remaining
                         @if (Model.TimeRemainingDescription is { } timeRemaining)
                         {
-                            <text> (@timeRemaining)</text>
+                            @T[UiText.Of(CloseText.LedgersRemainingWithTime, ("count", remaining), ("time", timeRemaining))]
+                        }
+                        else
+                        {
+                            @T[UiText.Of(CloseText.LedgersRemaining, ("count", remaining))]
                         }
                     </p>
                 }

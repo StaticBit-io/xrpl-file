@@ -55,7 +55,9 @@ public sealed class ReadModelTests : IDisposable
         await model.LookUpAsync(TestContext.Current.CancellationToken);
 
         Assert.False(model.CanRead);
-        Assert.Contains("Settings", model.Message!, StringComparison.Ordinal);
+        Assert.Equal(
+            "No node URL is known for the network '1'. Add one in Settings.",
+            TestText.En(model.Message));
         Assert.Equal(0, _connections.Connections);
     }
 

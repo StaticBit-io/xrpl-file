@@ -15,27 +15,27 @@
 @if (_unexportedReference is { } reference)
 {
     <div class="alert alert-success">
-        This key exists nowhere but this vault until it is exported.
+        @T[KeysText.ExportReminder]
     </div>
     <ExportKey Reference="@reference" OnBack="FinishAsync" />
 }
 else
 {
-    <BackLink To="Accounts" OnClick="FinishAsync" />
-    <h1 class="xf-title">Import a key</h1>
+    <BackLink To="AppTab.Accounts" OnClick="FinishAsync" />
+    <h1 class="xf-title">@T[KeysText.ImportTitle]</h1>
 
     <ul class="nav nav-tabs mb-3">
         <li class="nav-item">
-            <button type="button" class="nav-link @(_mode == Mode.Import ? "active" : "")" @onclick="() => SwitchMode(Mode.Import)">Import a seed</button>
+            <button type="button" class="nav-link @(_mode == Mode.Import ? "active" : "")" @onclick="() => SwitchMode(Mode.Import)">@T[KeysText.TabSeed]</button>
         </li>
         <li class="nav-item">
-            <button type="button" class="nav-link @(_mode == Mode.Container ? "active" : "")" @onclick="() => SwitchMode(Mode.Container)">Open a backup file</button>
+            <button type="button" class="nav-link @(_mode == Mode.Container ? "active" : "")" @onclick="() => SwitchMode(Mode.Container)">@T[KeysText.TabBackup]</button>
         </li>
     </ul>
 
     @if (Model.Problem is { } problem)
     {
-        <div class="alert alert-danger">@problem</div>
+        <div class="alert alert-danger">@T[problem]</div>
     }
 
     <section class="xf-card">
@@ -43,29 +43,29 @@ else
         {
             case Mode.Import:
                 <div class="mb-3">
-                    <label for="add-import-label" class="form-label">Label</label>
+                    <label for="add-import-label" class="form-label">@T[CommonText.FieldLabel]</label>
                     <input id="add-import-label" class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
                 </div>
                 <div class="mb-3">
-                    <label for="add-import-network" class="form-label">Network</label>
+                    <label for="add-import-network" class="form-label">@T[CommonText.FieldNetwork]</label>
                     <NetworkSelect Id="add-import-network" @bind-Value="_network" Disabled="_busy" />
                 </div>
                 <div class="mb-3">
-                    <label for="add-import-seed" class="form-label">Seed</label>
+                    <label for="add-import-seed" class="form-label">@T[KeysText.SeedLabel]</label>
                     <input id="add-import-seed" type="password" class="form-control" @bind="_seed" @bind:event="oninput" disabled="@_busy" />
                 </div>
-                <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoImport">Preview</button>
+                <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoImport">@T[KeysText.PreviewButton]</button>
                 break;
 
             case Mode.Container:
                 @if (Model.ContainerKeys.Count == 0)
                 {
                     <div class="mb-3">
-                        <label for="add-backup-password" class="form-label">Backup password (leave blank if it has none)</label>
+                        <label for="add-backup-password" class="form-label">@T[KeysText.BackupPasswordOptionalLabel]</label>
                         <input id="add-backup-password" type="password" class="form-control" @bind="_containerPassword" @bind:event="oninput" disabled="@_busy" />
                     </div>
                     <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="PickFileAsync">
-                        Choose file&hellip;
+                        @T[KeysText.ChooseFileButton]
                     </button>
                 }
                 else
@@ -73,9 +73,9 @@ else
                     <table class="table">
                         <thead>
                             <tr>
-                                <th>Address</th>
-                                <th>Algorithm</th>
-                                <th>Backup's label</th>
+                                <th>@T[KeysText.ColumnAddress]</th>
+                                <th>@T[KeysText.ColumnAlgorithm]</th>
+                                <th>@T[KeysText.ColumnBackupLabel]</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -91,7 +91,7 @@ else
                                     <td>
                                         <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_busy"
                                                 @onclick="() => BeginSelect(capturedIndex, key)">
-                                            Import&hellip;
+                                            @T[KeysText.ImportKeyButton]
                                         </button>
                                     </td>
                                 </tr>
@@ -102,24 +102,24 @@ else
                     @if (_selectingIndex >= 0)
                     {
                         <div class="border rounded p-3 mb-3">
-                            <p>Importing <code class="xf-mono">@Model.ContainerKeys[_selectingIndex].Address</code>.</p>
+                            <p>@Html(UiText.Of(KeysText.ImportingAddress, ("address", Model.ContainerKeys[_selectingIndex].Address)), ("address", "code"))</p>
                             <div class="mb-3">
-                                <label for="add-select-label" class="form-label">Label</label>
+                                <label for="add-select-label" class="form-label">@T[CommonText.FieldLabel]</label>
                                 <input id="add-select-label" class="form-control" @bind="_selectLabel" @bind:event="oninput" disabled="@_busy" />
                             </div>
                             <div class="mb-3">
-                                <label for="add-select-network" class="form-label">Network</label>
+                                <label for="add-select-network" class="form-label">@T[CommonText.FieldNetwork]</label>
                                 <NetworkSelect Id="add-select-network" @bind-Value="_selectNetwork" Disabled="_busy" />
                             </div>
-                            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoSelect">Preview</button>
+                            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoSelect">@T[KeysText.PreviewButton]</button>
                             <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="() => _selectingIndex = -1">
-                                Cancel
+                                @T[CommonText.Cancel]
                             </button>
                         </div>
                     }
 
                     <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="DoCloseContainer">
-                        Close this backup
+                        @T[KeysText.CloseBackupButton]
                     </button>
                 }
                 break;
@@ -128,15 +128,15 @@ else
         @if (Model.Preview is { } preview)
         {
             <div class="alert alert-info mt-3">
-                <p>This will be stored as <code class="xf-mono">@preview.Address</code> (@preview.Algorithm).</p>
-                <button type="button" class="btn btn-success" disabled="@_busy" @onclick="StoreAsync">Add to vault</button>
+                <p>@Html(UiText.Of(KeysText.StoredAs, ("address", preview.Address), ("algorithm", preview.Algorithm)), ("address", "code"))</p>
+                <button type="button" class="btn btn-success" disabled="@_busy" @onclick="StoreAsync">@T[KeysText.AddToVaultButton]</button>
             </div>
         }
     </section>
 
     @if (_stored is { } storedAddress)
     {
-        <div class="alert alert-success mt-3">Added <code class="xf-mono">@storedAddress</code> to the vault.</div>
+        <div class="alert alert-success mt-3">@Html(UiText.Of(KeysText.AddedToVault, ("address", storedAddress)), ("address", "code"))</div>
     }
 
 }

@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -31,34 +32,34 @@ public static class VaultErrorMessages
     /// </remarks>
     // See UnlockMessages.For for why CS8524 is suppressed here and CS8509 is left armed.
 #pragma warning disable CS8524
-    public static string For(VaultError error) => error switch
+    public static UiText For(VaultError error) => error switch
     {
         VaultError.Corrupt =>
-            "The vault's record did not check out and could not be read.",
+            VaultText.ErrorCorrupt,
 
         VaultError.Unsupported =>
-            "This build does not understand the vault's format.",
+            VaultText.ErrorUnsupported,
 
         VaultError.Locked =>
-            "The vault is locked. Unlock it and try again.",
+            VaultText.ErrorLocked,
 
         VaultError.NoSuchEntry =>
-            "That key is no longer in the vault.",
+            VaultText.ErrorNoSuchEntry,
 
         VaultError.DuplicateAddress =>
-            "The vault already holds this address on this network.",
+            VaultText.ErrorDuplicateAddress,
 
         VaultError.EntryDamaged =>
-            "This entry is damaged and cannot be read.",
+            VaultText.ErrorEntryDamaged,
 
         VaultError.StorageFailed =>
-            "The vault's storage did not respond. Try again in a moment.",
+            VaultText.ErrorStorageFailed,
 
         VaultError.Degraded =>
-            "The vault found damage that has not been acknowledged yet. Acknowledge it first.",
+            VaultText.ErrorDegraded,
 
         VaultError.AddressMismatch =>
-            "This entry's recorded address does not match its own key.",
+            VaultText.ErrorAddressMismatch,
     };
 #pragma warning restore CS8524
 }

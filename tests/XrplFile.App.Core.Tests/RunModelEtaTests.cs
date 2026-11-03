@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using XrplFile.Tests;
 using Xunit;
 
@@ -27,7 +28,7 @@ public sealed class RunModelEtaTests : IDisposable
     [Fact]
     public void A_measured_rate_gives_the_rate_the_time_left_with_a_settle_per_pass_to_come_and_the_elapsed_time()
     {
-        string text = RunModel.StageTextOf(Running("chunks", 1240, 7124, batch: true, TimeSpan.FromSeconds(24)), Now, rate: 52);
+        string text = TestText.En(RunModel.StageTextOf(Running("chunks", 1240, 7124, batch: true, TimeSpan.FromSeconds(24)), Now, rate: 52));
 
         // 5,884 left at 52/s is 113 s, plus a settle for the list pass and one for the manifest: 137 s,
         // to the nearest minute as spec 6.3's own example has it.
@@ -39,13 +40,13 @@ public sealed class RunModelEtaTests : IDisposable
     {
         RunSnapshot snapshot = Running("chunks", 0, 7124, batch: true, TimeSpan.FromSeconds(7)) with { Progress = null };
 
-        Assert.Equal("Starting · 0:07 elapsed", RunModel.StageTextOf(snapshot, Now, rate: null));
+        Assert.Equal("Starting · 0:07 elapsed", TestText.En(RunModel.StageTextOf(snapshot, Now, rate: null)));
     }
 
     [Fact]
     public void A_pass_that_is_sending_with_nothing_landed_yet_names_its_stage()
     {
-        string text = RunModel.StageTextOf(Running("chunks", 0, 7124, batch: true, TimeSpan.FromSeconds(6)), Now, rate: null);
+        string text = TestText.En(RunModel.StageTextOf(Running("chunks", 0, 7124, batch: true, TimeSpan.FromSeconds(6)), Now, rate: null));
 
         // 7,124 left at 70/s is 102 s, plus two settles.
         Assert.Equal($"Writing the file — 0 of {7124:N0} · about 2 min left · 0:06 elapsed", text);
@@ -54,7 +55,7 @@ public sealed class RunModelEtaTests : IDisposable
     [Fact]
     public void Before_thirty_seconds_the_Batch_path_assumes_seventy_memos_a_second_and_shows_no_rate()
     {
-        string text = RunModel.StageTextOf(Running("chunks", 120, 7124, batch: true, TimeSpan.FromSeconds(5)), Now, rate: null);
+        string text = TestText.En(RunModel.StageTextOf(Running("chunks", 120, 7124, batch: true, TimeSpan.FromSeconds(5)), Now, rate: null));
 
         // 7,004 left at 70/s is 100 s, plus two settles: 124 s.
         Assert.Equal($"Writing the file — {120:N0} of {7124:N0} · about 2 min left · 0:05 elapsed", text);
@@ -63,7 +64,7 @@ public sealed class RunModelEtaTests : IDisposable
     [Fact]
     public void A_rate_under_ten_keeps_a_decimal_and_hours_read_as_hours()
     {
-        string text = RunModel.StageTextOf(Running("chunks", 530, 7124, batch: false, TimeSpan.FromSeconds(24)), Now, rate: 1.3);
+        string text = TestText.En(RunModel.StageTextOf(Running("chunks", 530, 7124, batch: false, TimeSpan.FromSeconds(24)), Now, rate: 1.3));
 
         // 6,594 left at 1.3/s is 5,072 s, plus two settles: 5,097 s, 85 min.
         Assert.Equal($"Writing the file — {530:N0} of {7124:N0} · {1.3:N1} chunks/s · about 1 h 25 min left · 0:24 elapsed", text);
@@ -72,7 +73,7 @@ public sealed class RunModelEtaTests : IDisposable
     [Fact]
     public void A_rate_that_shows_as_zero_is_a_stall_not_a_time_left_in_days()
     {
-        string text = RunModel.StageTextOf(Running("chunks", 120, 7124, batch: true, TimeSpan.FromSeconds(90)), Now, rate: 0.03);
+        string text = TestText.En(RunModel.StageTextOf(Running("chunks", 120, 7124, batch: true, TimeSpan.FromSeconds(90)), Now, rate: 0.03));
 
         Assert.Equal($"Writing the file — {120:N0} of {7124:N0} · estimating… · 1:30 elapsed", text);
     }
@@ -81,7 +82,7 @@ public sealed class RunModelEtaTests : IDisposable
     public void A_Batch_pass_with_rounds_still_to_come_adds_a_settle_for_each()
     {
         const long fileBytes = 41_000_000;
-        string text = RunModel.StageTextOf(Running("chunks", 0, 41_000, batch: true, TimeSpan.FromSeconds(6), fileBytes), Now, rate: 70);
+        string text = TestText.En(RunModel.StageTextOf(Running("chunks", 0, 41_000, batch: true, TimeSpan.FromSeconds(6), fileBytes), Now, rate: 70));
 
         // 41,000 at 70/s is 586 s; two more rounds of this pass, the list pass and the manifest: 4 x 12 s. One settle
         // per pass would give 610 s, which reads "10 min"; the rounds' 634 s read "11 min".
@@ -91,7 +92,7 @@ public sealed class RunModelEtaTests : IDisposable
     [Fact]
     public void The_read_back_says_how_long_its_remaining_blocks_take()
     {
-        string text = RunModel.StageTextOf(Running("read-back", 1, 4, batch: true, TimeSpan.FromSeconds(10)), Now, rate: null);
+        string text = TestText.En(RunModel.StageTextOf(Running("read-back", 1, 4, batch: true, TimeSpan.FromSeconds(10)), Now, rate: null));
 
         // Three blocks of 1,024 records at 0.7 s per 400: 5.4 s.
         Assert.Equal("Reading it back from the ledger — 1 of 4 · about 6 s left · 0:10 elapsed", text);
@@ -103,7 +104,7 @@ public sealed class RunModelEtaTests : IDisposable
         // 16 ledgers at the approximate interval is 64 s, which used to read "about 2 min".
         Assert.Equal(
             "Waiting for earlier transactions to expire — about 64 s",
-            RunModel.StageTextOf(Running("fence", 0, 16, batch: true, TimeSpan.FromSeconds(3)), Now, rate: null));
+            TestText.En(RunModel.StageTextOf(Running("fence", 0, 16, batch: true, TimeSpan.FromSeconds(3)), Now, rate: null)));
     }
 
     [Fact]
@@ -115,8 +116,8 @@ public sealed class RunModelEtaTests : IDisposable
             FinishedAt = Now - TimeSpan.FromSeconds(17),
         };
 
-        Assert.Equal("Finished in 4:26", RunModel.StageTextOf(published, Now, rate: null));
-        Assert.Equal("Finished in 4:26", RunModel.StageTextOf(published, Now + TimeSpan.FromMinutes(5), rate: 40));
+        Assert.Equal("Finished in 4:26", TestText.En(RunModel.StageTextOf(published, Now, rate: null)));
+        Assert.Equal("Finished in 4:26", TestText.En(RunModel.StageTextOf(published, Now + TimeSpan.FromMinutes(5), rate: 40)));
     }
 
     [Fact]
@@ -130,7 +131,7 @@ public sealed class RunModelEtaTests : IDisposable
             WaitedForPerson = TimeSpan.FromSeconds(19),
         };
 
-        Assert.Equal("Finished in 37:09", RunModel.StageTextOf(published, Now, rate: null));
+        Assert.Equal("Finished in 37:09", TestText.En(RunModel.StageTextOf(published, Now, rate: null)));
     }
 
     [Fact]
@@ -144,7 +145,7 @@ public sealed class RunModelEtaTests : IDisposable
 
         Assert.Equal(
             $"Stopped while writing the file — {1240:N0} of {7124:N0} · 0:24 elapsed",
-            RunModel.StageTextOf(cancelled, Now, rate: 52));
+            TestText.En(RunModel.StageTextOf(cancelled, Now, rate: 52)));
     }
 
     [Fact]
@@ -157,8 +158,8 @@ public sealed class RunModelEtaTests : IDisposable
         };
         RunSnapshot early = fence with { State = PublicationRunState.Failed, Progress = null };
 
-        Assert.Equal("Stopped while waiting for earlier transactions to expire · 0:05 elapsed", RunModel.StageTextOf(fence, Now, rate: null));
-        Assert.Equal("Stopped while starting · 0:05 elapsed", RunModel.StageTextOf(early, Now, rate: null));
+        Assert.Equal("Stopped while waiting for earlier transactions to expire · 0:05 elapsed", TestText.En(RunModel.StageTextOf(fence, Now, rate: null)));
+        Assert.Equal("Stopped while starting · 0:05 elapsed", TestText.En(RunModel.StageTextOf(early, Now, rate: null)));
     }
 
     [Fact]
@@ -170,7 +171,7 @@ public sealed class RunModelEtaTests : IDisposable
         RunSnapshot Fence(long done) => Running("fence", done, 27, batch: true, TimeSpan.Zero) with { StartedAt = start };
 
         // 27 ledgers at the approximate interval: the only figure there is before a ledger closes.
-        Assert.Equal("Waiting for earlier transactions to expire — about 2 min", model.Describe(Fence(0)));
+        Assert.Equal("Waiting for earlier transactions to expire — about 2 min", TestText.En(model.Describe(Fence(0))));
 
         // Testnet: a ledger every 2 s, the first one 2 s in.
         for (int second = 1; second <= 12; second++)
@@ -180,7 +181,7 @@ public sealed class RunModelEtaTests : IDisposable
         }
 
         // Five ledgers in the ten seconds since the first: 21 left at 0.5 a second is 42 s, not 84 s.
-        Assert.Equal("Waiting for earlier transactions to expire — about 42 s", model.Describe(Fence(6)));
+        Assert.Equal("Waiting for earlier transactions to expire — about 42 s", TestText.En(model.Describe(Fence(6))));
     }
 
     /// <summary>
@@ -203,17 +204,17 @@ public sealed class RunModelEtaTests : IDisposable
         }
 
         // 25 ledgers in 50 s from the first: one left at 0.5 a second.
-        Assert.Equal("Waiting for earlier transactions to expire — about 2 s", model.Describe(Fence(26)));
+        Assert.Equal("Waiting for earlier transactions to expire — about 2 s", TestText.En(model.Describe(Fence(26))));
 
         time.Advance(TimeSpan.FromSeconds(30));
 
-        Assert.Equal("Waiting for earlier transactions to expire — about 2 s", model.Describe(Fence(26)));
+        Assert.Equal("Waiting for earlier transactions to expire — about 2 s", TestText.En(model.Describe(Fence(26))));
     }
 
     [Fact]
     public void Before_thirty_seconds_the_ticket_path_says_it_is_estimating()
     {
-        string text = RunModel.StageTextOf(Running("chunks", 120, 7124, batch: false, TimeSpan.FromSeconds(5)), Now, rate: null);
+        string text = TestText.En(RunModel.StageTextOf(Running("chunks", 120, 7124, batch: false, TimeSpan.FromSeconds(5)), Now, rate: null));
 
         Assert.Equal($"Writing the file — {120:N0} of {7124:N0} · estimating… · 0:05 elapsed", text);
     }
@@ -221,7 +222,7 @@ public sealed class RunModelEtaTests : IDisposable
     [Fact]
     public void Nothing_landing_for_thirty_seconds_reads_as_estimating_never_as_an_endless_wait()
     {
-        string text = RunModel.StageTextOf(Running("chunks", 120, 7124, batch: true, TimeSpan.FromSeconds(90)), Now, rate: 0);
+        string text = TestText.En(RunModel.StageTextOf(Running("chunks", 120, 7124, batch: true, TimeSpan.FromSeconds(90)), Now, rate: 0));
 
         Assert.Contains("estimating…", text, StringComparison.Ordinal);
         Assert.DoesNotContain("∞", text, StringComparison.Ordinal);
@@ -231,7 +232,7 @@ public sealed class RunModelEtaTests : IDisposable
     [Fact]
     public void A_pass_whose_memos_have_all_landed_claims_no_seconds_left()
     {
-        string text = RunModel.StageTextOf(Running("chunks", 7124, 7124, batch: true, TimeSpan.FromSeconds(40)), Now, rate: 300);
+        string text = TestText.En(RunModel.StageTextOf(Running("chunks", 7124, 7124, batch: true, TimeSpan.FromSeconds(40)), Now, rate: 300));
 
         Assert.Equal($"Writing the file — {7124:N0} of {7124:N0} · finishing this pass · 0:40 elapsed", text);
     }
@@ -242,7 +243,7 @@ public sealed class RunModelEtaTests : IDisposable
         UnfinishedModel model = new(new RunPaths(_directory), NewRun(), new FakeFilePicker());
 
         Assert.False(await model.ResumeByPathAsync(Path.Combine(_directory, "gone.json"), TestContext.Current.CancellationToken));
-        Assert.Equal("This run is no longer listed under unfinished runs, so there is nothing to resume.", model.Message);
+        Assert.Equal("This run is no longer listed under unfinished runs, so there is nothing to resume.", TestText.En(model.Message));
     }
 
     [Fact]
@@ -250,13 +251,13 @@ public sealed class RunModelEtaTests : IDisposable
     {
         Assert.Equal(
             "Waiting for earlier transactions to expire — about 40 s",
-            RunModel.StageTextOf(Running("fence", 0, 10, batch: true, TimeSpan.FromSeconds(3)), Now, rate: null));
+            TestText.En(RunModel.StageTextOf(Running("fence", 0, 10, batch: true, TimeSpan.FromSeconds(3)), Now, rate: null)));
     }
 
     [Fact]
     public void A_fence_already_behind_the_ledger_never_shows_a_negative_wait()
     {
-        string text = RunModel.StageTextOf(Running("fence", 12, 10, batch: true, TimeSpan.FromSeconds(3)), Now, rate: null);
+        string text = TestText.En(RunModel.StageTextOf(Running("fence", 12, 10, batch: true, TimeSpan.FromSeconds(3)), Now, rate: null));
 
         Assert.DoesNotContain("-", text, StringComparison.Ordinal);
     }
@@ -269,13 +270,13 @@ public sealed class RunModelEtaTests : IDisposable
         DateTimeOffset start = time.GetUtcNow();
         RunSnapshot Chunks(long done) => Running("chunks", done, 7124, batch: true, TimeSpan.Zero) with { StartedAt = start };
 
-        Assert.DoesNotContain("chunks/s", model.Describe(Chunks(0)), StringComparison.Ordinal);
+        Assert.DoesNotContain("chunks/s", TestText.En(model.Describe(Chunks(0))), StringComparison.Ordinal);
 
         time.Advance(TimeSpan.FromSeconds(5));
-        Assert.DoesNotContain("chunks/s", model.Describe(Chunks(100)), StringComparison.Ordinal);
+        Assert.DoesNotContain("chunks/s", TestText.En(model.Describe(Chunks(100))), StringComparison.Ordinal);
 
         time.Advance(TimeSpan.FromSeconds(30));
-        string text = model.Describe(Chunks(1600));
+        string text = TestText.En(model.Describe(Chunks(1600)));
 
         Assert.Contains("50 chunks/s", text, StringComparison.Ordinal);
         Assert.Contains("0:35 elapsed", text, StringComparison.Ordinal);
@@ -302,7 +303,7 @@ public sealed class RunModelEtaTests : IDisposable
 
         model.Describe(Chunks(56));
         time.Advance(TimeSpan.FromSeconds(1));
-        string text = model.Describe(Chunks(112));
+        string text = TestText.En(model.Describe(Chunks(112)));
 
         // The prior, not 112 chunks over 30 s: 7,012 left at 70/s is 100 s, plus two settles.
         Assert.Equal($"Writing the file — {112:N0} of {7124:N0} · about 2 min left · 0:30 elapsed", text);
@@ -319,13 +320,13 @@ public sealed class RunModelEtaTests : IDisposable
         time.Advance(TimeSpan.FromSeconds(5));
         model.Describe(Running("chunks", 100, 7124, batch: true, TimeSpan.Zero) with { StartedAt = first });
         time.Advance(TimeSpan.FromSeconds(35));
-        Assert.Contains("chunks/s", model.Describe(Running("chunks", 1500, 7124, batch: true, TimeSpan.Zero) with { StartedAt = first }), StringComparison.Ordinal);
+        Assert.Contains("chunks/s", TestText.En(model.Describe(Running("chunks", 1500, 7124, batch: true, TimeSpan.Zero) with { StartedAt = first })), StringComparison.Ordinal);
 
         DateTimeOffset second = time.GetUtcNow();
         time.Advance(TimeSpan.FromSeconds(1));
         model.Describe(Running("chunks", 1400, 7124, batch: true, TimeSpan.Zero) with { StartedAt = second });
         time.Advance(TimeSpan.FromSeconds(1));
-        string text = model.Describe(Running("chunks", 1600, 7124, batch: true, TimeSpan.Zero) with { StartedAt = second });
+        string text = TestText.En(model.Describe(Running("chunks", 1600, 7124, batch: true, TimeSpan.Zero) with { StartedAt = second }));
 
         Assert.DoesNotContain("chunks/s", text, StringComparison.Ordinal);
     }
@@ -347,7 +348,7 @@ public sealed class RunModelEtaTests : IDisposable
         string text = string.Empty;
         for (int second = 0; second <= 40; second++)
         {
-            text = model.Describe(Chunks(Landed(second)));
+            text = TestText.En(model.Describe(Chunks(Landed(second))));
             time.Advance(TimeSpan.FromSeconds(1));
         }
 
@@ -355,7 +356,7 @@ public sealed class RunModelEtaTests : IDisposable
         Assert.Contains("35 chunks/s", text, StringComparison.Ordinal);
 
         // At 0:41 it starts at 1,032: 32 in 30 s, under a tenth of 35.
-        text = model.Describe(Chunks(Landed(41)));
+        text = TestText.En(model.Describe(Chunks(Landed(41))));
 
         Assert.Equal($"Writing the file — {1064:N0} of {7124:N0} · estimating… · 0:41 elapsed", text);
     }
@@ -372,11 +373,11 @@ public sealed class RunModelEtaTests : IDisposable
         time.Advance(TimeSpan.FromSeconds(1));
         model.Describe(Chunks(50));
         time.Advance(TimeSpan.FromSeconds(30));
-        Assert.Contains("40 chunks/s", model.Describe(Chunks(1250)), StringComparison.Ordinal);
+        Assert.Contains("40 chunks/s", TestText.En(model.Describe(Chunks(1250))), StringComparison.Ordinal);
 
         time.Advance(TimeSpan.FromSeconds(90));
 
-        Assert.Contains("40 chunks/s", model.Describe(Chunks(4850)), StringComparison.Ordinal);
+        Assert.Contains("40 chunks/s", TestText.En(model.Describe(Chunks(4850))), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -387,7 +388,7 @@ public sealed class RunModelEtaTests : IDisposable
             PublicationState.CurrentVersion, "testnet", "rWriter", "key-1", "text/plain", "f.bin", 2500, MemoLayout.ChunkBytes, "AB",
             42, "chunks").Save(path);
 
-        RunSnapshot failed = new(PublicationRunState.Failed, null, null, "it failed", "f.bin", "testnet", null) { StatePath = path };
+        RunSnapshot failed = new(PublicationRunState.Failed, null, null, RunText.ErrorUnexpected, "f.bin", "testnet", null) { StatePath = path };
 
         Assert.True(RunModel.IsResumable(failed));
         Assert.False(RunModel.IsResumable(failed with { State = PublicationRunState.Succeeded }));
@@ -400,7 +401,7 @@ public sealed class RunModelEtaTests : IDisposable
     [Fact]
     public void Hashing_says_how_many_chunks_of_how_many()
     {
-        string text = RunModel.StageTextOf(Running("hashing", 412_000, 1_689_810, batch: true, TimeSpan.FromSeconds(30)), Now, rate: null);
+        string text = TestText.En(RunModel.StageTextOf(Running("hashing", 412_000, 1_689_810, batch: true, TimeSpan.FromSeconds(30)), Now, rate: null));
 
         Assert.Equal($"Hashing the file — {412_000:N0} of {1_689_810:N0} chunks · 0:30 elapsed", text);
     }
@@ -410,10 +411,10 @@ public sealed class RunModelEtaTests : IDisposable
     {
         Assert.Equal(
             "Reading the ledger history · 0:05 elapsed",
-            RunModel.StageTextOf(Running("history", 0, 0, batch: true, TimeSpan.FromSeconds(5)), Now, rate: null));
+            TestText.En(RunModel.StageTextOf(Running("history", 0, 0, batch: true, TimeSpan.FromSeconds(5)), Now, rate: null)));
         Assert.Equal(
             $"Reading the ledger history — {3_000:N0} records · 0:05 elapsed",
-            RunModel.StageTextOf(Running("history", 3_000, 0, batch: true, TimeSpan.FromSeconds(5)), Now, rate: null));
+            TestText.En(RunModel.StageTextOf(Running("history", 3_000, 0, batch: true, TimeSpan.FromSeconds(5)), Now, rate: null)));
     }
 
     [Fact]
@@ -425,13 +426,13 @@ public sealed class RunModelEtaTests : IDisposable
             FinishedAt = Now - TimeSpan.FromSeconds(10),
         };
 
-        Assert.Equal($"Stopped while hashing the file — {412_000:N0} of {1_689_810:N0} chunks · 0:30 elapsed", RunModel.StageTextOf(cancelled, Now, rate: null));
+        Assert.Equal($"Stopped while hashing the file — {412_000:N0} of {1_689_810:N0} chunks · 0:30 elapsed", TestText.En(RunModel.StageTextOf(cancelled, Now, rate: null)));
     }
 
     [Fact]
     public void The_stage_names_are_the_specs()
     {
-        Assert.Equal("Hashing the file", RunModel.StageNameOf("hashing"));
-        Assert.Equal("Reading the ledger history", RunModel.StageNameOf("history"));
+        Assert.Equal("Hashing the file", TestText.En(RunModel.StageNameOf("hashing")));
+        Assert.Equal("Reading the ledger history", TestText.En(RunModel.StageNameOf("history")));
     }
 }

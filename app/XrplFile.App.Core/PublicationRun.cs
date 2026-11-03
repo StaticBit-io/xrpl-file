@@ -1,4 +1,5 @@
 using System.Globalization;
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -29,10 +30,10 @@ public sealed record RunSnapshot(
     PublicationRunState State,
     PublishProgress? Progress,
     PublicationReport? Report,
-    string? Failure,
+    UiText? Failure,
     string? Name,
     string? Network,
-    string? HistoryNote)
+    UiText? HistoryNote)
 {
     /// <summary>
     /// Whether the run publishes on tickets, as the estimate it was approved against decided.
@@ -121,10 +122,10 @@ public sealed class PublicationRun(
     private PublicationRunState _state = PublicationRunState.Idle;
     private PublishProgress? _progress;
     private PublicationReport? _report;
-    private string? _failure;
+    private UiText? _failure;
     private string? _name;
     private string? _network;
-    private string? _historyNote;
+    private UiText? _historyNote;
     private bool _usesTickets;
     private long _ownerReserveDrops;
     private CostSummary? _confirmation;
@@ -352,7 +353,7 @@ public sealed class PublicationRun(
         PublicationReport? report = null;
         PublicationState? finished = null;
         string? finishedPath = null;
-        string? failure = null;
+        UiText? failure = null;
         Exception? caught = null;
         RunAttempt attempt = new()
         {
@@ -433,7 +434,7 @@ public sealed class PublicationRun(
         {
             // Not marked as a rejected source: "has changed since the run started" is reserved for a
             // size or root refusal (Spec question 10), and this message already sends the person to the picker.
-            failure = $"The file at {ex.Path} could not be read. Choose it again.";
+            failure = UiText.Of(RunText.ErrorSourceUnreadable, ("path", ex.Path));
             finalState = PublicationRunState.Failed;
         }
         catch (SourceReadFailedException ex)
@@ -442,13 +443,13 @@ public sealed class PublicationRun(
             // written, which would send the person after the wrong thing. With a state file the run
             // stays resumable once the file is back; a fresh run that fails while its file is hashed
             // has none yet (both starts hash before they save), so there is nothing to resume.
-            failure = attempt.StatePath is null
-                ? (ex.Path is null
-                    ? "The file could not be read. Make it available and publish it again."
-                    : $"The file at {ex.Path} could not be read. Make it available and publish it again.")
-                : (ex.Path is null
-                    ? "The file could not be read while it was being published. Make it available again and resume the run."
-                    : $"The file at {ex.Path} could not be read while it was being published. Make it available again and resume the run.");
+            failure = (attempt.StatePath is null, ex.Path) switch
+            {
+                (true, null) => RunText.ErrorSourceReadFailed,
+                (true, { } path) => UiText.Of(RunText.ErrorSourceReadFailedAt, ("path", path)),
+                (false, null) => RunText.ErrorSourceReadFailedResuming,
+                (false, { } path) => UiText.Of(RunText.ErrorSourceReadFailedResumingAt, ("path", path)),
+            };
             finalState = PublicationRunState.Failed;
         }
         catch (XrplFileException ex) when (ex is { Error: XrplFileError.ResumeMismatch, SourceChanged: true } && statePath is not null)
@@ -457,8 +458,8 @@ public sealed class PublicationRun(
             // another writer is refused with ResumeMismatch too, and would open the picker for nothing.
             lock (_gate) _rejectedSources.Add(Path.GetFullPath(statePath));
             failure = request.SourceRecorded
-                ? $"The file at {request.SourcePath} has changed since the run started. Choose the original file."
-                : "That file is not the one this run was publishing.";
+                ? UiText.Of(RunText.ErrorSourceChanged, ("path", request.SourcePath ?? string.Empty))
+                : RunText.ErrorSourceNotThisRun;
             finalState = PublicationRunState.Failed;
         }
         catch (XrplFileException ex)
@@ -475,12 +476,12 @@ public sealed class PublicationRun(
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            failure = "The publication's state could not be written to disk, so the run was stopped.";
+            failure = RunText.ErrorStateNotWritten;
             finalState = PublicationRunState.Failed;
         }
         catch (Exception ex) when (ex is FormatException or System.Text.Json.JsonException)
         {
-            failure = "This run's state file could not be read, so it cannot be resumed.";
+            failure = RunText.ErrorStateUnreadable;
             finalState = PublicationRunState.Failed;
         }
         catch (Exception)
@@ -493,7 +494,7 @@ public sealed class PublicationRun(
             // success about it. A service that can only be recovered by restarting the whole
             // application is worse than one that reports a failure it does not have a specific
             // sentence for.
-            failure = "Something went wrong that this application does not have a specific message for. The run was stopped.";
+            failure = RunText.ErrorUnexpected;
             finalState = PublicationRunState.Failed;
         }
         finally
@@ -571,8 +572,7 @@ public sealed class PublicationRun(
                     {
                         if (_generation == generation)
                         {
-                            _historyNote = appended.Note
-                                ?? "The publication succeeded, but could not be recorded in your history.";
+                            _historyNote = appended.Note ?? RunText.HistoryNotRecorded;
                         }
                     }
                 }
@@ -604,8 +604,7 @@ public sealed class PublicationRun(
                 {
                     if (_generation == generation)
                     {
-                        _historyNote =
-                            $"The publication succeeded, but recording it in your history failed unexpectedly: {ex.Message}";
+                        _historyNote = UiText.Of(RunText.HistoryRecordFailed, ("error", ex.Message));
                     }
                 }
             }

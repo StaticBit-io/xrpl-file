@@ -31,8 +31,8 @@ public class UnlockModelCreateFailureTests : VaultHarness
         Assert.NotNull(model.LastCreateMessage);
         CreateMessage message = model.LastCreateMessage!;
         Assert.Equal(CreateMessages.For(VaultCreateResult.VaultAlreadyExists).Headline, message.Headline);
-        Assert.DoesNotContain(VaultPath, message.Detail, StringComparison.Ordinal);
-        Assert.DoesNotContain(VaultPath, message.Headline, StringComparison.Ordinal);
+        Assert.DoesNotContain(VaultPath, TestText.En(message.Detail), StringComparison.Ordinal);
+        Assert.DoesNotContain(VaultPath, TestText.En(message.Headline), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -52,8 +52,8 @@ public class UnlockModelCreateFailureTests : VaultHarness
         Assert.NotNull(model.LastCreateMessage);
         CreateMessage message = model.LastCreateMessage!;
         Assert.Equal(CreateMessages.For(VaultCreateResult.StorageUnavailable).Headline, message.Headline);
-        Assert.DoesNotContain(vault.SimulatedPath, message.Detail, StringComparison.Ordinal);
-        Assert.DoesNotContain(vault.SimulatedPath, message.Headline, StringComparison.Ordinal);
+        Assert.DoesNotContain(vault.SimulatedPath, TestText.En(message.Detail), StringComparison.Ordinal);
+        Assert.DoesNotContain(vault.SimulatedPath, TestText.En(message.Headline), StringComparison.Ordinal);
     }
 
     [Fact]

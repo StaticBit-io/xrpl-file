@@ -1,15 +1,20 @@
+using XrplFile.App.Core.Localization;
 using Xunit;
 
 namespace XrplFile.App.Core.Tests;
 
 public sealed class ReadErrorMessagesTests
 {
+    private static string Say(XrplFileError error) => TestText.En(ReadErrorMessages.For(error));
+
+    private static string Say(XrplFileException exception) => TestText.En(ReadErrorMessages.For(exception));
+
     [Fact]
     public void Every_error_has_a_sentence()
     {
         foreach (XrplFileError error in Enum.GetValues<XrplFileError>())
         {
-            string message = ReadErrorMessages.For(error);
+            string message = Say(error);
 
             Assert.False(string.IsNullOrWhiteSpace(message), $"{error} has no sentence");
             Assert.EndsWith(".", message, StringComparison.Ordinal);
@@ -44,7 +49,7 @@ public sealed class ReadErrorMessagesTests
             XrplFileError.SubmitRefused,
         ];
 
-        string[] all = [.. readingErrors.Select(ReadErrorMessages.For)];
+        string[] all = [.. readingErrors.Select(Say)];
 
         Assert.Equal(all.Length, all.Distinct(StringComparer.Ordinal).Count());
     }
@@ -67,13 +72,13 @@ public sealed class ReadErrorMessagesTests
             XrplFileError.SessionAlreadyRun,
         ];
 
-        Assert.Single(publishingOnlyErrors.Select(ReadErrorMessages.For).Distinct(StringComparer.Ordinal));
+        Assert.Single(publishingOnlyErrors.Select(Say).Distinct(StringComparer.Ordinal));
     }
 
     [Fact]
     public void The_four_batch_publishing_errors_share_the_publishing_only_sentence()
     {
-        string shared = ReadErrorMessages.For(XrplFileError.SubmitRefused);
+        string shared = Say(XrplFileError.SubmitRefused);
 
         foreach (XrplFileError error in new[]
                  {
@@ -81,18 +86,18 @@ public sealed class ReadErrorMessagesTests
                      XrplFileError.AccountInUse, XrplFileError.FeeTooHigh,
                  })
         {
-            Assert.Equal(shared, ReadErrorMessages.For(error));
+            Assert.Equal(shared, Say(error));
         }
     }
 
     [Fact]
     public void The_streaming_publication_errors_share_the_publishing_only_sentence()
     {
-        string shared = ReadErrorMessages.For(XrplFileError.SubmitRefused);
+        string shared = Say(XrplFileError.SubmitRefused);
 
         foreach (XrplFileError error in new[] { XrplFileError.WriterWindowConflict, XrplFileError.ManifestRejected, XrplFileError.ApprovalExceeded })
         {
-            Assert.Equal(shared, ReadErrorMessages.For(error));
+            Assert.Equal(shared, Say(error));
         }
     }
 
@@ -108,7 +113,7 @@ public sealed class ReadErrorMessagesTests
                      XrplFileError.BlockMismatch, XrplFileError.ListMismatch, XrplFileError.ChunkMissing,
                  })
         {
-            Assert.NotEqual(PublishErrorMessages.For(error), ReadErrorMessages.For(error));
+            Assert.NotEqual(TestText.En(PublishErrorMessages.For(error)), Say(error));
         }
     }
 
@@ -117,7 +122,7 @@ public sealed class ReadErrorMessagesTests
     {
         // Nothing is submitted while reading, so these cannot happen here. They still need a
         // sentence, because the enum-coverage test enumerates every value.
-        Assert.Contains("reading", ReadErrorMessages.For(XrplFileError.SubmitRefused), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("reading", Say(XrplFileError.SubmitRefused), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -125,6 +130,27 @@ public sealed class ReadErrorMessagesTests
     {
         XrplFileException thrown = new(XrplFileError.BlockMismatch, "block 3 did not verify", block: 3);
 
-        Assert.Contains("block 3", ReadErrorMessages.For(thrown), StringComparison.Ordinal);
+        Assert.Contains("block 3", Say(thrown), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_block_numbered_failure_keeps_its_sentence_and_names_the_block_exactly()
+    {
+        XrplFileException thrown = new(XrplFileError.BlockMismatch, "block 3 did not verify", block: 3);
+
+        Assert.Equal(
+            "A block of the file does not match what the file's own description says it should be. Nothing was saved. (block 3)",
+            Say(thrown));
+    }
+
+    [Fact]
+    public void The_publishing_only_errors_are_one_phrase_not_just_one_text()
+    {
+        // The decision "these cannot happen while reading" is the phrase's identity, so a translation
+        // cannot make them diverge.
+        UiText shared = ReadErrorMessages.For(XrplFileError.SubmitRefused);
+
+        Assert.Equal(shared, ReadErrorMessages.For(XrplFileError.ManifestRejected));
+        Assert.Equal(shared, ReadErrorMessages.For(XrplFileError.AccountInUse));
     }
 }

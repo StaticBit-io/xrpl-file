@@ -172,4 +172,15 @@ public sealed class ShellModelTests
 
         Assert.Equal(expected, model.IsMoreCurrent);
     }
+
+    [Theory]
+    [InlineData(AppTab.Accounts, "Accounts")]
+    [InlineData(AppTab.Publish, "Publish")]
+    [InlineData(AppTab.Read, "Read")]
+    [InlineData(AppTab.History, "History")]
+    [InlineData(AppTab.Settings, "Settings")]
+    public void Every_tab_is_named_in_the_words_the_rail_has_always_shown(AppTab tab, string expected)
+    {
+        Assert.Equal(expected, TestText.En(ShellModel.NameOf(tab)));
+    }
 }

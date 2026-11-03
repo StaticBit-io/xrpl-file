@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using Xunit;
 
 namespace XrplFile.App.Core.Tests;
@@ -44,7 +45,7 @@ public sealed class EstimateModelSizeTests : IDisposable
 
         await model.EstimateAsync(Request(withPayer: false), Token);
 
-        Assert.Equal("Choose a payer — files larger than 64 MiB publish through Batch.", model.Message);
+        Assert.Equal("Choose a payer — files larger than 64 MiB publish through Batch.", TestText.En(model.Message));
         Assert.False(model.CanPublish);
         Assert.Null(model.Estimate);
         Assert.Null(model.Approval);
@@ -60,7 +61,7 @@ public sealed class EstimateModelSizeTests : IDisposable
 
         await model.EstimateAsync(Request(withPayer: true), Token);
 
-        Assert.Equal("This application publishes files up to 16 GiB.", model.Message);
+        Assert.Equal("This application publishes files up to 16 GiB.", TestText.En(model.Message));
         Assert.False(model.CanPublish);
         Assert.Null(model.BatchEstimate);
         Assert.Equal(0, _connections.Connections);
@@ -86,7 +87,7 @@ public sealed class EstimateModelSizeTests : IDisposable
 
         await model.EstimateAsync(Request(withPayer: false), Token);
 
-        Assert.NotEqual(PublishModel.PayerRequiredMessage, model.Message);
+        Assert.NotEqual(UiText.Of(PublishText.PayerRequired), model.Message);
         Assert.NotNull(model.Estimate);
     }
 

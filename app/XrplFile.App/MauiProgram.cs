@@ -1,6 +1,8 @@
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 
 using XrplFile.App.Core;
+using XrplFile.App.Core.Localization;
 using XrplFile.App.Platform;
 using XrplFile.Keys;
 
@@ -220,6 +222,12 @@ public static class MauiProgram
         services.AddSingleton<IConnectionFactory>(
             provider => new XrplConnectionFactory(provider.GetRequiredService<INodeSettingsStore>()));
         services.AddSingleton<NodeSettingsModel>();
+
+        // The language the screens speak (design 2026-11-02): the choice made in Settings, else the
+        // OS display language as this process started with it, else English.
+        services.AddSingleton<ILanguageSettingsStore>(new FileLanguageSettingsStore());
+        services.AddSingleton(provider => new Localizer(
+            provider.GetRequiredService<ILanguageSettingsStore>(), CultureInfo.CurrentUICulture));
         services.AddSingleton<NetworkChoices>();
 
         // "Paid by" (spec 6.1): the payer remembered per network, beside node-urls.json, and the

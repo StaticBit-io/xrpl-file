@@ -170,7 +170,7 @@ public sealed class PublicationRunBatchTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.Contains("Estimate it again.", run.Snapshot.Failure, StringComparison.Ordinal);
+        Assert.Contains("Estimate it again.", TestText.En(run.Snapshot.Failure), StringComparison.Ordinal);
         Assert.Empty(_connections.BatchSink!.Transmissions);
     }
 

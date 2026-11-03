@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -14,21 +15,20 @@ namespace XrplFile.App.Core;
 public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connections)
 {
     /// <summary>What the Balance column says while a node is being asked.</summary>
-    public const string CheckingBalance = "Checking…";
+    public static readonly UiText CheckingBalance = AccountsText.BalanceChecking;
 
     /// <summary>
     /// What the Balance column says when the last read of the row failed. Short on purpose: it sits in
     /// a column sized for an amount, and <see cref="Message"/> above the list already says why and what
     /// to do.
     /// </summary>
-    public const string UnreadBalance = "Not read";
+    public static readonly UiText UnreadBalance = AccountsText.BalanceNotRead;
 
     /// <summary>
     /// Why a read from a node came back with nothing. Its own sentence, not the publication one:
     /// a balance check spends nothing, so "nothing was spent" would answer a question nobody asked.
     /// </summary>
-    public const string ReadFailedMessage =
-        "The node did not answer, so the balance could not be read. Check the node URL in Settings, then choose Check balance from the account's menu to try again.";
+    public static readonly UiText ReadFailedMessage = AccountsText.ReadFailed;
 
     // One gate for _rows, _checking and Rows: the model is a singleton, its continuations run on
     // pool threads (ConfigureAwait(false)) while the renderer and Check clicks touch the same state.
@@ -46,7 +46,7 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
     public IReadOnlyList<AccountRow> ImportedRows => [.. Rows.Where(row => !row.IsThrowaway)];
 
     /// <summary>Why the last read from a node came back with nothing, when it did.</summary>
-    public string? Message { get; private set; }
+    public UiText? Message { get; private set; }
 
     /// <summary>
     /// Whether <see cref="RefreshFromLedgerAsync"/> or <see cref="RefreshAllFromLedgerAsync"/>
@@ -240,35 +240,36 @@ public sealed class AccountsModel(IKeyVault vault, IConnectionFactory connection
     /// <summary>
     /// What the Balance column says for a row: the balance once a node has answered, and nothing
     /// where another column already says it (a closed account, a key with no account yet) or where
-    /// no answer has come yet.
+    /// no answer has come yet — <see langword="null"/> then.
     /// </summary>
-    public string BalanceTextOf(AccountRow row)
+    public UiText? BalanceTextOf(AccountRow row)
     {
         ArgumentNullException.ThrowIfNull(row);
 
         if (IsChecking(row.Reference)) return CheckingBalance;
-        if (row.Stage == AccountStage.Closed) return string.Empty;
+        if (row.Stage == AccountStage.Closed) return null;
         if (row.CheckFailed) return UnreadBalance;
-        if (row.BalanceDrops is null || row.Stage == AccountStage.KeyOnly) return string.Empty;
+        if (row.BalanceDrops is null || row.Stage == AccountStage.KeyOnly) return null;
 
-        return XrpAmount.Format(row.BalanceDrops.Value);
+        return UiText.Of(AccountsText.BalanceAmount, ("amount", new XrpAmount(row.BalanceDrops.Value)));
     }
 
     /// <summary>What the Status column says for a row no node has answered about.</summary>
-    public const string NotCheckedStatus = "Not checked yet";
+    public static readonly UiText NotCheckedStatus = AccountsText.StatusNotChecked;
 
     /// <summary>
     /// What the Status column says for a row of the <see cref="AccountStage.Unknown"/> stage: that
     /// nothing has asked a node yet, and nothing else. While a read is under way, and after one has
     /// failed, the Balance column already says so, and a second line would contradict it.
+    /// <see langword="null"/> when there is nothing to add.
     /// </summary>
-    public string UnknownStatusTextOf(AccountRow row)
+    public UiText? UnknownStatusTextOf(AccountRow row)
     {
         ArgumentNullException.ThrowIfNull(row);
 
         return row.Stage == AccountStage.Unknown && !row.CheckFailed && !IsChecking(row.Reference)
             ? NotCheckedStatus
-            : string.Empty;
+            : null;
     }
 
     /// <summary>

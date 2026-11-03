@@ -7,6 +7,7 @@ using Windows.Storage.Streams;
 using WinRT.Interop;
 
 using XrplFile.App.Core;
+using XrplFile.App.Core.Localization;
 
 namespace XrplFile.App.Platform;
 
@@ -25,7 +26,7 @@ namespace XrplFile.App.Platform;
 /// hands back a path itself. <see cref="PickExistingFilePathAsync"/> is the one deliberate exception
 /// to "never a path"; see its own remarks and <see cref="IFilePickerService"/>'s for why.
 /// </remarks>
-public sealed class MauiFilePickerService : IFilePickerService
+public sealed class MauiFilePickerService(Localizer localizer) : IFilePickerService
 {
     /// <inheritdoc/>
     public async Task<bool> SaveFileAsync(string suggestedFileName, byte[] content, CancellationToken cancellationToken)
@@ -39,7 +40,8 @@ public sealed class MauiFilePickerService : IFilePickerService
         };
 
         string extension = Path.GetExtension(suggestedFileName) is { Length: > 0 } value ? value : ".bin";
-        picker.FileTypeChoices.Add("Backup file", [extension]);
+        // Read on every call, not at construction, so a language chosen in Settings applies to the next dialog.
+        picker.FileTypeChoices.Add(localizer.Text[CommonText.FileTypeBackup], [extension]);
 
         InitializeWithWindow.Initialize(picker, GetActiveWindowHandle());
 
@@ -65,7 +67,7 @@ public sealed class MauiFilePickerService : IFilePickerService
         };
 
         string extension = Path.GetExtension(suggestedFileName) is { Length: > 0 } value ? value : ".bin";
-        picker.FileTypeChoices.Add("File", [extension]);
+        picker.FileTypeChoices.Add(localizer.Text[CommonText.FileTypeAny], [extension]);
 
         InitializeWithWindow.Initialize(picker, GetActiveWindowHandle());
 

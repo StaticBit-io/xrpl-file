@@ -1,3 +1,5 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>
@@ -80,7 +82,7 @@ public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore
 
     public string? NodeUrl => Snapshot.NodeUrl;
 
-    public string? Message => Snapshot.Message;
+    public UiText? Message => Snapshot.Message;
 
     public bool CanRead => Snapshot.CanRead;
 
@@ -164,7 +166,7 @@ public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore
         XrplFileLink? parsedResult = null;
         ManifestRecord? manifestResult = null;
         string? nodeUrlResult = null;
-        string? messageResult = null;
+        UiText? messageResult = null;
         bool completed = false;
 
         try
@@ -182,8 +184,7 @@ public sealed class ReadModel(IConnectionFactory connections, INodeSettingsStore
             // disagree (design H9).
             if (NodeEndpoint.Resolve(nodes, parsed.Network) is null)
             {
-                messageResult =
-                    $"No node URL is known for the network '{parsed.Network}'. Add one in Settings.";
+                messageResult = UiText.Of(ReadText.NoNodeUrl, ("network", parsed.Network));
                 completed = true;
                 return;
             }

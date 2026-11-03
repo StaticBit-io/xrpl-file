@@ -69,15 +69,15 @@ public sealed class FundingModelTests : VaultHarness
 
         // Before any node has answered, an account that may well exist is not called unfunded.
         Assert.False(model.BalanceKnown);
-        Assert.DoesNotContain("Not funded", model.BalanceLine, StringComparison.Ordinal);
+        Assert.DoesNotContain("Not funded", TestText.En(model.BalanceLine), StringComparison.Ordinal);
 
         await model.RefreshAsync(token);
 
         Assert.Equal(imported.Address, model.QrPayload);
         Assert.True(model.BalanceKnown);
         Assert.True(model.AccountExists);
-        Assert.Equal($"Balance: {XrpAmount.Format(75_000_000)}", model.BalanceLine);
-        Assert.DoesNotContain("reserve", model.InstructionText, StringComparison.Ordinal);
+        Assert.Equal($"Balance: {XrpAmount.Format(75_000_000)}", TestText.En(model.BalanceLine));
+        Assert.DoesNotContain("reserve", TestText.En(model.InstructionText), StringComparison.Ordinal);
         Assert.False(model.ShouldPoll);
     }
 
@@ -87,12 +87,12 @@ public sealed class FundingModelTests : VaultHarness
         (FundingModel model, string reference, _, _) = await OpenAsync(TestContext.Current.CancellationToken);
 
         await model.SelectAsync(reference, TestContext.Current.CancellationToken);
-        Assert.Equal("Checking the ledger…", model.BalanceLine);
+        Assert.Equal("Checking the ledger…", TestText.En(model.BalanceLine));
 
         await model.RefreshAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal("Not funded yet.", model.BalanceLine);
-        Assert.Contains("reserve", model.InstructionText, StringComparison.Ordinal);
+        Assert.Equal("Not funded yet.", TestText.En(model.BalanceLine));
+        Assert.Contains("reserve", TestText.En(model.InstructionText), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public sealed class FundingModelTests : VaultHarness
         await model.SelectAsync(reference, TestContext.Current.CancellationToken);
 
         Assert.Equal(entry.Address, model.Address);
-        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), TestText.En(model.Message));
 
         // Address is deliberately left alone (asserted above), but nothing here vouches for it any
         // more -- a caller comparing CurrentReference to the reference it asked for is the only way
@@ -156,7 +156,7 @@ public sealed class FundingModelTests : VaultHarness
         // own Message = null housekeeping.
         Assert.Equal(0, _connections.Connections);
         Assert.Equal(entry.Address, model.Address);
-        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), TestText.En(model.Message));
         Assert.Null(model.CurrentReference);
     }
 

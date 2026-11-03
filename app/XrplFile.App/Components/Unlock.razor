@@ -8,29 +8,29 @@
 
 <div class="xf-vault">
     <section class="xf-card">
-        <h1 class="xf-title">Unlock your vault</h1>
+        <h1 class="xf-title">@T[VaultText.UnlockTitle]</h1>
 
         @if (Model.LastMessage is { } message)
         {
             <div class="alert @(message.CountsAsAFailedAttempt ? "alert-danger" : "alert-info")" role="alert">
-                <strong>@message.Headline</strong>
-                <div>@message.Detail</div>
+                <strong>@T[message.Headline]</strong>
+                <div>@T[message.Detail]</div>
             </div>
         }
 
         <form @onsubmit="SubmitAsync" @onsubmit:preventDefault="true">
             <div class="mb-3">
-                <label for="unlock-password" class="form-label">Master password</label>
+                <label for="unlock-password" class="form-label">@T[VaultText.MasterPasswordLabel]</label>
                 <input id="unlock-password" type="password" class="form-control" autofocus
                        @bind="_password" @bind:event="oninput" disabled="@_busy" />
             </div>
 
-            <button type="submit" class="btn btn-primary" disabled="@_busy">Unlock</button>
+            <button type="submit" class="btn btn-primary" disabled="@_busy">@T[VaultText.UnlockButton]</button>
 
             @if (Model.DeviceUnlockOffered)
             {
                 <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="UnlockWithDeviceAsync">
-                    Unlock with this device
+                    @T[VaultText.UnlockWithDeviceButton]
                 </button>
             }
         </form>

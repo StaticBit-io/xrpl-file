@@ -1,11 +1,20 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>One account's part of a publication, as the summary shows it (spec S12).</summary>
-/// <param name="Role">"Writer" or "Payer".</param>
+/// <param name="Role">The writer or the payer.</param>
 /// <param name="Name">The key's label, or its address when the label is not known.</param>
 /// <param name="RequiredDrops">What the account must hold for the run, reserve included.</param>
 /// <param name="WorstCaseFeeDrops">What the account's fees come to when every transaction is retried.</param>
-public sealed record AccountCost(string Role, string Name, long RequiredDrops, long WorstCaseFeeDrops);
+public sealed record AccountCost(AccountRole Role, string Name, long RequiredDrops, long WorstCaseFeeDrops)
+{
+    /// <summary>The row label for <see cref="RequiredDrops"/>: the role and the key it names.</summary>
+    public UiText NeedsLabel => UiText.Of(Role == AccountRole.Payer ? EstimateText.PayerNeeds : EstimateText.WriterNeeds, ("name", Name));
+
+    /// <summary>The row label for <see cref="WorstCaseFeeDrops"/>.</summary>
+    public UiText WorstCaseFeesLabel => Role == AccountRole.Payer ? EstimateText.PayerFeesWorstCase : EstimateText.WriterFeesWorstCase;
+}
 
 /// <summary>
 /// What a run will cost in time and money (spec S12): the duration range, the transactions, and each
@@ -31,7 +40,7 @@ public sealed record CostSummary(DurationRange Duration, long Transactions, IRea
 
         return new CostSummary(
             PublicationDuration.ForOneAccount(estimate), estimate.Transactions,
-            [new AccountCost("Writer", request.WriterLabel ?? request.Account, estimate.RequiredDrops, estimate.FeeDropsWorstCase)]);
+            [new AccountCost(AccountRole.Writer, request.WriterLabel ?? request.Account, estimate.RequiredDrops, estimate.FeeDropsWorstCase)]);
     }
 
     public static CostSummary Of(BatchPublicationEstimate estimate, PublishRequest request)
@@ -59,8 +68,8 @@ public sealed record CostSummary(DurationRange Duration, long Transactions, IRea
         return new CostSummary(
             duration, estimate.Memos + estimate.Batches,
             [
-                new AccountCost("Payer", request.PayerLabel ?? request.PayerAccount ?? string.Empty, estimate.PayerRequiredDrops, estimate.PayerFeeDropsWorstCase),
-                new AccountCost("Writer", request.WriterLabel ?? request.Account, estimate.WriterRequiredDrops, estimate.WriterFeeDropsWorstCase),
+                new AccountCost(AccountRole.Payer, request.PayerLabel ?? request.PayerAccount ?? string.Empty, estimate.PayerRequiredDrops, estimate.PayerFeeDropsWorstCase),
+                new AccountCost(AccountRole.Writer, request.WriterLabel ?? request.Account, estimate.WriterRequiredDrops, estimate.WriterFeeDropsWorstCase),
             ]);
     }
 }

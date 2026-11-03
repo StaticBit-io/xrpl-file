@@ -1,5 +1,6 @@
 using Xrpl.Wallet;
 
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 using XrplFile.Tests;
 
@@ -25,22 +26,22 @@ public sealed class RunModelTests : VaultHarness
     {
         foreach (string stage in new[] { "chunks", "lists", "read-back", "manifest", "done" })
         {
-            Assert.False(string.IsNullOrWhiteSpace(RunModel.StageNameOf(stage)));
-            Assert.NotEqual(stage, RunModel.StageNameOf(stage));
+            Assert.False(string.IsNullOrWhiteSpace(TestText.En(RunModel.StageNameOf(stage))));
+            Assert.NotEqual(stage, TestText.En(RunModel.StageNameOf(stage)));
         }
     }
 
     [Fact]
     public void The_read_back_stage_says_it_is_not_submitting_anything()
     {
-        Assert.Contains("read", RunModel.StageNameOf("read-back"), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("submit", RunModel.StageNameOf("read-back"), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("read", TestText.En(RunModel.StageNameOf("read-back")), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("submit", TestText.En(RunModel.StageNameOf("read-back")), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void A_stage_the_library_adds_later_is_shown_as_itself_rather_than_hidden()
     {
-        Assert.Equal("something-new", RunModel.StageNameOf("something-new"));
+        Assert.Equal("something-new", TestText.En(RunModel.StageNameOf("something-new")));
     }
 
     [Fact]
@@ -83,7 +84,7 @@ public sealed class RunModelTests : VaultHarness
     {
         RunModel model = new(NewRun(), new ManualTimeProvider());
 
-        Assert.Equal("Starting", model.StageText);
+        Assert.Equal("Starting", TestText.En(model.StageText));
     }
 
     [Fact]
@@ -179,10 +180,10 @@ public sealed class RunModelTests : VaultHarness
         Assert.NotNull(stopped.FinishedAt);
         Assert.True(stopped.FinishedAt >= stopped.StartedAt);
 
-        string line = model.StageText;
+        string line = TestText.En(model.StageText);
         time.Advance(TimeSpan.FromMinutes(10));
 
-        Assert.Equal(line, model.StageText);
+        Assert.Equal(line, TestText.En(model.StageText));
         Assert.StartsWith("Stopped while", line, StringComparison.Ordinal);
         Assert.DoesNotContain("/s", line, StringComparison.Ordinal);
         Assert.DoesNotContain("left", line, StringComparison.Ordinal);
@@ -237,7 +238,7 @@ public sealed class RunModelTests : VaultHarness
         new PublicationState(3, "testnet", "rWriter", "key", "text/plain", null, 2500, 1000, "AB", 1, "chunks",
             Strategy: "batch", Payer: XrplWallet.Generate().ClassicAddress, PayerKeyReference: "key-p", Fence: 0,
             Failure: PublicationState.WriterWindowConflictFailure).Save(path);
-        RunSnapshot snapshot = new(PublicationRunState.Failed, null, null, "failed", "f", "testnet", null) { StatePath = path };
+        RunSnapshot snapshot = new(PublicationRunState.Failed, null, null, RunText.ErrorUnexpected, "f", "testnet", null) { StatePath = path };
 
         Assert.False(RunModel.IsResumable(snapshot));
     }
@@ -252,10 +253,10 @@ public sealed class RunModelTests : VaultHarness
         (state with { ManifestStatus = PublicationState.ManifestLandedRejected }).Save(rejected);
         state.Save(interrupted);
 
-        Assert.False(RunModel.IsResumable(new RunSnapshot(PublicationRunState.Failed, null, null, "failed", "f", "testnet", null) { StatePath = rejected }));
+        Assert.False(RunModel.IsResumable(new RunSnapshot(PublicationRunState.Failed, null, null, RunText.ErrorUnexpected, "f", "testnet", null) { StatePath = rejected }));
 
         // The same state without the rejection is what a resume is for.
-        Assert.True(RunModel.IsResumable(new RunSnapshot(PublicationRunState.Failed, null, null, "failed", "f", "testnet", null) { StatePath = interrupted }));
+        Assert.True(RunModel.IsResumable(new RunSnapshot(PublicationRunState.Failed, null, null, RunText.ErrorUnexpected, "f", "testnet", null) { StatePath = interrupted }));
     }
 
     /// <summary>Every field <see cref="RunModel.Capture"/> derives, checked against its own
@@ -408,7 +409,7 @@ public sealed class RunModelTests : VaultHarness
             "\"big.bin\" is still publishing. Closing now stops the run; it can be resumed later. The tickets it "
             + "reserved stay on this account, each holding 2 XRP of owner reserve, until a later "
             + "publication from this account spends them or the account is closed. Close anyway?",
-            RunModel.CloseConfirmation(snapshot));
+            TestText.En(RunModel.CloseConfirmation(snapshot)));
     }
 
     [Fact]
@@ -418,7 +419,7 @@ public sealed class RunModelTests : VaultHarness
 
         Assert.Equal(
             "\"small.txt\" is still publishing. Closing now will stop the run; it can be resumed later. Close anyway?",
-            RunModel.CloseConfirmation(snapshot));
+            TestText.En(RunModel.CloseConfirmation(snapshot)));
     }
 
     [Fact]
@@ -426,7 +427,7 @@ public sealed class RunModelTests : VaultHarness
     {
         RunSnapshot snapshot = new(PublicationRunState.Running, null, null, null, null, null, null);
 
-        Assert.StartsWith("\"the file\" is still publishing.", RunModel.CloseConfirmation(snapshot), StringComparison.Ordinal);
+        Assert.StartsWith("\"the file\" is still publishing.", TestText.En(RunModel.CloseConfirmation(snapshot)), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -436,7 +437,7 @@ public sealed class RunModelTests : VaultHarness
         CostSummary asked = new(
             new DurationRange(TimeSpan.FromHours(2), TimeSpan.FromHours(3)),
             1_000,
-            [new AccountCost("Payer", "payer", 5_000_000, 2_000_000)]);
+            [new AccountCost(AccountRole.Payer, "payer", 5_000_000, 2_000_000)]);
         RunSnapshot snapshot = new(
             PublicationRunState.Running, new PublishProgress("history", 98_000, 0), null, null, "big.bin", "1", null)
         {
@@ -444,7 +445,7 @@ public sealed class RunModelTests : VaultHarness
             Confirmation = asked,
         };
 
-        Assert.Equal("Waiting for you to confirm the cost below.", RunModel.StageTextOf(snapshot, now, rate: null));
+        Assert.Equal("Waiting for you to confirm the cost below.", TestText.En(RunModel.StageTextOf(snapshot, now, rate: null)));
     }
 
     /// <summary>A report whose tidy-up ran and found nothing, unless the caller says otherwise.</summary>
@@ -467,7 +468,7 @@ public sealed class RunModelTests : VaultHarness
 
     private static void AssertTicketNote(RunSnapshot snapshot, string? text, bool locked)
     {
-        Assert.Equal(text, RunModel.TicketNoteOf(snapshot));
+        Assert.Equal(text, RunModel.TicketNoteOf(snapshot) is { } note ? TestText.En(note) : null);
         Assert.Equal(locked, RunModel.TicketsLockedOf(snapshot));
     }
 
@@ -482,7 +483,7 @@ public sealed class RunModelTests : VaultHarness
     {
         foreach (PublicationRunState state in Enum.GetValues<PublicationRunState>().Where(s => s != PublicationRunState.Succeeded))
         {
-            RunSnapshot snapshot = new(state, null, null, state == PublicationRunState.Failed ? "it broke" : null, "big.bin", "1", null)
+            RunSnapshot snapshot = new(state, null, null, state == PublicationRunState.Failed ? RunText.ErrorUnexpected : null, "big.bin", "1", null)
             {
                 UsesTickets = true,
                 OwnerReserveDrops = 2_000_000,
@@ -585,6 +586,6 @@ public sealed class RunModelTests : VaultHarness
             "This run's progress file could not be updated, so it may still be listed under unfinished runs. The "
             + "file is published; delete that entry rather than resume it, which would pay again for transactions "
             + "the file no longer needs.",
-            RunModel.StateNoteOf(Finished(Report() with { StateSaveFailure = new IOException("disk full") })));
+            TestText.En(RunModel.StateNoteOf(Finished(Report() with { StateSaveFailure = new IOException("disk full") }))));
     }
 }

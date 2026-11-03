@@ -1,3 +1,5 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>
@@ -26,7 +28,7 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
     private long _bytesDone;
     private long _bytesTotal;
     private string? _name;
-    private string? _failure;
+    private UiText? _failure;
     private bool _saved;
     private bool _saving;
     private string? _temporary;
@@ -191,7 +193,7 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
         }
 
         bool saved = false;
-        string? failure = null;
+        UiText? failure = null;
 
         try
         {
@@ -307,7 +309,7 @@ public sealed class ReadRun(IConnectionFactory connections, IFilePickerService p
     private async Task RunAsync(XrplFileLink link, ManifestRecord manifest, CancellationToken cancellationToken)
     {
         ReadState finalState;
-        string? failure = null;
+        UiText? failure = null;
 
         try
         {

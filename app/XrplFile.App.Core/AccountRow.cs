@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -59,5 +60,5 @@ public sealed record AccountRow(
     /// is. The Accounts screen reads this rather than multiplying by a ledger interval itself — a
     /// component holds no decisions.
     /// </summary>
-    public string? TimeRemainingDescription => LedgerTiming.Describe(LedgerTiming.Estimate(LedgersRemaining));
+    public UiText? TimeRemainingDescription => LedgerTiming.Describe(LedgerTiming.Estimate(LedgersRemaining));
 }

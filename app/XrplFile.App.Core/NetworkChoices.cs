@@ -1,7 +1,9 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>One entry of a network drop-down: the canonical value a key is stored under, and what the person reads.</summary>
-public sealed record NetworkChoice(string Value, string Label);
+public sealed record NetworkChoice(string Value, UiText Label);
 
 /// <summary>
 /// The networks a key can be put on, as the add-key and new-account screens offer them -- a closed
@@ -49,10 +51,11 @@ public sealed class NetworkChoices(INodeSettingsStore store)
             : null;
 
     /// <summary>The sentence for a network no xrpl-file link can name, shared by every screen that refuses one.</summary>
-    public static string NotANetwork(string network) =>
-        $"'{network}' is not a network an xrpl-file link can name. Use mainnet, testnet, devnet, "
-        + "or a network ID in digits.";
+    public static UiText NotANetwork(string network) =>
+        UiText.Of(NetworkText.NotANetwork, ("network", network));
 
-    private static string LabelFor(string value) =>
-        Endpoints.KnownNetworks.Contains(value, StringComparer.Ordinal) ? value : $"NetworkID {value}";
+    private static UiText LabelFor(string value) =>
+        Endpoints.KnownNetworks.Contains(value, StringComparer.Ordinal)
+            ? UiText.Of(NetworkText.NetworkName, ("network", value))
+            : UiText.Of(NetworkText.NetworkById, ("id", value));
 }

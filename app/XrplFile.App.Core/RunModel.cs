@@ -1,4 +1,4 @@
-using System.Globalization;
+using XrplFile.App.Core.Localization;
 
 namespace XrplFile.App.Core;
 
@@ -12,13 +12,13 @@ public readonly record struct RunView(
     bool IsFinished,
     bool WasCancelled,
     string? Link,
-    string? Failure,
-    string? HistoryNote,
-    string StageText,
+    UiText? Failure,
+    UiText? HistoryNote,
+    UiText StageText,
     int Percent,
-    string? TicketNote,
+    UiText? TicketNote,
     bool TicketsLocked,
-    string? StateNote,
+    UiText? StateNote,
     bool CanResume,
     string? StatePath,
     CostSummary? Confirmation,
@@ -35,7 +35,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// The stage line while a resume's cost waits for the person: the run is stopped on the answer, so it
     /// shows no progress, rate or elapsed time (spec amendment 3).
     /// </summary>
-    public const string AwaitingConfirmationText = "Waiting for you to confirm the cost below.";
+    public static UiText AwaitingConfirmationText => RunText.AwaitingConfirmation;
 
     /// <summary>The window the rate is measured over (spec B21).</summary>
     public static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(30);
@@ -71,7 +71,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     private readonly record struct ProgressSample(DateTimeOffset At, long Done);
 
     /// <summary>The progress line for this snapshot now, the rate measured from what this model has seen.</summary>
-    internal string Describe(RunSnapshot snapshot)
+    internal UiText Describe(RunSnapshot snapshot)
     {
         DateTimeOffset now = _time.GetUtcNow();
         return StageTextOf(snapshot, now, snapshot.State == PublicationRunState.Running ? RateOf(snapshot, now) : null);
@@ -147,7 +147,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// resume's fence wait has its own line, where <paramref name="rate"/> is ledgers per second. A run
     /// that has stopped shows how long it took, never a rate or a time left.
     /// </summary>
-    public static string StageTextOf(RunSnapshot snapshot, DateTimeOffset now, double? rate)
+    public static UiText StageTextOf(RunSnapshot snapshot, DateTimeOffset now, double? rate)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
@@ -157,13 +157,15 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
         }
 
         // The run is stopped on the person's answer, so a clock or a rate here would read as work in progress.
-        if (snapshot.Confirmation is not null) return AwaitingConfirmationText;
+        if (snapshot.Confirmation is not null) return RunText.AwaitingConfirmation;
 
-        string elapsed = snapshot.StartedAt is { } started ? $" · {Clock(now - started)} elapsed" : string.Empty;
+        UiText WithElapsed(UiText line) => snapshot.StartedAt is { } started
+            ? UiText.Of(RunText.LineElapsed, ("line", line), ("clock", Clock(now - started)))
+            : line;
 
         // Connecting, checking the accounts and signing the first batches report nothing; the clock
         // shows that a run which says this for ten seconds is still moving.
-        if (snapshot.Progress is not { } progress) return "Starting" + elapsed;
+        if (snapshot.Progress is not { } progress) return WithElapsed(RunText.Starting);
 
         if (progress.Stage == "fence")
         {
@@ -174,10 +176,10 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
                 ? TimeSpan.FromSeconds(ledgers / pace)
                 : LedgerTiming.ApproximateLedgerInterval * ledgers;
 
-            return $"{StageNameOf("fence")} — about {DurationText.Of(wait)}";
+            return UiText.Of(RunText.LineFence, ("stage", StageNameOf("fence")), ("wait", DurationText.Of(wait)));
         }
 
-        string head = HeadOf(progress);
+        UiText head = HeadOf(progress, inSentence: false);
 
         if (progress.Stage == "read-back")
         {
@@ -186,37 +188,43 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
                 ? TimeSpan.FromSeconds(blocks / blocksPerSecond)
                 : PublicationDuration.Reading(blocks * PublicationDuration.RecordsPerSampledBlock);
 
-            return blocks == 0 ? head + elapsed : $"{head} · about {DurationText.Of(left)} left{elapsed}";
+            return WithElapsed(blocks == 0 ? head : TimeLeft(head, left));
         }
 
-        if (progress.Stage is not ("chunks" or "lists")) return head + elapsed;
+        if (progress.Stage is not ("chunks" or "lists")) return WithElapsed(head);
 
-        string unit = progress.Stage == "chunks" ? "chunks/s" : "lists/s";
         long remaining = Math.Max(0, progress.Total - progress.Done);
 
         // Every memo of the pass is in; the pass still settles and the writer still has work, so no
         // figure of seconds is claimed for it (Spec question 23).
-        if (remaining == 0) return $"{head} · finishing this pass{elapsed}";
+        if (remaining == 0) return WithElapsed(UiText.Of(RunText.LineFinishingPass, ("head", head)));
         TimeSpan settles = SettlesAfter(progress.Stage, remaining, snapshot.FileBytes, snapshot.UsesBatch);
 
-        if (rate is { } measured && RateText(measured) is { } shown)
+        if (rate is { } measured && RateOf(progress.Stage, measured) is { } shown)
         {
-            return $"{head} · {shown} {unit} · about {DurationText.Of(TimeSpan.FromSeconds(remaining / measured) + settles)} left{elapsed}";
+            return WithElapsed(UiText.Of(
+                RunText.LineRateTimeLeft,
+                ("head", head),
+                ("rate", shown),
+                ("left", DurationText.Of(TimeSpan.FromSeconds(remaining / measured) + settles))));
         }
 
         if (rate is null && snapshot.UsesBatch)
         {
-            return $"{head} · about {DurationText.Of(TimeSpan.FromSeconds(remaining / BatchPriorMemosPerSecond) + settles)} left{elapsed}";
+            return WithElapsed(TimeLeft(head, TimeSpan.FromSeconds(remaining / BatchPriorMemosPerSecond) + settles));
         }
 
-        return $"{head} · estimating…{elapsed}";
+        return WithElapsed(UiText.Of(RunText.LineEstimating, ("head", head)));
     }
+
+    private static UiText TimeLeft(UiText head, TimeSpan left) =>
+        UiText.Of(RunText.LineTimeLeft, ("head", head), ("left", DurationText.Of(left)));
 
     /// <summary>
     /// The line of a run that has stopped: how long it ran, frozen at the moment it stopped, and for a
     /// run that did not finish, where it stopped. The outcome itself is the alert below the line.
     /// </summary>
-    private static string StoppedTextOf(RunSnapshot snapshot)
+    private static UiText StoppedTextOf(RunSnapshot snapshot)
     {
         string? took = snapshot is { StartedAt: { } started, FinishedAt: { } finished } ? Clock(finished - started) : null;
 
@@ -224,18 +232,19 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
         if (snapshot.State == PublicationRunState.Succeeded)
         {
             return snapshot is { StartedAt: { } began, FinishedAt: { } ended }
-                ? $"Finished in {Clock(snapshot.WorkedBefore + (ended - began - snapshot.WaitedForPerson))}"
-                : "Finished";
+                ? UiText.Of(RunText.FinishedIn, ("clock", Clock(snapshot.WorkedBefore + (ended - began - snapshot.WaitedForPerson))))
+                : RunText.Finished;
         }
 
-        string where = snapshot.Progress switch
+        UiText activity = snapshot.Progress switch
         {
-            null => "Stopped while starting",
-            { Stage: "fence" } => $"Stopped while {Lowered(StageNameOf("fence"))}",
-            { } progress => $"Stopped while {Lowered(HeadOf(progress))}",
+            null => RunText.MidStarting,
+            { Stage: "fence" } => StageInSentence("fence"),
+            { } progress => HeadOf(progress, inSentence: true),
         };
+        UiText where = UiText.Of(RunText.StoppedWhile, ("activity", activity));
 
-        return took is null ? where : $"{where} · {took} elapsed";
+        return took is null ? where : UiText.Of(RunText.LineElapsed, ("line", where), ("clock", took));
     }
 
     /// <summary>
@@ -243,11 +252,14 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// chunks/s is not shown as 1 or 0. Null when even one decimal shows zero: that is a stall, not a
     /// rate, and a time left built from it would run to days.
     /// </summary>
-    private static string? RateText(double perSecond)
+    private static UiText? RateOf(string stage, double perSecond)
     {
+        bool chunks = stage == "chunks";
         double tenths = Math.Round(perSecond, 1, MidpointRounding.AwayFromZero);
 
-        return tenths >= 10 ? perSecond.ToString("N0") : tenths > 0 ? tenths.ToString("N1") : null;
+        if (tenths >= 10) return UiText.Of(chunks ? RunText.RateChunksWhole : RunText.RateListsWhole, ("rate", perSecond));
+
+        return tenths > 0 ? UiText.Of(chunks ? RunText.RateChunksTenths : RunText.RateListsTenths, ("rate", tenths)) : null;
     }
 
     /// <summary>
@@ -296,14 +308,19 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// <summary>
     /// A stage with its count (spec 5.3): hashing counts chunks of the file's total; the history pass
     /// counts records and has no total, because how far back the writer's history goes is what it is
-    /// finding out.
+    /// finding out. <paramref name="inSentence"/> names the stage for the middle of "Stopped while …".
     /// </summary>
-    private static string HeadOf(PublishProgress progress) => progress.Stage switch
+    private static UiText HeadOf(PublishProgress progress, bool inSentence)
     {
-        "hashing" => $"{StageNameOf("hashing")} — {progress.Done:N0} of {progress.Total:N0} chunks",
-        "history" => progress.Done > 0 ? $"{StageNameOf("history")} — {progress.Done:N0} records" : StageNameOf("history"),
-        _ => $"{StageNameOf(progress.Stage)} — {progress.Done:N0} of {progress.Total:N0}",
-    };
+        UiText stage = inSentence ? StageInSentence(progress.Stage) : StageNameOf(progress.Stage);
+
+        return progress.Stage switch
+        {
+            "hashing" => UiText.Of(RunText.HeadHashing, ("stage", stage), ("done", progress.Done), ("total", progress.Total)),
+            "history" => progress.Done > 0 ? UiText.Of(RunText.HeadRecords, ("stage", stage), ("count", progress.Done)) : stage,
+            _ => UiText.Of(RunText.HeadProgress, ("stage", stage), ("done", progress.Done), ("total", progress.Total)),
+        };
+    }
 
     private static string Lowered(string text) =>
         text.Length == 0 ? text : string.Concat(char.ToLowerInvariant(text[0]).ToString(), text.AsSpan(1));
@@ -331,17 +348,15 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// run names the only two ways its tickets ever go, and promises neither: a later publication
     /// tries, and closing the account always removes them. A run without tickets reads as it always did.
     /// </summary>
-    public static string CloseConfirmation(RunSnapshot snapshot)
+    public static UiText CloseConfirmation(RunSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
-        string name = snapshot.Name ?? "the file";
+        object name = snapshot.Name ?? (object)RunText.CloseDefaultName;
 
         return snapshot.UsesTickets
-            ? $"\"{name}\" is still publishing. Closing now stops the run; it can be resumed later. The tickets it "
-                + $"reserved stay on this account, each holding {XrpAmount.Format(snapshot.OwnerReserveDrops)} of owner reserve, "
-                + $"until a later publication from this account spends them or the account is closed. Close anyway?"
-            : $"\"{name}\" is still publishing. Closing now will stop the run; it can be resumed later. Close anyway?";
+            ? UiText.Of(RunText.CloseConfirmTickets, ("name", name), ("reserve", new XrpAmount(snapshot.OwnerReserveDrops)))
+            : UiText.Of(RunText.CloseConfirmPlain, ("name", name));
     }
 
     public bool CanCancel => Snapshot.State == PublicationRunState.Running;
@@ -368,7 +383,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
 
     public string? Link => Snapshot.Report?.Link.ToString();
 
-    public string StageText => Describe(run.Snapshot);
+    public UiText StageText => Describe(run.Snapshot);
 
     public int Percent => Snapshot.Progress is { } progress ? PercentOf(progress) : 0;
 
@@ -381,7 +396,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// list of it did. A screen that showed this alongside a failure banner, or hid it because the
     /// run "succeeded", would both be claiming something about the publication that is not true.
     /// </summary>
-    public string? HistoryNote => Snapshot.HistoryNote;
+    public UiText? HistoryNote => Snapshot.HistoryNote;
 
     /// <summary>
     /// Why the run ended badly, or <see langword="null"/> on anything else — including a success
@@ -389,7 +404,7 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// <see cref="Link"/>: <see cref="PublicationRun"/> only ever populates one of
     /// <see cref="RunSnapshot.Report"/> or <see cref="RunSnapshot.Failure"/> for a finished run.
     /// </summary>
-    public string? Failure => Snapshot.Failure;
+    public UiText? Failure => Snapshot.Failure;
 
     public void Cancel() => run.Cancel();
 
@@ -438,13 +453,13 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     }
 
     /// <inheritdoc cref="TicketNoteOf"/>
-    public string? TicketNote => TicketNoteOf(Snapshot);
+    public UiText? TicketNote => TicketNoteOf(Snapshot);
 
     /// <inheritdoc cref="TicketsLockedOf"/>
     public bool TicketsLocked => TicketsLockedOf(Snapshot);
 
     /// <inheritdoc cref="StateNoteOf"/>
-    public string? StateNote => StateNoteOf(Snapshot);
+    public UiText? StateNote => StateNoteOf(Snapshot);
 
     /// <summary>
     /// What the tidy-up after a succeeded publication did with this library's leftover tickets
@@ -454,47 +469,28 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// tickets stay, since all-zero counts then say nothing about the account. Tickets that stay are
     /// named with the only two ways they ever go, as the close confirmation names them.
     /// </summary>
-    public static string? TicketNoteOf(RunSnapshot snapshot)
+    public static UiText? TicketNoteOf(RunSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
         if (FinishedReport(snapshot) is not { } report) return null;
 
-        string reserve = XrpAmount.Format(snapshot.OwnerReserveDrops);
+        XrpAmount reserve = new(snapshot.OwnerReserveDrops);
 
-        if (report.TicketReleaseFeeDrops is null)
-        {
-            return "Releasing the leftover tickets on this account did not finish. Any it did not release stay on the "
-                + $"account, each holding {reserve} of owner reserve, until a later publication from this account "
-                + "spends them or the account is closed.";
-        }
+        if (report.TicketReleaseFeeDrops is null) return UiText.Of(RunText.TicketsUnfinished, ("reserve", reserve));
 
         int released = report.TicketsReleased + report.TicketsAlreadyGone;
         int locked = report.TicketsNotReleased;
 
-        if (locked == 0)
-        {
-            return released == 0
-                ? null
-                : released == 1
-                    ? "1 leftover ticket was released, freeing its owner reserve."
-                    : string.Create(CultureInfo.InvariantCulture,
-                        $"{released:N0} leftover tickets were released, freeing their owner reserve.");
-        }
+        if (locked == 0) return released == 0 ? null : UiText.Of(RunText.TicketsReleased, ("count", released));
 
-        string stay = locked == 1
-            ? $"It stays on this account, holding {reserve} of owner reserve, until a later publication from "
-                + "this account spends it or the account is closed."
-            : $"They stay on this account, each holding {reserve} of owner reserve, until a later publication "
-                + "from this account spends them or the account is closed.";
+        UiText stay = UiText.Of(RunText.TicketsStay, ("count", locked), ("reserve", reserve));
 
-        string lead = released == 0
-            ? string.Create(CultureInfo.InvariantCulture,
-                $"{locked:N0} leftover {(locked == 1 ? "ticket" : "tickets")} could not be released.")
-            : string.Create(CultureInfo.InvariantCulture,
-                $"{released:N0} leftover {(released == 1 ? "ticket was" : "tickets were")} released, but {locked:N0} could not be.");
+        UiText lead = released == 0
+            ? UiText.Of(RunText.TicketsNoneReleased, ("count", locked))
+            : UiText.Of(RunText.TicketsSomeReleased, ("count", released), ("locked", locked));
 
-        return $"{lead} {stay}";
+        return UiText.Of(RunText.TicketsJoined, ("lead", lead), ("stay", stay));
     }
 
     /// <summary>
@@ -515,15 +511,11 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// stage and the unfinished-runs list may go on showing the run; resuming it would write the
     /// block lists and the manifest again.
     /// </summary>
-    public static string? StateNoteOf(RunSnapshot snapshot)
+    public static UiText? StateNoteOf(RunSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
-        return FinishedReport(snapshot)?.StateSaveFailure is null
-            ? null
-            : "This run's progress file could not be updated, so it may still be listed under unfinished runs. The "
-                + "file is published; delete that entry rather than resume it, which would pay again for transactions "
-                + "the file no longer needs.";
+        return FinishedReport(snapshot)?.StateSaveFailure is null ? null : RunText.StateNote;
     }
 
     private static PublicationReport? FinishedReport(RunSnapshot snapshot) =>
@@ -541,19 +533,36 @@ public sealed class RunModel(PublicationRun run, TimeProvider? time = null)
     /// it submits nothing, so a person watching a transaction counter would read a working run as a
     /// stalled one.
     /// </summary>
-    public static string StageNameOf(string stage) => stage switch
+    public static UiText StageNameOf(string stage) => stage switch
     {
-        "hashing" => "Hashing the file",
-        "history" => "Reading the ledger history",
-        "chunks" => "Writing the file",
-        "lists" => "Writing the block list",
-        "read-back" => "Reading it back from the ledger",
-        "manifest" => "Writing the manifest",
-        "fence" => "Waiting for earlier transactions to expire",
-        "done" => "Finished",
+        "hashing" => RunText.StageHashing,
+        "history" => RunText.StageHistory,
+        "chunks" => RunText.StageChunks,
+        "lists" => RunText.StageLists,
+        "read-back" => RunText.StageReadBack,
+        "manifest" => RunText.StageManifest,
+        "fence" => RunText.StageFence,
+        "done" => RunText.StageDone,
 
         // Not an exception: a stage this application does not know about is still a stage the run is
         // genuinely in, and showing its raw name beats showing nothing or crashing the screen.
-        _ => stage,
+        _ => UiText.Of(RunText.StageUnknown, ("stage", stage)),
+    };
+
+    /// <summary>
+    /// <see cref="StageNameOf"/> for the middle of a sentence ("Stopped while …"), where English lowers
+    /// the first letter and another language may need another form altogether.
+    /// </summary>
+    private static UiText StageInSentence(string stage) => stage switch
+    {
+        "hashing" => RunText.MidHashing,
+        "history" => RunText.MidHistory,
+        "chunks" => RunText.MidChunks,
+        "lists" => RunText.MidLists,
+        "read-back" => RunText.MidReadBack,
+        "manifest" => RunText.MidManifest,
+        "fence" => RunText.MidFence,
+        "done" => RunText.MidDone,
+        _ => UiText.Of(RunText.StageUnknown, ("stage", Lowered(stage))),
     };
 }

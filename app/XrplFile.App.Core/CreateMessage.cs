@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -40,7 +41,7 @@ public enum VaultCreateResult
 /// <summary>What a screen says about one outcome of trying to create a vault.</summary>
 /// <param name="Headline">The short line a screen leads with. Distinct for every <see cref="VaultCreateResult"/>.</param>
 /// <param name="Detail">The sentence that follows it, explaining what the headline means and, where relevant, what to do about it.</param>
-public sealed record CreateMessage(string Headline, string Detail);
+public sealed record CreateMessage(UiText Headline, UiText Detail);
 
 /// <summary>
 /// Turns a <see cref="VaultCreateResult"/> into the words a person is told (design E2).
@@ -70,23 +71,20 @@ public static class CreateMessages
     public static CreateMessage For(VaultCreateResult result) => result switch
     {
         VaultCreateResult.Success => new CreateMessage(
-            "Vault created",
-            "The vault is open and ready."),
+            VaultText.CreateSuccessHeadline,
+            VaultText.CreateSuccessDetail),
 
         VaultCreateResult.VaultAlreadyExists => new CreateMessage(
-            "A vault already exists",
-            "There is already a vault at this location. Creating a new one here would destroy " +
-            "every key inside it, so nothing was written."),
+            VaultText.CreateExistsHeadline,
+            VaultText.CreateExistsDetail),
 
         VaultCreateResult.StorageUnavailable => new CreateMessage(
-            "Storage unavailable",
-            "The vault could not be written. Check that the location is writable and try again."),
+            VaultText.CreateStorageHeadline,
+            VaultText.CreateStorageDetail),
 
         VaultCreateResult.PasswordTooShort => new CreateMessage(
-            "Choose a longer password",
-            $"The master password must be at least {PasswordPolicy.MinimumLength} characters. It " +
-            "is the only thing that will ever open this vault, and there is no recovery phrase " +
-            "behind it."),
+            VaultText.CreateTooShortHeadline,
+            UiText.Of(VaultText.CreateTooShortDetail, ("minimum", PasswordPolicy.MinimumLength))),
     };
 #pragma warning restore CS8524
 }

@@ -6,10 +6,10 @@
    working. The empty first option is what keeps "Choose a network." reachable. *@
 
 <select id="@Id" class="form-select" value="@Value" disabled="@Disabled" @onchange="OnChangedAsync">
-    <option value="" selected="@(string.IsNullOrEmpty(Value))">Choose a network&hellip;</option>
+    <option value="" selected="@(string.IsNullOrEmpty(Value))">@T[NetworkText.ChooseNetwork]</option>
     @foreach (NetworkChoice choice in Choices.Choices)
     {
-        <option value="@choice.Value" selected="@string.Equals(choice.Value, Value, StringComparison.Ordinal)">@choice.Label</option>
+        <option value="@choice.Value" selected="@string.Equals(choice.Value, Value, StringComparison.Ordinal)">@T[choice.Label]</option>
     }
 </select>
 

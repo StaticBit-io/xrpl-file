@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Encodings.Web;
+using XrplFile.App.Core.Localization;
 
 namespace XrplFile.App.Core;
 
@@ -22,7 +23,7 @@ namespace XrplFile.App.Core;
 /// is recorded, but something about the rest of the list is worth mentioning — a corrupt file this
 /// call replaced, for one). Never claims a file "has been left as it is" when this call replaced it.
 /// </param>
-public readonly record struct HistoryAppendResult(bool Recorded, string? Note);
+public readonly record struct HistoryAppendResult(bool Recorded, UiText? Note);
 
 /// <summary>
 /// The one operation a caller needs back from a history at the moment it acts, rather than through a
@@ -89,7 +90,7 @@ public sealed class PublicationHistory : IPublicationHistory
     /// <see cref="HistoryAppendResult"/>), computed under the same lock acquisition as the write
     /// itself, which is what makes it safe to trust as that call's own.
     /// </summary>
-    public string? Failure { get; private set; }
+    public UiText? Failure { get; private set; }
 
     /// <summary>
     /// Set by <see cref="RecordFinishedRuns"/> when it held back a finished publication it could not
@@ -98,11 +99,7 @@ public sealed class PublicationHistory : IPublicationHistory
     /// a start-up that can read and write the list records them, however the file came to be
     /// readable meanwhile.
     /// </summary>
-    public string? RecoveryNote { get; private set; }
-
-    private const string HeldBackNote =
-        "Some publications that finished earlier are not in this list yet, because it could not be updated. "
-        + "Their links are kept and are added when the application starts with a list it can read and write.";
+    public UiText? RecoveryNote { get; private set; }
 
     /// <summary>Newest first. An unreadable file reads as empty and sets <see cref="Failure"/>.</summary>
     public IReadOnlyList<PublicationRecord> Read()
@@ -149,10 +146,7 @@ public sealed class PublicationHistory : IPublicationHistory
 
             return new HistoryAppendResult(
                 Recorded: true,
-                Note: replacedAnUnreadableFile
-                    ? "Your previous publications list could not be read, so it has been replaced. "
-                      + "This publication is recorded, but earlier entries may be missing."
-                    : null);
+                Note: replacedAnUnreadableFile ? HistoryText.ListReplaced : null);
         }
     }
 
@@ -202,7 +196,7 @@ public sealed class PublicationHistory : IPublicationHistory
             {
                 if (historyUnreadable)
                 {
-                    RecoveryNote = HeldBackNote;
+                    RecoveryNote = HistoryText.HeldBack;
                     continue;
                 }
 
@@ -216,7 +210,7 @@ public sealed class PublicationHistory : IPublicationHistory
                 {
                     // Either the write failed or the file stopped being readable since the first
                     // read; in both cases the state is kept and retried at the next start-up.
-                    RecoveryNote = HeldBackNote;
+                    RecoveryNote = HistoryText.HeldBack;
                     continue;
                 }
 
@@ -280,7 +274,7 @@ public sealed class PublicationHistory : IPublicationHistory
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            Failure = "The publications file could not be read, so this list is empty. The file has been left as it is.";
+            Failure = HistoryText.ListUnreadable;
             return [];
         }
     }
@@ -338,7 +332,7 @@ public sealed class PublicationHistory : IPublicationHistory
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Failure = "The publications file could not be written. Your file is in the ledger and your link is safe, but this history could not be updated. Try again later.";
+            Failure = HistoryText.ListNotWritten;
 
             try
             {

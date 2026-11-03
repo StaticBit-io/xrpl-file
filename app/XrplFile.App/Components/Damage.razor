@@ -9,10 +9,9 @@
    person, never anything that calls AcknowledgeDamageAsync on its own. *@
 
 <div class="alert alert-warning" role="alert">
-    <h2 class="h5">Damage found</h2>
+    <h2 class="h5">@T[VaultText.DamageTitle]</h2>
     <p>
-        These entries failed their own integrity check the last time the vault was opened. Everything
-        else in the vault is unaffected and still works.
+        @T[VaultText.DamageIntro]
     </p>
     <ul class="mb-2">
         @foreach (KeyRow row in Model.Rows.Where(row => row.IsDamaged))
@@ -24,13 +23,10 @@
     @if (Model.WritesAreRefused)
     {
         <p>
-            Adding, exporting or deleting keys is refused until this has been acknowledged. The
-            record above is the only witness there is to what was lost &mdash; look at it before
-            pressing the button below, because acknowledging clears the block, not the fact that it
-            happened.
+            @T[VaultText.DamageWritesRefused]
         </p>
         <button type="button" class="btn btn-outline-warning" disabled="@_busy" @onclick="AcknowledgeAsync">
-            I've seen it
+            @T[VaultText.DamageAcknowledge]
         </button>
     }
 </div>

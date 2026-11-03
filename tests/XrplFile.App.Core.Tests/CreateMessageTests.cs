@@ -13,8 +13,8 @@ public class CreateMessageTests
     {
         CreateMessage message = CreateMessages.For(result);
 
-        Assert.False(string.IsNullOrWhiteSpace(message.Headline));
-        Assert.False(string.IsNullOrWhiteSpace(message.Detail));
+        Assert.False(string.IsNullOrWhiteSpace(TestText.En(message.Headline)));
+        Assert.False(string.IsNullOrWhiteSpace(TestText.En(message.Detail)));
     }
 
     [Fact]
@@ -24,7 +24,7 @@ public class CreateMessageTests
 
         Assert.Equal(
             all.Length,
-            all.Select(r => CreateMessages.For(r).Headline).Distinct(StringComparer.Ordinal).Count());
+            all.Select(r => TestText.En(CreateMessages.For(r).Headline)).Distinct(StringComparer.Ordinal).Count());
     }
 
     [Fact]
@@ -34,21 +34,21 @@ public class CreateMessageTests
         // names the full local vault path ("Writing the vault file at '{path}' failed."), and a
         // screen that relayed an exception's message verbatim put that path on screen. Nothing
         // here may ever carry a path, a drive letter, or a directory separator.
-        CreateMessage message = CreateMessages.For(VaultCreateResult.VaultAlreadyExists);
+        string detail = TestText.En(CreateMessages.For(VaultCreateResult.VaultAlreadyExists).Detail);
 
-        Assert.DoesNotContain(":\\", message.Detail, StringComparison.Ordinal);
-        Assert.DoesNotContain("/", message.Detail, StringComparison.Ordinal);
-        Assert.DoesNotContain(".json", message.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(":\\", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("/", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain(".json", detail, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void Storage_unavailable_never_names_the_path_or_the_underlying_exception()
     {
-        CreateMessage message = CreateMessages.For(VaultCreateResult.StorageUnavailable);
+        string detail = TestText.En(CreateMessages.For(VaultCreateResult.StorageUnavailable).Detail);
 
-        Assert.DoesNotContain(":\\", message.Detail, StringComparison.Ordinal);
-        Assert.DoesNotContain("/", message.Detail, StringComparison.Ordinal);
-        Assert.DoesNotContain(".json", message.Detail, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Exception", message.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain(":\\", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("/", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain(".json", detail, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Exception", detail, StringComparison.Ordinal);
     }
 }

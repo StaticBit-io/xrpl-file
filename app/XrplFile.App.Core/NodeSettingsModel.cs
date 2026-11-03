@@ -1,3 +1,5 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>
@@ -57,7 +59,7 @@ public sealed class NodeSettingsModel(INodeSettingsStore store)
     public IReadOnlyList<NodeSettingRow> Rows { get; private set; } = [];
 
     /// <summary>Why the last <see cref="Save"/> or <see cref="AddNetwork"/> did not take effect, or <see langword="null"/> when it did.</summary>
-    public string? Message { get; private set; }
+    public UiText? Message { get; private set; }
 
     public void Refresh()
     {
@@ -96,20 +98,20 @@ public sealed class NodeSettingsModel(INodeSettingsStore store)
 
         if (!XrplFileLink.TryNormalizeNetwork(network, out string? canonical))
         {
-            Message = $"'{network}' is not a network an xrpl-file link can name.";
+            Message = UiText.Of(SettingsText.NodeNotANetwork, ("network", network));
             return false;
         }
 
         string trimmedUrl = url.Trim();
         if (trimmedUrl.Length == 0)
         {
-            Message = "Give the new network a URL to save it with.";
+            Message = SettingsText.NodeUrlMissing;
             return false;
         }
 
         if (!IsWebSocketUrl(trimmedUrl))
         {
-            Message = $"'{url}' is not a ws:// or wss:// URL.";
+            Message = UiText.Of(SettingsText.NodeUrlNotWebSocket, ("url", url));
             return false;
         }
 
@@ -148,7 +150,7 @@ public sealed class NodeSettingsModel(INodeSettingsStore store)
 
             if (!IsWebSocketUrl(trimmed))
             {
-                Message = $"'{rawUrl}' for {network} is not a ws:// or wss:// URL.";
+                Message = UiText.Of(SettingsText.NodeRowUrlNotWebSocket, ("url", rawUrl), ("network", network));
                 return false;
             }
 

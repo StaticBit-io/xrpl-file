@@ -10,35 +10,32 @@
 
 <div class="xf-vault">
     <section class="xf-card">
-        <h1 class="xf-title">Create your vault</h1>
+        <h1 class="xf-title">@T[VaultText.CreateTitle]</h1>
 
         <p>
-            This is the first time this application has run here, and there is nothing to open yet.
+            @T[VaultText.CreateFirstRun]
         </p>
 
         <p>
-            <strong>There is no recovery phrase.</strong> The master password you choose below is the
-            only way this vault will ever open. If it is forgotten, every key inside that was not
-            individually exported is gone for good &mdash; there is no support process, no reset link
-            and no backdoor that gets it back.
+            <strong>@T[VaultText.CreateNoRecoveryLead]</strong> @T[VaultText.CreateNoRecoveryBody]
         </p>
 
         @if (Model.LastCreateMessage is { } message)
         {
             <div class="alert alert-danger" role="alert">
-                <strong>@message.Headline</strong>
-                <div>@message.Detail</div>
+                <strong>@T[message.Headline]</strong>
+                <div>@T[message.Detail]</div>
             </div>
         }
 
         <form @onsubmit="SubmitAsync" @onsubmit:preventDefault="true">
             <div class="mb-3">
-                <label for="new-password" class="form-label">Master password</label>
+                <label for="new-password" class="form-label">@T[VaultText.MasterPasswordLabel]</label>
                 <input id="new-password" type="password" class="form-control" autofocus
                        @bind="_password" @bind:event="oninput" disabled="@_busy" />
             </div>
 
-            <button type="submit" class="btn btn-primary" disabled="@_busy">Create vault</button>
+            <button type="submit" class="btn btn-primary" disabled="@_busy">@T[VaultText.CreateButton]</button>
         </form>
     </section>
 </div>

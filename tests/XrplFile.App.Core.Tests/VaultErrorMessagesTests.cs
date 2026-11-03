@@ -18,7 +18,7 @@ public class VaultErrorMessagesTests
     [InlineData(VaultError.AddressMismatch)]
     public void Every_error_has_words(VaultError error)
     {
-        Assert.False(string.IsNullOrWhiteSpace(VaultErrorMessages.For(error)));
+        Assert.False(string.IsNullOrWhiteSpace(TestText.En(VaultErrorMessages.For(error))));
     }
 
     [Fact]
@@ -28,7 +28,7 @@ public class VaultErrorMessagesTests
 
         Assert.Equal(
             all.Length,
-            all.Select(VaultErrorMessages.For).Distinct(StringComparer.Ordinal).Count());
+            all.Select(error => TestText.En(VaultErrorMessages.For(error))).Distinct(StringComparer.Ordinal).Count());
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public class VaultErrorMessagesTests
         // This type must compose its own words rather than relay VaultException.Message.
         foreach (VaultError error in Enum.GetValues<VaultError>())
         {
-            string message = VaultErrorMessages.For(error);
+            string message = TestText.En(VaultErrorMessages.For(error));
 
             Assert.DoesNotContain(":\\", message, StringComparison.Ordinal);
             Assert.DoesNotContain(".json", message, StringComparison.OrdinalIgnoreCase);

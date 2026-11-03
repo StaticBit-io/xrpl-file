@@ -25,27 +25,38 @@ public sealed class LedgerTimingTests
         TimeSpan? estimate = LedgerTiming.Estimate(254);
 
         Assert.Equal(TimeSpan.FromSeconds(254 * 4), estimate);
-        Assert.Equal("about 17 minutes", LedgerTiming.Describe(estimate));
+        Assert.Equal("about 17 minutes", TestText.En(LedgerTiming.Describe(estimate)));
     }
 
     [Fact]
     public void Zero_ledgers_remaining_is_still_an_estimate_not_null()
     {
         Assert.Equal(TimeSpan.Zero, LedgerTiming.Estimate(0));
-        Assert.Equal("less than a minute", LedgerTiming.Describe(TimeSpan.Zero));
+        Assert.Equal("less than a minute", TestText.En(LedgerTiming.Describe(TimeSpan.Zero)));
     }
 
     [Fact]
     public void A_handful_of_ledgers_reads_as_under_a_minute()
     {
-        Assert.Equal("less than a minute", LedgerTiming.Describe(LedgerTiming.Estimate(1)));
+        Assert.Equal("less than a minute", TestText.En(LedgerTiming.Describe(LedgerTiming.Estimate(1))));
+    }
+
+    [Theory]
+    [InlineData(15, "about 1 minute")]
+    [InlineData(30, "about 2 minutes")]
+    [InlineData(900, "about 1 hour")]
+    [InlineData(1_800, "about 2 hours")]
+    [InlineData(43_200, "about 2 days")]
+    public void The_unit_agrees_with_the_count(long ledgers, string expected)
+    {
+        Assert.Equal(expected, TestText.En(LedgerTiming.Describe(LedgerTiming.Estimate(ledgers))));
     }
 
     [Fact]
     public void An_hour_long_wait_is_described_in_hours()
     {
         // 1,000 ledgers is a little over an hour at four seconds each.
-        string? description = LedgerTiming.Describe(LedgerTiming.Estimate(1_000));
+        string description = TestText.En(LedgerTiming.Describe(LedgerTiming.Estimate(1_000)));
 
         Assert.Equal("about 1 hour", description);
     }
@@ -54,7 +65,7 @@ public sealed class LedgerTimingTests
     public void A_multi_day_wait_is_described_in_days()
     {
         // 30,000 ledgers is a little over a day at four seconds each.
-        string? description = LedgerTiming.Describe(LedgerTiming.Estimate(30_000));
+        string description = TestText.En(LedgerTiming.Describe(LedgerTiming.Estimate(30_000)));
 
         Assert.Equal("about 1 day", description);
     }

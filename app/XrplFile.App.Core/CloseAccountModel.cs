@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -45,9 +46,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     public string? AccountAddress => _state.AccountAddress;
 
     /// <summary>What <see cref="ImportedWarning"/> says.</summary>
-    public const string ImportedWarningText =
-        "This is an imported key. Closing deletes its account from the ledger for good — " +
-        "make sure it is not an account you still use.";
+    public static readonly UiText ImportedWarningText = CloseText.ImportedWarning;
 
     /// <summary>
     /// An extra line for the confirm step when the account being closed is an imported key, and
@@ -56,7 +55,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     /// needs telling that the deletion removes something they may still be using. Set with the rest
     /// of the entry, so it is there before any node has been asked.
     /// </summary>
-    public string? ImportedWarning => _state.Kind == VaultEntryKind.Imported ? ImportedWarningText : null;
+    public UiText? ImportedWarning => _state.Kind == VaultEntryKind.Imported ? ImportedWarningText : null;
 
     public string? Destination => _state.Destination;
 
@@ -82,9 +81,9 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
     /// <see cref="LedgersRemaining"/> is. The arithmetic and the wording both live here rather than
     /// in the screen that shows them — a component holds no decisions.
     /// </summary>
-    public string? TimeRemainingDescription => LedgerTiming.Describe(LedgerTiming.Estimate(LedgersRemaining));
+    public UiText? TimeRemainingDescription => LedgerTiming.Describe(LedgerTiming.Estimate(LedgersRemaining));
 
-    public string? Message => _state.Message;
+    public UiText? Message => _state.Message;
 
     /// <summary>The closure this screen recorded, once one happened.</summary>
     public AccountClosure? Closed => _state.Closed;
@@ -145,7 +144,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
 
             if (entry is null)
             {
-                state.Message = "That key is no longer in the vault.";
+                state.Message = VaultText.ErrorNoSuchEntry;
                 return;
             }
 
@@ -208,7 +207,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
         if (state.Reference is not { } reference || state.Network is not { } network
             || state.Destination is not { } destination)
         {
-            state.Message = "Choose where the remainder should go.";
+            state.Message = CloseText.ChooseDestination;
             return;
         }
 
@@ -311,8 +310,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
 
         if (_closing is not null)
         {
-            state.Message = "Another account is being closed. Wait until that has finished, " +
-                "then close this one.";
+            state.Message = CloseText.AnotherAccountClosing;
             return;
         }
 
@@ -348,7 +346,8 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             // this was already null every time this line runs — cleared explicitly anyway so nothing
             // here depends on that coincidence if DeleteAsync's own internal preview ever disagrees.
             state.LedgersRemaining = null;
-            state.Message = CloseErrorMessages.For(result.Outcome);
+            UiText outcomeMessage = CloseErrorMessages.For(result.Outcome);
+            state.Message = outcomeMessage;
 
             // Recorded only for a deletion a ledger actually took. A queued one has not happened:
             // the account still exists and still holds everything, and the queue may yet drop it.
@@ -377,8 +376,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
                 // the vault's own error — telling somebody the vault is locked about money that is
                 // already gone, and irrecoverably so, is the wrong thing to say. The hash is what
                 // is left to find the closure by, since this screen could not save it.
-                state.Message = $"{state.Message} The record of it could not be saved to the vault. " +
-                    $"Its transaction hash is {result.TxHash} — look the deletion up with that.";
+                state.Message = UiText.Of(CloseText.RecordNotSaved, ("outcome", outcomeMessage), ("hash", result.TxHash));
             }
         }
         catch (XrplFileException ex)
@@ -422,8 +420,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
             // trusted either way — and the person is told to check rather than left looking at a
             // screen that simply stopped responding.
             state.Preview = null;
-            state.Message = "The close was interrupted before it could be confirmed either way. Press Check " +
-                "again before retrying — the account may already have been closed.";
+            state.Message = CloseText.Interrupted;
         }
         finally
         {
@@ -460,7 +457,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
 
         public long? LedgersRemaining { get; set; }
 
-        public string? Message { get; set; }
+        public UiText? Message { get; set; }
 
         public AccountClosure? Closed { get; set; }
 

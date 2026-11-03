@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using Xunit;
 
 namespace XrplFile.App.Core.Tests;
@@ -42,7 +43,7 @@ public sealed class EstimateModelConfirmationTests : IDisposable
         Assert.False(model.NeedsConfirmation);
         Assert.True(model.CanPublish);
         Assert.NotNull(model.Approval);
-        Assert.Equal(["Payer", "Writer"], model.Summary!.Accounts.Select(account => account.Role));
+        Assert.Equal([AccountRole.Payer, AccountRole.Writer], model.Summary!.Accounts.Select(account => account.Role));
     }
 
     [Fact]
@@ -210,6 +211,6 @@ public sealed class EstimateModelConfirmationTests : IDisposable
     [Fact]
     public void The_label_is_the_specs()
     {
-        Assert.Equal("I understand the cost and the time", EstimateModel.ConfirmationLabel);
+        Assert.Equal("I understand the cost and the time", TestText.En(EstimateText.ConfirmationLabel));
     }
 }

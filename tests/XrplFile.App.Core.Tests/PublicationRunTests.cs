@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 
 using Xrpl.Wallet;
 
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 using XrplFile.Tests;
 
@@ -160,7 +161,7 @@ public sealed class PublicationRunTests : VaultHarness
         // this runs after money has already been spent, and losing every trace of what went wrong
         // afterwards is not something to also do here.
         Assert.NotNull(snapshot.HistoryNote);
-        Assert.Contains("Value cannot be null", snapshot.HistoryNote, StringComparison.Ordinal);
+        Assert.Contains("Value cannot be null", TestText.En(snapshot.HistoryNote), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -231,7 +232,7 @@ public sealed class PublicationRunTests : VaultHarness
                 // history behind this double is never even touched for this call, let alone
                 // produces this string on its own.
                 return new HistoryAppendResult(
-                    Recorded: true, Note: "SENTINEL: this note belongs only to the first, gated run");
+                    Recorded: true, Note: UiText.Of(RunText.HistoryRecordFailed, ("error", "SENTINEL: this note belongs only to the first, gated run")));
             }
 
             return inner.Append(record);
@@ -544,7 +545,7 @@ public sealed class PublicationRunTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.Equal(PublishErrorMessages.For(XrplFileError.NodeUnreachable), run.Snapshot.Failure);
+        Assert.Equal(TestText.En(PublishErrorMessages.For(XrplFileError.NodeUnreachable)), TestText.En(run.Snapshot.Failure));
 
         // No connection was ever handed back to leak: ConnectAsync fails before FakeConnectionFactory
         // counts one, so this holds at 0 == 0 -- still the same invariant a run that failed after
@@ -563,10 +564,10 @@ public sealed class PublicationRunTests : VaultHarness
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
         Assert.Equal(
-            PublishErrorMessages.ForRun(
+            TestText.En(PublishErrorMessages.ForRun(
                 new XrplFileException(XrplFileError.NodeUnreachable, "no answer"),
-                RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0),
-            run.Snapshot.Failure);
+                RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0)),
+            TestText.En(run.Snapshot.Failure));
         Assert.NotEmpty(PublicationSession.Unfinished(Paths.StateDirectory));
     }
 
@@ -582,10 +583,10 @@ public sealed class PublicationRunTests : VaultHarness
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
         Assert.Equal(
-            PublishErrorMessages.ForRun(
+            TestText.En(PublishErrorMessages.ForRun(
                 new XrplFileException(XrplFileError.NodeUnreachable, "no answer"),
-                RunFailurePoint.WhileSubmitting, usesTickets: true, ownerReserveDrops: 200_000),
-            run.Snapshot.Failure);
+                RunFailurePoint.WhileSubmitting, usesTickets: true, ownerReserveDrops: 200_000)),
+            TestText.En(run.Snapshot.Failure));
     }
 
     [Fact]
@@ -603,10 +604,10 @@ public sealed class PublicationRunTests : VaultHarness
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
         Assert.Equal(
-            PublishErrorMessages.ForRun(
+            TestText.En(PublishErrorMessages.ForRun(
                 new XrplFileException(XrplFileError.NodeUnreachable, "no answer"),
-                RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0),
-            run.Snapshot.Failure);
+                RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0)),
+            TestText.En(run.Snapshot.Failure));
     }
 
     [Fact]
@@ -644,7 +645,7 @@ public sealed class PublicationRunTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.Equal(VaultErrorMessages.For(VaultError.NoSuchEntry), run.Snapshot.Failure);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.NoSuchEntry)), TestText.En(run.Snapshot.Failure));
         Assert.Equal(1, _connections.Connections);
         Assert.Equal(_connections.Connections, _connections.Disposals);
     }
@@ -671,7 +672,7 @@ public sealed class PublicationRunTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.Equal(PublishErrorMessages.FeeTooLargeForApplication, run.Snapshot.Failure);
+        Assert.Equal(TestText.En(PublishErrorMessages.FeeTooLargeForApplication), TestText.En(run.Snapshot.Failure));
 
         // No strategy, and therefore no vault reveal, was ever reached for a run refused this
         // early -- but a connection was already opened for the (re-)estimate, and it must not leak.
@@ -700,7 +701,7 @@ public sealed class PublicationRunTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.Equal(PublishErrorMessages.For(XrplFileError.SubmitRefused), run.Snapshot.Failure);
+        Assert.Equal(TestText.En(PublishErrorMessages.For(XrplFileError.SubmitRefused)), TestText.En(run.Snapshot.Failure));
         Assert.Equal(1, _connections.Connections);
         Assert.Equal(_connections.Connections, _connections.Disposals);
     }

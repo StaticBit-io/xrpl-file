@@ -1,5 +1,6 @@
 using Xunit;
 
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core.Tests;
@@ -52,6 +53,22 @@ public class PasswordChangeModelDescribeTests
     }
 
     [Fact]
+    public async Task A_new_password_below_the_minimum_is_refused_with_the_minimum_as_a_value()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        PasswordChangeModel model = new(new NeverVault(), @"C:aultault.json");
+
+        PasswordChangeReport report = await model.ChangeAsync(
+            System.Text.Encoding.UTF8.GetBytes("old password"), System.Text.Encoding.UTF8.GetBytes("short"), token);
+
+        Assert.False(report.Changed);
+        Assert.Equal(
+            UiText.Of(VaultText.ChangeTooShort, ("minimum", PasswordPolicy.MinimumLength)),
+            report.Refusal);
+        Assert.StartsWith("Choose a new password of at least 8 characters.", TestText.En(report.Refusal), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Changed_alone_says_only_that_the_password_changed()
     {
         // A failing sentence-count test only says "expected N, got M" — this pins the actual text
@@ -62,7 +79,7 @@ public class PasswordChangeModelDescribeTests
         // without saying what actually happened here.
         PasswordChangeReport report = PasswordChangeModel.Describe(VaultPasswordChange.Changed, @"C:\vault\vault.json");
 
-        string sentence = Assert.Single(report.ThingsToTell);
+        string sentence = TestText.En(Assert.Single(report.ThingsToTell));
         Assert.Contains("master password", sentence, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("was changed", sentence, StringComparison.OrdinalIgnoreCase);
     }
@@ -92,17 +109,19 @@ public class PasswordChangeModelDescribeTests
             | VaultPasswordChange.TheRecordsIntegrityCodeDidNotMatch,
             @"C:\vault\vault.json");
 
+        string[] sentences = [.. report.ThingsToTell.Select(text => TestText.En(text))];
+
         Assert.Contains(
-            report.ThingsToTell, s => s.Contains("master password", StringComparison.OrdinalIgnoreCase)
-                                       && s.Contains("was changed", StringComparison.OrdinalIgnoreCase));
+            sentences, s => s.Contains("master password", StringComparison.OrdinalIgnoreCase)
+                             && s.Contains("was changed", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(
-            report.ThingsToTell, s => s.Contains("remember on this device", StringComparison.OrdinalIgnoreCase)
-                                       && s.Contains("turned off", StringComparison.OrdinalIgnoreCase));
+            sentences, s => s.Contains("remember on this device", StringComparison.OrdinalIgnoreCase)
+                             && s.Contains("turned off", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(
-            report.ThingsToTell, s => s.Contains(@"C:\vault\vault.json.bak", StringComparison.Ordinal));
+            sentences, s => s.Contains(@"C:\vault\vault.json.bak", StringComparison.Ordinal));
         Assert.Contains(
-            report.ThingsToTell, s => s.Contains("integrity code", StringComparison.OrdinalIgnoreCase)
-                                       && s.Contains("repaired", StringComparison.OrdinalIgnoreCase));
+            sentences, s => s.Contains("integrity code", StringComparison.OrdinalIgnoreCase)
+                             && s.Contains("repaired", StringComparison.OrdinalIgnoreCase));
     }
 }
 

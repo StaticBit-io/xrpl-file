@@ -8,32 +8,31 @@
    decision (a label given, a network an xrpl-file link can name); this markup only reads it to
    decide whether the button is live. *@
 
-<BackLink To="Accounts" OnClick="DoneAsync" Disabled="_busy" />
-<h1 class="xf-title">New account</h1>
+<BackLink To="AppTab.Accounts" OnClick="DoneAsync" Disabled="_busy" />
+<h1 class="xf-title">@T[AccountsText.NewTitle]</h1>
 
 <p>
-    This generates a key, not an account &mdash; on the XRP Ledger an account exists once it holds
-    its reserve, so the account appears on the ledger only once somebody funds the address it gets.
+    @T[AccountsText.NewIntro]
 </p>
 
 @if (Model.Message is not null)
 {
-    <div class="alert alert-warning">@Model.Message</div>
+    <div class="alert alert-warning">@T[Model.Message]</div>
 }
 
 <section class="xf-card">
     <div class="mb-3">
-        <label class="form-label">Label</label>
+        <label class="form-label">@T[CommonText.FieldLabel]</label>
         <input class="form-control" @bind="Model.Label" @bind:event="oninput" disabled="@_busy" />
     </div>
 
     <div class="mb-3">
-        <label for="new-account-network" class="form-label">Network</label>
+        <label for="new-account-network" class="form-label">@T[CommonText.FieldNetwork]</label>
         <NetworkSelect Id="new-account-network" @bind-Value="Model.Network" Disabled="_busy" />
     </div>
 
     <button type="button" class="btn btn-primary" disabled="@(!Model.CanCreate || _busy)" @onclick="CreateAsync">
-        Generate
+        @T[AccountsText.NewGenerateButton]
     </button>
 </section>
 

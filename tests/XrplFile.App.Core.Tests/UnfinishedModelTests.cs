@@ -2,6 +2,7 @@ using System.Text;
 
 using Xrpl.Wallet;
 
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 using Xunit;
@@ -332,8 +333,8 @@ public sealed class UnfinishedModelTests : VaultHarness
         Assert.Equal(PublicationRunState.Succeeded, resumingRun.Snapshot.State);
     }
 
-    private static UnfinishedRow Row(long size, string? unreadable = null) =>
-        new("state.json", "1", "rWriter", "ref", "application/octet-stream", "file.bin", size, "chunks", 0, unreadable);
+    private static UnfinishedRow Row(long size, UiText? unreadable = null) =>
+        new("state.json", "1", "rWriter", "ref", "application/octet-stream", "file.bin", size, RunText.StageChunks, 0, unreadable);
 
     [Fact]
     public void A_ticketed_run_in_the_list_brings_the_ticket_note()
@@ -344,14 +345,14 @@ public sealed class UnfinishedModelTests : VaultHarness
     [Fact]
     public void A_list_without_a_ticketed_run_has_no_ticket_note()
     {
-        Assert.False(UnfinishedModel.ShowsTicketNoteFor([Row(4096), Row(0, unreadable: "newer format")]));
+        Assert.False(UnfinishedModel.ShowsTicketNoteFor([Row(4096), Row(0, unreadable: UiText.Of(UnfinishedText.RowReason, ("reason", "newer format")))]));
         Assert.False(UnfinishedModel.ShowsTicketNoteFor([]));
     }
 
     [Fact]
     public void An_unreadable_row_never_brings_the_ticket_note_whatever_size_it_carries()
     {
-        Assert.False(UnfinishedModel.ShowsTicketNoteFor([Row(3_145_728, unreadable: "newer format")]));
+        Assert.False(UnfinishedModel.ShowsTicketNoteFor([Row(3_145_728, unreadable: UiText.Of(UnfinishedText.RowReason, ("reason", "newer format")))]));
     }
 
     private void WriteState(string fileName, long size, int chunk = 0, string phase = "chunks")
@@ -374,7 +375,7 @@ public sealed class UnfinishedModelTests : VaultHarness
         UnfinishedModel model = new(Paths, NewRun(), _picker);
         model.Refresh();
 
-        Assert.Equal(stage, Assert.Single(model.Rows).Stage);
+        Assert.Equal(stage, TestText.En(Assert.Single(model.Rows).Stage));
     }
 
     [Theory]
@@ -419,6 +420,6 @@ public sealed class UnfinishedModelTests : VaultHarness
         Assert.Equal(
             "Deleting a run leaves the tickets it reserved on this account, each holding an owner reserve, until a "
             + "later publication from this account spends them or the account is closed.",
-            UnfinishedModel.TicketNote);
+            TestText.En(UnfinishedModel.TicketNote));
     }
 }

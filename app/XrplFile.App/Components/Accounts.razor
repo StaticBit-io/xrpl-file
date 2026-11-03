@@ -42,20 +42,20 @@
     {
         case SubView.List:
             <div class="xf-page-head">
-                <h1 class="xf-title">Accounts</h1>
+                <h1 class="xf-title">@T[AccountsText.Title]</h1>
                 <div class="xf-page-actions">
                     <button type="button" class="btn btn-outline-secondary" @onclick="() => _view = SubView.AddKey">
-                        Import key
+                        @T[AccountsText.ImportKeyButton]
                     </button>
                     <button type="button" class="btn btn-primary" @onclick="() => _view = SubView.New">
-                        New account
+                        @T[AccountsText.NewAccountButton]
                     </button>
                 </div>
             </div>
 
             @if (Model.Message is not null)
             {
-                <div class="alert alert-warning">@Model.Message</div>
+                <div class="alert alert-warning">@T[Model.Message]</div>
             }
 
             @if (VaultList.IsDegraded)
@@ -63,14 +63,14 @@
                 <Damage OnChanged="StateHasChanged" />
             }
 
-            @Section("Publishing accounts",
-                "Throwaway accounts this app created for publishing. Close one to delete it from the ledger and get its reserve back.",
-                "No publishing accounts yet.",
+            @Section(AccountsText.PublishingTitle,
+                AccountsText.PublishingDescription,
+                AccountsText.PublishingEmpty,
                 Model.ThrowawayRows)
 
-            @Section("Your keys",
-                "Accounts you imported to sign publications. Close one only if you no longer need it on the ledger.",
-                "No imported keys.",
+            @Section(AccountsText.KeysTitle,
+                AccountsText.KeysDescription,
+                AccountsText.KeysEmpty,
                 Model.ImportedRows)
 
             @if (_pendingDeleteRow is { } pending)
@@ -80,29 +80,27 @@
                 <div class="xf-dialog-backdrop">
                     <div class="xf-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-title"
                          @onkeydown="OnDialogKey">
-                        <h2 id="delete-title">Delete @pending.Label?</h2>
+                        <h2 id="delete-title">@T[UiText.Of(AccountsText.DeleteTitle, ("label", pending.Label))]</h2>
                         <p>
-                            This removes the key for <code class="xf-mono">@pending.Address</code> from this
-                            vault. The account on the ledger is not touched.
+                            @Html(UiText.Of(AccountsText.DeleteIntro, ("address", pending.Address)), ("address", "code"))
                         </p>
                         @if (_deleteWarning is { NeverExported: true })
                         {
                             <div class="alert alert-danger">
-                                This key has never been exported. Nothing else holds its secret, so
-                                deleting it loses access to that account for good.
+                                @T[AccountsText.DeleteNeverExported]
                             </div>
                         }
                         @if (_deleteProblem is { } deleteProblem)
                         {
-                            <div class="alert alert-warning">@deleteProblem</div>
+                            <div class="alert alert-warning">@T[deleteProblem]</div>
                         }
                         <div class="xf-dialog-actions">
                             <button type="button" class="btn btn-outline-secondary" disabled="@_busy"
                                     @ref="_dialogCancel" @onclick="CancelDelete">
-                                Cancel
+                                @T[CommonText.Cancel]
                             </button>
                             <button type="button" class="btn btn-danger" disabled="@_busy" @onclick="ConfirmDeleteAsync">
-                                Delete key
+                                @T[AccountsText.DeleteKeyButton]
                             </button>
                         </div>
                     </div>
@@ -112,8 +110,8 @@
             {
                 @* A failed preparation leaves no pending row, so the dialog above cannot carry it. *@
                 <div class="alert alert-warning d-flex justify-content-between align-items-center gap-3">
-                    <span>@prepareProblem</span>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelDelete">Dismiss</button>
+                    <span>@T[prepareProblem]</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelDelete">@T[AccountsText.DismissButton]</button>
                 </div>
             }
             break;
@@ -161,16 +159,16 @@
     /// its own empty-state line. Both sections go through here so they cannot drift apart in columns
     /// or actions; their differences are the text passed in and the rows the model sorted into them.
     /// </summary>
-    private RenderFragment Section(string title, string description, string emptyText, IReadOnlyList<AccountRow> rows) =>
-        @<section class="xf-section" aria-label="@title">
+    private RenderFragment Section(TextId title, TextId description, TextId emptyText, IReadOnlyList<AccountRow> rows) =>
+        @<section class="xf-section" aria-label="@T[title]">
             <div class="xf-section-head">
-                <h2>@title</h2>
-                <p>@description</p>
+                <h2>@T[title]</h2>
+                <p>@T[description]</p>
             </div>
 
             @if (rows.Count == 0)
             {
-                <p class="xf-empty">@emptyText</p>
+                <p class="xf-empty">@T[emptyText]</p>
             }
             else
             {
@@ -180,10 +178,10 @@
                            it is to a screen reader (an address, an amount, a status), so the row is hidden
                            from assistive technology rather than read as a fake list item. *@
                         <li class="xf-account xf-account-head" aria-hidden="true">
-                            <span>Account</span>
-                            <span>Network</span>
-                            <span>Balance</span>
-                            <span>Status</span>
+                            <span>@T[AccountsText.ColumnAccount]</span>
+                            <span>@T[AccountsText.ColumnNetwork]</span>
+                            <span>@T[AccountsText.ColumnBalance]</span>
+                            <span>@T[AccountsText.ColumnStatus]</span>
                         </li>
                         @foreach (AccountRow row in rows)
                         {
@@ -193,8 +191,8 @@
                                         <span>@row.Label</span>
                                         @if (row.NeedsExporting)
                                         {
-                                            <span class="xf-tag xf-tag-danger" title="This key exists only in this vault. Export it to keep a copy.">
-                                                Not exported
+                                            <span class="xf-tag xf-tag-danger" title="@T[AccountsText.NotExportedHint]">
+                                                @T[AccountsText.NotExportedTag]
                                             </span>
                                         }
                                     </div>
@@ -205,9 +203,9 @@
                                     <span class="xf-net @(row.Network == "mainnet" ? "is-mainnet" : null)">@row.Network</span>
                                 </div>
 
-                                @{ string balance = Model.BalanceTextOf(row); }
-                                <div class="xf-account-balance @(balance.Length == 0 || Model.IsChecking(row.Reference) || row.CheckFailed ? "is-unread" : null)">
-                                    @(balance.Length == 0 ? "—" : balance)
+                                @{ UiText? balance = Model.BalanceTextOf(row); }
+                                <div class="xf-account-balance @(balance is null || Model.IsChecking(row.Reference) || row.CheckFailed ? "is-unread" : null)">
+                                    @(balance is null ? "—" : T[balance])
                                 </div>
 
                                 <div class="xf-account-status">
@@ -222,7 +220,7 @@
                                     {
                                         <button type="button" class="btn btn-sm btn-outline-secondary"
                                                 @onclick="() => OpenFunding(row.Reference)">
-                                            Fund
+                                            @T[AccountsText.FundButton]
                                         </button>
                                     }
                                     @RowMenu(row)
@@ -241,21 +239,21 @@
     /// </summary>
     private RenderFragment StatusOf(AccountRow row) => row.Stage switch
     {
-        AccountStage.Unknown => @<span class="xf-status">@(Model.UnknownStatusTextOf(row) is { Length: > 0 } text ? text : "Not read")</span>,
-        AccountStage.KeyOnly => @<span class="xf-status">Not on the ledger yet</span>,
+        AccountStage.Unknown => @<span class="xf-status">@T[Model.UnknownStatusTextOf(row) ?? AccountsText.StatusNotRead]</span>,
+        AccountStage.KeyOnly => @<span class="xf-status">@T[AccountsText.StatusNotOnLedger]</span>,
         @* Funded is only reached once a node answered, and DeletableFromLedger and LedgersRemaining are
            set together by that same read, so both are there; the null-forgiving operator states that
            rather than letting a default stand in for an answer nobody gave (design G8). *@
         AccountStage.Funded => @<span>
-            <span class="xf-status is-waiting">Closable in @row.TimeRemainingDescription</span>
-            <small>At ledger @row.DeletableFromLedger!.Value.ToString("N0"), @row.LedgersRemaining!.Value.ToString("N0") to go</small>
+            <span class="xf-status is-waiting">@T[UiText.Of(AccountsText.StatusClosableIn, ("time", row.TimeRemainingDescription!))]</span>
+            <small>@T[UiText.Of(AccountsText.StatusAtLedger, ("ledger", row.DeletableFromLedger!.Value), ("remaining", row.LedgersRemaining!.Value))]</small>
         </span>,
-        AccountStage.Closable => @<span class="xf-status is-ready">Ready to close</span>,
+        AccountStage.Closable => @<span class="xf-status is-ready">@T[AccountsText.StatusReadyToClose]</span>,
         AccountStage.Closed => @<span>
-            <span class="xf-status">Closed</span>
+            <span class="xf-status">@T[AccountsText.StatusClosed]</span>
             @if (row.Closure is { } closure)
             {
-                <small>Sent @XrpAmount.Format(closure.ArrivedDrops) to <span class="xf-mono">@closure.Destination</span></small>
+                <small>@Html(UiText.Of(AccountsText.StatusClosedSent, ("amount", new XrpAmount(closure.ArrivedDrops)), ("destination", closure.Destination)), ("destination", "code"))</small>
             }
         </span>,
         _ => @<span></span>,
@@ -270,37 +268,37 @@
         @<div class="xf-menu" @onkeydown="OnMenuKey">
             <button type="button" class="xf-icon-btn" aria-haspopup="menu"
                     aria-expanded="@(_menuFor == row.Reference ? "true" : "false")"
-                    aria-label="@($"More actions for {row.Label}")"
+                    aria-label="@(T[UiText.Of(AccountsText.MoreActionsFor, ("label", row.Label))])"
                     @onclick="() => ToggleMenu(row.Reference)">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
             </button>
             @if (_menuFor == row.Reference)
             {
                 <div class="xf-menu-backdrop" @onclick="CloseMenu"></div>
-                <div class="xf-menu-list" role="menu" tabindex="-1" @ref="_menuFirst" aria-label="@($"Actions for {row.Label}")">
+                <div class="xf-menu-list" role="menu" tabindex="-1" @ref="_menuFirst" aria-label="@(T[UiText.Of(AccountsText.ActionsFor, ("label", row.Label))])">
                     @if (row.HasActions)
                     {
                         <button type="button" role="menuitem" class="xf-menu-item"
                                 disabled="@Model.IsChecking(row.Reference)"
                                 @onclick="() => FromMenu(() => CheckAsync(row.Reference))">
-                            Check balance
+                            @T[AccountsText.MenuCheckBalance]
                         </button>
                     }
                     <button type="button" role="menuitem" class="xf-menu-item"
                             @onclick="() => FromMenu(() => OpenReveal(row.Reference))">
-                        Reveal secret
+                        @T[AccountsText.MenuRevealSecret]
                     </button>
                     <button type="button" role="menuitem" class="xf-menu-item"
                             disabled="@VaultList.WritesAreRefused"
                             @onclick="() => FromMenu(() => OpenExport(row.Reference))">
-                        Export key
+                        @T[AccountsText.MenuExportKey]
                     </button>
                     <div class="xf-menu-sep" role="separator"></div>
                     @if (row.HasActions)
                     {
                         <button type="button" role="menuitem" class="xf-menu-item is-danger"
                                 @onclick="() => FromMenu(() => OpenClose(row.Reference))">
-                            Close account…
+                            @T[AccountsText.MenuCloseAccount]
                         </button>
                     }
                     @* The key actions stay on a closed account: its seed still controls an address
@@ -308,7 +306,7 @@
                     <button type="button" role="menuitem" class="xf-menu-item is-danger"
                             disabled="@VaultList.WritesAreRefused"
                             @onclick="() => FromMenu(() => PrepareDeleteAsync(row))">
-                        Delete key…
+                        @T[AccountsText.MenuDeleteKey]
                     </button>
                 </div>
             }
@@ -379,7 +377,7 @@
     private string? _activeReference;
     private AccountRow? _pendingDeleteRow;
     private DeleteWarning? _deleteWarning;
-    private string? _deleteProblem;
+    private UiText? _deleteProblem;
     private bool _busy;
 
     protected override async Task OnInitializedAsync()

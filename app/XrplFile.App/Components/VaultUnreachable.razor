@@ -21,43 +21,36 @@
 
 <div class="xf-vault">
     <section class="xf-card">
-        <h1 class="xf-title">Vault not found here</h1>
+        <h1 class="xf-title">@T[VaultText.UnreachableTitle]</h1>
 
         <p>
-            This application was pointed at a vault kept somewhere else, and nothing answered at that
-            location just now. <strong>This is not a fresh install</strong> &mdash; a vault was chosen
-            here before, and it is not offered to create a new one, because that would write a second,
-            different vault at the remembered location and leave the real one wherever it actually is.
+            @Html(UiText.Of(VaultText.UnreachableLead, ("notFresh", VaultText.UnreachableNotFresh)), ("notFresh", "strong"))
         </p>
 
         <p>
-            This usually means the medium holding it is not reachable right now &mdash; a memory stick
-            not plugged in, a synced folder that has not caught up yet. Reconnect it and try again.
+            @T[VaultText.UnreachableCause]
         </p>
 
         <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="RetryAsync">
-            Try again
+            @T[VaultText.UnreachableRetry]
         </button>
         <button type="button" class="btn btn-outline-secondary ms-2" disabled="@_busy" @onclick="ChooseDifferentAsync">
-            Choose a different vault&hellip;
+            @T[VaultText.UnreachableChoose]
         </button>
 
         @if (_actionOutcome is { } outcome)
         {
-            <div class="alert mt-3 @(outcome.Succeeded ? "alert-info" : "alert-danger")">@outcome.Message</div>
+            <div class="alert mt-3 @(outcome.Succeeded ? "alert-info" : "alert-danger")">@T[outcome.Message]</div>
         }
 
         <hr class="my-4" />
 
-        <h2 class="xf-section-title mt-4">Start fresh instead</h2>
+        <h2 class="xf-section-title mt-4">@T[VaultText.StartFreshTitle]</h2>
         <p>
-            Forgetting this location does not touch the vault file itself &mdash; it only stops this
-            application from looking for it here on its own. If the medium holding it reconnects later,
-            point the application at it again from Settings. After forgetting, restarting opens (or
-            offers to create) the vault at the default location instead.
+            @T[VaultText.StartFreshBody]
         </p>
         <button type="button" class="btn btn-outline-danger" disabled="@_busy" @onclick="Forget">
-            Forget this location and start fresh
+            @T[VaultText.ForgetLocationButton]
         </button>
     </section>
 </div>

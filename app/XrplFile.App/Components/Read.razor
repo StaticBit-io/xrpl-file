@@ -42,18 +42,18 @@
 @if (snapshot.State == ReadState.Running)
 {
     <div class="xf-page">
-        <h1 class="xf-title">Reading</h1>
+        <h1 class="xf-title">@T[ReadText.RunningTitle]</h1>
 
         <section class="xf-card">
-            <p>@snapshot.BlocksDone of @snapshot.BlocksTotal blocks</p>
+            <p>@T[UiText.Of(ReadText.ProgressBlocks, ("done", snapshot.BlocksDone), ("total", snapshot.BlocksTotal), ("count", snapshot.BlocksTotal))]</p>
             <progress class="w-100" value="@snapshot.BlocksDone" max="@snapshot.BlocksTotal"></progress>
 
-            <p class="mt-3">@snapshot.BytesDone.ToString("N0") of @snapshot.BytesTotal.ToString("N0") bytes</p>
+            <p class="mt-3">@T[UiText.Of(ReadText.ProgressBytes, ("done", snapshot.BytesDone), ("total", snapshot.BytesTotal), ("count", snapshot.BytesTotal))]</p>
             <progress class="w-100" value="@snapshot.BytesDone" max="@snapshot.BytesTotal"></progress>
         </section>
 
         <div class="xf-actionbar">
-            <button type="button" class="btn btn-outline-secondary" @onclick="Cancel">Cancel</button>
+            <button type="button" class="btn btn-outline-secondary" @onclick="Cancel">@T[CommonText.Cancel]</button>
         </div>
     </div>
 }
@@ -66,67 +66,67 @@ else
     ReadLookupSnapshot lookup = Model.Snapshot;
 
     <div class="xf-page">
-        <h1 class="xf-title">Read a file</h1>
+        <h1 class="xf-title">@T[ReadText.Title]</h1>
 
         @if (snapshot.IsFinished)
         {
             @if (snapshot.State == ReadState.Succeeded)
             {
                 <div class="alert alert-success">
-                    <p class="mb-2">@(snapshot.Name is { } name ? $"Read \"{name}\" successfully." : "Read successfully.")</p>
+                    <p class="mb-2">@T[snapshot.Name is { } name ? UiText.Of(ReadText.SucceededNamed, ("name", name)) : UiText.Of(ReadText.Succeeded)]</p>
                     <button type="button" class="btn btn-outline-secondary" disabled="@snapshot.Saving" @onclick="SaveAsync">
-                        Save&hellip;
+                        @T[ReadText.SaveButton]
                     </button>
                     @if (snapshot.Saved)
                     {
-                        <p class="mt-2 mb-0">Saved.</p>
+                        <p class="mt-2 mb-0">@T[ReadText.Saved]</p>
                     }
                     @if (snapshot.Failure is not null)
                     {
-                        <div class="alert alert-danger mt-2 mb-0">@snapshot.Failure</div>
+                        <div class="alert alert-danger mt-2 mb-0">@T[snapshot.Failure]</div>
                     }
                 </div>
             }
             else if (snapshot.State == ReadState.Failed)
             {
-                <div class="alert alert-danger">@snapshot.Failure</div>
+                <div class="alert alert-danger">@T[snapshot.Failure]</div>
             }
             else
             {
-                <div class="alert alert-secondary">Cancelled. Nothing was saved.</div>
+                <div class="alert alert-secondary">@T[ReadText.CancelledNote]</div>
             }
         }
 
         <section class="xf-card">
             <div class="mb-3">
-                <label for="read-link" class="form-label">Link</label>
+                <label for="read-link" class="form-label">@T[ReadText.LinkLabel]</label>
                 <input id="read-link" class="form-control xf-mono" @bind="Model.Link" @bind:event="oninput" />
             </div>
 
             <button type="button" class="btn btn-outline-primary" disabled="@Model.LookingUp" @onclick="LookUpAsync">
-                Look up
+                @T[ReadText.LookUpButton]
             </button>
         </section>
 
         @if (lookup.Message is not null)
         {
-            <div class="alert alert-warning mt-3">@lookup.Message</div>
+            <div class="alert alert-warning mt-3">@T[lookup.Message]</div>
         }
 
         @if (lookup.Manifest is { } manifest)
         {
             <section class="xf-card">
-                <p class="mb-1">@(manifest.Manifest.Name ?? "(no name)")</p>
-                <p class="mb-1">@manifest.Manifest.Size.ToString("N0") bytes</p>
-                <p class="mb-1">About @DurationText.Of(lookup.ReadDuration!.Value) to read</p>
+                <p class="mb-1">@(manifest.Manifest.Name ?? T[ReadText.NoName])</p>
+                <p class="mb-1">@T[UiText.Of(CommonText.Bytes, ("count", manifest.Manifest.Size))]</p>
+                <p class="mb-1">@T[UiText.Of(ReadText.ReadTime, ("duration", DurationText.Of(lookup.ReadDuration!.Value)))]</p>
                 <p class="mb-1">@manifest.Manifest.Type</p>
-                <p class="mb-1">Written by <span class="xf-mono">@manifest.Writer</span></p>
-                <p class="mb-1">@manifest.Manifest.Blocks block(s)</p>
-                <p class="mb-1">Node: <span class="xf-mono">@lookup.NodeUrl</span></p>
+                <p class="mb-1">@Html(UiText.Of(ReadText.WrittenBy, ("writer", manifest.Writer)), ("writer", "code"))</p>
+                <p class="mb-1">@T[UiText.Of(ReadText.Blocks, ("count", manifest.Manifest.Blocks))]</p>
+                <p class="mb-1">@Html(UiText.Of(ReadText.Node, ("url", lookup.NodeUrl ?? string.Empty)), ("url", "code"))</p>
             </section>
 
             <button type="button" class="btn btn-primary" disabled="@(!lookup.CanRead)" @onclick="StartRead">
-                Read
+                @T[ReadText.ReadButton]
             </button>
         }
     </div>

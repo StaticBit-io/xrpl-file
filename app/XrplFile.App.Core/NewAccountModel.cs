@@ -1,5 +1,6 @@
 using Xrpl.Wallet;
 
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -16,7 +17,7 @@ public sealed class NewAccountModel(IKeyVault vault)
 
     public string Network { get; set; } = "mainnet";
 
-    public string? Message { get; private set; }
+    public UiText? Message { get; private set; }
 
     public bool CanCreate =>
         !string.IsNullOrWhiteSpace(Label) && XrplFileLink.TryNormalizeNetwork(Network, out _);
@@ -31,7 +32,7 @@ public sealed class NewAccountModel(IKeyVault vault)
 
         if (string.IsNullOrWhiteSpace(Label))
         {
-            Message = "Give the account a name, so you can tell it from the others later.";
+            Message = AccountsText.NewNeedsLabel;
             return null;
         }
 
