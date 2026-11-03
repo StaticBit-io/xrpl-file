@@ -53,7 +53,7 @@ public sealed class HistoryModelTests : IDisposable
         model.Refresh();
 
         Assert.NotNull(history.RecoveryNote);
-        Assert.Contains(history.RecoveryNote, model.Message, StringComparison.Ordinal);
+        Assert.Contains(TestText.En(history.RecoveryNote), TestText.En(model.Message), StringComparison.Ordinal);
     }
 
     [Fact]

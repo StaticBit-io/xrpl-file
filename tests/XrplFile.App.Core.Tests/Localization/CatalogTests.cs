@@ -79,7 +79,8 @@ public sealed partial class CatalogTests
 
         foreach ((string key, TextCatalog.Phrase phrase) in catalog.Phrases)
         {
-            string[] names = phrase.Texts.SelectMany(Placeholders).Distinct(StringComparer.Ordinal).ToArray();
+            // A plural phrase is chosen by `count` whether or not any of its forms prints the number ("It stays" / "They stay").
+            string[] names = phrase.Texts.SelectMany(Placeholders).Concat(phrase.Forms is null ? [] : ["count"]).Distinct(StringComparer.Ordinal).ToArray();
             foreach (long count in new long[] { 0, 1, 2, 5, 21 })
             {
                 (string, object)[] values = names.Select(name => (name, (object)(name == "count" ? count : 2L))).ToArray();

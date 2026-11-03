@@ -40,10 +40,10 @@
 @if (!view.IsFinished)
 {
     <div class="xf-page">
-        <h1 class="xf-title">Publishing</h1>
+        <h1 class="xf-title">@T[RunText.Title]</h1>
 
         <section class="xf-card">
-            <p>@view.StageText</p>
+            <p>@T[view.StageText]</p>
             @if (view.ShowsProgress)
             {
                 <div class="progress" role="progressbar" aria-valuenow="@view.Percent" aria-valuemin="0" aria-valuemax="100">
@@ -53,15 +53,15 @@
 
             @if (view.Confirmation is { } confirm)
             {
-                <h2 class="xf-section-title mt-4">Resuming costs</h2>
+                <h2 class="xf-section-title mt-4">@T[RunText.ResumingCosts]</h2>
                 <table class="table xf-kv-table">
                     <tbody>
-                        <tr><th>Time</th><td>@DurationText.Of(confirm.Duration)</td></tr>
-                        <tr><th>Transactions</th><td>@confirm.Transactions.ToString("N0")</td></tr>
+                        <tr><th>@T[EstimateText.RowTime]</th><td>@T[DurationText.Of(confirm.Duration)]</td></tr>
+                        <tr><th>@T[EstimateText.RowTransactions]</th><td>@T.Number(confirm.Transactions)</td></tr>
                         @foreach (AccountCost account in confirm.Accounts)
                         {
-                            <tr><th>@T[account.NeedsLabel]</th><td>@XrpAmount.Format(account.RequiredDrops)</td></tr>
-                            <tr><th>@T[account.WorstCaseFeesLabel]</th><td>@XrpAmount.Format(account.WorstCaseFeeDrops)</td></tr>
+                            <tr><th>@T[account.NeedsLabel]</th><td>@T.Xrp(account.RequiredDrops)</td></tr>
+                            <tr><th>@T[account.WorstCaseFeesLabel]</th><td>@T.Xrp(account.WorstCaseFeeDrops)</td></tr>
                         }
                     </tbody>
                 </table>
@@ -70,8 +70,8 @@
                     <label class="form-check-label" for="xf-resume-understood">@T[EstimateText.ConfirmationLabel]</label>
                 </div>
                 <div class="xf-actionbar">
-                    <button type="button" class="btn btn-outline-secondary" @onclick="() => Model.DeclineResume()">Cancel</button>
-                    <button type="button" class="btn btn-primary" disabled="@(!_understood)" @onclick="() => Model.ConfirmResume()">Continue</button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => Model.DeclineResume()">@T[CommonText.Cancel]</button>
+                    <button type="button" class="btn btn-primary" disabled="@(!_understood)" @onclick="() => Model.ConfirmResume()">@T[RunText.ContinueButton]</button>
                 </div>
             }
         </section>
@@ -80,7 +80,7 @@
         {
             <div class="xf-actionbar">
                 <button type="button" class="btn btn-outline-secondary" disabled="@(!view.CanCancel)" @onclick="Cancel">
-                    Cancel
+                    @T[CommonText.Cancel]
                 </button>
             </div>
         }
@@ -88,49 +88,49 @@
 }
 else
 {
-    <section class="xf-run-outcome" aria-label="Last publication">
-        <p class="xf-muted mb-2">@view.StageText</p>
+    <section class="xf-run-outcome" aria-label="@T[RunText.OutcomeLabel]">
+        <p class="xf-muted mb-2">@T[view.StageText]</p>
 
         @if (view.Link is { } link)
         {
             <div class="alert alert-success">
-                <p class="mb-2">Published.</p>
+                <p class="mb-2">@T[RunText.Published]</p>
                 <code class="d-block p-2 bg-body-tertiary text-break user-select-all xf-mono xf-link">@link</code>
-                <button type="button" class="btn btn-outline-secondary mt-2" @onclick="CopyLinkAsync">Copy link</button>
+                <button type="button" class="btn btn-outline-secondary mt-2" @onclick="CopyLinkAsync">@T[CommonText.CopyLinkButton]</button>
             </div>
         }
         else if (view.Failure is { } failure)
         {
-            <div class="alert alert-danger">@failure</div>
+            <div class="alert alert-danger">@T[failure]</div>
         }
         else if (view.WasCancelled)
         {
-            <div class="alert alert-secondary">Cancelled. Nothing further was submitted.</div>
+            <div class="alert alert-secondary">@T[RunText.CancelledNote]</div>
         }
 
         @if (_resumeMessage is { } resumeMessage)
         {
-            <div class="alert alert-warning">@resumeMessage</div>
+            <div class="alert alert-warning">@T[resumeMessage]</div>
         }
 
         @if (view.HistoryNote is { } note)
         {
-            <div class="alert alert-info">@note</div>
+            <div class="alert alert-info">@T[note]</div>
         }
 
         @if (view.TicketNote is { } ticketNote)
         {
-            <div class="alert @(view.TicketsLocked ? "alert-warning" : "alert-info")">@ticketNote</div>
+            <div class="alert @(view.TicketsLocked ? "alert-warning" : "alert-info")">@T[ticketNote]</div>
         }
 
         @if (view.StateNote is { } stateNote)
         {
-            <div class="alert alert-info">@stateNote</div>
+            <div class="alert alert-info">@T[stateNote]</div>
         }
 
         @if (view.CanResume)
         {
-            <button type="button" class="btn btn-outline-primary mb-3" disabled="@_resuming" @onclick="() => ResumeAsync(view.StatePath!)">Resume</button>
+            <button type="button" class="btn btn-outline-primary mb-3" disabled="@_resuming" @onclick="() => ResumeAsync(view.StatePath!)">@T[RunText.ResumeButton]</button>
         }
     </section>
 }
@@ -145,7 +145,7 @@ else
 
     /// <summary>The resume's checkbox; cleared whenever no confirmation is shown, so the next one starts unticked.</summary>
     private bool _understood;
-    private string? _resumeMessage;
+    private UiText? _resumeMessage;
 
     private async Task ResumeAsync(string statePath)
     {

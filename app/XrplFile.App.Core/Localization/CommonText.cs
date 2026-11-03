@@ -18,6 +18,7 @@ public static class CommonText
 
     public static readonly TextId Cancel = Id();
     public static readonly TextId Done = Id();
+    public static readonly TextId CopyLinkButton = Id();
 
     public static readonly TextId FieldLabel = Id();
     public static readonly TextId FieldNetwork = Id();

@@ -83,7 +83,7 @@ public sealed class PublicationRunStandaloneTests : VaultHarness
         await run.Completion.WaitAsync(token);
 
         RunSnapshot snapshot = run.Snapshot;
-        Assert.True(snapshot.State == PublicationRunState.Succeeded, snapshot.Failure);
+        Assert.True(snapshot.State == PublicationRunState.Succeeded, TestText.En(snapshot.Failure));
 
         // One SDK request timeout (40 s) to learn of the silence, then the rest of a ~10 s run.
         Assert.True(second.Elapsed < TimeSpan.FromSeconds(100), $"the second publication took {second.Elapsed}");

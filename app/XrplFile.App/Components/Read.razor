@@ -48,7 +48,7 @@
             <p>@snapshot.BlocksDone of @snapshot.BlocksTotal blocks</p>
             <progress class="w-100" value="@snapshot.BlocksDone" max="@snapshot.BlocksTotal"></progress>
 
-            <p class="mt-3">@snapshot.BytesDone.ToString("N0") of @snapshot.BytesTotal.ToString("N0") bytes</p>
+            <p class="mt-3">@T.Number(snapshot.BytesDone) of @T.Number(snapshot.BytesTotal) bytes</p>
             <progress class="w-100" value="@snapshot.BytesDone" max="@snapshot.BytesTotal"></progress>
         </section>
 
@@ -117,8 +117,8 @@ else
         {
             <section class="xf-card">
                 <p class="mb-1">@(manifest.Manifest.Name ?? "(no name)")</p>
-                <p class="mb-1">@manifest.Manifest.Size.ToString("N0") bytes</p>
-                <p class="mb-1">About @DurationText.Of(lookup.ReadDuration!.Value) to read</p>
+                <p class="mb-1">@T.Number(manifest.Manifest.Size) bytes</p>
+                <p class="mb-1">About @T[DurationText.Of(lookup.ReadDuration!.Value)] to read</p>
                 <p class="mb-1">@manifest.Manifest.Type</p>
                 <p class="mb-1">Written by <span class="xf-mono">@manifest.Writer</span></p>
                 <p class="mb-1">@manifest.Manifest.Blocks block(s)</p>

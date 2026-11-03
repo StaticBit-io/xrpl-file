@@ -16,9 +16,9 @@ public sealed record UnfinishedRow(
     string? Type,
     string? Name,
     long Size,
-    string? Stage,
+    UiText? Stage,
     int Chunks,
-    string? Unreadable)
+    UiText? Unreadable)
 {
     /// <summary>The Merkle root the run recorded at its start, which a resumed file must reproduce.</summary>
     public string? Root { get; init; }
@@ -39,7 +39,7 @@ public sealed record UnfinishedRow(
     public string? Strategy { get; init; }
 
     /// <summary>"Batch, paid by &lt;label&gt;", "Tickets" or "Sequence" (spec 6.4).</summary>
-    public string? Method { get; init; }
+    public UiText? Method { get; init; }
 }
 
 /// <summary>
@@ -48,16 +48,14 @@ public sealed record UnfinishedRow(
 public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePickerService picker, IKeyVault? vault = null)
 {
     /// <summary>What the list adds when a run in it uses tickets (spec 6.2).</summary>
-    public const string TicketNote =
-        "Deleting a run leaves the tickets it reserved on this account, each holding an owner reserve, until a "
-        + "later publication from this account spends them or the account is closed.";
+    public static UiText TicketNote => UnfinishedText.TicketNote;
 
     /// <summary>The vault labels the last <see cref="RefreshAsync"/> read, so a synchronous <see cref="Refresh"/> keeps naming payers by them.</summary>
     private Dictionary<string, string> _labels = new(StringComparer.Ordinal);
 
     public IReadOnlyList<UnfinishedRow> Rows { get; private set; } = [];
 
-    public string? Message { get; private set; }
+    public UiText? Message { get; private set; }
 
     /// <summary>The run waiting for a payer because its payer key left the vault (spec B18), or null.</summary>
     public UnfinishedRow? NeedsPayer { get; private set; }
@@ -89,7 +87,7 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
     public void Refresh()
     {
         UnfinishedRow? waiting = NeedsPayer;
-        string? waitingMessage = Message;
+        UiText? waitingMessage = Message;
 
         Message = null;
         NeedsPayer = null;
@@ -102,7 +100,8 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
                 {
                     return new UnfinishedRow(
                         unfinished.Path, null, null, null, null, null, 0, null, 0,
-                        unfinished.Unreadable ?? "This run's state file could not be read.");
+                        // The library's own reason is a developer-facing sentence, shown as it is.
+                        unfinished.Unreadable is { } reason ? UiText.Of(UnfinishedText.RowReason, ("reason", reason)) : UnfinishedText.RowUnreadable);
                 }
 
                 UnfinishedRow row = new(
@@ -152,7 +151,7 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
     /// known), otherwise "Tickets" or "Sequence" by the recorded strategy, or by the size when the state
     /// predates strategies. Null for an unreadable row.
     /// </summary>
-    public static string? MethodOf(UnfinishedRow row, IReadOnlyDictionary<string, string> labels)
+    public static UiText? MethodOf(UnfinishedRow row, IReadOnlyDictionary<string, string> labels)
     {
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(labels);
@@ -161,12 +160,14 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
 
         if (row.IsBatch)
         {
-            string payer = row.PayerKeyReference is { } reference && labels.TryGetValue(reference, out string? label) ? label : row.Payer ?? "an unknown account";
-            return $"Batch, paid by {payer}";
+            object payer = row.PayerKeyReference is { } reference && labels.TryGetValue(reference, out string? label)
+                ? label
+                : row.Payer ?? (object)UnfinishedText.UnknownPayer;
+            return UiText.Of(UnfinishedText.MethodBatch, ("payer", payer));
         }
 
         bool tickets = row.Strategy is { } strategy ? strategy == PublicationState.TicketStrategyName : PublishPolicy.UsesTickets(row.Size);
-        return tickets ? "Tickets" : "Sequence";
+        return tickets ? UnfinishedText.MethodTickets : UnfinishedText.MethodSequence;
     }
 
     /// <summary>
@@ -193,7 +194,7 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
 
         if (row is null)
         {
-            Message = "This run is no longer listed under unfinished runs, so there is nothing to resume.";
+            Message = UnfinishedText.NotListed;
             return false;
         }
 
@@ -216,7 +217,7 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
 
         if (row.Unreadable is not null)
         {
-            Message = "This run's state file cannot be read, so there is nothing to resume from. It can be deleted.";
+            Message = UnfinishedText.NothingToResumeFrom;
             return false;
         }
 
@@ -231,7 +232,7 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
             {
                 // Not KeysAsync, which reads a failure as an empty vault: a vault that cannot be
                 // listed (locked, above all) says nothing about whether the payer key is still in it.
-                Message = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
+                Message = VaultErrorMessages.For(ex.Error);
                 return false;
             }
 
@@ -244,7 +245,7 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
                     !string.Equals(key.Address, row.Writer, StringComparison.Ordinal)
                     && XrplFileLink.TryNormalizeNetwork(key.Network, out string? other)
                     && string.Equals(other, network, StringComparison.Ordinal))];
-                Message = "The key that paid for this run is no longer in the vault. Choose another payer on the same network to resume it.";
+                Message = UnfinishedText.PayerKeyGone;
                 return false;
             }
         }
@@ -263,7 +264,7 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
 
         if (payer is null)
         {
-            Message = "Choose a payer on this run's network.";
+            Message = UnfinishedText.ChoosePayer;
             return false;
         }
 
@@ -292,21 +293,21 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
     /// cannot be opened, its size changed, or the last resume found its bytes changed. Nothing is
     /// read: the run opens the file and checks its root as it hashes it (spec S7).
     /// </summary>
-    private string? RecordedSourceProblem(UnfinishedRow row, string source)
+    private UiText? RecordedSourceProblem(UnfinishedRow row, string source)
     {
-        if (!File.Exists(source)) return $"The file this run was publishing is no longer at {source}. Choose it again.";
+        if (!File.Exists(source)) return UiText.Of(UnfinishedText.SourceGone, ("source", source));
 
-        if (run.HasRejectedSource(row.Path)) return $"The file at {source} has changed since the run started. Choose the original file.";
+        if (run.HasRejectedSource(row.Path)) return UiText.Of(RunText.ErrorSourceChanged, ("path", source));
 
         try
         {
-            if (new FileInfo(source).Length != row.Size) return $"The file at {source} has changed since the run started. Choose the original file.";
+            if (new FileInfo(source).Length != row.Size) return UiText.Of(RunText.ErrorSourceChanged, ("path", source));
 
             using Microsoft.Win32.SafeHandles.SafeFileHandle handle = File.OpenHandle(source, FileMode.Open, FileAccess.Read, FileShare.Read);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return $"The file at {source} could not be read. Choose it again.";
+            return UiText.Of(RunText.ErrorSourceUnreadable, ("path", source));
         }
 
         return null;
@@ -330,7 +331,7 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                Message = "That file could not be read.";
+                Message = UnfinishedText.FileUnreadable;
                 return false;
             }
 
@@ -338,9 +339,7 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
             // from a run that starts and refuses. The run checks the root, which is what binds.
             if (size != row.Size)
             {
-                Message =
-                    $"That file is {size:N0} bytes and this run was publishing {row.Size:N0}. "
-                    + "Resuming needs the same file the run started with.";
+                Message = UiText.Of(UnfinishedText.FileSizeDiffers, ("count", size), ("expected", row.Size));
                 return false;
             }
 
@@ -368,7 +367,7 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
 
         if (!run.Resume(row.Path, request))
         {
-            Message = "A publication is already running.";
+            Message = UnfinishedText.AlreadyRunning;
             return false;
         }
 
@@ -383,7 +382,7 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
     {
         ArgumentNullException.ThrowIfNull(row);
 
-        string? failure = null;
+        UiText? failure = null;
 
         try
         {
@@ -391,7 +390,7 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            failure = "That state file could not be deleted.";
+            failure = UnfinishedText.DeleteFailed;
         }
 
         // Refresh() clears Message on its own first line -- it has to run either way, since a

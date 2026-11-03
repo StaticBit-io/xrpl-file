@@ -1,4 +1,5 @@
 using XrplFile.App.Core;
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App;
@@ -24,8 +25,9 @@ public partial class App : Application
 	private readonly VaultAutoLock _autoLock;
 	private readonly PublicationRun _run;
 	private readonly ReadRun _read;
+	private readonly Localizer _localizer;
 
-	public App(IKeyVault vault, VaultAutoLock autoLock, PublicationRun run, ReadRun read)
+	public App(IKeyVault vault, VaultAutoLock autoLock, PublicationRun run, ReadRun read, Localizer localizer)
 	{
 		StartupLog.Write("App: constructing");
 		InitializeComponent();
@@ -33,6 +35,7 @@ public partial class App : Application
 		_autoLock = autoLock;
 		_run = run;
 		_read = read;
+		_localizer = localizer;
 	}
 
 	protected override Window CreateWindow(IActivationState? activationState)
@@ -113,11 +116,12 @@ public partial class App : Application
 					confirming = true;
 					try
 					{
+						TextCatalog text = _localizer.Text;
 						bool confirmed = window.Page is null || await window.Page.DisplayAlertAsync(
-							"Publication in progress",
-							RunModel.CloseConfirmation(snapshot),
-							"Close",
-							"Cancel");
+							text[RunText.CloseTitle],
+							text[RunModel.CloseConfirmation(snapshot)],
+							text[RunText.CloseButton],
+							text[CommonText.Cancel]);
 
 						if (!confirmed) return;
 

@@ -410,7 +410,7 @@ public sealed class ResumeConfirmationTests : VaultHarness
         Assert.Equal(PublicationRunState.Succeeded, snapshot.State);
         Assert.Equal(TimeSpan.FromSeconds(600), snapshot.WorkedBefore);
         Assert.Equal(TimeSpan.FromSeconds(180), snapshot.WaitedForPerson);
-        Assert.Equal("Finished in 15:00", RunModel.StageTextOf(snapshot, time.GetUtcNow(), rate: null));
+        Assert.Equal("Finished in 15:00", TestText.En(RunModel.StageTextOf(snapshot, time.GetUtcNow(), rate: null)));
     }
 
     [Fact]

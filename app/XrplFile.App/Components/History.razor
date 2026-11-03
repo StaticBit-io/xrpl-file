@@ -22,31 +22,28 @@
 
 <div class="xf-page xf-page-wide">
     <div class="xf-page-head">
-        <h1 class="xf-title">Published files</h1>
+        <h1 class="xf-title">@T[HistoryText.Title]</h1>
         @if (Model.Records.Count > 0)
         {
             <div class="xf-page-actions">
-                <button type="button" class="btn btn-outline-danger" @onclick="Clear">Clear list</button>
+                <button type="button" class="btn btn-outline-danger" @onclick="Clear">@T[HistoryText.ClearButton]</button>
             </div>
         }
     </div>
 
     @if (Model.Records.Count > 0)
     {
-        <p class="xf-lede">
-            Forgetting or clearing only changes this list on this device. Every file is already in the
-            ledger, and any link you kept elsewhere still works.
-        </p>
+        <p class="xf-lede">@T[HistoryText.Lede]</p>
     }
 
     @if (Model.Message is not null)
     {
-        <div class="alert alert-warning">@Model.Message</div>
+        <div class="alert alert-warning">@T[Model.Message]</div>
     }
 
     @if (Model.Records.Count == 0)
     {
-        <p class="xf-empty">Nothing published yet. Files you publish from this device appear here with their links.</p>
+        <p class="xf-empty">@T[HistoryText.Empty]</p>
     }
     else
     {
@@ -59,7 +56,7 @@
                             <span class="xf-file-name">@record.Name</span>
                             @if (record.Payer is { } payer)
                             {
-                                <small class="xf-muted">Paid by <span class="xf-mono">@payer</span></small>
+                                <small class="xf-muted">@Html(UiText.Of(HistoryText.PaidBy, ("payer", payer)), ("payer", "code"))</small>
                             }
                         </div>
                         <div class="xf-record-net">
@@ -68,13 +65,13 @@
                         <code class="xf-mono xf-record-link" title="@record.Link">@record.Link</code>
                         <div class="xf-record-actions">
                             <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => CopyAsync(record)">
-                                Copy link
+                                @T[CommonText.CopyLinkButton]
                             </button>
                             <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => Read(record)">
-                                Open
+                                @T[HistoryText.OpenButton]
                             </button>
                             <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => Forget(record)">
-                                Forget
+                                @T[HistoryText.ForgetButton]
                             </button>
                         </div>
                     </li>

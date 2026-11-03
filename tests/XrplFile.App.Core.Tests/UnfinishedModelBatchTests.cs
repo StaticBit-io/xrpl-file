@@ -1,4 +1,5 @@
 using Xrpl.Wallet;
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 using XrplFile.Tests;
 using Xunit;
@@ -62,7 +63,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
     {
         (UnfinishedModel model, _, _, _, _) = await BatchRunAsync(new byte[3000]);
 
-        Assert.Equal("Batch, paid by Payer key", Assert.Single(model.Rows).Method);
+        Assert.Equal("Batch, paid by Payer key", TestText.En(Assert.Single(model.Rows).Method));
     }
 
     [Theory]
@@ -72,15 +73,15 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
     [InlineData(null, 500_000L, "Tickets")]
     public void A_one_account_run_is_listed_by_its_recorded_or_implied_method(string? strategy, long size, string expected)
     {
-        UnfinishedRow row = new("p", "testnet", "rW", "k", "t", "n", size, "Writing the file", 3, null) { Strategy = strategy };
+        UnfinishedRow row = new("p", "testnet", "rW", "k", "t", "n", size, RunText.StageChunks, 3, null) { Strategy = strategy };
 
-        Assert.Equal(expected, UnfinishedModel.MethodOf(row, new Dictionary<string, string>()));
+        Assert.Equal(expected, TestText.En(UnfinishedModel.MethodOf(row, new Dictionary<string, string>())));
     }
 
     [Fact]
     public void Batch_runs_and_recorded_sequence_runs_never_show_the_ticket_note()
     {
-        UnfinishedRow big = new("p", "testnet", "rW", "k", "t", "n", 3_145_728, "Writing the file", 3146, null);
+        UnfinishedRow big = new("p", "testnet", "rW", "k", "t", "n", 3_145_728, RunText.StageChunks, 3146, null);
 
         Assert.False(UnfinishedModel.ShowsTicketNoteFor([big with { IsBatch = true }]));
         Assert.False(UnfinishedModel.ShowsTicketNoteFor([big with { Strategy = PublicationState.SequenceStrategyName }]));
@@ -113,7 +114,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
 
         // The run built its signers from the request: the writer's, then the payer's the state names.
         Assert.Equal([recorded.Writer, recorded.Payer!], signers);
-        Assert.NotEqual(MissingPayer, _run.Snapshot.Failure);
+        Assert.NotEqual(MissingPayer, TestText.En(_run.Snapshot.Failure));
     }
 
     [Fact]
@@ -126,7 +127,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
 
         Assert.False(await model.ResumeByPathAsync(statePath, Token));
         Assert.NotNull(model.NeedsPayer);
-        string? reason = model.Message;
+        string? reason = TestText.En(model.Message);
         Assert.NotNull(reason);
 
         // The Unfinished list refreshes when the person reaches it: the chooser is still there.
@@ -134,7 +135,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
 
         Assert.Equal(statePath, model.NeedsPayer?.Path);
         Assert.Equal(["new payer"], model.PayerChoices.Select(key => key.Label).ToArray());
-        Assert.Equal(reason, model.Message);
+        Assert.Equal(reason, TestText.En(model.Message));
 
         // Once its state file is gone there is nothing to choose a payer for.
         model.Delete(model.NeedsPayer!);
@@ -155,7 +156,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
 
         Assert.Null(model.NeedsPayer);
         Assert.Empty(model.PayerChoices);
-        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), model.Message);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), TestText.En(model.Message));
     }
 
     [Fact]
@@ -168,7 +169,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
 
         model.Delete(model.Rows[0]);
 
-        Assert.Equal("Batch, paid by Payer key", Assert.Single(model.Rows).Method);
+        Assert.Equal("Batch, paid by Payer key", TestText.En(Assert.Single(model.Rows).Method));
     }
 
     [Theory]
@@ -189,7 +190,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
             what == "moved"
                 ? $"The file this run was publishing is no longer at {filePath}. Choose it again."
                 : $"The file at {filePath} has changed since the run started. Choose the original file.",
-            model.Message);
+            TestText.En(model.Message));
     }
 
     [Fact]
@@ -201,7 +202,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
 
         Assert.False(await model.ResumeAsync(model.Rows[0], Token));
 
-        Assert.Equal($"The file at {filePath} could not be read. Choose it again.", model.Message);
+        Assert.Equal($"The file at {filePath} could not be read. Choose it again.", TestText.En(model.Message));
         Assert.False(_run!.HasRejectedSource(statePath));
     }
 
@@ -216,7 +217,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
         await _run!.Completion;
 
         Assert.Equal(PublicationRunState.Failed, _run.Snapshot.State);
-        Assert.Equal($"The file at {filePath} has changed since the run started. Choose the original file.", _run.Snapshot.Failure);
+        Assert.Equal($"The file at {filePath} has changed since the run started. Choose the original file.", TestText.En(_run.Snapshot.Failure));
         Assert.True(_run.HasRejectedSource(statePath));
 
         _picker.PickThrows = new InvalidOperationException("the picker was asked");
@@ -224,7 +225,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
         await model.RefreshAsync(Token);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => model.ResumeAsync(model.Rows[0], Token));
-        Assert.Equal($"The file at {filePath} has changed since the run started. Choose the original file.", model.Message);
+        Assert.Equal($"The file at {filePath} has changed since the run started. Choose the original file.", TestText.En(model.Message));
     }
 
     [Fact]
@@ -240,7 +241,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
         await _run!.Completion;
 
         Assert.Equal(PublicationRunState.Failed, _run.Snapshot.State);
-        Assert.Equal("That file is not the one this run was publishing.", _run.Snapshot.Failure);
+        Assert.Equal("That file is not the one this run was publishing.", TestText.En(_run.Snapshot.Failure));
         Assert.True(_run.HasRejectedSource(statePath));
     }
 
@@ -257,7 +258,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
 
         Assert.Equal(
             "That file is 2,000 bytes and this run was publishing 3,000. Resuming needs the same file the run started with.",
-            model.Message);
+            TestText.En(model.Message));
         Assert.Equal(PublicationRunState.Idle, _run!.Snapshot.State);
     }
 
@@ -285,6 +286,6 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
         await _run.Completion;
 
         Assert.Equal([recorded.Writer, replacement.ClassicAddress], signers);
-        Assert.NotEqual(MissingPayer, _run.Snapshot.Failure);
+        Assert.NotEqual(MissingPayer, TestText.En(_run.Snapshot.Failure));
     }
 }
