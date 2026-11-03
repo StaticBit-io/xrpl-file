@@ -3,7 +3,10 @@
 // the link with a copy button, and the note on how it works. The page's name, size and Download
 // come from the element's `load` event and `save()`, never from a second read of the ledger.
 import { initCheckLink } from './check-link.mjs';
+import { mountCloud as mountPointCloud } from './cloud.mjs';
 import { initCopyButton } from './copy-button.mjs';
+import { startElementRead } from './element-read.mjs';
+import { fileCloudStrings } from './home-strings.mjs';
 import { activeLang, homePath, htmlLang } from './languages.mjs';
 import { getLang } from './prefs.mjs';
 import { linkFromPath } from './route.mjs';
@@ -31,6 +34,9 @@ function saveErrorKey(error) {
   if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') return 'saveRefused';
   return SAVE_ERROR_KEYS[error?.code] ?? 'saveFailed';
 }
+
+// How long the canvas fades out; the same figure as the transition in site.css.
+const CLOUD_FADE_MS = 250;
 
 function normalise(lang) {
   return activeLang(lang);
@@ -82,9 +88,16 @@ function setTitle(doc, text) {
  * Wires the file page.
  * @param {Document} doc
  * @param {{ pathname: string, search?: string, hash?: string }} location
- * @param {{ lang?: string, history?: Pick<History, 'replaceState'> }} [options]
+ * @param {{ lang?: string, history?: Pick<History, 'replaceState'>, mountCloud?: typeof mountPointCloud,
+ *   reducedMotion?: boolean }} [options] `mountCloud` and `reducedMotion` are seams for tests; the
+ *   defaults are the point cloud and the browser's own setting.
  */
-export function initFilePage(doc, location, { lang: initialLang, history = globalThis.history } = {}) {
+export function initFilePage(doc, location, {
+  lang: initialLang,
+  history = globalThis.history,
+  mountCloud = mountPointCloud,
+  reducedMotion = doc.defaultView?.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
+} = {}) {
   let lang = normalise(initialLang);
   const route = linkFromPath(location.pathname);
   const filePage = doc.getElementById('file-page');
@@ -119,7 +132,9 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
   filePage.hidden = false;
   invalidPage.hidden = true;
 
-  const view = doc.getElementById('file-view');
+  const canvas = doc.getElementById('file-cloud');
+  const cloudCaption = doc.getElementById('file-cloud-caption');
+  const cloudNote = doc.getElementById('file-cloud-note');
   const button = doc.getElementById('file-download');
   const status = doc.getElementById('file-status');
   const linkText = doc.getElementById('file-link');
@@ -138,7 +153,42 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
   // The element reads the page's language when it connects and follows its own `lang` after that. This page
   // switches language in place, so <html lang> changes under an element that is already there: it is told.
   element.setAttribute('lang', htmlLang(lang));
-  view.append(element);
+  // The cloud is the loader: the element keeps its box, which the canvas fills, and draws nothing in it.
+  element.setAttribute('loader', 'off');
+
+  // The cloud listens to the element, so it is mounted before the element is in the page and cannot
+  // miss an event; it uses the network of the link, which is known before the file is read.
+  const network = route.link.split('/')[2];
+  const cloud = mountCloud(
+    canvas,
+    {
+      caption: cloudCaption,
+      note: cloudNote,
+      turn: false,
+      swayFor: 5000,
+      fast: true,
+      strings: fileCloudStrings(lang, network),
+    },
+    { startRead: startElementRead, element },
+  );
+  let cloudEnded = false;
+  const endCloud = () => {
+    if (cloudEnded) return;
+    cloudEnded = true;
+    canvas.classList.add('is-gone');
+    const remove = () => {
+      // Hidden, not just covered: a transparent picture shows whatever is under the element.
+      canvas.hidden = true;
+      cloudCaption.textContent = '';
+      cloudCaption.hidden = true;
+      cloudNote.textContent = '';
+      cloudNote.hidden = true;
+      cloud.destroy();
+    };
+    if (reducedMotion) remove();
+    else setTimeout(remove, CLOUD_FADE_MS);
+  };
+  canvas.parentElement.append(element);
 
   linkText.textContent = route.link;
   initCopyButton({
@@ -175,6 +225,7 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
   };
 
   element.addEventListener('load', (event) => {
+    endCloud();
     detail = event.detail ?? {};
     // A picture with transparent parts shows on the page itself. Until it loads, and for any other
     // type, the box stays: the loader, a message, a text file or a video need a ground of their own.
@@ -183,8 +234,10 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
     render();
     syncButton();
   });
-  // There is no `error` listener on purpose: the element also reports a video its browser cannot
-  // play, while the verified file can still be saved. A save the element refuses is worded below.
+  // `error` only ends the cloud: the element also reports a video its browser cannot play, while the
+  // verified file can still be saved, so it neither disables Download nor words a message here. A save
+  // the element refuses is worded below.
+  element.addEventListener('error', endCloud);
 
   button.addEventListener('click', async () => {
     if (button.disabled) return;
@@ -214,6 +267,7 @@ export function initFilePage(doc, location, { lang: initialLang, history = globa
   doc.addEventListener('xf-langchange', (event) => {
     lang = normalise(event.detail?.lang);
     element.setAttribute('lang', htmlLang(lang));
+    if (!cloudEnded) cloud.setStrings(fileCloudStrings(lang, network));
     render();
   });
   return { view: 'file', element };

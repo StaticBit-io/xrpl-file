@@ -7,6 +7,8 @@ const { initFilePage, initNotFoundPage } = await import('../src/js/file-page.mjs
 const { t, formatSize, networkName } = await import('../src/js/strings.mjs');
 const { ACTIVE_LANGS: LANGS, homePath, htmlLang, localeOf } = await import('../src/js/languages.mjs');
 const strings = await import('../src/js/strings.mjs');
+const { startElementRead } = await import('../src/js/element-read.mjs');
+const { fileCloudStrings } = await import('../src/js/home-strings.mjs');
 
 const HASH = '32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59';
 const LINK = `xrpl-file://testnet/${HASH}`;
@@ -24,6 +26,9 @@ class FakeNode {
     this.value = '';
     this.children = [];
     this.focused = false;
+    this.parentElement = null;
+    this.classes = new Set();
+    this.classList = { add: (name) => this.classes.add(name), contains: (name) => this.classes.has(name) };
   }
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.has(name) ? this.attributes.get(name) : null; }
@@ -59,9 +64,15 @@ function fakeDocument({ theme = 'dark' } = {}) {
   const ids = [
     'file-page', 'invalid-page', 'file-view', 'file-download', 'file-status', 'file-title', 'file-details',
     'file-size', 'file-size-row', 'file-network', 'file-link', 'file-copy', 'file-copy-status',
-    'check-link', 'check-link-input', 'check-link-error',
+    'check-link', 'check-link-input', 'check-link-error', 'file-cloud', 'file-cloud-caption', 'file-cloud-note',
   ];
   const nodes = Object.fromEntries(ids.map((id) => [id, new FakeNode(id)]));
+  // The canvas sits in the stage, which is where the page puts the element.
+  const stage = new FakeNode();
+  stage.append(nodes['file-cloud']);
+  nodes['file-cloud'].parentElement = stage;
+  nodes['file-view'].append(stage);
+  nodes['file-cloud-note'].hidden = true;
   nodes['check-link-error'].id = 'check-link-error';
   const heading = Object.assign(new FakeNode(), { dataset: { s: 'howTitle' } });
   const labelled = Object.assign(new FakeNode(), { dataset: { sLabel: 'copyLabel' } });
@@ -73,6 +84,7 @@ function fakeDocument({ theme = 'dark' } = {}) {
   const listeners = new Map();
   const doc = {
     nodes,
+    stage,
     heading,
     labelled,
     home,
@@ -102,10 +114,36 @@ function fakeHistory() {
   return { calls, replaceState: (...args) => calls.push(args) };
 }
 
-function open(pathname, { lang = 'en', search = '', hash = '', doc = fakeDocument() } = {}) {
+/** Stands in for mountCloud, which needs a real canvas: records how it was called and what became of it. */
+function fakeCloud(doc) {
+  const cloud = {
+    mounts: [],
+    destroyed: 0,
+    strings: [],
+    mount(canvas, options, env) {
+      cloud.mounts.push({
+        canvas,
+        options,
+        env,
+        elementAppended: doc.stage.children.includes(env.element),
+        loader: env.element.getAttribute('loader'),
+      });
+      return {
+        done: Promise.resolve(),
+        phase: 'reading',
+        destroy: () => { cloud.destroyed += 1; },
+        setStrings: (strings) => cloud.strings.push(strings),
+      };
+    },
+  };
+  return cloud;
+}
+
+function open(pathname, { lang = 'en', search = '', hash = '', doc = fakeDocument(), reducedMotion = true } = {}) {
   const history = fakeHistory();
-  const page = initFilePage(doc, { pathname, search, hash }, { lang, history });
-  return { doc, history, page };
+  const cloud = fakeCloud(doc);
+  const page = initFilePage(doc, { pathname, search, hash }, { lang, history, mountCloud: cloud.mount, reducedMotion });
+  return { doc, history, page, cloud };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 80));
@@ -172,7 +210,7 @@ test('the page renders the element with the link, no caption and the page theme'
   assert.equal(doc.file.getAttribute('src'), LINK);
   assert.equal(doc.file.getAttribute('caption'), 'off');
   assert.equal(doc.file.getAttribute('theme'), 'dark');
-  assert.deepEqual(doc.nodes['file-view'].children, [doc.file]);
+  assert.deepEqual(doc.stage.children, [doc.nodes['file-cloud'], doc.file], 'the element stands above the canvas');
   assert.equal(doc.nodes['file-page'].hidden, false);
   assert.equal(doc.nodes['invalid-page'].hidden, true);
   assert.equal(doc.nodes['file-link'].textContent, LINK);
@@ -381,7 +419,7 @@ test('an invalid path shows "Check a link" with an error and no file', async () 
   assert.deepEqual(history.calls, []);
   assert.equal(doc.nodes['file-page'].hidden, true);
   assert.equal(doc.nodes['invalid-page'].hidden, false);
-  assert.deepEqual(doc.nodes['file-view'].children, [], 'no element is created');
+  assert.deepEqual(doc.stage.children, [doc.nodes['file-cloud']], 'no element is created');
   assert.equal(doc.nodes['check-link-input'].value, 'xrpl-file://testnet/xyz');
   await settle();
   assert.equal(doc.nodes['check-link-error'].textContent, t('checkInvalid', 'en'));
@@ -438,7 +476,7 @@ test('switching language keeps the element, the loaded details and the Download 
   const { doc } = open(CANONICAL, { lang: 'ru' });
   doc.file.load(DETAIL);
   doc.switchLanguage('de');
-  assert.deepEqual(doc.nodes['file-view'].children, [doc.file], 'one element, not re-created');
+  assert.deepEqual(doc.stage.children, [doc.nodes['file-cloud'], doc.file], 'one element, not re-created');
   assert.equal(doc.nodes['file-download'].disabled, false);
   assert.equal(doc.file.getAttribute('src'), LINK);
 });
@@ -458,6 +496,107 @@ test('a shown save result is re-worded in the new language, an error stays an er
   doc.switchLanguage('ru');
   assert.equal(doc.nodes['file-status'].textContent, t('saveNotVerified', 'ru'));
   assert.equal(doc.nodes['file-status'].dataset.state, 'error');
+});
+
+test('the element gets loader="off"', () => {
+  const { doc } = open(CANONICAL);
+  assert.equal(doc.file.getAttribute('loader'), 'off', 'the cloud is the loader, the element shows only its bare box');
+});
+
+test('the cloud is mounted before the element reads', () => {
+  const { doc, cloud } = open(CANONICAL);
+  assert.equal(cloud.mounts.length, 1);
+  const [mount] = cloud.mounts;
+  assert.equal(mount.elementAppended, false, 'no event can be missed: the element is not in the page yet');
+  assert.equal(mount.loader, 'off');
+  assert.equal(mount.canvas, doc.nodes['file-cloud']);
+  assert.equal(mount.env.element, doc.file);
+  assert.equal(mount.env.startRead, startElementRead);
+  assert.equal(mount.options.caption, doc.nodes['file-cloud-caption']);
+  assert.equal(mount.options.note, doc.nodes['file-cloud-note']);
+  assert.equal(mount.options.turn, false);
+  assert.equal(mount.options.swayFor, 5000);
+  assert.equal(mount.options.fast, true);
+  assert.equal(mount.options.callouts, undefined, 'no callouts and no card on this page');
+  assert.equal(mount.options.card, undefined);
+  const expected = fileCloudStrings('en', 'testnet');
+  assert.deepEqual(Object.keys(mount.options.strings).sort(), Object.keys(expected).sort());
+  assert.equal(mount.options.strings.failed('x'), expected.failed('x'));
+});
+
+test('the cloud is worded for the network of the link', () => {
+  const { cloud } = open(`/21338/${HASH}`);
+  const detail = { firstLedger: 1, lastLedger: 2, chunks: 3, span: 2 };
+  assert.equal(cloud.mounts[0].options.strings.note(detail), fileCloudStrings('en', '21338').note(detail));
+});
+
+test('load hides the canvas, empties the caption and destroys the cloud', () => {
+  const { doc, cloud } = open(CANONICAL);
+  const canvas = doc.nodes['file-cloud'];
+  const caption = doc.nodes['file-cloud-caption'];
+  const note = doc.nodes['file-cloud-note'];
+  caption.textContent = 'read · 3 chunks';
+  note.textContent = 'Each cube stands on its ledger.';
+  note.hidden = false;
+  assert.equal(canvas.hidden, false);
+  doc.file.load(DETAIL);
+  assert.equal(canvas.classList.contains('is-gone'), true);
+  assert.equal(canvas.hidden, true, 'a transparent picture would show the page through a covered canvas');
+  assert.equal(caption.textContent, '');
+  assert.equal(caption.hidden, true);
+  assert.equal(note.textContent, '');
+  assert.equal(note.hidden, true);
+  assert.equal(cloud.destroyed, 1);
+});
+
+test('without reduced motion the canvas fades first and goes after 250 ms', async () => {
+  const { doc, cloud } = open(CANONICAL, { reducedMotion: false });
+  const canvas = doc.nodes['file-cloud'];
+  doc.file.load(DETAIL);
+  assert.equal(canvas.classList.contains('is-gone'), true, 'the fade starts at once');
+  assert.equal(canvas.hidden, false, 'still there while it fades');
+  assert.equal(cloud.destroyed, 0);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.equal(canvas.hidden, true);
+  assert.equal(cloud.destroyed, 1);
+});
+
+test('error before the manifest hides the canvas without throwing', () => {
+  const { doc, cloud } = open(CANONICAL);
+  assert.doesNotThrow(() => doc.file.fail());
+  assert.equal(doc.nodes['file-cloud'].hidden, true);
+  assert.equal(doc.nodes['file-cloud-caption'].hidden, true);
+  assert.equal(cloud.destroyed, 1);
+  assert.equal(doc.nodes['file-download'].disabled, true, 'a file that did not load cannot be saved');
+});
+
+test('a later event does not end the cloud twice', () => {
+  const { doc, cloud } = open(CANONICAL);
+  doc.file.load(DETAIL);
+  doc.file.fail();
+  doc.file.load(DETAIL);
+  assert.equal(cloud.destroyed, 1);
+});
+
+test('a language switch re-words the cloud', () => {
+  const { doc, cloud } = open(CANONICAL);
+  doc.switchLanguage('ru');
+  assert.equal(cloud.strings.length, 1);
+  assert.equal(cloud.strings[0].failed('x'), fileCloudStrings('ru', 'testnet').failed('x'));
+  assert.notEqual(cloud.strings[0].failed('x'), cloud.mounts[0].options.strings.failed('x'));
+});
+
+test('a language switch after the cloud has ended leaves it alone', () => {
+  const { doc, cloud } = open(CANONICAL);
+  doc.file.load(DETAIL);
+  doc.switchLanguage('ru');
+  assert.deepEqual(cloud.strings, []);
+});
+
+test('an invalid address mounts no cloud', () => {
+  const { doc, cloud } = open('/testnet/xyz');
+  assert.deepEqual(cloud.mounts, []);
+  assert.equal(doc.nodes['file-cloud'].hidden, false, 'nothing touches the canvas on the invalid view');
 });
 
 test('the 404 page is localised and its field works', () => {
@@ -495,6 +634,14 @@ test('the file page loads the element from its own build, before its own script'
   assert.match(html, /<button id="file-download"[^>]*\bdisabled\b/);
   assert.match(html, /<p id="file-status"[^>]*role="status"/);
   assert.match(html, /<p id="check-link-error" class="check__error" role="alert"><\/p>/);
+});
+
+test('the file page has the cloud stage: canvas under the element, caption and note after it', async () => {
+  const html = await page('file.html');
+  assert.match(html, /<div id="file-view"[^>]*>\s*<div class="file__stage">\s*<canvas id="file-cloud" class="cloud file__cloud"[^>]*><\/canvas>\s*<\/div>/);
+  assert.match(html, /<p id="file-cloud-caption" class="cloud-caption"><\/p>/);
+  assert.match(html, /<p id="file-cloud-note" class="cloud-note" hidden><\/p>/);
+  assert.ok(html.indexOf('id="file-cloud-caption"') > html.indexOf('class="file__stage"'));
 });
 
 test('the text shipped in the HTML is the English string of its key', async () => {

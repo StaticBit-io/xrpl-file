@@ -13,7 +13,13 @@
 <!--@chrome:header-->
 <main id="main">
 <div id="file-page" class="file container" hidden>
-<div id="file-view" class="file__view ticks"></div>
+<div id="file-view" class="file__view ticks">
+<div class="file__stage">
+<canvas id="file-cloud" class="cloud file__cloud"></canvas>
+</div>
+<p id="file-cloud-caption" class="cloud-caption"></p>
+<p id="file-cloud-note" class="cloud-note" hidden></p>
+</div>
 <div class="file__grid">
 <div class="file__lead">
 <h1 id="file-title" class="file__title">File</h1>

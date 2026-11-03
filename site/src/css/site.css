@@ -944,6 +944,31 @@
   background: var(--paper-2);
 }
 
+.file__stage {
+  position: relative;
+}
+
+/* The cloud fills the element's box exactly and shows through it while the file is read: the element
+   (positioned, and later in the stage) stands above it with no ground of its own (loader="off"). It is
+   hidden, not only covered, once the file shows, because a transparent picture lets the page through. */
+.file__cloud {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  aspect-ratio: auto;
+  transition: opacity 250ms;
+}
+
+.file__cloud.is-gone {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file__cloud {
+    transition: none;
+  }
+}
+
 .file__view xrpl-file {
   width: 100%;
   /* The element keeps the file's aspect ratio at full width; capped in height it letterboxes the picture
