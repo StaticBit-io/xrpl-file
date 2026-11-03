@@ -28,7 +28,7 @@ public class SampledReadBackTests
         List<PublishProgress> reports = await PublishAsync(5 * 1_024_000);
 
         Assert.Equal(
-            [new PublishProgress("read-back", 1, 4), new PublishProgress("read-back", 2, 4), new PublishProgress("read-back", 3, 4), new PublishProgress("read-back", 4, 4)],
+            [new PublishProgress("read-back", 0, 4), new PublishProgress("read-back", 1, 4), new PublishProgress("read-back", 2, 4), new PublishProgress("read-back", 3, 4), new PublishProgress("read-back", 4, 4)],
             reports.Where(progress => progress.Stage == "read-back"));
     }
 
@@ -38,7 +38,7 @@ public class SampledReadBackTests
         List<PublishProgress> reports = await PublishAsync(2 * 1_024_000 + 1);
 
         Assert.Equal(3, reports.Where(progress => progress.Stage == "read-back").Select(progress => progress.Total).Distinct().Single());
-        Assert.Equal(3, reports.Count(progress => progress.Stage == "read-back"));
+        Assert.Equal(3, reports.Count(progress => progress.Stage == "read-back" && progress.Done > 0));
     }
 
     [Fact]

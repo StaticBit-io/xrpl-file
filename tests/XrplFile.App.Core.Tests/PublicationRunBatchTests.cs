@@ -214,6 +214,26 @@ public sealed class PublicationRunBatchTests : VaultHarness
         Assert.Contains("end Succeeded", log, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The 2026-11-03 mainnet failure was logged as "end Failed NodeUnreachable" and nothing more:
+    /// which read failed, and what the node said, was lost with the exception.
+    /// </summary>
+    [Fact]
+    public async Task A_failed_batch_run_logs_what_it_failed_with()
+    {
+        (PublicationRun run, PublishRequest request, _, _) = await ReadyAsync(40_000);
+        _connections.BatchSink!.Transmitting = transmission =>
+        {
+            if (transmission.Ordinal == 1) throw new XrplFileException(XrplFileError.SubmitRefused, "fake: refused\r\nat the door");
+        };
+
+        Assert.True(run.Start(request));
+        await run.Completion;
+
+        Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
+        Assert.Contains("end Failed SubmitRefused: fake: refused at the door ", await File.ReadAllTextAsync(Paths.TraceLogPath, Token), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task A_cancelled_batch_run_logs_how_it_ended()
     {

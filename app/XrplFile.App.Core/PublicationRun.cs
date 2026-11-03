@@ -463,7 +463,9 @@ public sealed class PublicationRun(
         }
         catch (XrplFileException ex)
         {
-            failure = PublishErrorMessages.ForRun(ex, attempt.Point, attempt.UsesTickets, attempt.OwnerReserveDrops);
+            string? lastStage;
+            lock (_gate) lastStage = _progress?.Stage;
+            failure = PublishErrorMessages.ForRun(ex, PublishErrorMessages.PointAt(attempt.Point, lastStage), attempt.UsesTickets, attempt.OwnerReserveDrops);
             finalState = PublicationRunState.Failed;
         }
         catch (VaultException ex)
@@ -844,19 +846,24 @@ public sealed class PublicationRun(
     {
         if (attempt.Trace is not { } trace) return;
 
+        // The message says which read or answer failed and what the node said; without it a failed
+        // run's trace names only the error's kind (2026-11-03). RunTraceLog withholds the line if the
+        // message carries anything key-shaped.
         string ending = finalState == PublicationRunState.Failed
             ? caught switch
             {
-                XrplFileException e => $" {e.Error}{(e.EngineResult is null ? string.Empty : " " + e.EngineResult)}",
+                XrplFileException e => $" {e.Error}{(e.EngineResult is null ? string.Empty : " " + e.EngineResult)}: {OneLine(e.Message)}",
                 VaultException e => $" {e.Error}",
                 null => string.Empty,
-                _ => $" {caught.GetType().Name}",
+                _ => $" {caught.GetType().Name}: {OneLine(caught.Message)}",
             }
             : string.Empty;
 
         trace.Post(string.Create(CultureInfo.InvariantCulture, $"{_time.GetUtcNow():O} end {finalState}{ending} {StateFileOf(attempt)}"));
         await trace.CompleteAsync().ConfigureAwait(false);
     }
+
+    private static string OneLine(string text) => string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
 
     /// <summary>A fresh run's file is named by the session after the strategy is built, so its header cannot name it.</summary>
     private static string StateFileOf(RunAttempt attempt) =>

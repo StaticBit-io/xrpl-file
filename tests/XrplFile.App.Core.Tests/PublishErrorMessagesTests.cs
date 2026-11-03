@@ -100,6 +100,31 @@ public sealed class PublishErrorMessagesTests
             PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 200_000));
     }
 
+    [Fact]
+    public void A_node_that_stops_answering_during_the_read_back_says_every_chunk_is_already_in()
+    {
+        XrplFileException thrown = new(XrplFileError.NodeUnreachable, "no answer");
+
+        Assert.Equal(
+            "Every chunk of the file is in the ledger and paid for, but the node stopped answering while the app read "
+                + "the file back to check it, so the link has not been written yet. The run is listed under unfinished "
+                + "runs: resume it to check the file again and write the link. Resuming pays only for the link's own "
+                + "transaction.",
+            PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileReadingBack, usesTickets: true, ownerReserveDrops: 200_000));
+    }
+
+    [Theory]
+    [InlineData(RunFailurePoint.WhileSubmitting, "read-back", RunFailurePoint.WhileReadingBack)]
+    [InlineData(RunFailurePoint.WhileSubmitting, "chunks", RunFailurePoint.WhileSubmitting)]
+    [InlineData(RunFailurePoint.WhileSubmitting, "manifest", RunFailurePoint.WhileSubmitting)]
+    [InlineData(RunFailurePoint.WhileSubmitting, null, RunFailurePoint.WhileSubmitting)]
+    [InlineData(RunFailurePoint.BeforeResuming, "read-back", RunFailurePoint.BeforeResuming)]
+    [InlineData(RunFailurePoint.BeforeSubmitting, "read-back", RunFailurePoint.BeforeSubmitting)]
+    public void Only_a_submitting_run_last_seen_reading_back_failed_while_reading_back(RunFailurePoint point, string? stage, RunFailurePoint expected)
+    {
+        Assert.Equal(expected, PublishErrorMessages.PointAt(point, stage));
+    }
+
     [Theory]
     [InlineData(200_000, "0.2 XRP")]
     [InlineData(2_000_000, "2 XRP")]
@@ -121,12 +146,13 @@ public sealed class PublishErrorMessagesTests
     [InlineData(RunFailurePoint.BeforeSubmitting)]
     [InlineData(RunFailurePoint.BeforeResuming)]
     [InlineData(RunFailurePoint.WhileSubmitting)]
+    [InlineData(RunFailurePoint.WhileReadingBack)]
     public void Every_other_error_keeps_its_own_sentence_wherever_the_run_failed(RunFailurePoint point)
     {
         foreach (XrplFileError error in Enum.GetValues<XrplFileError>().Where(e => e != XrplFileError.NodeUnreachable))
         {
             if (error == XrplFileError.FeeTooHigh && point == RunFailurePoint.BeforeSubmitting) continue;
-            if (error == XrplFileError.NodeLacksHistory && point is RunFailurePoint.WhileSubmitting or RunFailurePoint.BeforeResuming) continue;
+            if (error == XrplFileError.NodeLacksHistory && point is RunFailurePoint.WhileSubmitting or RunFailurePoint.WhileReadingBack or RunFailurePoint.BeforeResuming) continue;
             if (error is XrplFileError.PayerInsufficientBalance or XrplFileError.BatchNotEnabled && point == RunFailurePoint.BeforeResuming) continue;
 
             XrplFileException thrown = new(error, "failed", block: 7);

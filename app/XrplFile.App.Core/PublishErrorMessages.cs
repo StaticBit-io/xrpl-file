@@ -17,6 +17,12 @@ public enum RunFailurePoint
 
     /// <summary>The session had begun submitting, so some transactions may already be paid for.</summary>
     WhileSubmitting,
+
+    /// <summary>
+    /// The session was reading the file back before its manifest: every chunk and block list had
+    /// landed and been paid for, and the manifest had not been sent.
+    /// </summary>
+    WhileReadingBack,
 }
 
 /// <summary>
@@ -147,6 +153,17 @@ public static class PublishErrorMessages
     }
 
     /// <summary>
+    /// Where a run failed, refined by the last stage the writer reported: a submitting run last seen
+    /// in "read-back" had nothing left to pay for but its manifest. The writer reports "read-back"
+    /// before its first read and "manifest" before it sends the manifest, so the stage is never stale
+    /// in the direction that would understate what was spent.
+    /// </summary>
+    public static RunFailurePoint PointAt(RunFailurePoint point, string? lastStage) =>
+        point == RunFailurePoint.WhileSubmitting && string.Equals(lastStage, "read-back", StringComparison.Ordinal)
+            ? RunFailurePoint.WhileReadingBack
+            : point;
+
+    /// <summary>
     /// The sentence for a failed publication run. <see cref="XrplFileError.NodeUnreachable"/>'s own
     /// "Nothing was spent" is true only before the session submits anything; past that point a run
     /// may already have paid for transactions and minted tickets, and its state file lists it under
@@ -160,7 +177,7 @@ public static class PublishErrorMessages
 
         if (exception.Error == XrplFileError.FeeTooHigh && point == RunFailurePoint.BeforeSubmitting) return FeeTooHighNow;
 
-        if (exception.Error == XrplFileError.NodeLacksHistory && point is RunFailurePoint.WhileSubmitting or RunFailurePoint.BeforeResuming)
+        if (exception.Error == XrplFileError.NodeLacksHistory && point is RunFailurePoint.WhileSubmitting or RunFailurePoint.WhileReadingBack or RunFailurePoint.BeforeResuming)
         {
             return HistoryLaggedWhilePublishing;
         }
@@ -179,6 +196,11 @@ public static class PublishErrorMessages
             RunFailurePoint.BeforeResuming =>
                 "The node did not answer. This attempt spent nothing, and the run is still listed under unfinished runs. "
                 + "Check the node URL in Settings and try again.",
+            RunFailurePoint.WhileReadingBack =>
+                "Every chunk of the file is in the ledger and paid for, but the node stopped answering while the app read "
+                + "the file back to check it, so the link has not been written yet. The run is listed under unfinished "
+                + "runs: resume it to check the file again and write the link. Resuming pays only for the link's own "
+                + "transaction.",
             RunFailurePoint.WhileSubmitting =>
                 "The node stopped answering partway through the run. Transactions sent before that may already be in the "
                 + (usesTickets

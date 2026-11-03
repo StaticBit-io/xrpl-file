@@ -40,6 +40,16 @@ public sealed class WriterOptions
 
     /// <summary>The wait between reads of the landed manifest (spec S22); a seam for tests, which must not sleep seconds.</summary>
     internal TimeSpan ManifestReadPause { get; init; } = PublicationCheck.DefaultManifestReadPause;
+
+    /// <summary>The wait between read-back reads the node did not answer; a seam for tests.</summary>
+    internal TimeSpan ReadBackPause { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// How long a read-back read is taken again before the run fails as unreachable: the Batch
+    /// reads' own <see cref="BatchStrategyOptions.NodeOutageLimit"/>. Every chunk has landed and
+    /// been paid for by then, so giving up early costs the person a resume and a scary message.
+    /// </summary>
+    internal TimeSpan ReadBackOutageLimit { get; init; } = TimeSpan.FromMinutes(2);
 }
 
 public sealed record PublishProgress(string Stage, long Done, long Total);
@@ -54,10 +64,6 @@ public sealed record PublishResult(XrplFileLink Link, Manifest Manifest, string 
 /// </summary>
 public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource source, WriterOptions? options = null)
 {
-    private const int ReadBackAttempts = 3;
-
-    private static readonly TimeSpan ReadBackPause = TimeSpan.FromSeconds(1);
-
     private readonly ISubmissionStrategy _strategy = strategy;
     private readonly ILedgerSource _source = source;
     private readonly WriterOptions _options = options ?? new WriterOptions();
@@ -238,6 +244,9 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
             await ReadBlocksBackAsync(file, entries, visit, manifest, writer, lastLedger, historyCache, progress, cancellationToken).ConfigureAwait(false);
         }
 
+        // Reported before it is sent: a run that dies here has paid for the manifest's transaction
+        // or may have, which is not what a failure at the read-back means.
+        progress?.Report(new PublishProgress("manifest", 0, 1));
         SubmittedMemos manifestLanded = await _strategy.SubmitAllAsync([ManifestPlan.Memo(manifest)], null, cancellationToken).ConfigureAwait(false);
 
         if (!manifestLanded.TryHashOf(0, out string? manifestHash))
@@ -337,6 +346,11 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
         IPublicationSource file, IReadOnlyList<BlockEntry> plan, IReadOnlyList<int> visit, Manifest manifest, string writer,
         long lastLedger, int historyCache, IProgress<PublishProgress>? progress, CancellationToken cancellationToken)
     {
+        // Reported before the first read, which can take a while against a node that lags: a run
+        // that fails there has paid for every chunk and list and has nothing left but this check
+        // and the manifest, and the person is told so only if the stage says where it stopped.
+        progress?.Report(new PublishProgress("read-back", 0, visit.Count));
+
         XrplFileReader reader = new(_source, new ReaderOptions { MaxBytes = long.MaxValue, HistoryCacheRecords = historyCache });
         ManifestRecord unpublished = new(manifest, writer, lastLedger + 1, string.Empty);
         IReadOnlyList<BlockEntry> published = await ReadBackAsync(
@@ -404,21 +418,32 @@ public sealed class XrplFileWriter(ISubmissionStrategy strategy, ILedgerSource s
 
     /// <summary>
     /// Takes a read-back read again when the node did not answer it (spec B24): a request left
-    /// unanswered costs its connection, and the next one goes over a new connection. Without this, a
-    /// socket that went silent during the read-back failed a run whose chunks had all landed and been
-    /// paid for. A node that answers none of the attempts still fails the run as unreachable.
+    /// unanswered costs its connection, and the next one goes over a new connection. The read-back
+    /// starts the moment the last chunk settles, so it reads at the very head of the ledger: a
+    /// cluster backend a ledger or two behind (Clio answers <c>lgrIdxsInvalid</c> to a range above
+    /// its own validated ledger) or a node throttling a burst of reads refuses for several seconds.
+    /// Three tries a second apart failed a mainnet run whose chunks had all landed and been paid for,
+    /// so it waits <see cref="WriterOptions.ReadBackOutageLimit"/>, as long as the Batch reads do.
+    /// A node that answers none of the attempts in that time still fails the run as unreachable.
     /// </summary>
-    private static async Task<T> ReadBackAsync<T>(Func<Task<T>> read, CancellationToken cancellationToken)
+    private async Task<T> ReadBackAsync<T>(Func<Task<T>> read, CancellationToken cancellationToken)
     {
-        for (int attempt = 1; ; attempt++)
+        DateTimeOffset? firstFailure = null;
+
+        while (true)
         {
             try
             {
                 return await read().ConfigureAwait(false);
             }
-            catch (XrplFileException e) when (e.Error == XrplFileError.NodeUnreachable && attempt < ReadBackAttempts)
+            catch (XrplFileException e) when (e.Error == XrplFileError.NodeUnreachable)
             {
-                await Task.Delay(ReadBackPause, cancellationToken).ConfigureAwait(false);
+                DateTimeOffset now = DateTimeOffset.UtcNow;
+                firstFailure ??= now;
+
+                if (now - firstFailure.Value >= _options.ReadBackOutageLimit) throw;
+
+                await Task.Delay(_options.ReadBackPause, cancellationToken).ConfigureAwait(false);
             }
         }
     }

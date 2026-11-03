@@ -27,19 +27,42 @@ public class WriterReadBackTests
         Assert.Equal(file, (await new XrplFileReader(node.Ledger).ReadAsync(result.Link, Token)).Bytes);
     }
 
+    /// <summary>
+    /// A node one ledger behind the run, or one that throttles a burst of reads, refuses for longer
+    /// than a few seconds: on mainnet the read-back's three tries a second apart failed a run whose
+    /// 123 chunks had all landed (2026-11-03). It waits as long as the Batch reads do.
+    /// </summary>
+    [Fact]
+    public async Task A_read_back_the_node_refuses_for_a_while_is_taken_again_until_it_answers()
+    {
+        BatchTestNode node = new();
+        UnansweredOnceSource source = new(node.Ledger) { Refusals = 6 };
+        await using BatchStrategy batch = node.Strategy();
+        ArmingStrategy strategy = new(batch, source);
+        byte[] file = VectorStream.Bytes("read-back-lagging", 20_000);
+
+        PublishResult result = await new XrplFileWriter(strategy, source, FastRetries).PublishAsync(
+            file, "application/octet-stream", null, node.Writer.Account, "testnet", null, null, Token);
+
+        Assert.Equal(6, source.RefusedCount);
+        Assert.Equal(file, (await new XrplFileReader(node.Ledger).ReadAsync(result.Link, Token)).Bytes);
+    }
+
     [Fact]
     public async Task A_read_back_whose_node_never_answers_still_fails_as_unreachable()
     {
         BatchTestNode node = new();
-        UnansweredOnceSource source = new(node.Ledger) { Always = true };
+        UnansweredOnceSource source = new(node.Ledger) { Refusals = int.MaxValue };
         await using BatchStrategy batch = node.Strategy();
         ArmingStrategy strategy = new(batch, source);
 
-        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(strategy, source).PublishAsync(
+        XrplFileException error = await Assert.ThrowsAsync<XrplFileException>(() => new XrplFileWriter(strategy, source, FastRetries).PublishAsync(
             VectorStream.Bytes("read-back-down", 20_000), "application/octet-stream", null, node.Writer.Account, "testnet", null, null, Token));
 
         Assert.Equal(XrplFileError.NodeUnreachable, error.Error);
     }
+
+    private static WriterOptions FastRetries => new() { ReadBackPause = TimeSpan.FromMilliseconds(10), ReadBackOutageLimit = TimeSpan.FromMilliseconds(500) };
 
     /// <summary>Arms the source once the chunks have landed: every account_tx after that is the read-back's.</summary>
     private sealed class ArmingStrategy(ISubmissionStrategy inner, UnansweredOnceSource source) : ISubmissionStrategy
@@ -63,20 +86,22 @@ public class WriterReadBackTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    /// <summary>Refuses the first account_tx once armed, the way a silent socket's request times out.</summary>
+    /// <summary>Refuses the first <see cref="Refusals"/> account_tx once armed, the way a silent socket's request times out.</summary>
     private sealed class UnansweredOnceSource(ILedgerSource inner) : ILedgerSource
     {
         public volatile bool Armed;
 
-        public bool Always { get; init; }
+        public int Refusals { get; init; } = 1;
 
-        public bool Refused { get; private set; }
+        public int RefusedCount { get; private set; }
+
+        public bool Refused => RefusedCount > 0;
 
         public IAsyncEnumerable<LedgerTransaction> AccountTransactionsAsync(string account, long fromLedger, long toLedger, bool forward, CancellationToken cancellationToken)
         {
-            if (Armed && (Always || !Refused))
+            if (Armed && RefusedCount < Refusals)
             {
-                Refused = true;
+                RefusedCount++;
                 throw new XrplFileException(XrplFileError.NodeUnreachable, "fake: the node did not answer account_tx");
             }
 
