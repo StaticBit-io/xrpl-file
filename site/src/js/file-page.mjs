@@ -154,7 +154,7 @@ export function initFilePage(doc, location, {
   // switches language in place, so <html lang> changes under an element that is already there: it is told.
   element.setAttribute('lang', htmlLang(lang));
   // The cloud is the loader: the element keeps its box, which the canvas fills, and draws nothing in it.
-  element.setAttribute('loader', 'off');
+  element.setAttribute('loader', 'false');
 
   // The cloud listens to the element, so it is mounted before the element is in the page and cannot
   // miss an event; it uses the network of the link, which is known before the file is read.
