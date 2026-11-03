@@ -47,8 +47,11 @@ export async function prepare(handle) {
  * has delivered but whose block is not yet verified) and once per verified block (`block: true`).
  * Bytes are counted from one source per block: chunks while it is read, the block's own length once
  * it verified, so the two never add up twice.
+ *
+ * `onRead` is a read report (report.mjs) or null: it gets every chunk of every block read, and the
+ * block's index once it verified.
  */
-export async function loadWhole(handle, record, { limitBytes = Infinity, priority, signal, onProgress } = {}) {
+export async function loadWhole(handle, record, { limitBytes = Infinity, priority, signal, onProgress, onRead = null } = {}) {
   const { size, chunk } = record.manifest;
   const blockBytes = await handle.blockBytes();
   const wanted = Math.min(size, limitBytes);
@@ -61,10 +64,11 @@ export async function loadWhole(handle, record, { limitBytes = Infinity, priorit
     signal?.throwIfAborted();
     const blockLength = Math.min(blockBytes, size - index * blockBytes);
     let chunks = 0;
-    const onChunk = onProgress
-      ? () => {
+    const onChunk = onProgress || onRead
+      ? (info) => {
+        onRead?.chunk(info);
         chunks++;
-        onProgress(progressDetail({
+        onProgress?.(progressDetail({
           bytesDone: bytesDone + Math.min(chunks * chunk, blockLength),
           bytesTotal,
           blocksVerified: index,
@@ -76,6 +80,7 @@ export async function loadWhole(handle, record, { limitBytes = Infinity, priorit
     const blockPriority = typeof priority === 'function' ? priority() : priority;
     const bytes = await handle.block(index, { priority: blockPriority, signal, onChunk, sequential: true });
     parts.push(bytes);
+    onRead?.block(index);
     bytesDone += bytes.length;
     onProgress?.(progressDetail({ bytesDone, bytesTotal, blocksVerified: index + 1, blocksTotal }), { block: true });
   }

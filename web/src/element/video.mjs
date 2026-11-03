@@ -60,6 +60,7 @@ export class VideoView {
   #givenCover;
   #deps;
   #onProgress;
+  #onRead;
   #onError;
   #onDownload;
   #onLoad;
@@ -117,6 +118,7 @@ export class VideoView {
    * @param {{ bytes: Uint8Array, type: string } | null} [options.cover] a cover already read; left out, the handle is asked (shared per link)
    * @param {() => number} options.priority a PRIORITY value for the element as it is now: NOW when visible
    * @param {(detail: object, kind: { block: boolean }) => void} options.onProgress every newly verified block of this file
+   * @param {{ chunk: Function, block: Function } | null} [options.onRead] a read report (report.mjs): every chunk the block reads take, and each block once it verified
    * @param {(error: Error, state: { playing: boolean }) => void} options.onError a block failed and playback stands at the gap, or the browser's decoder gave up; `playing` is whether a frame was already shown
    * @param {(reason: string) => void} [options.onDownload] the browser rejected the stream before any frame was shown: the file is for download instead (`unplayable`)
    * @param {() => void} options.onLoad the first frame is on screen
@@ -125,13 +127,14 @@ export class VideoView {
    * @param {() => string} [options.lang] the language of the overlay's words, asked each time they are drawn; English when left out
    * @param {object} [options.deps] test seams: `openFeed`, `Streamer`, `loadMp4Box`
    */
-  constructor({ root, handle, record, cover, priority, onProgress, onError, onDownload, onLoad, onSize, onStatus, lang, deps = {} }) {
+  constructor({ root, handle, record, cover, priority, onProgress, onRead, onError, onDownload, onLoad, onSize, onStatus, lang, deps = {} }) {
     this.#root = root;
     this.#handle = handle;
     this.#record = record;
     this.#givenCover = cover;
     this.#priority = priority;
     this.#onProgress = onProgress;
+    this.#onRead = onRead ?? null;
     this.#onError = onError;
     this.#onDownload = onDownload ?? (() => {});
     this.#onLoad = onLoad;
@@ -237,7 +240,9 @@ export class VideoView {
           priority: typeof priority === 'function' ? priority(index) : priority,
           signal,
           sequential: false,
+          onChunk: (info) => this.#onRead?.chunk(info),
         });
+        this.#onRead?.block(index);
         this.#noteVerified(index, bytes.length);
         return bytes;
       } catch (error) {

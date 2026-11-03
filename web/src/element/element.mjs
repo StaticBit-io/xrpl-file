@@ -12,6 +12,7 @@ import { parseLength, parseLoading, parseLoader, parseTheme, backgroundTranspare
 import { viewForType, magicAgrees, normalizeType } from './view.mjs';
 import { textPreview, TEXT_LIMIT } from './text.mjs';
 import { VideoView } from './video.mjs';
+import { createReadReport } from './report.mjs';
 import { formatBytes, downloadName, bytesOf, progressLines, typeBadge, downloadLabel } from './format.mjs';
 import { elementError, messageFor, shortTitleFor, saveMessageFor, detailFor, canVerify, INSECURE, NO_LINK } from './messages.mjs';
 import { stringsFor } from './strings.mjs';
@@ -470,27 +471,35 @@ export class XrplFileElement extends HTMLElement {
       this.#record = record;
       this.#renderCaption();
 
+      // One report per load, so the read events of a file are not repeated by the second read of its first block.
+      const blockBytes = await this.#handle.blockBytes();
+      if (signal.aborted) return;
+      const report = createReadReport({
+        manifest: record.manifest, blockBytes, signal, emit: (type, detail) => this.#emit(type, detail),
+      });
+      report.manifest();
+
       const { view, reason } = viewForType(record.manifest);
       this.#parts.frame.classList.toggle('video', view === 'video');
-      if (view === 'image') await this.#loadImage(record, signal);
-      else if (view === 'text') await this.#loadText(record, signal);
-      else if (view === 'video') await this.#loadVideo(record, signal);
+      if (view === 'image') await this.#loadImage(record, signal, report);
+      else if (view === 'text') await this.#loadText(record, signal, report);
+      else if (view === 'video') await this.#loadVideo(record, signal, report);
       else this.#showDownload(record, reason);
     } catch (error) {
       if (!signal.aborted) this.#fail(error);
     }
   }
 
-  async #loadImage(record, signal) {
+  async #loadImage(record, signal, report) {
     const { manifest } = record;
     // The first block decides before the rest is read: a file that is not what its type says never
     // costs more than one block. Block 0 then comes back from the handle's recent blocks.
-    const head = await this.#readHead(record, signal);
+    const head = await this.#readHead(record, signal, report);
     if (signal.aborted) return;
     if (!magicAgrees(manifest.type, head)) { this.#showDownload(record, 'mismatch'); return; }
 
     const bytes = await loadWhole(this.#handle, record, {
-      priority: this.#priority, signal, onProgress: (detail, kind) => this.#report(detail, kind),
+      priority: this.#priority, signal, onProgress: (detail, kind) => this.#report(detail, kind), onRead: report,
     });
     if (signal.aborted) return;
     this.#verified = true;
@@ -507,13 +516,14 @@ export class XrplFileElement extends HTMLElement {
     this.#emitLoad(record);
   }
 
-  async #loadVideo(record, signal) {
+  async #loadVideo(record, signal, report) {
     const view = new VideoView({
       root: this.#parts.video,
       handle: this.#handle,
       record,
       priority: this.#priority,
       onProgress: (detail, kind) => this.#report(detail, kind),
+      onRead: report,
       onSize: (kind, width, height) => this.#setRatio(kind === 'cover' ? RATIO_COVER : RATIO_CONTENT, width, height),
       onStatus: (text) => this.#renderLoading(text === null ? READING : () => ({ bytes: text, blocks: '' }), null),
       lang: () => this.#lang,
@@ -548,16 +558,17 @@ export class XrplFileElement extends HTMLElement {
     this.#emit('error', detailFor(error, { playing: true }));
   }
 
-  async #readHead(record, signal) {
+  async #readHead(record, signal, report) {
     const { manifest } = record;
     const blockBytes = await this.#handle.blockBytes();
     const blockLength = Math.min(blockBytes, manifest.size);
     let chunks = 0;
-    return this.#handle.block(0, {
+    const head = await this.#handle.block(0, {
       priority: this.#priority(),
       signal,
       sequential: true,
-      onChunk: () => {
+      onChunk: (info) => {
+        report.chunk(info);
         chunks++;
         this.#report(progressDetail({
           bytesDone: Math.min(chunks * manifest.chunk, blockLength),
@@ -567,6 +578,8 @@ export class XrplFileElement extends HTMLElement {
         }), { block: false });
       },
     });
+    report.block(0);
+    return head;
   }
 
   /** Resolves true once `url` has decoded into `image`, false when the browser cannot show it or this generation ended. */
@@ -588,13 +601,14 @@ export class XrplFileElement extends HTMLElement {
     });
   }
 
-  async #loadText(record, signal) {
+  async #loadText(record, signal, report) {
     const { manifest } = record;
     const bytes = await loadWhole(this.#handle, record, {
       limitBytes: TEXT_LIMIT,
       priority: this.#priority,
       signal,
       onProgress: (detail, kind) => this.#report(detail, kind),
+      onRead: report,
     });
     if (signal.aborted) return;
     if (!magicAgrees(manifest.type, bytes.subarray(0, 64))) { this.#showDownload(record, 'mismatch'); return; }

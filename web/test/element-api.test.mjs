@@ -80,6 +80,9 @@ globalThis.setTimeout = (callback, delay, ...rest) => {
   if (delay >= 60_000) timer.unref?.();
   return timer;
 };
+// Progress is painted on animation frames; the read events of these tests do not depend on them.
+globalThis.requestAnimationFrame = (callback) => realSetTimeout(() => callback(0), 0);
+globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
 globalThis.HTMLElement = StubHTMLElement;
 globalThis.isSecureContext = true;
 globalThis.document = {
@@ -625,4 +628,121 @@ test('loader toggled live leaves the idle view of a click-to-load element in pla
   element.setAttribute('loader', 'true');
   assert.deepEqual(shownViews(element), ['idle']);
   element.disconnectedCallback();
+});
+
+// A file of three 100-byte chunks. Like the real handle, `block` reports every chunk of the block through
+// onChunk before it resolves, whether or not the block is cached.
+const READ_TYPES = ['xrpl-file-manifest', 'xrpl-file-chunk', 'xrpl-file-block'];
+const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+function chunkedHandle({ type = 'image/png', chunksPerBlock = 2, gate = null } = {}) {
+  const blockBytes = chunksPerBlock * 100;
+  const bytes = new Uint8Array(268).fill(0x61);
+  if (type === 'image/png') bytes.set(PNG_MAGIC);
+  const manifest = {
+    ...MANIFEST, type, chunk: 100, blocks: Math.ceil(268 / blockBytes), firstLedger: 500, lastLedger: 520,
+  };
+  const handle = fakeHandle({ manifest });
+  handle.blockBytes = async () => blockBytes;
+  handle.block = async (index, { onChunk } = {}) => {
+    const first = index * chunksPerBlock;
+    const last = Math.min(3, first + chunksPerBlock);
+    for (let i = first; i < last; i++) {
+      onChunk?.({ index: i, ledger: 500 + i });
+      if (gate !== null && i === 0) await gate.promise;
+    }
+    // The stubbed image never decodes by itself: say so once the last block is back.
+    if (last === 3 && type === 'image/png') setImmediate(() => handle.element?.shadowRoot.node('img').dispatchEvent(new Event('load')));
+    return bytes.slice(index * blockBytes, Math.min(268, (index + 1) * blockBytes));
+  };
+  return handle;
+}
+
+function mountChunked(options) {
+  const handle = chunkedHandle(options);
+  const element = mount(handle);
+  handle.element = element;
+  return element;
+}
+
+function recordReads(element) {
+  const events = [];
+  for (const type of [...READ_TYPES, 'load']) {
+    element.addEventListener(type, (event) => events.push({ type, detail: event.detail, bubbles: event.bubbles }));
+  }
+  return events;
+}
+
+const named = (events) => events.map(({ type, detail }) => (detail && 'index' in detail ? `${type}:${detail.index}` : type));
+
+test('an image load emits manifest, then each chunk once, then each block once, before load', async () => {
+  const element = mountChunked({});
+  const events = recordReads(element);
+  await loaded(element);
+
+  // Block 0 is read twice on the image path (the type check, then the whole file).
+  assert.deepEqual(named(events), [
+    'xrpl-file-manifest',
+    'xrpl-file-chunk:0', 'xrpl-file-chunk:1', 'xrpl-file-block:0',
+    'xrpl-file-chunk:2', 'xrpl-file-block:1',
+    'load',
+  ]);
+  assert.deepEqual(events[0].detail, { size: 268, chunk: 100, chunks: 3, blocks: 2, firstLedger: 500, lastLedger: 520 });
+  assert.deepEqual(events[1].detail, { index: 0, ledger: 500 });
+  assert.deepEqual(events[3].detail, { index: 0, firstChunk: 0, lastChunk: 1 });
+  assert.deepEqual(events[5].detail, { index: 1, firstChunk: 2, lastChunk: 2 });
+});
+
+test('a cached block reports its chunks then the block', async () => {
+  // A text file takes the loadWhole path alone; one block of ten chunks' room holds all three.
+  const element = mountChunked({ type: 'text/plain', chunksPerBlock: 10 });
+  const events = recordReads(element);
+  await loaded(element);
+
+  assert.deepEqual(named(events), [
+    'xrpl-file-manifest',
+    'xrpl-file-chunk:0', 'xrpl-file-chunk:1', 'xrpl-file-chunk:2',
+    'xrpl-file-block:0',
+    'load',
+  ]);
+  assert.deepEqual(events.at(-2).detail, { index: 0, firstChunk: 0, lastChunk: 2 });
+});
+
+test('a src change mid-read emits nothing more for the old file', async () => {
+  let release;
+  const gate = { promise: new Promise((resolve) => { release = resolve; }) };
+  const element = mountChunked({ gate, type: 'text/plain' });
+  const events = recordReads(element);
+  const firstChunk = new Promise((resolve) => element.addEventListener('xrpl-file-chunk', resolve, { once: true }));
+  element.connectedCallback();
+  await firstChunk;
+
+  element.removeAttribute('src');
+  const seen = events.length;
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(named(events), ['xrpl-file-manifest', 'xrpl-file-chunk:0']);
+  assert.equal(events.length, seen);
+});
+
+test('save() emits no read events', async () => {
+  installBlobSink();
+  const element = mountChunked({});
+  await loaded(element);
+  const events = recordReads(element);
+
+  assert.equal(await element.save(), 'started');
+  assert.deepEqual(events, []);
+});
+
+test('events do not bubble', async () => {
+  const element = mountChunked({});
+  const events = recordReads(element);
+  await loaded(element);
+
+  const reads = events.filter(({ type }) => READ_TYPES.includes(type));
+  assert.ok(reads.length > 0);
+  assert.ok(reads.every(({ bubbles }) => bubbles === false));
 });

@@ -96,8 +96,8 @@ class FakeHandle {
 
   cover() { return Promise.resolve(this.coverValue); }
 
-  block(index, { priority, signal }) {
-    const call = { index, priority, signal, settled: false };
+  block(index, { priority, signal, onChunk }) {
+    const call = { index, priority, signal, onChunk, settled: false };
     this.calls.push(call);
     return new Promise((resolve, reject) => {
       call.resolve = () => { call.settled = true; resolve(blockBytes(index)); };
@@ -199,7 +199,7 @@ class FakeStreamer {
   close() { this.closed = true; }
 }
 
-function setup({ cover = null, openFeed, lang } = {}) {
+function setup({ cover = null, openFeed, lang, onRead } = {}) {
   const root = fakeRoot();
   const handle = new FakeHandle();
   handle.coverValue = cover;
@@ -212,6 +212,7 @@ function setup({ cover = null, openFeed, lang } = {}) {
     record: { manifest: { type: 'video/mp4', size: BLOCK * BLOCKS - 100, blocks: BLOCKS, chunk: 100, name: 'clip.mp4' } },
     priority: () => PRIORITY.NOW,
     onProgress: (detail, kind) => log.progress.push({ detail, kind }),
+    onRead,
     onError: (error, state) => log.errors.push({ error, state }),
     onLoad: () => { log.loads++; },
     onSize: (kind, width, height) => log.sizes.push([kind, width, height]),
@@ -592,6 +593,21 @@ test('progress counts each verified block once, whatever re-reads follow', async
     await settle(t, 1);
     assert.equal(t.log.progress.at(-1).detail.blocksVerified, 2);
     assert.equal(t.log.progress.at(-1).detail.bytesDone, 2 * BLOCK);
+  } finally { t.view.close(); }
+});
+
+test('the read report gets every chunk a block read takes, and the block once it verified', async () => {
+  const seen = [];
+  const t = setup({ onRead: { chunk: (info) => seen.push(['chunk', info]), block: (index) => seen.push(['block', index]) } });
+  try {
+    const start = t.view.start();
+    await until(() => t.handle.pending(0).length === 1, 'the head read');
+    t.handle.pending(0)[0].onChunk({ index: 0, ledger: 700 });
+    t.handle.pending(0)[0].onChunk({ index: 1, ledger: 701 });
+    assert.deepEqual(seen, [['chunk', { index: 0, ledger: 700 }], ['chunk', { index: 1, ledger: 701 }]], 'a chunk is reported as it arrives, before its block');
+    t.handle.pending(0)[0].resolve();
+    await start;
+    assert.deepEqual(seen.at(-1), ['block', 0]);
   } finally { t.view.close(); }
 });
 

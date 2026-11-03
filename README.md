@@ -138,6 +138,18 @@ to a light one: the overlay is dark in both themes. The element dispatches `xrpl
 `{ bytesDone, bytesTotal, blocksVerified, blocksTotal }`), `load` once the content is shown (`detail`:
 `{ name, type, size, network, link }`) and `error` (`detail`: `{ name, message }`; the message is English whatever the `lang`).
 
+Three more events let a page draw the file's layout from the element's own read, with no ledger
+requests of its own. Each fires at most once per load for a given manifest, chunk or block, and none
+bubbles. `xrpl-file-manifest` fires once the manifest is known, before the first block is requested
+(`detail`: `{ size, chunk, chunks, blocks, firstLedger, lastLedger }`; `chunks` is `ceil(size / chunk)`).
+`xrpl-file-chunk` fires when a chunk has been read (`detail`: `{ index, ledger }`, the chunk's index in the
+file and the ledger of its transaction), in the order the chunks arrive, which is not always index order.
+`xrpl-file-block` fires when a block has verified (`detail`: `{ index, firstChunk, lastChunk }`, the chunks
+the block covers; the last block ends at the file's last chunk). "Chunk" means read, not verified: a chunk
+event can precede the block event that vouches for it, and a block that fails verification emits no
+block event after its chunks. A `save()` reads the file again but reports nothing, and a load that is
+reset (the `src` changes, or the element is disconnected) emits nothing more.
+
 The `load` detail describes the file from the same read, so a page needs no second one: `name` is the
 file name the element shows and saves under, or `null` when the manifest has none; `type` is the media
 type without parameters; `size` is in bytes; `network` and `link` are canonical (`link` is
