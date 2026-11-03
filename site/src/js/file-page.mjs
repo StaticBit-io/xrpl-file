@@ -38,6 +38,13 @@ function saveErrorKey(error) {
 // How long the canvas fades out; the same figure as the transition in site.css.
 const CLOUD_FADE_MS = 250;
 
+/**
+ * The longest the file stays hidden after `load` for the cubes to light up and the sweep to pass. The
+ * element can deliver a small file in a few milliseconds, which would end the cloud before a cube is
+ * visible; a slow sweep is cut here so the file never waits long.
+ */
+export const HOLD_MAX_MS = 3000;
+
 function normalise(lang) {
   return activeLang(lang);
 }
@@ -166,15 +173,23 @@ export function initFilePage(doc, location, {
       note: cloudNote,
       turn: false,
       swayFor: 5000,
-      fast: true,
+      // Normal timings, not the replay: this page does not use the home page's "seen" flag.
+      fast: false,
       strings: fileCloudStrings(lang, network),
     },
     { startRead: startElementRead, element },
   );
+  const stage = canvas.parentElement;
   let cloudEnded = false;
+  let holdTimer = null;
   const endCloud = () => {
     if (cloudEnded) return;
     cloudEnded = true;
+    if (holdTimer !== null) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+      stage.classList.remove('is-settling');
+    }
     canvas.classList.add('is-gone');
     const remove = () => {
       // Hidden, not just covered: a transparent picture shows whatever is under the element.
@@ -188,7 +203,23 @@ export function initFilePage(doc, location, {
     if (reducedMotion) remove();
     else setTimeout(remove, CLOUD_FADE_MS);
   };
-  canvas.parentElement.append(element);
+  // The file is already verified at `load`, but the cubes are drawn as the chunks arrive, so the cloud
+  // may have nothing on screen yet. The element is hidden (its box stays) while they settle.
+  const settleCloud = () => {
+    if (cloudEnded || holdTimer !== null) return;
+    const delay = reducedMotion ? 0 : Math.min(HOLD_MAX_MS, cloud.settleDelay());
+    if (delay <= 0) {
+      endCloud();
+      return;
+    }
+    stage.classList.add('is-settling');
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      stage.classList.remove('is-settling');
+      endCloud();
+    }, delay);
+  };
+  stage.append(element);
 
   linkText.textContent = route.link;
   initCopyButton({
@@ -225,7 +256,7 @@ export function initFilePage(doc, location, {
   };
 
   element.addEventListener('load', (event) => {
-    endCloud();
+    settleCloud();
     detail = event.detail ?? {};
     // A picture with transparent parts shows on the page itself. Until it loads, and for any other
     // type, the box stays: the loader, a message, a text file or a video need a ground of their own.
@@ -234,9 +265,9 @@ export function initFilePage(doc, location, {
     render();
     syncButton();
   });
-  // `error` only ends the cloud: the element also reports a video its browser cannot play, while the
-  // verified file can still be saved, so it neither disables Download nor words a message here. A save
-  // the element refuses is worded below.
+  // `error` only ends the cloud, at once, even in the middle of the hold: the element also reports a
+  // video its browser cannot play, while the verified file can still be saved, so it neither disables
+  // Download nor words a message here. A save the element refuses is worded below.
   element.addEventListener('error', endCloud);
 
   button.addEventListener('click', async () => {

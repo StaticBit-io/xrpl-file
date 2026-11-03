@@ -154,9 +154,11 @@ function defaultLoadElement(doc) {
  *   onBlockVerified, onDeveloping, onDone and onFailed. The other members are seams for tests and are
  *   passed on to it; defaults are the browser's own.
  * @returns {{ done: Promise<void>, destroy: () => void, setStrings: (strings: object) => void,
- *   readonly phase: string }} `done` settles, and never rejects, once the read is done or failed;
- *   `destroy()` stops everything and abandons the read; `setStrings()` swaps the text, as a language
- *   switch does, and rewrites the label, the caption, the note and the figures at once.
+ *   settleDelay: () => number, readonly phase: string }} `done` settles, and never rejects, once the read
+ *   is done or failed; `destroy()` stops everything and abandons the read; `setStrings()` swaps the text,
+ *   as a language switch does, and rewrites the label, the caption, the note and the figures at once;
+ *   `settleDelay()` is how many ms the cubes still need to light up, sweep and settle (0 before the
+ *   manifest, once settled, and after destroy()).
  */
 export function mountCloud(canvas, options, env) {
   if (typeof env?.startRead !== 'function') throw new TypeError('mountCloud needs env.startRead');
@@ -709,6 +711,10 @@ export function mountCloud(canvas, options, env) {
     done: read.done,
     get phase() {
       return read.phase;
+    },
+    /** Milliseconds until the last colour change and the settling pause are over; 0 before the manifest and after destroy(). */
+    settleDelay() {
+      return destroyed ? 0 : timeline?.settleDelay(now()) ?? 0;
     },
     setStrings(next) {
       strings = { ...DEFAULT_STRINGS, ...next };
