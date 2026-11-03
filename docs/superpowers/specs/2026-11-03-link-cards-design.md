@@ -167,10 +167,9 @@ Language of a file card: English. The file URL has no language prefix and robots
 Static tags written by the site build into each language's page: title and description in that
 page's language, one shared card banner. No function involved.
 
-The card banner: a 1200 × 630 PNG built from the site's existing identity (the StaticBit logo and the
-site's palette), committed under `site/src/img/`. It is both the home pages' `og:image` and the
-fallback picture of every file card. The builder makes it, by a script next to `site/tools/` if that
-is the simplest way; the owner sees it in review before the home pages ship.
+The card banner exists: `site/src/og-banner.png`, 1200 × 630, the wordmark beside the hero's point
+cloud, drawn by `site/tools/og-banner.mjs`; the home pages and the static file page already name it
+(`cardTags` in `site/chrome-markup.mjs`). It is also the fallback picture of every file card.
 
 ### Caching
 
