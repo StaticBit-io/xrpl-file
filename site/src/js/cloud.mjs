@@ -548,6 +548,9 @@ export function mountCloud(canvas, options, env) {
     if (phase === 'failed') {
       const code = failure?.code ?? 'Unknown';
       captionLine(typeof strings.failed === 'function' ? strings.failed(code) : strings.failed);
+    } else if (manifest === null) {
+      // A file with no chunks (size 0) is read to the end without a manifest ever being reported.
+      caption.replaceChildren();
     } else {
       captionLine(strings.caption({ chunks: fileChunks, firstLedger: manifest.firstLedger, lastLedger: manifest.lastLedger }));
     }
