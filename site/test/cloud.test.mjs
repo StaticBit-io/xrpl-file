@@ -739,3 +739,41 @@ test('setStrings before the manifest writes the label and leaves the note and ca
   assert.equal(parts.note.hidden, true);
   assert.equal(parts.caption.children.length, 0);
 });
+
+// The element-driven read: a plain EventTarget stands in for <xrpl-file>.
+const { startElementRead } = await import('../src/js/element-read.mjs');
+
+function mountOnElement() {
+  const parts = page();
+  const clock = fakeEnv();
+  const element = new EventTarget();
+  const cloud = mountCloud(
+    parts.canvas,
+    { link: LINK, caption: parts.caption, note: parts.note, callouts: parts.callouts, card: parts.card, strings, reducedMotion: true },
+    { ...clock.env, startRead: startElementRead, element },
+  );
+  const send = (type, detail) => element.dispatchEvent(
+    detail === undefined ? new Event(type) : new CustomEvent(type, { detail }),
+  );
+  return { parts, clock, cloud, send };
+}
+
+test('an empty file (a manifest with no chunks, then load) ends in done without throwing and leaves the caption empty', async () => {
+  const { parts, clock, cloud, send } = mountOnElement();
+  assert.doesNotThrow(() => {
+    send('xrpl-file-manifest', { size: 0, chunk: 1000, chunks: 0, blocks: 0, firstLedger: 100, lastLedger: 107 });
+    send('load');
+  });
+  await cloud.done;
+  assert.equal(cloud.phase, 'done');
+  assert.equal(parts.caption.children.length, 0, 'no manifest was reported, so there is nothing to caption');
+  assert.doesNotThrow(() => clock.flushFrames());
+});
+
+test('an element error before the manifest still writes the failure line', async () => {
+  const { parts, cloud, send } = mountOnElement();
+  send('error', { name: 'NotFound', message: 'x' });
+  await cloud.done;
+  assert.equal(cloud.phase, 'failed');
+  assert.equal(textOf(parts.caption), 'failed:NotFound');
+});
