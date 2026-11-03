@@ -563,9 +563,9 @@ public sealed class PublicationRunTests : VaultHarness
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
         Assert.Equal(
-            PublishErrorMessages.ForRun(
+            TestText.En(PublishErrorMessages.ForRun(
                 new XrplFileException(XrplFileError.NodeUnreachable, "no answer"),
-                RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0),
+                RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0)),
             run.Snapshot.Failure);
         Assert.NotEmpty(PublicationSession.Unfinished(Paths.StateDirectory));
     }
@@ -582,9 +582,9 @@ public sealed class PublicationRunTests : VaultHarness
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
         Assert.Equal(
-            PublishErrorMessages.ForRun(
+            TestText.En(PublishErrorMessages.ForRun(
                 new XrplFileException(XrplFileError.NodeUnreachable, "no answer"),
-                RunFailurePoint.WhileSubmitting, usesTickets: true, ownerReserveDrops: 200_000),
+                RunFailurePoint.WhileSubmitting, usesTickets: true, ownerReserveDrops: 200_000)),
             run.Snapshot.Failure);
     }
 
@@ -603,9 +603,9 @@ public sealed class PublicationRunTests : VaultHarness
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
         Assert.Equal(
-            PublishErrorMessages.ForRun(
+            TestText.En(PublishErrorMessages.ForRun(
                 new XrplFileException(XrplFileError.NodeUnreachable, "no answer"),
-                RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0),
+                RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0)),
             run.Snapshot.Failure);
     }
 
@@ -671,7 +671,7 @@ public sealed class PublicationRunTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.Equal(PublishErrorMessages.FeeTooLargeForApplication, run.Snapshot.Failure);
+        Assert.Equal(TestText.En(PublishErrorMessages.FeeTooLargeForApplication), run.Snapshot.Failure);
 
         // No strategy, and therefore no vault reveal, was ever reached for a run refused this
         // early -- but a connection was already opened for the (re-)estimate, and it must not leak.

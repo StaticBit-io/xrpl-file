@@ -6,7 +6,7 @@ namespace XrplFile.App.Core.Tests;
 public sealed class CostSummaryTests
 {
     private static CostSummary Summary(TimeSpan longest, long worstCase) =>
-        new(new DurationRange(longest / 2, longest), 10, [new AccountCost("Writer", "w", 2_000_000, worstCase)]);
+        new(new DurationRange(longest / 2, longest), 10, [new AccountCost(AccountRole.Writer, "w", 2_000_000, worstCase)]);
 
     [Fact]
     public void An_hour_and_one_XRP_are_the_lines()
@@ -20,7 +20,7 @@ public sealed class CostSummaryTests
     public void Either_account_crossing_the_line_is_enough()
     {
         CostSummary summary = new(new DurationRange(TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(2)), 10,
-            [new AccountCost("Payer", "p", 3_000_000, 1_000_001), new AccountCost("Writer", "w", 2_000_000, 5)]);
+            [new AccountCost(AccountRole.Payer, "p", 3_000_000, 1_000_001), new AccountCost(AccountRole.Writer, "w", 2_000_000, 5)]);
 
         Assert.True(summary.NeedsConfirmation);
     }

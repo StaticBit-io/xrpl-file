@@ -29,7 +29,7 @@ else if (_estimated)
 else
 {
     <div class="xf-page">
-        <h1 class="xf-title">Publish a file</h1>
+        <h1 class="xf-title">@T[PublishText.Title]</h1>
 
         @if (Run.IsFinished)
         {
@@ -37,30 +37,30 @@ else
         }
 
         <section class="xf-card">
-            <h2 class="xf-section-title">File</h2>
+            <h2 class="xf-section-title">@T[PublishText.FileTitle]</h2>
             <div class="xf-file-pick">
                 <button type="button" class="btn btn-outline-secondary" @onclick="PickAsync">
-                    @(Model.FileName is null ? "Choose a file…" : "Choose another…")
+                    @T[Model.FileName is null ? PublishText.ChooseFileButton : PublishText.ChooseAnotherButton]
                 </button>
                 @if (Model.FileName is not null)
                 {
                     <div class="xf-file-chosen">
                         <span class="xf-file-name">@Model.FileName</span>
-                        <span class="xf-muted xf-num">@Model.FileSize.ToString("N0") bytes</span>
+                        <span class="xf-muted xf-num">@T[UiText.Of(CommonText.Bytes, ("count", Model.FileSize))]</span>
                     </div>
                 }
                 else
                 {
-                    <span class="xf-muted">No file chosen</span>
+                    <span class="xf-muted">@T[PublishText.NoFileChosen]</span>
                 }
             </div>
         </section>
 
         <section class="xf-card">
-            <h2 class="xf-section-title" id="xf-publish-account">Publish from</h2>
+            <h2 class="xf-section-title" id="xf-publish-account">@T[PublishText.AccountTitle]</h2>
             @if (Model.Keys.Count == 0)
             {
-                <p class="xf-muted mb-0">No account to publish from yet. Create one on the Accounts tab.</p>
+                <p class="xf-muted mb-0">@T[PublishText.NoAccounts]</p>
             }
             else
             {
@@ -83,30 +83,30 @@ else
 
             @if (Model.SelectedKey is not null)
             {
-                <label class="form-label mt-3" for="xf-payer">Paid by</label>
+                <label class="form-label mt-3" for="xf-payer">@T[PublishText.PaidByLabel]</label>
                 <select id="xf-payer" class="form-select" disabled="@Model.PayerLocked"
                         value="@(Model.SelectedPayer?.Reference ?? string.Empty)" @onchange="OnPayerChanged">
                     @foreach (VaultEntryInfo payer in Model.PayerChoices)
                     {
-                        <option value="@payer.Reference">@payer.Label &mdash; @payer.Address</option>
+                        <option value="@payer.Reference">@T[UiText.Of(PublishText.PayerChoice, ("label", payer.Label), ("address", payer.Address))]</option>
                     }
-                    <option value="">@PublishModel.NobodyLabel</option>
+                    <option value="">@T[PublishText.PayerNobody]</option>
                 </select>
                 @if (Model.PayerNote is { } note)
                 {
-                    <p class="form-text xf-muted mt-2 mb-0">@note</p>
+                    <p class="form-text xf-muted mt-2 mb-0">@T[note]</p>
                 }
             }
         </section>
 
         @if (Model.Message is not null)
         {
-            <div class="alert alert-warning">@Model.Message</div>
+            <div class="alert alert-warning">@T[Model.Message]</div>
         }
 
         <div class="xf-actionbar">
             <button type="button" class="btn btn-primary" disabled="@(!Model.CanEstimate)" @onclick="EstimateAsync">
-                Estimate cost
+                @T[PublishText.EstimateButton]
             </button>
         </div>
     </div>

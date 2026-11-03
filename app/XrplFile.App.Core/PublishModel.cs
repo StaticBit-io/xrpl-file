@@ -20,23 +20,8 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
     /// <summary>The largest file this application publishes, through Batch (spec S1).</summary>
     public const long MaxPublicationBytes = PublicationSession.MaxPublicationBytes;
 
-    /// <summary>Above <see cref="TicketPathMaxBytes"/> with nobody paying (spec S1).</summary>
-    public const string PayerRequiredMessage = "Choose a payer — files larger than 64 MiB publish through Batch.";
-
-    /// <summary>Above <see cref="MaxPublicationBytes"/> (spec S1).</summary>
-    public const string TooLargeMessage = "This application publishes files up to 16 GiB.";
-
     /// <summary>The size limit of the publication as chosen: a payer lifts it from 64 MiB to 16 GiB.</summary>
     public long SizeLimit => SelectedPayer is null ? TicketPathMaxBytes : MaxPublicationBytes;
-
-    /// <summary>The last entry of "Paid by" (spec 6.1).</summary>
-    public const string NobodyLabel = "Nobody — publish with tickets";
-
-    /// <summary>The muted note under "Nobody" (spec 6.1).</summary>
-    public const string NobodyNote = "Slower, and holds up to 50 XRP of reserve while publishing.";
-
-    /// <summary>Under "Paid by" when the network's ledger does not enable Batch (spec 6.1).</summary>
-    public const string BatchUnavailableNote = "This network does not support Batch, so publishing uses tickets.";
 
     /// <summary>The writer the current payer was chosen for.</summary>
     private string? _payerChosenFor;
@@ -78,7 +63,7 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             : PayerChoices.FirstOrDefault(key => string.Equals(key.Reference, SelectedPayerReference, StringComparison.Ordinal));
 
     /// <summary>The muted line under "Paid by", or null.</summary>
-    public string? PayerNote => PayerLocked ? BatchUnavailableNote : SelectedPayer is null ? NobodyNote : null;
+    public UiText? PayerNote => PayerLocked ? PublishText.PayerBatchUnavailable : SelectedPayer is null ? PublishText.PayerNobodyNote : null;
 
     /// <summary>
     /// Reads the amendment for the writer's network (cached, spec B14) and picks the default payer
@@ -211,7 +196,7 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             : null;
 
     /// <summary>Why the screen cannot go on, or <see langword="null"/> when it can.</summary>
-    public string? Message { get; private set; }
+    public UiText? Message { get; private set; }
 
     public bool CanEstimate =>
         FilePath is not null && FileSize > 0 && FileSize <= SizeLimit && SelectedKey is not null
@@ -274,7 +259,7 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             // in a running window: Windows refuses to show this dialog to a process running as
             // administrator, and the exception went straight to Blazor's anonymous error bar.
             LastPickerFailure = ex;
-            Message = "The file dialog could not be opened.";
+            Message = PublishText.FileDialogFailed;
             return;
         }
 
@@ -292,7 +277,7 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             FilePath = null;
             FileName = null;
             FileSize = 0;
-            Message = "That file could not be read.";
+            Message = PublishText.FileUnreadable;
             return;
         }
 
@@ -341,13 +326,13 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Message = "That file could not be read.";
+            Message = PublishText.FileUnreadable;
             return null;
         }
 
         if (size == 0)
         {
-            Message = "That file is empty, and an empty file has nothing to publish.";
+            Message = PublishText.FileEmpty;
             return null;
         }
 
@@ -359,19 +344,19 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
             IReadOnlyList<VaultEntryInfo> listed = await vault.ListAsync(cancellationToken).ConfigureAwait(false);
             if (!listed.Any(key => string.Equals(key.Reference, SelectedKey.Reference, StringComparison.Ordinal)))
             {
-                Message = "That key is no longer in the vault.";
+                Message = VaultText.ErrorNoSuchEntry;
                 return null;
             }
 
             if (SelectedPayer is { } chosen && !listed.Any(key => string.Equals(key.Reference, chosen.Reference, StringComparison.Ordinal)))
             {
-                Message = "The key chosen to pay is no longer in the vault.";
+                Message = PublishText.PayerKeyGone;
                 return null;
             }
         }
         catch (VaultException ex)
         {
-            Message = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
+            Message = VaultErrorMessages.For(ex.Error);
             return null;
         }
 
@@ -407,46 +392,44 @@ public sealed class PublishModel(IKeyVault vault, IFilePickerService picker, INo
     {
         if (FilePath is null)
         {
-            Message = "Choose a file to publish.";
+            Message = PublishText.ChooseFile;
             return;
         }
 
         if (FileSize == 0)
         {
-            Message = "That file is empty, and an empty file has nothing to publish.";
+            Message = PublishText.FileEmpty;
             return;
         }
 
         if (FileSize > MaxPublicationBytes)
         {
-            Message = TooLargeMessage;
+            Message = PublishText.ErrorTooLarge;
             return;
         }
 
         if (SelectedKey is null)
         {
-            Message = "Choose the key that will publish it.";
+            Message = PublishText.ChooseKey;
             return;
         }
 
         if (!XrplFileLink.TryNormalizeNetwork(SelectedKey.Network, out string? canonicalNetwork))
         {
-            Message =
-                $"The key's network '{SelectedKey.Network}' is not one an xrpl-file link can name. "
-                + "xrpl-file links use 'mainnet', 'testnet', 'devnet', or a NetworkID written as digits.";
+            Message = UiText.Of(PublishText.NetworkNotLinkable, ("network", SelectedKey.Network));
             return;
         }
 
         if (FileSize > TicketPathMaxBytes && SelectedPayer is null)
         {
-            Message = PayerRequiredMessage;
+            Message = PublishText.PayerRequired;
             return;
         }
 
         // Named by its canonical form: that is the network the publication will actually use, and
         // the one NodeUrl itself resolved against, so it is also the one worth reading about here.
         Message = NodeUrl is null
-            ? $"No node URL is known for the network '{canonicalNetwork}'. Add one in Settings."
+            ? UiText.Of(PublishText.NoNodeUrl, ("network", canonicalNetwork))
             : null;
     }
 }

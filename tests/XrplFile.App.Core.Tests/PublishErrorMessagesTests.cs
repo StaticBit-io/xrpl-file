@@ -4,6 +4,9 @@ namespace XrplFile.App.Core.Tests;
 
 public sealed class PublishErrorMessagesTests
 {
+    private static string ForRunText(XrplFileException exception, RunFailurePoint point, bool usesTickets, long ownerReserveDrops) =>
+        TestText.En(PublishErrorMessages.ForRun(exception, point, usesTickets, ownerReserveDrops));
+
     [Fact]
     public void Every_error_the_library_can_report_has_a_sentence()
     {
@@ -27,7 +30,7 @@ public sealed class PublishErrorMessagesTests
     [Fact]
     public void TooLarge_says_the_applications_limit()
     {
-        Assert.Equal(PublishModel.TooLargeMessage, TestText.En(PublishErrorMessages.For(XrplFileError.TooLarge)));
+        Assert.Equal("This application publishes files up to 16 GiB.", TestText.En(PublishErrorMessages.For(XrplFileError.TooLarge)));
     }
 
     [Fact]
@@ -82,7 +85,7 @@ public sealed class PublishErrorMessagesTests
 
         Assert.Equal(
             "The node did not answer. Nothing was spent. Check the node URL in Settings and try again.",
-            PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
+            ForRunText(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
     }
 
     [Fact]
@@ -93,7 +96,7 @@ public sealed class PublishErrorMessagesTests
         Assert.Equal(
             "The node did not answer. This attempt spent nothing, and the run is still listed under unfinished runs. "
                 + "Check the node URL in Settings and try again.",
-            PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0));
+            ForRunText(thrown, RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0));
     }
 
     [Fact]
@@ -105,7 +108,7 @@ public sealed class PublishErrorMessagesTests
             "The node stopped answering partway through the run. Transactions sent before that may already be in the "
                 + "ledger and paid for. The run is listed under unfinished runs: check the node URL in Settings, then "
                 + "resume it. Resuming does not pay again for the chunks and block lists that already landed.",
-            PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 200_000));
+            ForRunText(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 200_000));
     }
 
     [Fact]
@@ -118,7 +121,7 @@ public sealed class PublishErrorMessagesTests
                 + "the file back to check it, so the link has not been written yet. The run is listed under unfinished "
                 + "runs: resume it to check the file again and write the link. Resuming pays only for the link's own "
                 + "transaction.",
-            PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileReadingBack, usesTickets: true, ownerReserveDrops: 200_000));
+            ForRunText(thrown, RunFailurePoint.WhileReadingBack, usesTickets: true, ownerReserveDrops: 200_000));
     }
 
     [Theory]
@@ -147,7 +150,7 @@ public sealed class PublishErrorMessagesTests
                 + "reserve until a later publication from this account spends them or the account is closed. The run "
                 + "is listed under unfinished runs: check the node URL in Settings, then resume it. Resuming does not "
                 + "pay again for the chunks and block lists that already landed.",
-            PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileSubmitting, usesTickets: true, ownerReserveDrops: drops));
+            ForRunText(thrown, RunFailurePoint.WhileSubmitting, usesTickets: true, ownerReserveDrops: drops));
     }
 
     [Theory]
@@ -167,7 +170,7 @@ public sealed class PublishErrorMessagesTests
 
             Assert.Equal(
                 TestText.En(PublishErrorMessages.For(thrown)),
-                PublishErrorMessages.ForRun(thrown, point, usesTickets: true, ownerReserveDrops: 200_000));
+                ForRunText(thrown, point, usesTickets: true, ownerReserveDrops: 200_000));
         }
     }
 
@@ -176,16 +179,16 @@ public sealed class PublishErrorMessagesTests
     {
         XrplFileException thrown = new(XrplFileError.PayerInsufficientBalance, "payer holds too little");
 
-        string sentence = PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0);
+        string sentence = ForRunText(thrown, RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0);
 
         Assert.Equal("The payer does not hold enough XRP to finish this publication. Fund it, then resume.", sentence);
         Assert.DoesNotContain("another payer", sentence, StringComparison.Ordinal);
         Assert.Equal(
             TestText.En(PublishErrorMessages.For(XrplFileError.PayerInsufficientBalance)),
-            PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
+            ForRunText(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
         Assert.Equal(
             TestText.En(PublishErrorMessages.For(XrplFileError.PayerInsufficientBalance)),
-            PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0));
+            ForRunText(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0));
     }
 
     [Fact]
@@ -193,16 +196,16 @@ public sealed class PublishErrorMessagesTests
     {
         XrplFileException thrown = new(XrplFileError.BatchNotEnabled, "Batch is not enabled");
 
-        string sentence = PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0);
+        string sentence = ForRunText(thrown, RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0);
 
         Assert.Equal("This network no longer enables Batch; the run can be resumed once it does.", sentence);
         Assert.DoesNotContain("Nobody", sentence, StringComparison.Ordinal);
         Assert.Equal(
             TestText.En(PublishErrorMessages.For(XrplFileError.BatchNotEnabled)),
-            PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
+            ForRunText(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
         Assert.Equal(
             TestText.En(PublishErrorMessages.For(XrplFileError.BatchNotEnabled)),
-            PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0));
+            ForRunText(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0));
     }
 
     [Fact]
@@ -248,9 +251,9 @@ public sealed class PublishErrorMessagesTests
     {
         XrplFileException thrown = new(XrplFileError.FeeTooHigh, "open ledger fee 250");
 
-        string sentence = PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0);
+        string sentence = ForRunText(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0);
 
-        Assert.Equal(PublishErrorMessages.FeeTooHighNow, sentence);
+        Assert.Equal(TestText.En(PublishErrorMessages.FeeTooHighNow), sentence);
         Assert.DoesNotContain("unfinished", sentence, StringComparison.Ordinal);
     }
 
@@ -260,14 +263,14 @@ public sealed class PublishErrorMessagesTests
         XrplFileException thrown = new(XrplFileError.NodeLacksHistory, "account_tx lagged");
 
         Assert.Equal(
-            PublishErrorMessages.HistoryLaggedWhilePublishing,
-            PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0));
+            TestText.En(PublishErrorMessages.HistoryLaggedWhilePublishing),
+            ForRunText(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0));
         Assert.Equal(
-            PublishErrorMessages.HistoryLaggedWhilePublishing,
-            PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0));
+            TestText.En(PublishErrorMessages.HistoryLaggedWhilePublishing),
+            ForRunText(thrown, RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0));
         Assert.Equal(
             TestText.En(PublishErrorMessages.For(XrplFileError.NodeLacksHistory)),
-            PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
+            ForRunText(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
     }
 
     [Fact]

@@ -60,14 +60,14 @@
                         <tr><th>Transactions</th><td>@confirm.Transactions.ToString("N0")</td></tr>
                         @foreach (AccountCost account in confirm.Accounts)
                         {
-                            <tr><th>@account.Role @account.Name needs</th><td>@XrpAmount.Format(account.RequiredDrops)</td></tr>
-                            <tr><th>@account.Role fees in the worst case</th><td>@XrpAmount.Format(account.WorstCaseFeeDrops)</td></tr>
+                            <tr><th>@T[account.NeedsLabel]</th><td>@XrpAmount.Format(account.RequiredDrops)</td></tr>
+                            <tr><th>@T[account.WorstCaseFeesLabel]</th><td>@XrpAmount.Format(account.WorstCaseFeeDrops)</td></tr>
                         }
                     </tbody>
                 </table>
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" id="xf-resume-understood" @bind="_understood" />
-                    <label class="form-check-label" for="xf-resume-understood">@EstimateModel.ConfirmationLabel</label>
+                    <label class="form-check-label" for="xf-resume-understood">@T[EstimateText.ConfirmationLabel]</label>
                 </div>
                 <div class="xf-actionbar">
                     <button type="button" class="btn btn-outline-secondary" @onclick="() => Model.DeclineResume()">Cancel</button>

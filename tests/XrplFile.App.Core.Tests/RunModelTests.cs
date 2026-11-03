@@ -436,7 +436,7 @@ public sealed class RunModelTests : VaultHarness
         CostSummary asked = new(
             new DurationRange(TimeSpan.FromHours(2), TimeSpan.FromHours(3)),
             1_000,
-            [new AccountCost("Payer", "payer", 5_000_000, 2_000_000)]);
+            [new AccountCost(AccountRole.Payer, "payer", 5_000_000, 2_000_000)]);
         RunSnapshot snapshot = new(
             PublicationRunState.Running, new PublishProgress("history", 98_000, 0), null, null, "big.bin", "1", null)
         {

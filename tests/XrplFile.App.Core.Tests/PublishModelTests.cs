@@ -117,7 +117,7 @@ public sealed class PublishModelTests : VaultHarness
         model.SelectKey(reference);
 
         Assert.False(model.CanEstimate);
-        Assert.Contains("empty", model.Message!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("empty", TestText.En(model.Message), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -173,7 +173,7 @@ public sealed class PublishModelTests : VaultHarness
 
         Assert.False(model.CanEstimate);
         Assert.Null(model.NodeUrl);
-        Assert.Contains("Settings", model.Message ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("Settings", TestText.En(model.Message), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -188,13 +188,13 @@ public sealed class PublishModelTests : VaultHarness
 
         Assert.False(model.CanEstimate);
         Assert.Null(await model.BuildRequestAsync(TestContext.Current.CancellationToken));
-        Assert.Contains("standalone", model.Message ?? string.Empty, StringComparison.Ordinal);
-        Assert.Contains("xrpl-file link", model.Message ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("standalone", TestText.En(model.Message), StringComparison.Ordinal);
+        Assert.Contains("xrpl-file link", TestText.En(model.Message), StringComparison.Ordinal);
 
         // The whole point of this screen catching the refusal is that the person never sees the
         // library's own error name -- that is what used to arrive, deep inside a confirmed run, as
         // a bare "InvalidLink". Pin it so a future edit cannot paste it back into the message.
-        Assert.DoesNotContain("InvalidLink", model.Message ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain("InvalidLink", TestText.En(model.Message), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -317,7 +317,7 @@ public sealed class PublishModelTests : VaultHarness
 
         await model.PickFileAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal("The file dialog could not be opened.", model.Message);
+        Assert.Equal("The file dialog could not be opened.", TestText.En(model.Message));
         Assert.Same(failure, model.LastPickerFailure);
         Assert.Null(model.FileName);
     }

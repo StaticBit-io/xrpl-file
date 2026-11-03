@@ -22,5 +22,7 @@ public static class CommonText
     public static readonly TextId FieldLabel = Id();
     public static readonly TextId FieldNetwork = Id();
 
+    public static readonly TextId Bytes = Id();
+
     private static TextId Id([CallerMemberName] string name = "") => TextId.Of("Common", name);
 }

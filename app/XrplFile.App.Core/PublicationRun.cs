@@ -427,7 +427,7 @@ public sealed class PublicationRun(
         }
         catch (FeeTooLargeForApplicationException)
         {
-            failure = PublishErrorMessages.FeeTooLargeForApplication;
+            failure = TextCatalog.For(UiLanguage.English).Render(PublishErrorMessages.FeeTooLargeForApplication) /* LOCALIZE(bridge) */;
             finalState = PublicationRunState.Failed;
         }
         catch (SourceUnreadableException ex)
@@ -466,7 +466,7 @@ public sealed class PublicationRun(
         {
             string? lastStage;
             lock (_gate) lastStage = _progress?.Stage;
-            failure = PublishErrorMessages.ForRun(ex, PublishErrorMessages.PointAt(attempt.Point, lastStage), attempt.UsesTickets, attempt.OwnerReserveDrops);
+            failure = TextCatalog.For(UiLanguage.English).Render(PublishErrorMessages.ForRun(ex, PublishErrorMessages.PointAt(attempt.Point, lastStage), attempt.UsesTickets, attempt.OwnerReserveDrops)) /* LOCALIZE(bridge) */;
             finalState = PublicationRunState.Failed;
         }
         catch (VaultException ex)

@@ -10,11 +10,10 @@
    before this component ever existed -- are named here too, not only the cost. *@
 
 <div class="xf-page">
-    <h1 class="xf-title">Estimate</h1>
+    <h1 class="xf-title">@T[EstimateText.Title]</h1>
 
     <p>
-        Publishing <strong>@Request.Name</strong> (@((Model.Request ?? Request).Size.ToString("N0")) bytes) from
-        <code class="xf-mono">@Request.Account</code>.
+        @Html(UiText.Of(EstimateText.Publishing, ("name", Request.Name), ("size", UiText.Of(CommonText.Bytes, ("count", (Model.Request ?? Request).Size))), ("account", Request.Account)), ("name", "strong"), ("account", "code"))
     </p>
 
     @if (Model.BatchEstimate is { } batch)
@@ -22,34 +21,34 @@
         <section class="xf-card">
             <table class="table xf-kv-table">
                 <tbody>
-                    <tr><th>Chunks</th><td>@batch.Chunks.ToString("N0")</td></tr>
-                    <tr><th>Batches</th><td>@batch.Batches.ToString("N0")</td></tr>
-                    <tr><th>Solo transactions</th><td>@batch.SoloTransactions.ToString("N0")</td></tr>
-                    <tr><th>Fee unit</th><td>@batch.FeeUnitDrops.ToString("N0") drops</td></tr>
+                    <tr><th>@T[EstimateText.RowChunks]</th><td>@T.Number(batch.Chunks)</td></tr>
+                    <tr><th>@T[EstimateText.RowBatches]</th><td>@T.Number(batch.Batches)</td></tr>
+                    <tr><th>@T[EstimateText.RowSoloTransactions]</th><td>@T.Number(batch.SoloTransactions)</td></tr>
+                    <tr><th>@T[EstimateText.RowFeeUnit]</th><td>@T[UiText.Of(EstimateText.Drops, ("count", batch.FeeUnitDrops))]</td></tr>
                 </tbody>
             </table>
 
-            <h2 class="xf-section-title mt-4">Payer &mdash; @(Request.PayerLabel) <code class="xf-mono">@Request.PayerAccount</code></h2>
+            <h2 class="xf-section-title mt-4">@Html(UiText.Of(EstimateText.PayerHeading, ("label", Request.PayerLabel ?? string.Empty), ("account", Request.PayerAccount ?? string.Empty)), ("account", "code"))</h2>
             <table class="table xf-kv-table">
                 <tbody>
-                    <tr><th>Fees</th><td>@XrpAmount.Format(batch.PayerFeeDrops)</td></tr>
-                    <tr><th>Fees in the worst case</th><td>@XrpAmount.Format(batch.PayerFeeDropsWorstCase)</td></tr>
-                    <tr><th>Account reserve</th><td>@XrpAmount.Format(batch.BaseReserveDrops)</td></tr>
-                    <tr><th>Required</th><td>@XrpAmount.Format(batch.PayerRequiredDrops)</td></tr>
-                    <tr><th>Balance</th><td>@XrpAmount.Format(batch.PayerBalanceDrops)</td></tr>
-                    <tr><th>Spendable</th><td>@XrpAmount.Format(batch.PayerSpendableDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowFees]</th><td>@T.Xrp(batch.PayerFeeDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowFeesWorstCase]</th><td>@T.Xrp(batch.PayerFeeDropsWorstCase)</td></tr>
+                    <tr><th>@T[EstimateText.RowAccountReserve]</th><td>@T.Xrp(batch.BaseReserveDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowRequired]</th><td>@T.Xrp(batch.PayerRequiredDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowBalance]</th><td>@T.Xrp(batch.PayerBalanceDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowSpendable]</th><td>@T.Xrp(batch.PayerSpendableDrops)</td></tr>
                 </tbody>
             </table>
 
-            <h2 class="xf-section-title mt-4">Writer &mdash; @(Request.WriterLabel) <code class="xf-mono">@Request.Account</code></h2>
+            <h2 class="xf-section-title mt-4">@Html(UiText.Of(EstimateText.WriterHeading, ("label", Request.WriterLabel ?? string.Empty), ("account", Request.Account)), ("account", "code"))</h2>
             <table class="table xf-kv-table">
                 <tbody>
-                    <tr><th>Fees</th><td>@XrpAmount.Format(batch.WriterFeeDrops)</td></tr>
-                    <tr><th>Fees in the worst case</th><td>@XrpAmount.Format(batch.WriterFeeDropsWorstCase)</td></tr>
-                    <tr><th>Account reserve</th><td>@XrpAmount.Format(batch.BaseReserveDrops)</td></tr>
-                    <tr><th>Required</th><td>@XrpAmount.Format(batch.WriterRequiredDrops)</td></tr>
-                    <tr><th>Balance</th><td>@XrpAmount.Format(batch.WriterBalanceDrops)</td></tr>
-                    <tr><th>Spendable</th><td>@XrpAmount.Format(batch.WriterSpendableDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowFees]</th><td>@T.Xrp(batch.WriterFeeDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowFeesWorstCase]</th><td>@T.Xrp(batch.WriterFeeDropsWorstCase)</td></tr>
+                    <tr><th>@T[EstimateText.RowAccountReserve]</th><td>@T.Xrp(batch.BaseReserveDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowRequired]</th><td>@T.Xrp(batch.WriterRequiredDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowBalance]</th><td>@T.Xrp(batch.WriterBalanceDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowSpendable]</th><td>@T.Xrp(batch.WriterSpendableDrops)</td></tr>
                 </tbody>
             </table>
 
@@ -57,13 +56,13 @@
             {
                 <table class="table xf-kv-table mt-4">
                     <tbody>
-                        <tr><th>Time</th><td>@DurationText.Of(summary.Duration)</td></tr>
+                        <tr><th>@T[EstimateText.RowTime]</th><td>@T[DurationText.Of(summary.Duration)]</td></tr>
                     </tbody>
                 </table>
             }
 
-            <p class="mt-3 mb-0">@Model.MethodLine</p>
-            <p class="mt-3 mb-0 xf-muted">Node: <code class="xf-mono">@Model.NodeUrl</code> (@Request.Network)</p>
+            <p class="mt-3 mb-0">@T[Model.MethodLine]</p>
+            <p class="mt-3 mb-0 xf-muted">@Html(UiText.Of(EstimateText.NodeLine, ("url", Model.NodeUrl ?? string.Empty), ("network", Request.Network)), ("url", "code"))</p>
         </section>
     }
     else if (Model.Estimate is { } estimate)
@@ -71,34 +70,34 @@
         <section class="xf-card">
             <table class="table xf-kv-table">
                 <tbody>
-                    <tr><th>Chunks</th><td>@estimate.Chunks.ToString("N0")</td></tr>
-                    <tr><th>Transactions</th><td>@estimate.Transactions.ToString("N0")</td></tr>
-                    <tr><th>Fee per transaction</th><td>@estimate.FeeDropsPerTransaction.ToString("N0") drops</td></tr>
+                    <tr><th>@T[EstimateText.RowChunks]</th><td>@T.Number(estimate.Chunks)</td></tr>
+                    <tr><th>@T[EstimateText.RowTransactions]</th><td>@T.Number(estimate.Transactions)</td></tr>
+                    <tr><th>@T[EstimateText.RowFeePerTransaction]</th><td>@T[UiText.Of(EstimateText.Drops, ("count", estimate.FeeDropsPerTransaction))]</td></tr>
                 </tbody>
             </table>
 
-            <h2 class="xf-section-title mt-4">Spent</h2>
+            <h2 class="xf-section-title mt-4">@T[EstimateText.SpentTitle]</h2>
             <table class="table xf-kv-table">
                 <tbody>
-                    <tr><th>Fees</th><td>@XrpAmount.Format(estimate.FeeDropsTotal)</td></tr>
-                    <tr><th>Fees if every transaction is retried</th><td>@XrpAmount.Format(estimate.FeeDropsWorstCase)</td></tr>
+                    <tr><th>@T[EstimateText.RowFees]</th><td>@T.Xrp(estimate.FeeDropsTotal)</td></tr>
+                    <tr><th>@T[EstimateText.RowFeesRetried]</th><td>@T.Xrp(estimate.FeeDropsWorstCase)</td></tr>
                 </tbody>
             </table>
 
-            <h2 class="xf-section-title mt-4">Held while publishing, returned afterwards</h2>
+            <h2 class="xf-section-title mt-4">@T[EstimateText.HeldTitle]</h2>
             <table class="table xf-kv-table">
                 <tbody>
-                    <tr><th>Ticket reserve</th><td>@XrpAmount.Format(estimate.PeakReserveDrops)</td></tr>
-                    <tr><th>Account reserve</th><td>@XrpAmount.Format(estimate.BaseReserveDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowTicketReserve]</th><td>@T.Xrp(estimate.PeakReserveDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowAccountReserve]</th><td>@T.Xrp(estimate.BaseReserveDrops)</td></tr>
                 </tbody>
             </table>
-            <p class="xf-muted small mb-0">The account reserve stays on the account until the account is closed.</p>
+            <p class="xf-muted small mb-0">@T[EstimateText.AccountReserveStays]</p>
 
             <table class="table xf-kv-table mt-4">
                 <tbody>
-                    <tr><th>Required</th><td>@XrpAmount.Format(estimate.RequiredDrops)</td></tr>
-                    <tr><th>Account balance</th><td>@XrpAmount.Format(estimate.BalanceDrops)</td></tr>
-                    <tr><th>Spendable</th><td>@XrpAmount.Format(estimate.SpendableDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowRequired]</th><td>@T.Xrp(estimate.RequiredDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowAccountBalance]</th><td>@T.Xrp(estimate.BalanceDrops)</td></tr>
+                    <tr><th>@T[EstimateText.RowSpendable]</th><td>@T.Xrp(estimate.SpendableDrops)</td></tr>
                 </tbody>
             </table>
 
@@ -106,15 +105,15 @@
             {
                 <table class="table xf-kv-table mt-4">
                     <tbody>
-                        <tr><th>Time</th><td>@DurationText.Of(summary.Duration)</td></tr>
+                        <tr><th>@T[EstimateText.RowTime]</th><td>@T[DurationText.Of(summary.Duration)]</td></tr>
                     </tbody>
                 </table>
             }
 
-            <p class="mt-3 mb-0 xf-muted">Node: <code class="xf-mono">@Model.NodeUrl</code> (@Request.Network)</p>
+            <p class="mt-3 mb-0 xf-muted">@Html(UiText.Of(EstimateText.NodeLine, ("url", Model.NodeUrl ?? string.Empty), ("network", Request.Network)), ("url", "code"))</p>
             @if (Model.Note is { } note)
             {
-                <p class="mt-2 mb-0 xf-muted small">@note</p>
+                <p class="mt-2 mb-0 xf-muted small">@T[note]</p>
             }
         </section>
     }
@@ -123,40 +122,40 @@
     @if (Model.NeedsConfirmation && Model.Message is null && Model.Summary is { } confirm)
     {
         <section class="xf-card">
-            <h2 class="xf-section-title">This publication is large</h2>
+            <h2 class="xf-section-title">@T[EstimateText.LargeTitle]</h2>
             <table class="table xf-kv-table">
                 <tbody>
-                    <tr><th>Time</th><td>@DurationText.Of(confirm.Duration)</td></tr>
-                    <tr><th>Transactions</th><td>@confirm.Transactions.ToString("N0")</td></tr>
+                    <tr><th>@T[EstimateText.RowTime]</th><td>@T[DurationText.Of(confirm.Duration)]</td></tr>
+                    <tr><th>@T[EstimateText.RowTransactions]</th><td>@T.Number(confirm.Transactions)</td></tr>
                     @foreach (AccountCost account in confirm.Accounts)
                     {
-                        <tr><th>@account.Role @account.Name needs</th><td>@XrpAmount.Format(account.RequiredDrops)</td></tr>
-                        <tr><th>@account.Role fees in the worst case</th><td>@XrpAmount.Format(account.WorstCaseFeeDrops)</td></tr>
+                        <tr><th>@T[account.NeedsLabel]</th><td>@T.Xrp(account.RequiredDrops)</td></tr>
+                        <tr><th>@T[account.WorstCaseFeesLabel]</th><td>@T.Xrp(account.WorstCaseFeeDrops)</td></tr>
                     }
                 </tbody>
             </table>
             <div class="form-check mb-0">
                 <input class="form-check-input" type="checkbox" id="xf-understood" checked="@Model.Confirmed"
                        @onchange="change => Model.Confirm(change.Value is true)" />
-                <label class="form-check-label" for="xf-understood">@EstimateModel.ConfirmationLabel</label>
+                <label class="form-check-label" for="xf-understood">@T[EstimateText.ConfirmationLabel]</label>
             </div>
         </section>
     }
 
     @if (Model.Message is not null)
     {
-        <div class="alert alert-warning">@Model.Message</div>
+        <div class="alert alert-warning">@T[Model.Message]</div>
     }
 
     @if (_notice is not null)
     {
-        <div class="alert alert-warning">@_notice</div>
+        <div class="alert alert-warning">@T[_notice]</div>
     }
 
     <div class="xf-actionbar">
-        <button type="button" class="btn btn-outline-secondary" disabled="@_starting" @onclick="Back">Back</button>
+        <button type="button" class="btn btn-outline-secondary" disabled="@_starting" @onclick="Back">@T[EstimateText.BackButton]</button>
         <button type="button" class="btn btn-primary" disabled="@(!Model.CanPublish || _starting)" @onclick="PublishAsync">
-            Publish
+            @T[EstimateText.PublishButton]
         </button>
     </div>
 </div>
@@ -164,7 +163,7 @@
 @code {
     private readonly ScreenLifetime _lifetime = new();
     private bool _starting;
-    private string? _notice;
+    private UiText? _notice;
 
     [Parameter, EditorRequired]
     public PublishRequest Request { get; set; } = null!;
@@ -201,7 +200,7 @@
             if (request is null)
             {
                 // The held file is gone: the estimate was discarded or taken while this screen was still showing it.
-                _notice = "Nothing is ready to publish. Go back and estimate the file again.";
+                _notice = EstimateText.NothingReady;
                 return;
             }
 

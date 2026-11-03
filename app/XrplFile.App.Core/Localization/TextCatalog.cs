@@ -93,6 +93,9 @@ public sealed class TextCatalog
     /// <summary>An integer grouped in the language's locale: "12,345", "12 345", "12.345".</summary>
     public string Number(long value) => value.ToString("N0", Language.Culture);
 
+    /// <summary>An amount of drops in XRP, in the language's locale: "1.5 XRP", "1,5 XRP".</summary>
+    public string Xrp(long drops) => new XrpAmount(drops).ToString(Language.Culture);
+
     internal static IReadOnlyDictionary<string, Phrase> Parse(Stream json)
     {
         using JsonDocument document = JsonDocument.Parse(json);

@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 using XrplFile.Tests;
 using Xunit;
@@ -71,7 +72,7 @@ public sealed class PublishModelPayerTests : VaultHarness
         model.SelectKey(refs["alone"]);
         await model.RefreshPayerAsync(Token);
         Assert.Null(model.SelectedPayerReference);
-        Assert.Equal(PublishModel.NobodyNote, model.PayerNote);
+        Assert.Equal(UiText.Of(PublishText.PayerNobodyNote), model.PayerNote);
     }
 
     [Fact]
@@ -85,7 +86,7 @@ public sealed class PublishModelPayerTests : VaultHarness
 
         Assert.True(model.PayerLocked);
         Assert.Null(model.SelectedPayer);
-        Assert.Equal("This network does not support Batch, so publishing uses tickets.", model.PayerNote);
+        Assert.Equal("This network does not support Batch, so publishing uses tickets.", TestText.En(model.PayerNote));
     }
 
     [Fact]
@@ -115,7 +116,7 @@ public sealed class PublishModelPayerTests : VaultHarness
         await model.RefreshPayerAsync(Token);
         model.SelectPayer(null);
 
-        Assert.Equal("Slower, and holds up to 50 XRP of reserve while publishing.", model.PayerNote);
+        Assert.Equal("Slower, and holds up to 50 XRP of reserve while publishing.", TestText.En(model.PayerNote));
         PublishRequest request = (await model.BuildRequestAsync(Token))!;
         Assert.Null(request.PayerReference);
         Assert.Equal(path, request.SourcePath);
@@ -194,7 +195,7 @@ public sealed class PublishModelPayerTests : VaultHarness
 
         model.DescribeFileForTests("over.bin", PublishModel.TicketPathMaxBytes + 1);
         Assert.False(model.CanEstimate);
-        Assert.Equal("Choose a payer — files larger than 64 MiB publish through Batch.", model.Message);
+        Assert.Equal("Choose a payer — files larger than 64 MiB publish through Batch.", TestText.En(model.Message));
     }
 
     [Fact]
@@ -212,7 +213,7 @@ public sealed class PublishModelPayerTests : VaultHarness
 
         model.DescribeFileForTests("over.bin", 16L * 1024 * 1024 * 1024 + 1);
         Assert.False(model.CanEstimate);
-        Assert.Equal("This application publishes files up to 16 GiB.", model.Message);
+        Assert.Equal("This application publishes files up to 16 GiB.", TestText.En(model.Message));
     }
 
     [Fact]
@@ -223,7 +224,7 @@ public sealed class PublishModelPayerTests : VaultHarness
 
         model.DescribeFileForTests("over.bin", PublishModel.MaxPublicationBytes + 1);
 
-        Assert.Equal(PublishModel.TooLargeMessage, model.Message);
+        Assert.Equal(UiText.Of(PublishText.ErrorTooLarge), model.Message);
     }
 
     [Fact]
@@ -232,7 +233,7 @@ public sealed class PublishModelPayerTests : VaultHarness
         (PublishModel model, Dictionary<string, string> refs) = await WriterAndPayerAsync();
         model.SelectPayer(null);
         model.DescribeFileForTests("large.bin", 100_000_000);
-        Assert.Equal(PublishModel.PayerRequiredMessage, model.Message);
+        Assert.Equal(UiText.Of(PublishText.PayerRequired), model.Message);
 
         model.SelectPayer(refs["payer"]);
 
@@ -250,7 +251,7 @@ public sealed class PublishModelPayerTests : VaultHarness
         model.DescribeFileForTests("large.bin", 100_000_000);
 
         Assert.False(model.CanEstimate);
-        Assert.Equal(PublishModel.PayerRequiredMessage, model.Message);
+        Assert.Equal(UiText.Of(PublishText.PayerRequired), model.Message);
     }
 
     [Fact]

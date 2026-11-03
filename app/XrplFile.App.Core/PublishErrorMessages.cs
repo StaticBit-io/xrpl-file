@@ -48,38 +48,33 @@ public static class PublishErrorMessages
     /// and <see cref="PublicationRun"/> for the one it re-takes before a resume, so a person reads
     /// the same words for the same refusal regardless of which screen it happened on.
     /// </summary>
-    public const string FeeTooLargeForApplication = "The node is quoting a price this application cannot use. Try a different node.";
+    public static UiText FeeTooLargeForApplication => PublishText.ErrorFeeTooLargeForApplication;
 
     /// <summary>
     /// <see cref="XrplFileError.FeeTooHigh"/> raised before a run exists -- by an estimate, or by a
     /// fresh start that never wrote a state file -- where "listed under unfinished runs" would be false.
     /// </summary>
-    public const string FeeTooHighNow =
-        "Network fees are above what this application publishes at right now. Try again when they are back down.";
+    public static UiText FeeTooHighNow => PublishText.ErrorFeeTooHighNow;
 
     /// <summary>
     /// <see cref="XrplFileError.NodeLacksHistory"/> raised while publishing (spec B30), or by a resume
     /// whose reconciliation waited for it (spec 5.2 step 3): the node's history lagged the run, which is
     /// not the reader's "history far enough back" problem.
     /// </summary>
-    public const string HistoryLaggedWhilePublishing =
-        "The node's history fell behind the publication, so what landed could not be confirmed. The run is listed under "
-        + "unfinished runs; resume it, or choose another node in Settings first.";
+    public static UiText HistoryLaggedWhilePublishing => PublishText.ErrorHistoryLagged;
 
     /// <summary>
     /// <see cref="XrplFileError.PayerInsufficientBalance"/> raised by a resume (spec 5.2 step 5): a Batch
     /// run cannot be moved to tickets (B18), and the screen offers another payer only when the recorded
     /// key has left the vault, so "choose another payer" would send the person to a control that is not there.
     /// </summary>
-    public const string PayerShortBeforeResuming =
-        "The payer does not hold enough XRP to finish this publication. Fund it, then resume.";
+    public static UiText PayerShortBeforeResuming => PublishText.ErrorPayerShortBeforeResuming;
 
     /// <summary>
     /// <see cref="XrplFileError.BatchNotEnabled"/> raised by a resume: the run is a Batch run and stays one
     /// (B18), so "Choose Nobody under Paid by" is not a way out of it.
     /// </summary>
-    public const string BatchNotEnabledBeforeResuming =
-        "This network no longer enables Batch; the run can be resumed once it does.";
+    public static UiText BatchNotEnabledBeforeResuming => PublishText.ErrorBatchOffBeforeResuming;
 
     private static UiText AccountInUse(AccountRole? role) => role switch
     {
@@ -156,7 +151,7 @@ public static class PublishErrorMessages
     /// manifest whose run never recorded "done", so that is all the sentence promises. Every other
     /// error keeps its own sentence: none of them claims anything about what was spent.
     /// </summary>
-    public static string ForRun(XrplFileException exception, RunFailurePoint point, bool usesTickets, long ownerReserveDrops)
+    public static UiText ForRun(XrplFileException exception, RunFailurePoint point, bool usesTickets, long ownerReserveDrops)
     {
         ArgumentNullException.ThrowIfNull(exception);
 
@@ -173,27 +168,16 @@ public static class PublishErrorMessages
             if (exception.Error == XrplFileError.BatchNotEnabled) return BatchNotEnabledBeforeResuming;
         }
 
-        if (exception.Error != XrplFileError.NodeUnreachable) return TextCatalog.For(UiLanguage.English).Render(For(exception)) /* LOCALIZE(bridge) */;
+        if (exception.Error != XrplFileError.NodeUnreachable) return For(exception);
 
         return point switch
         {
-            RunFailurePoint.BeforeSubmitting => TextCatalog.For(UiLanguage.English).Render(For(exception)) /* LOCALIZE(bridge) */,
-            RunFailurePoint.BeforeResuming =>
-                "The node did not answer. This attempt spent nothing, and the run is still listed under unfinished runs. "
-                + "Check the node URL in Settings and try again.",
-            RunFailurePoint.WhileReadingBack =>
-                "Every chunk of the file is in the ledger and paid for, but the node stopped answering while the app read "
-                + "the file back to check it, so the link has not been written yet. The run is listed under unfinished "
-                + "runs: resume it to check the file again and write the link. Resuming pays only for the link's own "
-                + "transaction.",
-            RunFailurePoint.WhileSubmitting =>
-                "The node stopped answering partway through the run. Transactions sent before that may already be in the "
-                + (usesTickets
-                    ? $"ledger and paid for, and tickets it reserved may be on this account, each holding {XrpAmount.Format(ownerReserveDrops)} "
-                        + "of owner reserve until a later publication from this account spends them or the account is closed. "
-                    : "ledger and paid for. ")
-                + "The run is listed under unfinished runs: check the node URL in Settings, then resume it. Resuming does "
-                + "not pay again for the chunks and block lists that already landed.",
+            RunFailurePoint.BeforeSubmitting => For(exception),
+            RunFailurePoint.BeforeResuming => PublishText.ErrorNodeUnreachableBeforeResuming,
+            RunFailurePoint.WhileReadingBack => PublishText.ErrorNodeUnreachableWhileReadingBack,
+            RunFailurePoint.WhileSubmitting => usesTickets
+                ? UiText.Of(PublishText.ErrorNodeUnreachableWhileSubmittingTickets, ("reserve", new XrpAmount(ownerReserveDrops)))
+                : PublishText.ErrorNodeUnreachableWhileSubmitting,
             _ => throw new ArgumentOutOfRangeException(nameof(point), point, "no sentence for this failure point"),
         };
     }

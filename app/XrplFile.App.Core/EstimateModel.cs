@@ -26,16 +26,13 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
     /// <summary>The node the estimate came from, which is also the node a run would go to.</summary>
     public string? NodeUrl { get; private set; }
 
-    public string? Message { get; private set; }
+    public UiText? Message { get; private set; }
 
     /// <summary>The two-account estimate, when the request has a payer (spec 6.2); otherwise null.</summary>
     public BatchPublicationEstimate? BatchEstimate { get; private set; }
 
     /// <summary>"Batch, paid by &lt;label&gt;." for a Batch request, otherwise null (spec 6.2).</summary>
-    public string? MethodLine { get; private set; }
-
-    /// <summary>Said under the estimate when a chosen payer was dropped because the file is too small for Batch.</summary>
-    public const string TooSmallForBatchNote = "Too small for Batch — the writer pays its few transactions itself.";
+    public UiText? MethodLine { get; private set; }
 
     /// <summary>
     /// The request a run started from this estimate uses (<see cref="PublishPolicy.Effective"/>):
@@ -43,11 +40,11 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
     /// </summary>
     public PublishRequest? Request { get; private set; }
 
-    /// <summary><see cref="TooSmallForBatchNote"/> when the payer was dropped, otherwise null.</summary>
-    public string? Note { get; private set; }
-
-    /// <summary>The checkbox's words (spec S12).</summary>
-    public const string ConfirmationLabel = "I understand the cost and the time";
+    /// <summary>
+    /// <see cref="EstimateText.TooSmallForBatch"/>, said under the estimate when a chosen payer was dropped
+    /// because the file is too small for Batch; otherwise null.
+    /// </summary>
+    public UiText? Note { get; private set; }
 
     private SpendingApproval? _approval;
 
@@ -144,7 +141,7 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Publish(generation, new Outcome { Message = "That file could not be read." }, held: null);
+            Publish(generation, new Outcome { Message = PublishText.FileUnreadable }, held: null);
             return;
         }
 
@@ -174,10 +171,10 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
     /// The size policy of <see cref="PublishModel"/> (spec S1, S16) applied to the file the estimate
     /// holds: the picker measured it earlier, and a file can grow between picking and estimating.
     /// </summary>
-    private static string? SizeRefusal(long length, string? payerAccount)
+    private static UiText? SizeRefusal(long length, string? payerAccount)
     {
-        if (length > PublishModel.MaxPublicationBytes) return PublishModel.TooLargeMessage;
-        if (length > PublishModel.TicketPathMaxBytes && payerAccount is null) return PublishModel.PayerRequiredMessage;
+        if (length > PublishModel.MaxPublicationBytes) return PublishText.ErrorTooLarge;
+        if (length > PublishModel.TicketPathMaxBytes && payerAccount is null) return PublishText.PayerRequired;
 
         return null;
     }
@@ -191,7 +188,7 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
     {
         public PublishRequest? Request { get; init; }
 
-        public string? Note { get; init; }
+        public UiText? Note { get; init; }
 
         public string? NodeUrl { get; set; }
 
@@ -199,9 +196,9 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
 
         public BatchPublicationEstimate? BatchEstimate { get; set; }
 
-        public string? Message { get; set; }
+        public UiText? Message { get; set; }
 
-        public string? MethodLine { get; set; }
+        public UiText? MethodLine { get; set; }
 
         public CostSummary? Summary { get; set; }
 
@@ -255,7 +252,7 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         Outcome outcome = new()
         {
             Request = effective,
-            Note = ReferenceEquals(effective, request) ? null : TooSmallForBatchNote,
+            Note = ReferenceEquals(effective, request) ? null : EstimateText.TooSmallForBatch,
         };
         request = effective;
 
@@ -286,7 +283,7 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         }
         catch (XrplFileException ex)
         {
-            outcome.Message = TextCatalog.For(UiLanguage.English).Render(PublishErrorMessages.For(ex)) /* LOCALIZE(bridge) */;
+            outcome.Message = PublishErrorMessages.For(ex);
             return outcome;
         }
 
@@ -306,19 +303,13 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
 
         if (PublishPolicy.HasNoTicketRoom(estimate))
         {
-            outcome.Message =
-                $"This account already holds the {TicketStrategy.MaxLiveTickets} tickets the XRP Ledger allows, none of them "
-                + "recognisably left by this application, so a file this size has nowhere to put its own. Publish a smaller file, "
-                + "which needs no tickets, or use another account.";
+            outcome.Message = UiText.Of(EstimateText.NoTicketRoom, ("limit", TicketStrategy.MaxLiveTickets));
             return outcome;
         }
 
         if (!estimate.BalanceCovers)
         {
-            outcome.Message =
-                $"This publication needs {XrpAmount.Format(estimate.RequiredDrops)} and the account can spend "
-                + $"{XrpAmount.Format(estimate.SpendableDrops)}. {ReserveSentence(estimate)}"
-                + "Fund it, or publish a smaller file.";
+            outcome.Message = NotAffordable(estimate);
         }
 
         SetApprovalIfPublishable(outcome);
@@ -344,12 +335,12 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         catch (XrplFileException ex)
         {
             // Nothing has started, so "listed under unfinished runs" would be false (Spec question 6).
-            outcome.Message = ex.Error == XrplFileError.FeeTooHigh ? PublishErrorMessages.FeeTooHighNow : TextCatalog.For(UiLanguage.English).Render(PublishErrorMessages.For(ex)) /* LOCALIZE(bridge) */;
+            outcome.Message = ex.Error == XrplFileError.FeeTooHigh ? PublishErrorMessages.FeeTooHighNow : PublishErrorMessages.For(ex);
             return;
         }
 
         outcome.BatchEstimate = estimate;
-        outcome.MethodLine = $"Batch, paid by {request.PayerLabel ?? payer}.";
+        outcome.MethodLine = UiText.Of(EstimateText.MethodBatch, ("payer", request.PayerLabel ?? payer));
         outcome.Summary = CostSummary.Of(estimate, request);
         outcome.Message = ShortfallOf(estimate, request);
         SetApprovalIfPublishable(outcome);
@@ -368,40 +359,64 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
     }
 
     /// <summary>The account that is short, by label, with what it needs and what it can spend (spec 6.2); null when both cover.</summary>
-    public static string? ShortfallOf(BatchPublicationEstimate estimate, PublishRequest request)
+    public static UiText? ShortfallOf(BatchPublicationEstimate estimate, PublishRequest request)
     {
         ArgumentNullException.ThrowIfNull(estimate);
         ArgumentNullException.ThrowIfNull(request);
 
-        List<string> lines = [];
+        string writer = request.WriterLabel ?? request.Account;
+        string payer = request.PayerLabel ?? request.PayerAccount ?? string.Empty;
+
+        if (!estimate.WriterCovers && !estimate.PayerCovers)
+        {
+            return UiText.Of(
+                EstimateText.ShortfallBoth,
+                ("writer", writer),
+                ("writerRequired", new XrpAmount(estimate.WriterRequiredDrops)),
+                ("writerSpendable", new XrpAmount(estimate.WriterSpendableDrops)),
+                ("payer", payer),
+                ("payerRequired", new XrpAmount(estimate.PayerRequiredDrops)),
+                ("payerSpendable", new XrpAmount(estimate.PayerSpendableDrops)));
+        }
 
         if (!estimate.WriterCovers)
         {
-            lines.Add($"The writer {request.WriterLabel ?? request.Account} needs {XrpAmount.Format(estimate.WriterRequiredDrops)} "
-                + $"and can spend {XrpAmount.Format(estimate.WriterSpendableDrops)}.");
+            return UiText.Of(
+                EstimateText.ShortfallWriter,
+                ("name", writer),
+                ("required", new XrpAmount(estimate.WriterRequiredDrops)),
+                ("spendable", new XrpAmount(estimate.WriterSpendableDrops)));
         }
 
         if (!estimate.PayerCovers)
         {
-            lines.Add($"The payer {request.PayerLabel ?? request.PayerAccount} needs {XrpAmount.Format(estimate.PayerRequiredDrops)} "
-                + $"and can spend {XrpAmount.Format(estimate.PayerSpendableDrops)}.");
+            return UiText.Of(
+                EstimateText.ShortfallPayer,
+                ("name", payer),
+                ("required", new XrpAmount(estimate.PayerRequiredDrops)),
+                ("spendable", new XrpAmount(estimate.PayerSpendableDrops)));
         }
 
-        return lines.Count == 0 ? null : string.Join(" ", lines);
+        return null;
     }
 
     /// <summary>
-    /// What part of the requirement is the ticket reserve, which the ledger gives back as tickets are
-    /// used up — so a person reading "needs 51 XRP" learns that most of it is not spent. Empty when
-    /// the estimate holds no ticket reserve, so the sentence never describes money that is not there.
+    /// The sentence for an account that cannot cover the run. When the estimate holds a ticket reserve,
+    /// which the ledger gives back as tickets are used up, it says what part of the requirement that is,
+    /// so a person reading "needs 51 XRP" learns that most of it is not spent; with none, it describes
+    /// no money that is not there.
     /// </summary>
-    private static string ReserveSentence(PublicationEstimate estimate)
+    private static UiText NotAffordable(PublicationEstimate estimate)
     {
-        if (estimate.PeakReserveDrops <= 0) return string.Empty;
+        XrpAmount required = new(estimate.RequiredDrops);
+        XrpAmount spendable = new(estimate.SpendableDrops);
 
-        string share = estimate.PeakReserveDrops * 2 > estimate.RequiredDrops ? "Most" : "Some";
+        if (estimate.PeakReserveDrops <= 0) return UiText.Of(EstimateText.NotAffordable, ("required", required), ("spendable", spendable));
 
-        return $"{share} of it is reserve that comes back as the publication finishes: "
-            + $"{XrpAmount.Format(estimate.PeakReserveDrops)} for tickets. ";
+        TextId phrase = estimate.PeakReserveDrops * 2 > estimate.RequiredDrops
+            ? EstimateText.NotAffordableMostReserve
+            : EstimateText.NotAffordableSomeReserve;
+
+        return UiText.Of(phrase, ("required", required), ("spendable", spendable), ("reserve", new XrpAmount(estimate.PeakReserveDrops)));
     }
 }
