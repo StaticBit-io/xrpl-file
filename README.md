@@ -62,7 +62,7 @@ The `<xrpl-file>` element shows a file from the ledger on any web page: an image
 verified download for anything else. Build it, put the files of one version on a host, and add two lines:
 
 ```html
-<script src="https://<host>/1.1.0/xrpl-file-element.js" integrity="sha384-4fGtb76PWktyhRAyWrIVbNPhx5aaS921oVm/8GEfyAaQ+nO8JlBmzVZ9InbG/Hr8" crossorigin="anonymous" defer></script>
+<script src="https://<host>/1.2.0/xrpl-file-element.js" integrity="sha384-3Ng6D0oyDdNcgbs1hTua5zQaHdn4E/3o7gnxr0ecp2jVh2kP2KbJymnO++iWWvP+" crossorigin="anonymous" defer></script>
 <xrpl-file src="xrpl-file://testnet/…"></xrpl-file>
 ```
 
@@ -75,7 +75,7 @@ element), `mp4box.min.js` (loaded beside it only when a plain MP4 is played), `m
 `xrpl-file-reader.mjs` (the reader the element uses, as one ES module, for a page that reads files
 itself) and `integrity.json` with the SHA-384 value of each script. The `integrity` attribute takes the
 value for `xrpl-file-element.js` from the `integrity.json` of the same version. The version is in the
-path, so a page that embeds `1.1.0` never changes under itself. The host serves both scripts with
+path, so a page that embeds `1.2.0` never changes under itself. The host serves both scripts with
 `Access-Control-Allow-Origin`: Subresource Integrity on a script from another origin fails without it.
 
 | Attribute | Values | Meaning |

@@ -17,7 +17,7 @@ import { ACTIVE_LANGS, DEFAULT_LANG, LANGS, htmlLang, langFromTag } from './src/
 import { ELEMENT_FILE, snippetHtml } from './snippet.mjs';
 import { findHtmlRewriteTargets, findShadowed, parseRedirects } from './redirects.mjs';
 
-export const ELEMENT_VERSION = '1.1.0';
+export const ELEMENT_VERSION = '1.2.0';
 // Cloudflare Pages rejects a deployment with any file over 25 MiB.
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const HOST_FILES = new Set(['_redirects', '_headers']);

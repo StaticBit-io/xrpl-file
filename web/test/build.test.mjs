@@ -340,12 +340,12 @@ test('the bundle names no host but the built-in nodes', async () => {
 
 test('build emits xrpl-file-reader.mjs with its integrity and the version banner', async () => {
   const out = await tempDir();
-  const { integrity } = await build({ webDir, outDir: out, version: '1.1.0' });
+  const { integrity } = await build({ webDir, outDir: out, version: '1.2.0' });
   const file = join(out, 'xrpl-file-reader.mjs');
   const bytes = await readFile(file);
   const code = bytes.toString('utf8');
 
-  assert.ok(code.startsWith('/*! xrpl-file reader 1.1.0 | MIT */\n'));
+  assert.ok(code.startsWith('/*! xrpl-file reader 1.2.0 | MIT */\n'));
   assert.equal(integrity['xrpl-file-reader.mjs'], `sha384-${createHash('sha384').update(bytes).digest('base64')}`);
   assert.deepEqual(JSON.parse(await readFile(join(out, 'integrity.json'), 'utf8')), integrity);
   assert.ok(bytes.every((byte) => byte < 0x80), 'plain ASCII, like the element');
