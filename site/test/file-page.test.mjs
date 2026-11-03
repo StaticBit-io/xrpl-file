@@ -126,7 +126,13 @@ function fakeCloud(doc) {
     strings: [],
     // What settleDelay() reports; a test sets it before `load`.
     settle: 0,
+    // The line the real cloud writes into the caption on `error`; its listener is registered at mount,
+    // before the page's own, so it runs first.
+    failureLine: null,
     mount(canvas, options, env) {
+      env.element.addEventListener('error', () => {
+        if (cloud.failureLine !== null) options.caption.textContent = cloud.failureLine;
+      });
       cloud.mounts.push({
         canvas,
         options,
@@ -565,6 +571,59 @@ test('without reduced motion the canvas fades first and goes after 250 ms', asyn
   assert.equal(cloud.destroyed, 0);
   await new Promise((resolve) => setTimeout(resolve, 400));
   assert.equal(canvas.hidden, true);
+  assert.equal(cloud.destroyed, 1);
+});
+
+test('load empties the caption and the note at once, before the fade ends', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { doc, cloud } = open(CANONICAL, { reducedMotion: false });
+  const caption = doc.nodes['file-cloud-caption'];
+  const note = doc.nodes['file-cloud-note'];
+  caption.textContent = 'read · 3 chunks';
+  note.textContent = 'Each cube stands on its ledger.';
+  note.hidden = false;
+  doc.file.load(DETAIL);
+  assert.equal(doc.nodes['file-cloud'].hidden, false, 'the canvas is still fading');
+  assert.equal(caption.textContent, '');
+  assert.equal(caption.hidden, true);
+  assert.equal(note.textContent, '');
+  assert.equal(note.hidden, true);
+  assert.equal(cloud.destroyed, 0);
+});
+
+test('load after the hold empties the caption when the hold ends, not after the fade', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { doc, cloud } = open(CANONICAL, { reducedMotion: false });
+  cloud.settle = 2000;
+  const caption = doc.nodes['file-cloud-caption'];
+  caption.textContent = 'read · 3 chunks';
+  doc.file.load(DETAIL);
+  assert.equal(caption.textContent, 'read · 3 chunks', 'the cubes are still settling');
+  t.mock.timers.tick(2000);
+  assert.equal(doc.nodes['file-cloud'].hidden, false, 'the fade has only begun');
+  assert.equal(caption.textContent, '');
+  assert.equal(caption.hidden, true);
+});
+
+test('error empties the caption at once, before the fade ends', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { doc, cloud } = open(CANONICAL, { reducedMotion: false });
+  const caption = doc.nodes['file-cloud-caption'];
+  const note = doc.nodes['file-cloud-note'];
+  cloud.failureLine = 'could not read';
+  caption.textContent = 'read · 3 chunks';
+  note.textContent = 'Each cube stands on its ledger.';
+  note.hidden = false;
+  doc.file.fail();
+  assert.equal(doc.nodes['file-cloud'].hidden, false, 'the canvas is still fading');
+  assert.equal(doc.nodes['file-cloud'].classList.contains('is-gone'), true);
+  assert.equal(caption.textContent, '');
+  assert.equal(caption.hidden, true);
+  assert.equal(note.textContent, '');
+  assert.equal(note.hidden, true);
+  assert.equal(cloud.destroyed, 0);
+  t.mock.timers.tick(250);
+  assert.equal(doc.nodes['file-cloud'].hidden, true);
   assert.equal(cloud.destroyed, 1);
 });
 

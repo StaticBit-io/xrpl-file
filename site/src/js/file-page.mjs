@@ -190,14 +190,16 @@ export function initFilePage(doc, location, {
       holdTimer = null;
       stage.classList.remove('is-settling');
     }
+    // At once, not after the fade: on `error` the cloud has just written its failure line into the polite
+    // status caption, and a screen reader would announce it next to the element's own error message.
+    cloudCaption.textContent = '';
+    cloudCaption.hidden = true;
+    cloudNote.textContent = '';
+    cloudNote.hidden = true;
     canvas.classList.add('is-gone');
     const remove = () => {
       // Hidden, not just covered: a transparent picture shows whatever is under the element.
       canvas.hidden = true;
-      cloudCaption.textContent = '';
-      cloudCaption.hidden = true;
-      cloudNote.textContent = '';
-      cloudNote.hidden = true;
       cloud.destroy();
     };
     if (reducedMotion) remove();
