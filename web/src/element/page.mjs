@@ -7,7 +7,7 @@
 import { LedgerClient } from '../ledger.mjs';
 import { XrplFileReader } from '../reader.mjs';
 import { formatLink } from '../link.mjs';
-import { BLOCK_CHUNKS, chunkCount } from '../tree.mjs';
+import { BLOCK_CHUNKS } from '../tree.mjs';
 
 export const PRIORITY = Object.freeze({ NOW: 0, AHEAD: 1, BACKGROUND: 2 });
 
@@ -223,8 +223,9 @@ class SharedRead {
     this.priority = priority;
     this.controller = new AbortController();
     this.listeners = new Set();
-    // Every chunk the read has taken so far, replayed to a consumer that joins late.
-    this.chunks = 0;
+    // Every chunk the read has taken so far (index and ledger, never the bytes), replayed to a
+    // consumer that joins late and kept with the verified block for a later cache hit.
+    this.taken = [];
     // Consumers that have not aborted; the read is aborted when this reaches zero.
     this.live = 0;
     this.started = false;
@@ -240,15 +241,20 @@ class SharedRead {
     });
   }
 
-  emitChunk = () => {
-    this.chunks++;
-    for (const listener of this.listeners) callProgress(listener);
+  emitChunk = (chunk) => {
+    this.taken.push({ index: chunk.index, ledger: chunk.ledger });
+    for (const listener of this.listeners) callProgress(listener, { index: chunk.index, ledger: chunk.ledger });
   };
 }
 
 /** A consumer's progress callback must not fail a read that other consumers share. */
-function callProgress(listener) {
-  try { listener(); } catch { /* the callback's own problem */ }
+function callProgress(listener, info) {
+  try { listener(info); } catch { /* the callback's own problem */ }
+}
+
+/** Replays what a read took to one listener, each call with an object of its own to change. */
+function replayTaken(listener, taken) {
+  for (const { index, ledger } of taken) callProgress(listener, { index, ledger });
 }
 
 /** What every handle of one link shares: the manifest, the block list, the reads and the blocks verified. */
@@ -316,8 +322,8 @@ class LinkState {
       // Most recent last, so the four kept are the four used last.
       this.verified.delete(index);
       this.verified.set(index, verified);
-      if (onChunk) for (let i = 0; i < blockChunks(record, index); i++) callProgress(onChunk);
-      return verified.slice();
+      if (onChunk) replayTaken(onChunk, verified.taken);
+      return verified.bytes.slice();
     }
 
     let read = this.reads.get(index);
@@ -338,9 +344,9 @@ class LinkState {
     read.live++;
 
     // Its own function, so one callback passed by two consumers is two listeners.
-    const listener = onChunk ? () => onChunk() : null;
+    const listener = onChunk ? (info) => onChunk(info) : null;
     if (listener) {
-      for (let i = 0; i < read.chunks; i++) callProgress(listener);
+      replayTaken(listener, read.taken);
       read.listeners.add(listener);
     }
 
@@ -381,7 +387,7 @@ class LinkState {
       const bytes = await this.#readerFor(read, record).block(record, entry, read.emitChunk);
       // An aborted read is never kept: whoever wanted it has gone, and a block that finished
       // after that is no business of the next reader's.
-      if (!read.controller.signal.aborted) this.#remember(index, bytes);
+      if (!read.controller.signal.aborted) this.#remember(index, bytes, read.taken);
       this.#finish(read, index);
       read.resolve(bytes);
     } catch (e) {
@@ -398,9 +404,9 @@ class LinkState {
       { historyCacheRecords: PAGE_HISTORY_RECORDS });
   }
 
-  #remember(index, bytes) {
+  #remember(index, bytes, taken) {
     this.verified.delete(index);
-    this.verified.set(index, bytes);
+    this.verified.set(index, { bytes, taken });
     while (this.verified.size > VERIFIED_BLOCKS) this.verified.delete(this.verified.keys().next().value);
   }
 
@@ -424,11 +430,6 @@ class LinkState {
     this.verified.clear();
     this.registry.forgetReader(this);
   }
-}
-
-function blockChunks(record, index) {
-  const { size, chunk } = record.manifest;
-  return Math.min(BLOCK_CHUNKS, chunkCount(size, chunk) - index * BLOCK_CHUNKS);
 }
 
 /**
@@ -465,8 +466,9 @@ export class FileHandle {
   }
 
   /**
-   * One verified block. `onChunk` is called once per chunk of the block, whether the read is
-   * shared, was joined late or the block was already verified. A shared read is aborted only when
+   * One verified block. `onChunk({ index, ledger })` is called once per chunk of the block (the
+   * absolute chunk index and the ledger of the chunk's transaction), whether the read is shared,
+   * was joined late or the block was already verified. A shared read is aborted only when
    * every consumer's signal has aborted. `sequential` reads through the page's shared reader (its
    * history cache serves blocks read in order); otherwise the walk stops when the read is aborted.
    * @returns a copy of the block that the caller may keep or change
