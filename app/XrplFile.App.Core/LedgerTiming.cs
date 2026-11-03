@@ -1,3 +1,5 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>
@@ -30,25 +32,25 @@ public static class LedgerTiming
     /// hours", not a timestamp accurate to the second for a number that is itself only an estimate.
     /// Null in, null out.
     /// </summary>
-    public static string? Describe(TimeSpan? span)
+    public static UiText? Describe(TimeSpan? span)
     {
         if (span is not { } value) return null;
 
-        if (value < TimeSpan.FromMinutes(1)) return "less than a minute";
+        if (value < TimeSpan.FromMinutes(1)) return CommonText.ApproxLessThanMinute;
 
         if (value < TimeSpan.FromHours(1))
         {
-            int minutes = Math.Max(1, (int)Math.Round(value.TotalMinutes));
-            return $"about {minutes} minute{(minutes == 1 ? "" : "s")}";
+            long minutes = Math.Max(1, (long)Math.Round(value.TotalMinutes));
+            return UiText.Of(CommonText.ApproxMinutes, ("count", minutes));
         }
 
         if (value < TimeSpan.FromDays(1))
         {
-            int hours = Math.Max(1, (int)Math.Round(value.TotalHours));
-            return $"about {hours} hour{(hours == 1 ? "" : "s")}";
+            long hours = Math.Max(1, (long)Math.Round(value.TotalHours));
+            return UiText.Of(CommonText.ApproxHours, ("count", hours));
         }
 
-        int days = Math.Max(1, (int)Math.Round(value.TotalDays));
-        return $"about {days} day{(days == 1 ? "" : "s")}";
+        long days = Math.Max(1, (long)Math.Round(value.TotalDays));
+        return UiText.Of(CommonText.ApproxDays, ("count", days));
     }
 }

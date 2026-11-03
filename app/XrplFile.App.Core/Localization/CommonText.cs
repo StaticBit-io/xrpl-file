@@ -11,5 +11,16 @@ public static class CommonText
     public static readonly TextId DurationHoursMinutes = Id();
     public static readonly TextId DurationRange = Id();
 
+    public static readonly TextId ApproxLessThanMinute = Id();
+    public static readonly TextId ApproxMinutes = Id();
+    public static readonly TextId ApproxHours = Id();
+    public static readonly TextId ApproxDays = Id();
+
+    public static readonly TextId Cancel = Id();
+    public static readonly TextId Done = Id();
+
+    public static readonly TextId FieldLabel = Id();
+    public static readonly TextId FieldNetwork = Id();
+
     private static TextId Id([CallerMemberName] string name = "") => TextId.Of("Common", name);
 }

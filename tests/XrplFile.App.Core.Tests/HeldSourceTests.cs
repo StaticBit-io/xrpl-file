@@ -174,7 +174,7 @@ public sealed class HeldSourceTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.StartsWith(PublishErrorMessages.For(XrplFileError.ResumeMismatch), run.Snapshot.Failure, StringComparison.Ordinal);
+        Assert.StartsWith(TestText.En(PublishErrorMessages.For(XrplFileError.ResumeMismatch)), run.Snapshot.Failure, StringComparison.Ordinal);
         Assert.False(run.HasRejectedSource(statePath));
     }
 

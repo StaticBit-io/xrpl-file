@@ -11,30 +11,29 @@
    sitting in markup nothing repainted. *@
 
 <BackLink To="AppTab.Accounts" OnClick="BackAsync" />
-<h1 class="xf-title">Reveal secret</h1>
+<h1 class="xf-title">@T[KeysText.RevealTitle]</h1>
 
 @if (_problem is { } problem)
 {
-    <div class="alert alert-danger">@problem</div>
+    <div class="alert alert-danger">@T[problem]</div>
 }
 
 @if (Model.Shown is { } secret)
 {
     <div class="alert alert-warning">
         <p>
-            Anyone who sees this can spend from this account. It hides itself automatically after a
-            minute, or the instant the vault locks.
+            @T[KeysText.RevealWarning]
         </p>
         <code class="d-block p-2 bg-body-tertiary user-select-all xf-mono">@secret</code>
-        <button type="button" class="btn btn-outline-secondary mt-2" @onclick="Hide">Hide now</button>
+        <button type="button" class="btn btn-outline-secondary mt-2" @onclick="Hide">@T[KeysText.HideNowButton]</button>
         <button type="button" class="btn btn-outline-secondary mt-2 ms-2" disabled="@_copying" @onclick="CopyAsync">
-            Copy
+            @T[KeysText.CopyButton]
         </button>
     </div>
 }
 else
 {
-    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="ShowAsync">Reveal seed</button>
+    <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="ShowAsync">@T[KeysText.RevealButton]</button>
 }
 
 <div class="mt-3">
@@ -51,7 +50,7 @@ else
     private Timer? _pollTimer;
     private bool _busy;
     private bool _copying;
-    private string? _problem;
+    private UiText? _problem;
     private bool _disposed;
 
     protected override void OnInitialized()
@@ -96,7 +95,7 @@ else
         }
         catch (VaultException ex)
         {
-            _problem = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
+            _problem = VaultErrorMessages.For(ex.Error);
         }
         finally
         {

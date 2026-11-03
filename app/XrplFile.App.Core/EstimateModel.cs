@@ -1,3 +1,5 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>
@@ -284,7 +286,7 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         }
         catch (XrplFileException ex)
         {
-            outcome.Message = PublishErrorMessages.For(ex);
+            outcome.Message = TextCatalog.For(UiLanguage.English).Render(PublishErrorMessages.For(ex)) /* LOCALIZE(bridge) */;
             return outcome;
         }
 
@@ -342,7 +344,7 @@ public sealed class EstimateModel(IConnectionFactory connections, RunPaths paths
         catch (XrplFileException ex)
         {
             // Nothing has started, so "listed under unfinished runs" would be false (Spec question 6).
-            outcome.Message = ex.Error == XrplFileError.FeeTooHigh ? PublishErrorMessages.FeeTooHighNow : PublishErrorMessages.For(ex);
+            outcome.Message = ex.Error == XrplFileError.FeeTooHigh ? PublishErrorMessages.FeeTooHighNow : TextCatalog.For(UiLanguage.English).Render(PublishErrorMessages.For(ex)) /* LOCALIZE(bridge) */;
             return;
         }
 

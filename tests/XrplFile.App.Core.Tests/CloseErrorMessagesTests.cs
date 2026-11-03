@@ -9,7 +9,7 @@ public sealed class CloseErrorMessagesTests
     {
         foreach (DeletionOutcome outcome in Enum.GetValues<DeletionOutcome>())
         {
-            string message = CloseErrorMessages.For(outcome);
+            string message = TestText.En(CloseErrorMessages.For(outcome));
 
             Assert.False(string.IsNullOrWhiteSpace(message), $"{outcome} has no sentence");
             Assert.EndsWith(".", message, StringComparison.Ordinal);
@@ -19,7 +19,7 @@ public sealed class CloseErrorMessagesTests
     [Fact]
     public void Every_sentence_is_its_own()
     {
-        string[] all = [.. Enum.GetValues<DeletionOutcome>().Select(CloseErrorMessages.For)];
+        string[] all = [.. Enum.GetValues<DeletionOutcome>().Select(outcome => TestText.En(CloseErrorMessages.For(outcome)))];
 
         Assert.Equal(all.Length, all.Distinct(StringComparer.Ordinal).Count());
     }
@@ -35,8 +35,8 @@ public sealed class CloseErrorMessagesTests
     [Fact]
     public void DeletionRefused_says_a_fee_was_claimed_only_when_one_was()
     {
-        string claimed = CloseErrorMessages.DeletionRefused(feeClaimed: true);
-        string notClaimed = CloseErrorMessages.DeletionRefused(feeClaimed: false);
+        string claimed = TestText.En(CloseErrorMessages.DeletionRefused(feeClaimed: true));
+        string notClaimed = TestText.En(CloseErrorMessages.DeletionRefused(feeClaimed: false));
 
         Assert.NotEqual(claimed, notClaimed);
         Assert.Contains("claimed", claimed, StringComparison.OrdinalIgnoreCase);

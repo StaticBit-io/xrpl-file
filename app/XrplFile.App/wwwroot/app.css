@@ -447,6 +447,9 @@ progress { accent-color: var(--mint); }
 /* Addresses, hashes and links are case-sensitive: an upper-casing heading around one must not change it. */
 .xf-mono { font-family: var(--font-mono); overflow-wrap: anywhere; text-transform: none; letter-spacing: normal; }
 .xf-link { word-break: break-all; }
+/* A localized sentence puts an address in a bare <code>; these keep what the markup around it used to give: one click selects all of it, and optionally bold. */
+.xf-pick-code code { user-select: all; }
+.xf-bold-code code { font-weight: 600; }
 .xf-num { font-variant-numeric: tabular-nums; }
 .xf-figure { font-variant-numeric: tabular-nums; color: var(--beige); font-weight: 600; }
 .xf-muted { color: var(--text-secondary); }

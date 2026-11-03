@@ -55,7 +55,7 @@ public sealed class ExportModel(IKeyVault vault, IFilePickerService filePicker)
     /// can show as-is — or <see langword="null"/> after a call that produced a container. Never
     /// built from the backup password or from anything derived from it.
     /// </summary>
-    public string? Problem { get; private set; }
+    public UiText? Problem { get; private set; }
 
     /// <summary>
     /// Reveals <paramref name="reference"/>'s secret and seals it into a container under
@@ -92,10 +92,7 @@ public sealed class ExportModel(IKeyVault vault, IFilePickerService filePicker)
     {
         if (!PasswordPolicy.IsLongEnough(containerPassword.Span))
         {
-            Problem =
-                $"Choose a backup password of at least {PasswordPolicy.MinimumLength} characters. " +
-                "This file is the only way back to this key if the master password is ever " +
-                "forgotten, and anyone who finds it can guess at it for as long as they like.";
+            Problem = UiText.Of(KeysText.BackupPasswordTooShort, ("minimum", PasswordPolicy.MinimumLength));
             return null;
         }
 
@@ -109,7 +106,7 @@ public sealed class ExportModel(IKeyVault vault, IFilePickerService filePicker)
         }
         catch (VaultException exception)
         {
-            Problem = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(exception.Error)) /* LOCALIZE(bridge) */;
+            Problem = VaultErrorMessages.For(exception.Error);
             return null;
         }
     }
@@ -151,9 +148,7 @@ public sealed class ExportModel(IKeyVault vault, IFilePickerService filePicker)
         }
         catch (VaultException exception)
         {
-            Problem =
-                "The backup was saved, but the vault could not record that it was: " +
-                TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(exception.Error)) /* LOCALIZE(bridge) */;
+            Problem = UiText.Of(KeysText.BackupSavedNotRecorded, ("reason", VaultErrorMessages.For(exception.Error)));
         }
     }
 
@@ -243,10 +238,7 @@ public sealed class ExportModel(IKeyVault vault, IFilePickerService filePicker)
     /// the sentence and its effect on the exported flag without needing a platform failure to
     /// reproduce it.
     /// </remarks>
-    public void ReportSaveFailed() =>
-        Problem =
-            "The backup could not be written where you chose. Nothing was saved, and this key " +
-            "still exists only in this vault. Try somewhere with room to write.";
+    public void ReportSaveFailed() => Problem = KeysText.BackupNotWritten;
 
     /// <summary>
     /// Encodes <paramref name="container"/> as the text a QR code would carry, and says whether

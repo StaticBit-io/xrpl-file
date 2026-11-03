@@ -47,17 +47,17 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
     public bool BalanceKnown { get; private set; }
 
     /// <summary>What the screen's first line asks the person to do, which differs once the account exists.</summary>
-    public string InstructionText => AccountExists
-        ? "Send XRP to the address below, from any wallet."
-        : "Send XRP to the address below, from any wallet. The account appears on the ledger once it holds its reserve.";
+    public UiText InstructionText => AccountExists
+        ? FundingText.InstructionAccountExists
+        : FundingText.InstructionAccountMissing;
 
     /// <summary>What the screen says about the balance: a reading, or honestly that there is none yet.</summary>
-    public string BalanceLine =>
-        !BalanceKnown ? (Message is null ? "Checking the ledger…" : "Balance not read yet.")
-        : AccountExists ? $"Balance: {XrpAmount.Format(BalanceDrops)}"
-        : "Not funded yet.";
+    public UiText BalanceLine =>
+        !BalanceKnown ? (Message is null ? FundingText.BalanceChecking : FundingText.BalanceNotRead)
+        : AccountExists ? UiText.Of(FundingText.Balance, ("amount", new XrpAmount(BalanceDrops)))
+        : FundingText.NotFunded;
 
-    public string? Message { get; private set; }
+    public UiText? Message { get; private set; }
 
     /// <summary>
     /// The reference the data above actually belongs to — set only once <see cref="SelectAsync"/>
@@ -105,14 +105,14 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
         }
         catch (VaultException ex)
         {
-            Message = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
+            Message = VaultErrorMessages.For(ex.Error);
             CurrentReference = null;
             return;
         }
 
         if (entry is null)
         {
-            Message = "That key is no longer in the vault.";
+            Message = VaultText.ErrorNoSuchEntry;
             CurrentReference = null;
             return;
         }

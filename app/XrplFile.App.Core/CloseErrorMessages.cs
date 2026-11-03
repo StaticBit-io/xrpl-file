@@ -1,3 +1,5 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>
@@ -22,9 +24,9 @@ public static class CloseErrorMessages
     /// account to itself — and telling somebody a fee was burned when nothing was ever charged is as
     /// wrong as the reverse.
     /// </summary>
-    public static string DeletionRefused(bool feeClaimed) => feeClaimed
-        ? "The node refused the deletion. The attempt still claimed the fee — one owner reserve."
-        : "The node refused the deletion. Nothing was charged.";
+    public static UiText DeletionRefused(bool feeClaimed) => feeClaimed
+        ? CloseText.RefusedFeeClaimed
+        : CloseText.RefusedNothingCharged;
 
     /// <summary>
     /// Whether a node's engine result for a refused submission actually claimed a fee. Only a
@@ -37,20 +39,14 @@ public static class CloseErrorMessages
     public static bool ClaimsFee(string? engineResult) =>
         engineResult is not null && engineResult.StartsWith("tec", StringComparison.Ordinal);
 
-    public static string For(DeletionOutcome outcome) => outcome switch
+    public static UiText For(DeletionOutcome outcome) => outcome switch
     {
-        DeletionOutcome.Ready =>
-            "This account can be closed now.",
-        DeletionOutcome.NotYet =>
-            "This account cannot be closed yet. The ledger refuses to delete an account until 255 ledgers have closed since its last transaction, and it must hold enough to cover the fee.",
-        DeletionOutcome.DestinationMissing =>
-            "There is no such account on this network, and the remainder would have nowhere to go. Check the address.",
-        DeletionOutcome.DestinationRefuses =>
-            "That destination will not accept this payment: it is the account being closed, it requires a destination tag, or it only accepts senders it has authorised. Send the remainder somewhere else.",
-        DeletionOutcome.Submitted =>
-            "The account was closed and its remainder is on its way.",
-        DeletionOutcome.Queued =>
-            "The node queued the deletion rather than applying it. Until a ledger takes it the account still exists and still holds everything, so check again in a moment.",
+        DeletionOutcome.Ready => CloseText.OutcomeReady,
+        DeletionOutcome.NotYet => CloseText.OutcomeNotYet,
+        DeletionOutcome.DestinationMissing => CloseText.OutcomeDestinationMissing,
+        DeletionOutcome.DestinationRefuses => CloseText.OutcomeDestinationRefuses,
+        DeletionOutcome.Submitted => CloseText.OutcomeSubmitted,
+        DeletionOutcome.Queued => CloseText.OutcomeQueued,
         _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "no sentence for this outcome"),
     };
 }

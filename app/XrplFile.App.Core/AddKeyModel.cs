@@ -77,15 +77,13 @@ public sealed record ContainerKeyOption(string Address, string Algorithm, string
 public sealed class AddKeyModel(IKeyVault vault)
 {
     /// <summary>What <see cref="SelectContainerKey"/> says when a key derives another address than the backup lists.</summary>
-    public const string ContainerAddressMismatchMessage =
-        "This key does not belong to the address the backup lists for it, so it was not imported.";
+    public static readonly UiText ContainerAddressMismatchMessage = KeysText.ContainerAddressMismatch;
 
     /// <summary>
     /// What <see cref="SelectContainerKey"/> says about a key that signs for its account as a regular
     /// key: this application signs only with an account's own master key.
     /// </summary>
-    public const string ContainerRegularKeyMessage =
-        "This key signs for its account as a regular key. Only an account's own master key can be imported here.";
+    public static readonly UiText ContainerRegularKeyMessage = KeysText.ContainerRegularKey;
 
     private IReadOnlyList<BackupWalletEntry> _containerWallets = [];
     private NewVaultEntry? _pending;
@@ -102,7 +100,7 @@ public sealed class AddKeyModel(IKeyVault vault)
     /// container's password, or anything else that must not be shown back to the person who typed
     /// it.
     /// </summary>
-    public string? Problem { get; private set; }
+    public UiText? Problem { get; private set; }
 
     /// <summary>
     /// Whether the entry the most recent successful <see cref="StoreAsync"/> wrote is one this
@@ -165,7 +163,7 @@ public sealed class AddKeyModel(IKeyVault vault)
 
         if (string.IsNullOrWhiteSpace(draft.Seed))
         {
-            Problem = "Enter a seed to import.";
+            Problem = KeysText.EnterSeed;
             return false;
         }
 
@@ -178,7 +176,7 @@ public sealed class AddKeyModel(IKeyVault vault)
         }
         catch (FormatException)
         {
-            Problem = "That does not look like a valid seed.";
+            Problem = KeysText.InvalidSeed;
             return false;
         }
 
@@ -274,7 +272,7 @@ public sealed class AddKeyModel(IKeyVault vault)
 
         if (index < 0 || index >= _containerWallets.Count)
         {
-            Problem = "That key is no longer available. Open the backup again.";
+            Problem = KeysText.KeyNoLongerAvailable;
             return false;
         }
 
@@ -294,7 +292,7 @@ public sealed class AddKeyModel(IKeyVault vault)
         }
         catch (FormatException)
         {
-            Problem = "This key inside the backup does not look like a valid seed.";
+            Problem = KeysText.BackupKeyInvalidSeed;
             return false;
         }
 
@@ -428,19 +426,19 @@ public sealed class AddKeyModel(IKeyVault vault)
 
         if (string.IsNullOrWhiteSpace(label))
         {
-            Problem = "Enter a label.";
+            Problem = KeysText.EnterLabel;
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(network))
         {
-            Problem = "Choose a network.";
+            Problem = KeysText.PickNetwork;
             return false;
         }
 
         if (!XrplFileLink.TryNormalizeNetwork(network.Trim(), out canonicalNetwork))
         {
-            Problem = TextCatalog.For(UiLanguage.English).Render(NetworkChoices.NotANetwork(network)) /* LOCALIZE(bridge) */;
+            Problem = NetworkChoices.NotANetwork(network);
             return false;
         }
 
@@ -470,22 +468,21 @@ public sealed class AddKeyModel(IKeyVault vault)
             ? parsed
             : VaultEntryKind.Imported;
 
-    private static string ContainerProblem(BackupUnpackError error) => error switch
+    private static UiText ContainerProblem(BackupUnpackError error) => error switch
     {
-        BackupUnpackError.NotOurContainer => "This file is not a backup this application can open.",
-        BackupUnpackError.WrongPassword => "That password does not open this backup.",
-        BackupUnpackError.PasswordlessContainerNotAllowed =>
-            "This backup carries no password of its own and cannot be imported from a file.",
-        BackupUnpackError.IterationsOutOfRange => "This backup's parameters are outside what this build accepts.",
-        _ => "This backup could not be opened.",
+        BackupUnpackError.NotOurContainer => KeysText.BackupNotOurs,
+        BackupUnpackError.WrongPassword => KeysText.BackupWrongPassword,
+        BackupUnpackError.PasswordlessContainerNotAllowed => KeysText.BackupPasswordless,
+        BackupUnpackError.IterationsOutOfRange => KeysText.BackupIterations,
+        _ => KeysText.BackupUnreadable,
     };
 
-    private static string StoreProblem(VaultError error) => error switch
+    private static UiText StoreProblem(VaultError error) => error switch
     {
-        VaultError.Locked => "Unlock the vault before adding a key.",
-        VaultError.DuplicateAddress => "The vault already holds this address on this network.",
-        VaultError.Degraded => "The vault found damage that has not been acknowledged yet. Acknowledge it first.",
-        VaultError.StorageFailed => "The vault's storage did not respond. Try again in a moment.",
-        _ => "The key could not be stored.",
+        VaultError.Locked => KeysText.StoreLocked,
+        VaultError.DuplicateAddress => VaultText.ErrorDuplicateAddress,
+        VaultError.Degraded => VaultText.ErrorDegraded,
+        VaultError.StorageFailed => VaultText.ErrorStorageFailed,
+        _ => KeysText.StoreFailed,
     };
 }

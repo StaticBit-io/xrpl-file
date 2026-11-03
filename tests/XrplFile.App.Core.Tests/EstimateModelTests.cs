@@ -89,7 +89,7 @@ public sealed class EstimateModelTests : IDisposable
 
         Assert.Null(model.Estimate);
         Assert.False(model.CanPublish);
-        Assert.Equal(PublishErrorMessages.For(XrplFileError.NodeUnreachable), model.Message);
+        Assert.Equal(TestText.En(PublishErrorMessages.For(XrplFileError.NodeUnreachable)), model.Message);
     }
 
     [Fact]
@@ -294,7 +294,7 @@ public sealed class EstimateModelTests : IDisposable
         await model.EstimateAsync(BatchRequest(), TestContext.Current.CancellationToken);
 
         Assert.False(model.CanPublish);
-        Assert.Equal(PublishErrorMessages.For(XrplFileError.BatchNotEnabled), model.Message);
+        Assert.Equal(TestText.En(PublishErrorMessages.For(XrplFileError.BatchNotEnabled)), model.Message);
     }
 
     [Fact]

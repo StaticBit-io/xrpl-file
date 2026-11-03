@@ -24,20 +24,20 @@
    being false. *@
 
 <BackLink To="AppTab.Accounts" OnClick="BackAsync" />
-<h1 class="xf-title">Fund this account</h1>
+<h1 class="xf-title">@T[FundingText.Title]</h1>
 
 @if (Model.Message is not null)
 {
-    <div class="alert alert-warning">@Model.Message</div>
+    <div class="alert alert-warning">@T[Model.Message]</div>
 }
 
 @if (!Ready)
 {
-    <p>Loading&hellip;</p>
+    <p>@T[ShellText.Loading]</p>
 }
 else
 {
-    <p>@Model.InstructionText</p>
+    <p>@T[Model.InstructionText]</p>
 
     @if (Model.Address is { } address)
     {
@@ -50,23 +50,23 @@ else
             </div>
             <div class="xf-fund-info">
                 <div>
-                    <div class="form-label">Address</div>
+                    <div class="form-label">@T[FundingText.AddressLabel]</div>
                     <code class="user-select-all xf-mono xf-fund-address">@address</code>
                 </div>
                 <div>
                     <button type="button" class="btn btn-outline-secondary" disabled="@_copying" @onclick="CopyAsync">
-                        Copy address
+                        @T[FundingText.CopyAddressButton]
                     </button>
                 </div>
                 <div>
-                    <div class="xf-fund-balance @(Model.AccountExists ? null : "xf-muted")">@Model.BalanceLine</div>
+                    <div class="xf-fund-balance @(Model.AccountExists ? null : "xf-muted")">@T[Model.BalanceLine]</div>
                     @if (!Model.AccountExists)
                     {
                         <p class="xf-muted small mt-2 mb-2">
-                            Checked again every @((int)FundingModel.PollInterval.TotalSeconds) seconds.
+                            @T[UiText.Of(FundingText.PollNote, ("count", (long)FundingModel.PollInterval.TotalSeconds))]
                         </p>
                         <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_checking || Model.IsRefreshing)" @onclick="CheckNowAsync">
-                            Check now
+                            @T[FundingText.CheckNowButton]
                         </button>
                     }
                 </div>

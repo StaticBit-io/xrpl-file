@@ -544,7 +544,7 @@ public sealed class PublicationRunTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.Equal(PublishErrorMessages.For(XrplFileError.NodeUnreachable), run.Snapshot.Failure);
+        Assert.Equal(TestText.En(PublishErrorMessages.For(XrplFileError.NodeUnreachable)), run.Snapshot.Failure);
 
         // No connection was ever handed back to leak: ConnectAsync fails before FakeConnectionFactory
         // counts one, so this holds at 0 == 0 -- still the same invariant a run that failed after
@@ -700,7 +700,7 @@ public sealed class PublicationRunTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.Equal(PublishErrorMessages.For(XrplFileError.SubmitRefused), run.Snapshot.Failure);
+        Assert.Equal(TestText.En(PublishErrorMessages.For(XrplFileError.SubmitRefused)), run.Snapshot.Failure);
         Assert.Equal(1, _connections.Connections);
         Assert.Equal(_connections.Connections, _connections.Disposals);
     }

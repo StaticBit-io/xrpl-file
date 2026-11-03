@@ -56,7 +56,7 @@ public sealed class CloseAccountModelTests : VaultHarness
         await model.SelectAsync(reference, token);
 
         Assert.Equal(CloseAccountModel.ImportedWarningText, model.ImportedWarning);
-        Assert.Contains("imported", model.ImportedWarning, StringComparison.Ordinal);
+        Assert.Contains("imported", TestText.En(model.ImportedWarning), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -443,8 +443,8 @@ public sealed class CloseAccountModelTests : VaultHarness
 
         await model.SelectAsync(reference, token);
         Assert.Null(model.Closed);
-        Assert.Contains("could not be saved to the vault", model.Message, StringComparison.Ordinal);
-        Assert.Contains(model.Preview!.TxHash, model.Message, StringComparison.Ordinal);
+        Assert.Contains("could not be saved to the vault", TestText.En(model.Message), StringComparison.Ordinal);
+        Assert.Contains(model.Preview!.TxHash, TestText.En(model.Message), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -466,7 +466,7 @@ public sealed class CloseAccountModelTests : VaultHarness
         AssertBlank(model);
 
         await model.SelectAsync(reference, token);
-        Assert.Contains("may already have been closed", model.Message, StringComparison.Ordinal);
+        Assert.Contains("may already have been closed", TestText.En(model.Message), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -538,7 +538,7 @@ public sealed class CloseAccountModelTests : VaultHarness
         await model.CloseAsync(token);
 
         // Said on the account that asked, not swallowed, and not written onto the one closing.
-        Assert.Contains("Another account is being closed", model.Message, StringComparison.Ordinal);
+        Assert.Contains("Another account is being closed", TestText.En(model.Message), StringComparison.Ordinal);
         Assert.Null(model.Closed);
         Assert.True(model.CanClose);
         Assert.Single(_connections.Sink.InFlightAtSubmit);
@@ -680,8 +680,8 @@ public sealed class CloseAccountModelTests : VaultHarness
         // The node already accepted the deletion: that must not be erased by the vault write failing.
         Assert.Null(model.Closed);
         Assert.NotNull(model.Message);
-        Assert.StartsWith(CloseErrorMessages.For(DeletionOutcome.Submitted), model.Message, StringComparison.Ordinal);
-        Assert.Contains(model.Preview.TxHash, model.Message, StringComparison.Ordinal);
+        Assert.StartsWith(TestText.En(CloseErrorMessages.For(DeletionOutcome.Submitted)), TestText.En(model.Message), StringComparison.Ordinal);
+        Assert.Contains(model.Preview.TxHash, TestText.En(model.Message), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -845,7 +845,7 @@ public sealed class CloseAccountModelTests : VaultHarness
 
         Assert.Null(model.Preview);
         Assert.False(model.CanClose);
-        Assert.Contains("interrupted", model.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("interrupted", TestText.En(model.Message), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -864,7 +864,7 @@ public sealed class CloseAccountModelTests : VaultHarness
         // A failed select must not leave CurrentReference pointing at data that no longer belongs
         // to this reference -- this is the whole guard the closing screen renders behind.
         Assert.Null(model.CurrentReference);
-        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), model.Message);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), TestText.En(model.Message));
     }
 
     /// <summary>

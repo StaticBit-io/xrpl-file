@@ -1,3 +1,5 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>
@@ -79,58 +81,38 @@ public static class PublishErrorMessages
     public const string BatchNotEnabledBeforeResuming =
         "This network no longer enables Batch; the run can be resumed once it does.";
 
-    private static string AccountInUse(string role) =>
-        $"The {role} account sent a transaction of its own during the publication. Is this key in use somewhere else? "
-        + "The run is listed under unfinished runs; resume it once nothing else uses the key.";
-
-    public static string For(XrplFileError error) => error switch
+    private static UiText AccountInUse(AccountRole? role) => role switch
     {
-        XrplFileError.NodeUnreachable =>
-            "The node did not answer. Nothing was spent. Check the node URL in Settings and try again.",
-        XrplFileError.InsufficientBalance =>
-            "The account does not hold enough to cover this publication. Fund it, or publish a smaller file.",
-        XrplFileError.SubmitRefused =>
-            "The node refused a transaction. Neither funding the account nor retrying will change that on its own.",
-        XrplFileError.BudgetExceeded =>
-            "The run would have cost more than it was started with, so it was stopped rather than allowed to overspend.",
-        XrplFileError.FeeMismatch =>
-            "The node's price changed between the estimate and the run. Take a fresh estimate and start again.",
-        XrplFileError.ValidationTimeout =>
-            "Transactions were submitted but not seen validated in time. The run is listed under unfinished runs, and "
-            + "resuming does not pay again for the chunks and block lists that already landed.",
-        XrplFileError.ResumeMismatch =>
-            "This is not the file, or not the key, that the interrupted run started with.",
-        XrplFileError.SessionAlreadyRun =>
-            "A publication session was run twice. That is a defect in this application, not something you did.",
-        XrplFileError.TooLarge => PublishModel.TooLargeMessage,
-        XrplFileError.InvalidLink =>
-            "The link is not a valid xrpl-file link.",
-        XrplFileError.ManifestNotFound =>
-            "The node has no manifest at that transaction hash.",
-        XrplFileError.NodeLacksHistory =>
-            "The node does not keep history far enough back to read this file.",
-        XrplFileError.CorruptManifest =>
-            "The manifest read back from the ledger is not one this version understands.",
-        XrplFileError.ListMismatch =>
-            "A block list read back from the ledger does not match what was written.",
-        XrplFileError.BlockMismatch =>
-            "A block read back from the ledger does not match what was written. The manifest was not published, so no link points at it.",
-        XrplFileError.ChunkMissing =>
-            "A chunk that was written could not be read back from the ledger.",
-        XrplFileError.BatchNotEnabled =>
-            "This network does not enable Batch. Choose Nobody under Paid by to publish with tickets.",
-        XrplFileError.PayerInsufficientBalance =>
-            "The payer does not hold enough XRP for this publication. Fund it, or choose another payer.",
-        XrplFileError.AccountInUse => AccountInUse("writer or payer"),
-        XrplFileError.FeeTooHigh =>
-            "Network fees rose above what this publication was approved for. The run is listed under unfinished runs; "
-            + "resume it when fees are back down.",
-        XrplFileError.WriterWindowConflict =>
-            "The writer account carries other data for this file's chunks — was it used for another publication while this one was interrupted? Publish this file again from a fresh writer key.",
-        XrplFileError.ApprovalExceeded =>
-            "Fees or balances changed since this was approved. Estimate it again.",
-        XrplFileError.ManifestRejected =>
-            "The manifest landed, but reading it back did not give this file's description, so its link must not be shared. Publish the file again from a fresh writer key.",
+        AccountRole.Writer => PublishText.ErrorAccountInUseWriter,
+        AccountRole.Payer => PublishText.ErrorAccountInUsePayer,
+        _ => PublishText.ErrorAccountInUseWriterOrPayer,
+    };
+
+    public static UiText For(XrplFileError error) => error switch
+    {
+        XrplFileError.NodeUnreachable => PublishText.ErrorNodeUnreachable,
+        XrplFileError.InsufficientBalance => PublishText.ErrorInsufficientBalance,
+        XrplFileError.SubmitRefused => PublishText.ErrorSubmitRefused,
+        XrplFileError.BudgetExceeded => PublishText.ErrorBudgetExceeded,
+        XrplFileError.FeeMismatch => PublishText.ErrorFeeMismatch,
+        XrplFileError.ValidationTimeout => PublishText.ErrorValidationTimeout,
+        XrplFileError.ResumeMismatch => PublishText.ErrorResumeMismatch,
+        XrplFileError.SessionAlreadyRun => PublishText.ErrorSessionAlreadyRun,
+        XrplFileError.TooLarge => PublishText.ErrorTooLarge,
+        XrplFileError.InvalidLink => PublishText.ErrorInvalidLink,
+        XrplFileError.ManifestNotFound => PublishText.ErrorManifestNotFound,
+        XrplFileError.NodeLacksHistory => PublishText.ErrorNodeLacksHistory,
+        XrplFileError.CorruptManifest => PublishText.ErrorCorruptManifest,
+        XrplFileError.ListMismatch => PublishText.ErrorListMismatch,
+        XrplFileError.BlockMismatch => PublishText.ErrorBlockMismatch,
+        XrplFileError.ChunkMissing => PublishText.ErrorChunkMissing,
+        XrplFileError.BatchNotEnabled => PublishText.ErrorBatchNotEnabled,
+        XrplFileError.PayerInsufficientBalance => PublishText.ErrorPayerInsufficientBalance,
+        XrplFileError.AccountInUse => AccountInUse(null),
+        XrplFileError.FeeTooHigh => PublishText.ErrorFeeTooHigh,
+        XrplFileError.WriterWindowConflict => PublishText.ErrorWriterWindowConflict,
+        XrplFileError.ApprovalExceeded => PublishText.ErrorApprovalExceeded,
+        XrplFileError.ManifestRejected => PublishText.ErrorManifestRejected,
         _ => throw new ArgumentOutOfRangeException(nameof(error), error, "no sentence for this error"),
     };
 
@@ -139,17 +121,20 @@ public static class PublishErrorMessages
     /// makes a read-back failure actionable at all — "a block did not read back" and "block 41 did
     /// not read back" are different amounts of help.
     /// </summary>
-    public static string For(XrplFileException exception)
+    public static UiText For(XrplFileException exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
 
-        string sentence = exception is { Error: XrplFileError.AccountInUse, Role: { } role }
-            ? AccountInUse(role == AccountRole.Writer ? "writer" : "payer")
+        UiText sentence = exception is { Error: XrplFileError.AccountInUse, Role: { } role }
+            ? AccountInUse(role)
             : For(exception.Error);
 
-        if (exception is { Error: XrplFileError.ManifestRejected, Link: { } link }) sentence = $"{sentence} The link that was written: {link}.";
+        if (exception is { Error: XrplFileError.ManifestRejected, Link: { } link })
+        {
+            sentence = UiText.Of(PublishText.ErrorWithLink, ("sentence", sentence), ("link", link.ToString()));
+        }
 
-        return exception.Block is int block ? $"{sentence} (block {block})" : sentence;
+        return exception.Block is int block ? UiText.Of(PublishText.ErrorWithBlock, ("sentence", sentence), ("block", block)) : sentence;
     }
 
     /// <summary>
@@ -188,11 +173,11 @@ public static class PublishErrorMessages
             if (exception.Error == XrplFileError.BatchNotEnabled) return BatchNotEnabledBeforeResuming;
         }
 
-        if (exception.Error != XrplFileError.NodeUnreachable) return For(exception);
+        if (exception.Error != XrplFileError.NodeUnreachable) return TextCatalog.For(UiLanguage.English).Render(For(exception)) /* LOCALIZE(bridge) */;
 
         return point switch
         {
-            RunFailurePoint.BeforeSubmitting => For(exception),
+            RunFailurePoint.BeforeSubmitting => TextCatalog.For(UiLanguage.English).Render(For(exception)) /* LOCALIZE(bridge) */,
             RunFailurePoint.BeforeResuming =>
                 "The node did not answer. This attempt spent nothing, and the run is still listed under unfinished runs. "
                 + "Check the node URL in Settings and try again.",

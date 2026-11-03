@@ -17,7 +17,7 @@ public sealed class NewAccountModel(IKeyVault vault)
 
     public string Network { get; set; } = "mainnet";
 
-    public string? Message { get; private set; }
+    public UiText? Message { get; private set; }
 
     public bool CanCreate =>
         !string.IsNullOrWhiteSpace(Label) && XrplFileLink.TryNormalizeNetwork(Network, out _);
@@ -32,13 +32,13 @@ public sealed class NewAccountModel(IKeyVault vault)
 
         if (string.IsNullOrWhiteSpace(Label))
         {
-            Message = "Give the account a name, so you can tell it from the others later.";
+            Message = AccountsText.NewNeedsLabel;
             return null;
         }
 
         if (!XrplFileLink.TryNormalizeNetwork(Network, out string? network))
         {
-            Message = TextCatalog.For(UiLanguage.English).Render(NetworkChoices.NotANetwork(Network)) /* LOCALIZE(bridge) */;
+            Message = NetworkChoices.NotANetwork(Network);
             return null;
         }
 
@@ -52,7 +52,7 @@ public sealed class NewAccountModel(IKeyVault vault)
         }
         catch (VaultException ex)
         {
-            Message = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
+            Message = VaultErrorMessages.For(ex.Error);
             return null;
         }
     }

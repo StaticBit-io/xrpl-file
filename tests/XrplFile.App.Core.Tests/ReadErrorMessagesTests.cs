@@ -108,7 +108,7 @@ public sealed class ReadErrorMessagesTests
                      XrplFileError.BlockMismatch, XrplFileError.ListMismatch, XrplFileError.ChunkMissing,
                  })
         {
-            Assert.NotEqual(PublishErrorMessages.For(error), ReadErrorMessages.For(error));
+            Assert.NotEqual(TestText.En(PublishErrorMessages.For(error)), ReadErrorMessages.For(error));
         }
     }
 

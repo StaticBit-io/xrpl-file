@@ -324,7 +324,7 @@ public class ExportModelTests : VaultHarness
         ExportModel model = new(vault, NoPicker);
 
         Assert.Null(await model.ToContainerAsync("no-such-reference", Password(ContainerPassword), token));
-        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.NoSuchEntry)), model.Problem);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.NoSuchEntry)), TestText.En(model.Problem));
     }
 
     [Fact]

@@ -9,7 +9,7 @@ public sealed class PublishErrorMessagesTests
     {
         foreach (XrplFileError error in Enum.GetValues<XrplFileError>())
         {
-            string message = PublishErrorMessages.For(error);
+            string message = TestText.En(PublishErrorMessages.For(error));
 
             Assert.False(string.IsNullOrWhiteSpace(message), $"{error} has no sentence");
             Assert.EndsWith(".", message, StringComparison.Ordinal);
@@ -19,7 +19,7 @@ public sealed class PublishErrorMessagesTests
     [Fact]
     public void Every_sentence_is_its_own()
     {
-        string[] all = [.. Enum.GetValues<XrplFileError>().Select(PublishErrorMessages.For)];
+        string[] all = [.. Enum.GetValues<XrplFileError>().Select(error => TestText.En(PublishErrorMessages.For(error)))];
 
         Assert.Equal(all.Length, all.Distinct(StringComparer.Ordinal).Count());
     }
@@ -27,15 +27,15 @@ public sealed class PublishErrorMessagesTests
     [Fact]
     public void TooLarge_says_the_applications_limit()
     {
-        Assert.Equal(PublishModel.TooLargeMessage, PublishErrorMessages.For(XrplFileError.TooLarge));
+        Assert.Equal(PublishModel.TooLargeMessage, TestText.En(PublishErrorMessages.For(XrplFileError.TooLarge)));
     }
 
     [Fact]
     public void The_three_that_must_never_be_conflated_are_not()
     {
-        string unreachable = PublishErrorMessages.For(XrplFileError.NodeUnreachable);
-        string balance = PublishErrorMessages.For(XrplFileError.InsufficientBalance);
-        string refused = PublishErrorMessages.For(XrplFileError.SubmitRefused);
+        string unreachable = TestText.En(PublishErrorMessages.For(XrplFileError.NodeUnreachable));
+        string balance = TestText.En(PublishErrorMessages.For(XrplFileError.InsufficientBalance));
+        string refused = TestText.En(PublishErrorMessages.For(XrplFileError.SubmitRefused));
 
         Assert.NotEqual(unreachable, balance);
         Assert.NotEqual(unreachable, refused);
@@ -47,7 +47,15 @@ public sealed class PublishErrorMessagesTests
     {
         XrplFileException thrown = new(XrplFileError.BlockMismatch, "block 3 did not read back", block: 3);
 
-        Assert.Contains("block 3", PublishErrorMessages.For(thrown), StringComparison.Ordinal);
+        Assert.Contains("block 3", TestText.En(PublishErrorMessages.For(thrown)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_block_number_is_not_grouped_like_a_count()
+    {
+        XrplFileException thrown = new(XrplFileError.BlockMismatch, "block 12345 did not read back", block: 12_345);
+
+        Assert.EndsWith("(block 12345)", TestText.En(PublishErrorMessages.For(thrown)), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -55,7 +63,7 @@ public sealed class PublishErrorMessagesTests
     {
         XrplFileException thrown = new(XrplFileError.NodeUnreachable, "no answer");
 
-        Assert.Equal(PublishErrorMessages.For(XrplFileError.NodeUnreachable), PublishErrorMessages.For(thrown));
+        Assert.Equal(TestText.En(PublishErrorMessages.For(XrplFileError.NodeUnreachable)), TestText.En(PublishErrorMessages.For(thrown)));
     }
 
     [Fact]
@@ -64,7 +72,7 @@ public sealed class PublishErrorMessagesTests
         Assert.Equal(
             "Transactions were submitted but not seen validated in time. The run is listed under unfinished runs, and "
                 + "resuming does not pay again for the chunks and block lists that already landed.",
-            PublishErrorMessages.For(XrplFileError.ValidationTimeout));
+            TestText.En(PublishErrorMessages.For(XrplFileError.ValidationTimeout)));
     }
 
     [Fact]
@@ -158,7 +166,7 @@ public sealed class PublishErrorMessagesTests
             XrplFileException thrown = new(error, "failed", block: 7);
 
             Assert.Equal(
-                PublishErrorMessages.For(thrown),
+                TestText.En(PublishErrorMessages.For(thrown)),
                 PublishErrorMessages.ForRun(thrown, point, usesTickets: true, ownerReserveDrops: 200_000));
         }
     }
@@ -173,10 +181,10 @@ public sealed class PublishErrorMessagesTests
         Assert.Equal("The payer does not hold enough XRP to finish this publication. Fund it, then resume.", sentence);
         Assert.DoesNotContain("another payer", sentence, StringComparison.Ordinal);
         Assert.Equal(
-            PublishErrorMessages.For(XrplFileError.PayerInsufficientBalance),
+            TestText.En(PublishErrorMessages.For(XrplFileError.PayerInsufficientBalance)),
             PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
         Assert.Equal(
-            PublishErrorMessages.For(XrplFileError.PayerInsufficientBalance),
+            TestText.En(PublishErrorMessages.For(XrplFileError.PayerInsufficientBalance)),
             PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0));
     }
 
@@ -190,10 +198,10 @@ public sealed class PublishErrorMessagesTests
         Assert.Equal("This network no longer enables Batch; the run can be resumed once it does.", sentence);
         Assert.DoesNotContain("Nobody", sentence, StringComparison.Ordinal);
         Assert.Equal(
-            PublishErrorMessages.For(XrplFileError.BatchNotEnabled),
+            TestText.En(PublishErrorMessages.For(XrplFileError.BatchNotEnabled)),
             PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
         Assert.Equal(
-            PublishErrorMessages.For(XrplFileError.BatchNotEnabled),
+            TestText.En(PublishErrorMessages.For(XrplFileError.BatchNotEnabled)),
             PublishErrorMessages.ForRun(thrown, RunFailurePoint.WhileSubmitting, usesTickets: false, ownerReserveDrops: 0));
     }
 
@@ -202,7 +210,7 @@ public sealed class PublishErrorMessagesTests
     {
         Assert.Equal(
             "This network does not enable Batch. Choose Nobody under Paid by to publish with tickets.",
-            PublishErrorMessages.For(XrplFileError.BatchNotEnabled));
+            TestText.En(PublishErrorMessages.For(XrplFileError.BatchNotEnabled)));
     }
 
     [Fact]
@@ -210,7 +218,7 @@ public sealed class PublishErrorMessagesTests
     {
         Assert.Equal(
             "The payer does not hold enough XRP for this publication. Fund it, or choose another payer.",
-            PublishErrorMessages.For(XrplFileError.PayerInsufficientBalance));
+            TestText.En(PublishErrorMessages.For(XrplFileError.PayerInsufficientBalance)));
     }
 
     [Theory]
@@ -223,7 +231,7 @@ public sealed class PublishErrorMessagesTests
         Assert.Equal(
             $"The {word} account sent a transaction of its own during the publication. Is this key in use somewhere else? "
                 + "The run is listed under unfinished runs; resume it once nothing else uses the key.",
-            PublishErrorMessages.For(thrown));
+            TestText.En(PublishErrorMessages.For(thrown)));
     }
 
     [Fact]
@@ -232,7 +240,7 @@ public sealed class PublishErrorMessagesTests
         Assert.Equal(
             "Network fees rose above what this publication was approved for. The run is listed under unfinished runs; "
                 + "resume it when fees are back down.",
-            PublishErrorMessages.For(XrplFileError.FeeTooHigh));
+            TestText.En(PublishErrorMessages.For(XrplFileError.FeeTooHigh)));
     }
 
     [Fact]
@@ -258,7 +266,7 @@ public sealed class PublishErrorMessagesTests
             PublishErrorMessages.HistoryLaggedWhilePublishing,
             PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeResuming, usesTickets: false, ownerReserveDrops: 0));
         Assert.Equal(
-            PublishErrorMessages.For(XrplFileError.NodeLacksHistory),
+            TestText.En(PublishErrorMessages.For(XrplFileError.NodeLacksHistory)),
             PublishErrorMessages.ForRun(thrown, RunFailurePoint.BeforeSubmitting, usesTickets: false, ownerReserveDrops: 0));
     }
 
@@ -267,13 +275,13 @@ public sealed class PublishErrorMessagesTests
     {
         Assert.Equal(
             "The writer account carries other data for this file's chunks — was it used for another publication while this one was interrupted? Publish this file again from a fresh writer key.",
-            PublishErrorMessages.For(XrplFileError.WriterWindowConflict));
+            TestText.En(PublishErrorMessages.For(XrplFileError.WriterWindowConflict)));
     }
 
     [Fact]
     public void A_changed_estimate_asks_for_a_new_one()
     {
-        Assert.Equal("Fees or balances changed since this was approved. Estimate it again.", PublishErrorMessages.For(XrplFileError.ApprovalExceeded));
+        Assert.Equal("Fees or balances changed since this was approved. Estimate it again.", TestText.En(PublishErrorMessages.For(XrplFileError.ApprovalExceeded)));
     }
 
     [Fact]
@@ -282,6 +290,6 @@ public sealed class PublishErrorMessagesTests
         XrplFileLink link = new("testnet", new string('A', 64));
         XrplFileException thrown = new(XrplFileError.ManifestRejected, "rejected", link: link);
 
-        Assert.Contains(link.ToString(), PublishErrorMessages.For(thrown), StringComparison.Ordinal);
+        Assert.Contains(link.ToString(), TestText.En(PublishErrorMessages.For(thrown)), StringComparison.Ordinal);
     }
 }

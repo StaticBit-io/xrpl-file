@@ -51,7 +51,7 @@ public sealed class NewAccountModelTests : VaultHarness
 
         Assert.False(model.CanCreate);
         Assert.Null(await model.CreateAsync(TestContext.Current.CancellationToken));
-        Assert.Contains("standalone", model.Message!, StringComparison.Ordinal);
+        Assert.Contains("standalone", TestText.En(model.Message), StringComparison.Ordinal);
     }
 
     [Fact]

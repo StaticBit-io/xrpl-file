@@ -13,49 +13,46 @@
 @if (_container is null)
 {
     <BackLink To="AppTab.Accounts" OnClick="BackAsync" Disabled="_busy" />
-    <h1 class="xf-title">Export key</h1>
+    <h1 class="xf-title">@T[KeysText.ExportTitle]</h1>
     <p>
-        Exporting writes a portable backup file, protected by its own password &mdash; separate from
-        the vault's master password. Anyone who has both the file (or the code below) and this
-        password can spend from this account.
+        @T[KeysText.ExportIntro]
     </p>
 
     @if (Model.Problem is { } problem)
     {
-        <div class="alert alert-danger">@problem</div>
+        <div class="alert alert-danger">@T[problem]</div>
     }
 
     <section class="xf-card">
         <div class="mb-3">
-            <label class="form-label">Backup password</label>
+            <label class="form-label">@T[KeysText.BackupPasswordLabel]</label>
             <input type="password" class="form-control" @bind="_password" @bind:event="oninput" disabled="@_busy" />
         </div>
 
-        <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="CreateAsync">Create backup</button>
+        <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="CreateAsync">@T[KeysText.CreateBackupButton]</button>
     </section>
-    <button type="button" class="btn btn-outline-secondary" @onclick="BackAsync">Skip for now</button>
+    <button type="button" class="btn btn-outline-secondary" @onclick="BackAsync">@T[KeysText.SkipButton]</button>
 }
 else
 {
     <div class="alert alert-success">
-        Backup created. It is not saved anywhere yet &mdash; save it to a file, or scan the code,
-        before leaving this screen.
+        @T[KeysText.BackupCreated]
     </div>
 
     @if (Model.Problem is { } saveProblem)
     {
-        <div class="alert alert-danger">@saveProblem</div>
+        <div class="alert alert-danger">@T[saveProblem]</div>
     }
 
     @if (_saved)
     {
-        <div class="alert alert-info">Saved.</div>
+        <div class="alert alert-info">@T[KeysText.Saved]</div>
     }
 
     <button type="button" class="btn btn-outline-primary" disabled="@_busy" @onclick="SaveToFileAsync">
-        Save to file&hellip;
+        @T[KeysText.SaveToFileButton]
     </button>
-    <button type="button" class="btn btn-outline-primary ms-2" @onclick="ShowQr">Show as QR code</button>
+    <button type="button" class="btn btn-outline-primary ms-2" @onclick="ShowQr">@T[KeysText.ShowQrButton]</button>
 
     @if (_showQr)
     {
@@ -74,14 +71,13 @@ else
         else if (_qr is not null)
         {
             <div class="alert alert-warning mt-3">
-                This key's backup is too large for a single QR code. Use the file instead &mdash;
-                splitting a backup across several codes is not supported.
+                @T[KeysText.QrTooLarge]
             </div>
         }
     }
 
     <div class="mt-3">
-        <button type="button" class="btn btn-primary" @onclick="BackAsync">Done</button>
+        <button type="button" class="btn btn-primary" @onclick="BackAsync">@T[CommonText.Done]</button>
     </div>
 }
 
