@@ -7,7 +7,7 @@ import {
 import { STRINGS } from '../src/js/chrome-strings.mjs';
 import { TABLES } from '../src/js/strings.mjs';
 import {
-  CHECK_LINK_STRINGS, COPY_STRINGS, NETWORK_NAMES, NETWORK_SHORT, PRICE_STRINGS, cloudStrings,
+  CHECK_LINK_STRINGS, COPY_STRINGS, NETWORK_NAMES, NETWORK_SHORT, PRICE_STRINGS, cloudStrings, fileCloudStrings,
 } from '../src/js/home-strings.mjs';
 import { SIZE_UNITS } from '../src/js/price.mjs';
 
@@ -95,6 +95,63 @@ test('the cloud strings have the same shape in every active language, and every 
       assert.ok(callout.caption && callout.value && callout.unit, `${lang} callout ${JSON.stringify(callout)}`);
     }
   }
+});
+
+test("the file page's cloud strings have the same shape in every active language, and every function answers with text", () => {
+  const [first, ...rest] = ACTIVE_LANGS;
+  for (const lang of rest) {
+    assert.deepEqual(shape(fileCloudStrings(lang, 'testnet')), shape(fileCloudStrings(first, 'testnet')), lang);
+  }
+  for (const lang of ACTIVE_LANGS) {
+    const strings = fileCloudStrings(lang, 'testnet');
+    assert.deepEqual(Object.keys(strings).sort(), ['caption', 'failed', 'label', 'note', 'reading']);
+    for (const phase of ['reading', 'done', 'failed']) {
+      for (const chunks of [null, 1, 123]) {
+        for (const perCube of [1, 84]) {
+          const label = strings.label(phase, { chunks, perCube });
+          assert.ok(typeof label === 'string' && label.length > 0, `${lang} label ${phase}`);
+          assert.ok(!label.includes('undefined'), `${lang} label ${phase}`);
+        }
+      }
+    }
+    assert.ok(strings.label('reading', { chunks: 123, perCube: 84 }).includes('84'), `${lang} label names the chunks to a cube`);
+    assert.ok(!strings.label('reading', { chunks: 123, perCube: 1 }).includes('84'));
+    for (const perCube of [1, 84]) {
+      for (const [firstLedger, lastLedger] of [[5, 7], [5, 5]]) {
+        const reading = strings.reading({ chunks: 123, perCube, firstLedger, lastLedger });
+        assert.ok(reading.includes('123') && reading.includes('5'), `${lang} reading`);
+        assert.ok(!reading.includes('undefined'), `${lang} reading`);
+      }
+      for (const capped of [false, true]) {
+        const note = strings.note({ ledgers: 40, ledgersPerPad: 3, capped, perCube });
+        assert.ok(typeof note === 'string' && note.length > 0, `${lang} note`);
+        assert.ok(!note.includes('undefined'), `${lang} note`);
+        assert.equal(note.includes('84'), perCube > 1, `${lang} note names the chunks to a cube only when there are several`);
+        assert.equal(note.includes('40'), capped, `${lang} note names the span only when the ground is capped`);
+      }
+    }
+    assert.equal(strings.note({ ledgers: null, ledgersPerPad: null, capped: false, perCube: 1 }), '', `${lang} note before the manifest`);
+    for (const code of ['NodeUnreachable', 'Stalled', 'BlockMismatch', 'DecodeFailed', 'NodeLacksHistory', 'ManifestNotFound', 'ChunkMissing', 'Other', undefined]) {
+      assert.ok(strings.failed(code).length > 0, `${lang} failed ${code}`);
+    }
+    assert.equal(strings.caption(), '', `${lang}: the file replaces the cloud's end line`);
+  }
+});
+
+test("the file page's cloud strings take any input without throwing, and an unknown language reads English", () => {
+  for (const lang of ACTIVE_LANGS) {
+    const strings = fileCloudStrings(lang, 'devnet');
+    assert.doesNotThrow(() => strings.label('unknown', {}), lang);
+    assert.doesNotThrow(() => strings.label('reading'), lang);
+    assert.doesNotThrow(() => strings.reading({}), lang);
+    assert.doesNotThrow(() => strings.reading(), lang);
+    assert.doesNotThrow(() => strings.note({}), lang);
+    assert.doesNotThrow(() => strings.note(), lang);
+    assert.ok(strings.reading({ chunks: 2, perCube: 1, firstLedger: 5, lastLedger: 5 }).includes('devnet'), `${lang} names a network without a short form as it is`);
+  }
+  assert.deepEqual(shape(fileCloudStrings('xx', 'testnet')), shape(fileCloudStrings('en', 'testnet')));
+  const args = { chunks: 1, perCube: 1 };
+  assert.equal(fileCloudStrings('xx', 'testnet').label('done', args), fileCloudStrings('en', 'testnet').label('done', args));
 });
 
 test('a string with placeholders asks for the same values in every language', () => {

@@ -1,5 +1,6 @@
 // The words the home page's scripts put on the page: the hero's status lines, callouts, the "Check a link"
-// errors, the price table and the copy button. The page's own prose is in index.html and <lang>/index.html.
+// errors, the price table and the copy button, and the point cloud the file page shows while it reads a
+// file. The page's own prose is in index.html and <lang>/index.html.
 // Every function here is called with whatever the page has and must not throw. Each table is keyed by
 // language with the same keys in every language; test/languages.test.mjs checks that for the active ones.
 
@@ -287,6 +288,219 @@ const CLOUD_STRINGS = {
 /** `network` is the hero file's network, e.g. "testnet". A language without an entry gets English. */
 export function cloudStrings(lang, network) {
   return (CLOUD_STRINGS[lang] ?? CLOUD_STRINGS.en)(network);
+}
+
+// The caption is "reading from <network> · N chunks · ledgers a–b"; a part the page does not have yet is left out.
+function readingCaption(parts) {
+  return parts.filter((part) => part !== '').join(' · ');
+}
+
+// The file page's cloud: the same cloud as the hero while the <xrpl-file> element reads the file, with no
+// turn, card or callouts. Terms, the ledger range and the "drawn, not measured" list follow CLOUD_STRINGS.
+// `caption` is empty on purpose: the file itself replaces the cloud's end line, and a non-empty value
+// would be announced at load just before the page empties the caption. `failed` is the hero's: the
+// element shows its own error view, so it is only a short fallback.
+// `perCube` is how many chunks one cube stands for (1 for small files); the label and the note
+// mention it only when it is more than 1.
+const FILE_CLOUD_STRINGS = {
+  en: (network) => {
+    const chunksOf = (count) => `${count} ${plural('en', count, EN_CHUNKS)}`;
+    const ledgers = { one: 'ledger', many: 'ledgers' };
+    return {
+      label: (phase, { chunks, perCube } = {}) => {
+        const count = chunks == null ? '' : `, ${chunksOf(chunks)}${perCube > 1 ? `, ${perCube} to a cube` : ''}`;
+        const labels = {
+          reading: `Point cloud of a stretch of the XRP Ledger. The file is being read from the ledger${count}`,
+          done: `Point cloud of a stretch of the XRP Ledger. The file is read from the ledger and checked${count}`,
+          failed: 'The file could not be read from the ledger just now',
+        };
+        return labels[phase] ?? labels.reading;
+      },
+      reading: ({ chunks, firstLedger, lastLedger } = {}) =>
+        readingCaption([
+          `reading from ${NETWORK_SHORT.en[network] ?? network}`,
+          chunks == null ? '' : chunksOf(chunks),
+          firstLedger == null || lastLedger == null ? '' : ledgerRange(firstLedger, lastLedger, ledgers),
+        ]),
+      note: ({ ledgers: span, ledgersPerPad, capped, perCube } = {}) => {
+        if (span == null) return '';
+        const lead = perCube > 1
+          ? `Each cube stands for ${chunksOf(perCube)} of the file, on the ledger of the first of them to arrive`
+          : 'Each cube is one chunk of the file, standing on the ledger it was written in';
+        const ground = capped
+          ? `; the file spans ${span} ledgers, so each strip of ground covers up to ${ledgersPerPad} of them. `
+          : '. ';
+        return `${lead}${ground}Drawn, not measured: the cube's place within its ${capped ? 'strip' : 'ledger'}, the points inside each cube (scattered by a seed from the chunk's index and ledger, not by its bytes), the ground and the gap before the manifest's cube.`;
+      },
+    };
+  },
+  ru: (network) => {
+    const chunksOf = (count) => `${count} ${plural('ru', count, RU_CHUNKS)}`;
+    const ledgers = { one: 'версия реестра', many: 'версии реестра' };
+    return {
+      label: (phase, { chunks, perCube } = {}) => {
+        const count = chunks == null ? '' : `, ${chunksOf(chunks)}${perCube > 1 ? `, по ${perCube} на куб` : ''}`;
+        const labels = {
+          reading: `Облако точек: участок XRP Ledger. Файл читается из реестра${count}`,
+          done: `Облако точек: участок XRP Ledger. Файл прочитан из реестра и проверен${count}`,
+          failed: 'Файл сейчас не удалось прочитать из реестра',
+        };
+        return labels[phase] ?? labels.reading;
+      },
+      reading: ({ chunks, firstLedger, lastLedger } = {}) =>
+        readingCaption([
+          `читается из ${NETWORK_SHORT.ru[network] ?? network}`,
+          chunks == null ? '' : chunksOf(chunks),
+          firstLedger == null || lastLedger == null ? '' : ledgerRange(firstLedger, lastLedger, ledgers),
+        ]),
+      note: ({ ledgers: span, ledgersPerPad, capped, perCube } = {}) => {
+        if (span == null) return '';
+        const lead = perCube > 1
+          ? `Каждый куб показывает ${chunksOf(perCube)} файла и стоит на версии реестра того из них, который пришёл первым`
+          : 'Каждый куб показывает один фрагмент файла и стоит на той версии реестра, в которой фрагмент записан';
+        const ground = capped
+          ? `; файл занимает ${span} ${plural('ru', span, RU_LEDGERS)}, поэтому каждая полоса поверхности охватывает до ${ledgersPerPad} из них. `
+          : '. ';
+        return `${lead}${ground}Нарисованы, а не измерены: место куба внутри ${capped ? 'полосы' : 'версии'}, точки внутри каждого куба (они разбросаны по числу, выведенному из номера фрагмента и версии реестра, а не из байтов фрагмента), поверхность и расстояние до куба манифеста.`;
+      },
+    };
+  },
+  de: (network) => {
+    const chunksOf = (count) => `${count} ${plural('de', count, DE_CHUNKS)}`;
+    const ledgers = { one: 'Ledger', many: 'Ledger' };
+    return {
+      label: (phase, { chunks, perCube } = {}) => {
+        const count = chunks == null ? '' : `, ${chunksOf(chunks)}${perCube > 1 ? `, ${perCube} pro Würfel` : ''}`;
+        const labels = {
+          reading: `Punktwolke eines Ausschnitts des XRP Ledger. Die Datei wird aus dem Ledger gelesen${count}`,
+          done: `Punktwolke eines Ausschnitts des XRP Ledger. Die Datei ist aus dem Ledger gelesen und geprüft${count}`,
+          failed: 'Die Datei konnte gerade nicht aus dem Ledger gelesen werden',
+        };
+        return labels[phase] ?? labels.reading;
+      },
+      reading: ({ chunks, firstLedger, lastLedger } = {}) =>
+        readingCaption([
+          `wird gelesen aus ${NETWORK_SHORT.de[network] ?? network}`,
+          chunks == null ? '' : chunksOf(chunks),
+          firstLedger == null || lastLedger == null ? '' : ledgerRange(firstLedger, lastLedger, ledgers),
+        ]),
+      note: ({ ledgers: span, ledgersPerPad, capped, perCube } = {}) => {
+        if (span == null) return '';
+        const lead = perCube > 1
+          ? `Jeder Würfel steht für ${chunksOf(perCube)} der Datei und liegt auf dem Ledger des Chunks, der davon zuerst eintrifft`
+          : 'Jeder Würfel ist ein Chunk der Datei und steht auf dem Ledger, in dem er geschrieben wurde';
+        const ground = capped
+          ? `. Die Datei umfasst ${span} Ledger, deshalb deckt jeder Streifen Boden bis zu ${ledgersPerPad} davon ab. `
+          : '. ';
+        return `${lead}${ground}Gezeichnet, nicht gemessen: die Position des Würfels innerhalb seines ${capped ? 'Streifens' : 'Ledgers'}, die Punkte im Inneren jedes Würfels (sie werden aus Index und Ledger des Chunks gestreut, nicht aus seinen Bytes), der Boden und der Abstand bis zum Würfel des Manifests.`;
+      },
+    };
+  },
+  es: (network) => {
+    const chunksOf = (count) => `${count} ${plural('es', count, ES_CHUNKS)}`;
+    const ledgers = { one: 'ledger', many: 'ledgers' };
+    return {
+      label: (phase, { chunks, perCube } = {}) => {
+        const count = chunks == null ? '' : `, ${chunksOf(chunks)}${perCube > 1 ? `, ${perCube} por cubo` : ''}`;
+        const labels = {
+          reading: `Nube de puntos de un tramo del XRP Ledger. Se está leyendo el archivo del ledger${count}`,
+          done: `Nube de puntos de un tramo del XRP Ledger. El archivo se ha leído del ledger y está comprobado${count}`,
+          failed: 'Ahora mismo no se puede leer el archivo del ledger',
+        };
+        return labels[phase] ?? labels.reading;
+      },
+      reading: ({ chunks, firstLedger, lastLedger } = {}) =>
+        readingCaption([
+          `leyendo de ${NETWORK_SHORT.es[network] ?? network}`,
+          chunks == null ? '' : chunksOf(chunks),
+          firstLedger == null || lastLedger == null ? '' : ledgerRange(firstLedger, lastLedger, ledgers),
+        ]),
+      note: ({ ledgers: span, ledgersPerPad, capped, perCube } = {}) => {
+        if (span == null) return '';
+        const lead = perCube > 1
+          ? `Cada cubo agrupa ${chunksOf(perCube)} del archivo y está sobre el ledger del primero de ellos en llegar`
+          : 'Cada cubo es un fragmento del archivo y está sobre el ledger en el que se escribió';
+        const ground = capped
+          ? `; el archivo abarca ${span} ledgers, así que cada franja de suelo cubre hasta ${ledgersPerPad} de ellos. `
+          : '. ';
+        return `${lead}${ground}Se dibujan, no se miden: la posición del cubo dentro de su ${capped ? 'franja' : 'ledger'}, los puntos del interior de cada cubo (se reparten con una semilla sacada del índice y del ledger del fragmento, no de sus bytes), el suelo y la distancia hasta el cubo del manifiesto.`;
+      },
+    };
+  },
+  pt: (network) => {
+    const chunksOf = (count) => `${count} ${plural('pt', count, PT_CHUNKS)}`;
+    const ledgers = { one: 'ledger', many: 'ledgers' };
+    return {
+      label: (phase, { chunks, perCube } = {}) => {
+        const count = chunks == null ? '' : `, ${chunksOf(chunks)}${perCube > 1 ? `, ${perCube} por cubo` : ''}`;
+        const labels = {
+          reading: `Nuvem de pontos de um trecho do XRP Ledger. O arquivo está sendo lido do ledger${count}`,
+          done: `Nuvem de pontos de um trecho do XRP Ledger. O arquivo foi lido do ledger e verificado${count}`,
+          failed: 'Não foi possível ler o arquivo do ledger agora',
+        };
+        return labels[phase] ?? labels.reading;
+      },
+      reading: ({ chunks, firstLedger, lastLedger } = {}) =>
+        readingCaption([
+          `lendo de ${NETWORK_SHORT.pt[network] ?? network}`,
+          chunks == null ? '' : chunksOf(chunks),
+          firstLedger == null || lastLedger == null ? '' : ledgerRange(firstLedger, lastLedger, ledgers),
+        ]),
+      note: ({ ledgers: span, ledgersPerPad, capped, perCube } = {}) => {
+        if (span == null) return '';
+        const lead = perCube > 1
+          ? `Cada cubo reúne ${chunksOf(perCube)} do arquivo e fica sobre o ledger do primeiro deles a chegar`
+          : 'Cada cubo é um fragmento do arquivo e fica sobre o ledger em que foi gravado';
+        const ground = capped
+          ? `; o arquivo abrange ${span} ledgers, então cada faixa de solo cobre até ${ledgersPerPad} deles. `
+          : '. ';
+        return `${lead}${ground}São desenhados, não medidos: a posição do cubo dentro ${capped ? 'da sua faixa' : 'do seu ledger'}, os pontos dentro de cada cubo (espalhados por uma semente tirada do índice e do ledger do fragmento, não dos seus bytes), o solo e a distância até o cubo do manifesto.`;
+      },
+    };
+  },
+  zh: (network) => {
+    const chunksOf = (count) => `${count} ${plural('zh', count, ZH_CHUNKS)}`;
+    const ledgers = { one: '账本', many: '账本' };
+    return {
+      label: (phase, { chunks, perCube } = {}) => {
+        const count = chunks == null ? '' : `，共 ${chunksOf(chunks)}${perCube > 1 ? `，每个立方体 ${perCube} 个分片` : ''}`;
+        const labels = {
+          reading: `XRP Ledger 一段区间的点云。正在从账本读取文件${count}`,
+          done: `XRP Ledger 一段区间的点云。文件已从账本读取并通过校验${count}`,
+          failed: '刚才未能从账本读取该文件',
+        };
+        return labels[phase] ?? labels.reading;
+      },
+      reading: ({ chunks, firstLedger, lastLedger } = {}) =>
+        readingCaption([
+          `正在从 ${NETWORK_SHORT.zh[network] ?? network} 读取`,
+          chunks == null ? '' : chunksOf(chunks),
+          firstLedger == null || lastLedger == null ? '' : ledgerRange(firstLedger, lastLedger, ledgers),
+        ]),
+      note: ({ ledgers: span, ledgersPerPad, capped, perCube } = {}) => {
+        if (span == null) return '';
+        const lead = perCube > 1
+          ? `每个立方体对应文件的 ${perCube} 个分片，立在其中最先到达的那个分片所在的账本上`
+          : '每个立方体是文件的一个分片，立在它被写入的那个账本上';
+        const ground = capped
+          ? `；文件跨越 ${span} 个账本，因此每条地面带最多覆盖其中的 ${ledgersPerPad} 个。`
+          : '。';
+        return `${lead}${ground}绘制而非测量的部分：立方体在${capped ? '地面带' : '该账本'}内的位置、每个立方体内部的点（由取自分片序号和账本的种子散布，而非由分片的字节决定）、地面，以及与清单立方体之间的间距。`;
+      },
+    };
+  },
+};
+
+/**
+ * The words of the file page's point cloud (see FILE_CLOUD_STRINGS). `network` is the file's network.
+ * A language without an entry gets English.
+ */
+export function fileCloudStrings(lang, network) {
+  return {
+    ...(FILE_CLOUD_STRINGS[lang] ?? FILE_CLOUD_STRINGS.en)(network),
+    failed: cloudStrings(lang, network).failed,
+    caption: () => '',
+  };
 }
 
 export const CHECK_LINK_STRINGS = {
