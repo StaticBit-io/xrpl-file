@@ -141,7 +141,7 @@
   "Shell.TabPublish": "Publicar",
   "Shell.TabRead": "Ler",
   "Shell.TabHistory": "Histórico",
-  "Shell.TabSettings": "Configurações",
+  "Shell.TabSettings": "Ajustes",
   "Network.ChooseNetwork": "Escolha uma rede…",
   "Network.NotANetwork": "“{network}” não é uma rede que um link xrpl-file possa nomear. Use mainnet, testnet, devnet ou um ID de rede em dígitos.",
   "Network.NetworkName": "{network}",
