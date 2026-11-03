@@ -10,7 +10,7 @@
    Model.Shown, after either has happened, actually reaches the screen instead of a stale value
    sitting in markup nothing repainted. *@
 
-<BackLink To="Accounts" OnClick="BackAsync" />
+<BackLink To="AppTab.Accounts" OnClick="BackAsync" />
 <h1 class="xf-title">Reveal secret</h1>
 
 @if (_problem is { } problem)
@@ -96,7 +96,7 @@ else
         }
         catch (VaultException ex)
         {
-            _problem = VaultErrorMessages.For(ex.Error);
+            _problem = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
         }
         finally
         {

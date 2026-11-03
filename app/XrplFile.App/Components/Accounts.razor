@@ -491,7 +491,7 @@
         {
             _pendingDeleteRow = null;
             _deleteWarning = null;
-            _deleteProblem = VaultErrorMessages.For(ex.Error);
+            _deleteProblem = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
         }
     }
 
@@ -522,7 +522,7 @@
         }
         catch (VaultException ex)
         {
-            _deleteProblem = VaultErrorMessages.For(ex.Error);
+            _deleteProblem = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
         }
         finally
         {

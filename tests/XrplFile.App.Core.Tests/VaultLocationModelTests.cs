@@ -79,7 +79,7 @@ public class VaultLocationModelTests
         VaultLocationModel.Outcome outcome = model.ChoosePath("D:\\backup\\vault.json");
 
         Assert.False(outcome.Succeeded);
-        Assert.False(string.IsNullOrWhiteSpace(outcome.Message));
+        Assert.False(string.IsNullOrWhiteSpace(TestText.En(outcome.Message)));
     }
 
     [Fact]
@@ -91,7 +91,7 @@ public class VaultLocationModelTests
         VaultLocationModel.Outcome outcome = model.ForgetChosenPath();
 
         Assert.False(outcome.Succeeded);
-        Assert.False(string.IsNullOrWhiteSpace(outcome.Message));
+        Assert.False(string.IsNullOrWhiteSpace(TestText.En(outcome.Message)));
     }
 
     [Fact]
@@ -104,8 +104,8 @@ public class VaultLocationModelTests
 
         foreach (string message in new[]
         {
-            model.ChoosePath("D:\\backup\\vault.json").Message,
-            model.ForgetChosenPath().Message,
+            TestText.En(model.ChoosePath("D:\\backup\\vault.json").Message),
+            TestText.En(model.ForgetChosenPath().Message),
         })
         {
             Assert.DoesNotContain("\\", message, StringComparison.Ordinal);

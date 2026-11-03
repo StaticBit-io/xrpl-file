@@ -1,5 +1,6 @@
 using Xrpl.Wallet;
 
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -37,7 +38,7 @@ public sealed class NewAccountModel(IKeyVault vault)
 
         if (!XrplFileLink.TryNormalizeNetwork(Network, out string? network))
         {
-            Message = NetworkChoices.NotANetwork(Network);
+            Message = TextCatalog.For(UiLanguage.English).Render(NetworkChoices.NotANetwork(Network)) /* LOCALIZE(bridge) */;
             return null;
         }
 
@@ -51,7 +52,7 @@ public sealed class NewAccountModel(IKeyVault vault)
         }
         catch (VaultException ex)
         {
-            Message = VaultErrorMessages.For(ex.Error);
+            Message = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
             return null;
         }
     }

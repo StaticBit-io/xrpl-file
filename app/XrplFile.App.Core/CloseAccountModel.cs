@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -175,7 +176,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
         }
         catch (VaultException ex)
         {
-            state.Message = VaultErrorMessages.For(ex.Error);
+            state.Message = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
         }
     }
 
@@ -282,7 +283,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
         }
         catch (VaultException ex)
         {
-            if (generation == state.Generation) state.Message = VaultErrorMessages.For(ex.Error);
+            if (generation == state.Generation) state.Message = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
         }
     }
 
@@ -407,7 +408,7 @@ public sealed class CloseAccountModel(IKeyVault vault, IConnectionFactory connec
         }
         catch (VaultException ex)
         {
-            state.Message = VaultErrorMessages.For(ex.Error);
+            state.Message = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
         }
         catch (OperationCanceledException)
         {

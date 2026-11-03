@@ -131,7 +131,7 @@ public sealed class FundingModelTests : VaultHarness
         await model.SelectAsync(reference, TestContext.Current.CancellationToken);
 
         Assert.Equal(entry.Address, model.Address);
-        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), model.Message);
 
         // Address is deliberately left alone (asserted above), but nothing here vouches for it any
         // more -- a caller comparing CurrentReference to the reference it asked for is the only way
@@ -156,7 +156,7 @@ public sealed class FundingModelTests : VaultHarness
         // own Message = null housekeeping.
         Assert.Equal(0, _connections.Connections);
         Assert.Equal(entry.Address, model.Address);
-        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), model.Message);
         Assert.Null(model.CurrentReference);
     }
 

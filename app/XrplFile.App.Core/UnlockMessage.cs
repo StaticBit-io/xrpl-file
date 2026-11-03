@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -13,7 +14,7 @@ namespace XrplFile.App.Core;
 /// <see cref="VaultUnlockResult.WrongPassword"/> ever sets this: a disk that refused to answer or
 /// a record that was already damaged is not evidence the person mistyped anything.
 /// </param>
-public sealed record UnlockMessage(string Headline, string Detail, bool CountsAsAFailedAttempt);
+public sealed record UnlockMessage(UiText Headline, UiText Detail, bool CountsAsAFailedAttempt);
 
 /// <summary>
 /// Turns a <see cref="VaultUnlockResult"/> into the words a person is told (design 7).
@@ -47,40 +48,38 @@ public static class UnlockMessages
     public static UnlockMessage For(VaultUnlockResult result) => result switch
     {
         VaultUnlockResult.Success => new UnlockMessage(
-            "Vault unlocked",
-            "The password worked, and every entry checked out clean.",
+            VaultText.UnlockSuccessHeadline,
+            VaultText.UnlockSuccessDetail,
             CountsAsAFailedAttempt: false),
 
         VaultUnlockResult.WrongPassword => new UnlockMessage(
-            "Wrong password",
-            "That password does not open this vault. Check it and try again.",
+            VaultText.UnlockWrongPasswordHeadline,
+            VaultText.UnlockWrongPasswordDetail,
             CountsAsAFailedAttempt: true),
 
         VaultUnlockResult.VaultMissing => new UnlockMessage(
-            "No vault here",
-            "There is nothing to open at this location yet.",
+            VaultText.UnlockMissingHeadline,
+            VaultText.UnlockMissingDetail,
             CountsAsAFailedAttempt: false),
 
         VaultUnlockResult.VaultCorrupt => new UnlockMessage(
-            "Vault could not be opened",
-            "The vault's record did not check out. Whether the password was wrong or the file " +
-            "itself is damaged cannot be told apart from here, so neither is assumed.",
+            VaultText.UnlockCorruptHeadline,
+            VaultText.UnlockCorruptDetail,
             CountsAsAFailedAttempt: false),
 
         VaultUnlockResult.VaultDegraded => new UnlockMessage(
-            "Unlocked, with damage",
-            "The password worked. Some entries inside failed their own integrity check and are " +
-            "listed as damaged; the rest are unaffected and still work.",
+            VaultText.UnlockDegradedHeadline,
+            VaultText.UnlockDegradedDetail,
             CountsAsAFailedAttempt: false),
 
         VaultUnlockResult.VaultUnsupported => new UnlockMessage(
-            "Vault format not supported",
-            "This build does not understand the format this vault was written in.",
+            VaultText.UnlockUnsupportedHeadline,
+            VaultText.UnlockUnsupportedDetail,
             CountsAsAFailedAttempt: false),
 
         VaultUnlockResult.VaultUnavailable => new UnlockMessage(
-            "Storage unavailable",
-            "The vault's storage did not respond. This is usually temporary; try again in a moment.",
+            VaultText.UnlockUnavailableHeadline,
+            VaultText.UnlockUnavailableDetail,
             CountsAsAFailedAttempt: false),
     };
 #pragma warning restore CS8524

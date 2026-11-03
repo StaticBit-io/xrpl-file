@@ -1,3 +1,5 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>
@@ -79,7 +81,7 @@ public sealed class VaultLocationModel(IVaultLocationStore store, string current
     /// otherwise carry the location of the application's own setting file, which is exactly what
     /// <see cref="CreateMessages"/>'s own remarks forbid.
     /// </param>
-    public sealed record Outcome(bool Succeeded, string Message);
+    public sealed record Outcome(bool Succeeded, UiText Message);
 
     /// <summary>Where this process is opening the vault from right now.</summary>
     public string CurrentPath { get; } = currentPath;
@@ -114,14 +116,12 @@ public sealed class VaultLocationModel(IVaultLocationStore store, string current
         {
             return new Outcome(
                 Succeeded: false,
-                Message:
-                    "This choice could not be saved, so the application will still open the vault " +
-                    "it opens now. The folder holding its settings may be read-only or full.");
+                Message: VaultText.LocationNotSaved);
         }
 
         return new Outcome(
             Succeeded: true,
-            Message: "Saved. Restart the application to open the vault at the new location.");
+            Message: VaultText.LocationSaved);
     }
 
     /// <summary>
@@ -147,14 +147,11 @@ public sealed class VaultLocationModel(IVaultLocationStore store, string current
         {
             return new Outcome(
                 Succeeded: false,
-                Message:
-                    "This location could not be forgotten, so the application will still look for " +
-                    "the vault here. The folder holding its settings may be read-only. The vault " +
-                    "file itself has not been touched.");
+                Message: VaultText.LocationNotForgotten);
         }
 
         return new Outcome(
             Succeeded: true,
-            Message: "Forgotten. Restart the application to start fresh at the default location.");
+            Message: VaultText.LocationForgotten);
     }
 }

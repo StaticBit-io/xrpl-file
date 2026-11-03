@@ -864,7 +864,7 @@ public sealed class CloseAccountModelTests : VaultHarness
         // A failed select must not leave CurrentReference pointing at data that no longer belongs
         // to this reference -- this is the whole guard the closing screen renders behind.
         Assert.Null(model.CurrentReference);
-        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), model.Message);
     }
 
     /// <summary>

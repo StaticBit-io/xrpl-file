@@ -155,7 +155,7 @@ public sealed class UnfinishedModelBatchTests : VaultHarness
 
         Assert.Null(model.NeedsPayer);
         Assert.Empty(model.PayerChoices);
-        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), model.Message);
     }
 
     [Fact]

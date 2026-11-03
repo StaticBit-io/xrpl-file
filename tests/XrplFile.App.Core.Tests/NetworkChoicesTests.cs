@@ -20,7 +20,7 @@ public sealed class NetworkChoicesTests : IDisposable
         choices.Refresh();
 
         Assert.Equal(["mainnet", "testnet", "devnet"], choices.Choices.Select(choice => choice.Value));
-        Assert.Equal(["mainnet", "testnet", "devnet"], choices.Choices.Select(choice => choice.Label));
+        Assert.Equal(["mainnet", "testnet", "devnet"], choices.Choices.Select(choice => TestText.En(choice.Label)));
     }
 
     [Fact]
@@ -33,7 +33,15 @@ public sealed class NetworkChoicesTests : IDisposable
         choices.Refresh();
 
         Assert.Equal(["mainnet", "testnet", "devnet", "1"], choices.Choices.Select(choice => choice.Value));
-        Assert.Equal("NetworkID 1", choices.Choices[^1].Label);
+        Assert.Equal("NetworkID 1", TestText.En(choices.Choices[^1].Label));
+    }
+
+    [Fact]
+    public void A_name_that_is_not_a_network_says_what_a_link_can_name()
+    {
+        Assert.Equal(
+            "'standalone' is not a network an xrpl-file link can name. Use mainnet, testnet, devnet, or a network ID in digits.",
+            TestText.En(NetworkChoices.NotANetwork("standalone")));
     }
 
     [Fact]

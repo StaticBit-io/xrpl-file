@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -108,7 +109,7 @@ public sealed class ExportModel(IKeyVault vault, IFilePickerService filePicker)
         }
         catch (VaultException exception)
         {
-            Problem = VaultErrorMessages.For(exception.Error);
+            Problem = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(exception.Error)) /* LOCALIZE(bridge) */;
             return null;
         }
     }
@@ -152,7 +153,7 @@ public sealed class ExportModel(IKeyVault vault, IFilePickerService filePicker)
         {
             Problem =
                 "The backup was saved, but the vault could not record that it was: " +
-                VaultErrorMessages.For(exception.Error);
+                TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(exception.Error)) /* LOCALIZE(bridge) */;
         }
     }
 

@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using Xrpl.AddressCodec;
 using Xrpl.Wallet;
 
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -439,7 +440,7 @@ public sealed class AddKeyModel(IKeyVault vault)
 
         if (!XrplFileLink.TryNormalizeNetwork(network.Trim(), out canonicalNetwork))
         {
-            Problem = NetworkChoices.NotANetwork(network);
+            Problem = TextCatalog.For(UiLanguage.English).Render(NetworkChoices.NotANetwork(network)) /* LOCALIZE(bridge) */;
             return false;
         }
 

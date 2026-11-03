@@ -23,7 +23,7 @@ public sealed class KnownServersTests
         KnownServer s1 = Assert.Single(KnownServers.For("mainnet"), server => server.Url == "wss://s1.ripple.com");
 
         Assert.False(s1.FullHistory);
-        Assert.Equal("s1.ripple.com — recent history only", s1.Label);
+        Assert.Equal("s1.ripple.com — recent history only", TestText.En(s1.Label));
         Assert.Equal(Endpoints.For("mainnet").Count + 1, KnownServers.For("mainnet").Count);
     }
 
@@ -48,12 +48,12 @@ public sealed class KnownServersTests
         IReadOnlyList<ServerOption> options = KnownServers.Options("mainnet");
 
         Assert.Equal(string.Empty, options[0].Value);
-        Assert.Equal("Built-in (xrplcluster.com)", options[0].Label);
+        Assert.Equal("Built-in (xrplcluster.com)", TestText.En(options[0].Label));
         Assert.Equal(
             ["", "wss://s2.ripple.com", "wss://s1.ripple.com", KnownServers.CustomValue],
             options.Select(option => option.Value));
-        Assert.Equal("Custom URL…", options[^1].Label);
-        Assert.Equal("s2.ripple.com", options[1].Label);
+        Assert.Equal("Custom URL…", TestText.En(options[^1].Label));
+        Assert.Equal("s2.ripple.com", TestText.En(options[1].Label));
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public sealed class KnownServersTests
         IReadOnlyList<ServerOption> options = KnownServers.Options("testnet");
 
         Assert.Equal(["", KnownServers.CustomValue], options.Select(option => option.Value));
-        Assert.Equal("Built-in (s.altnet.rippletest.net)", options[0].Label);
+        Assert.Equal("Built-in (s.altnet.rippletest.net)", TestText.En(options[0].Label));
     }
 
     [Theory]

@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -36,7 +37,7 @@ namespace XrplFile.App.Core;
 /// to decide. Trailing and optional so every existing construction site keeps compiling.
 /// </param>
 public sealed record PasswordChangeReport(
-    bool Changed, IReadOnlyList<string> ThingsToTell, string? SurvivingCopyPath, string? Refusal = null);
+    bool Changed, IReadOnlyList<UiText> ThingsToTell, string? SurvivingCopyPath, UiText? Refusal = null);
 
 /// <summary>
 /// The model behind changing the vault's master password (design 6). Every flag
@@ -85,9 +86,7 @@ public sealed class PasswordChangeModel(IKeyVault vault, string vaultPath)
                 Changed: false,
                 ThingsToTell: [],
                 SurvivingCopyPath: null,
-                Refusal:
-                    $"Choose a new password of at least {PasswordPolicy.MinimumLength} characters. " +
-                    "Nothing was changed, and the current password still opens the vault.");
+                Refusal: UiText.Of(VaultText.ChangeTooShort, ("minimum", PasswordPolicy.MinimumLength)));
         }
 
         VaultPasswordChange outcome = await vault
@@ -116,31 +115,23 @@ public sealed class PasswordChangeModel(IKeyVault vault, string vaultPath)
             return new PasswordChangeReport(Changed: false, ThingsToTell: [], SurvivingCopyPath: null);
         }
 
-        List<string> thingsToTell = ["The master password was changed."];
+        List<UiText> thingsToTell = [VaultText.ChangeDone];
 
         if (outcome.HasFlag(VaultPasswordChange.DeviceUnlockDropped))
         {
-            thingsToTell.Add(
-                "\"Remember on this device\" could not be carried over to the new password and has " +
-                "been turned off. Turn it back on if you still want it.");
+            thingsToTell.Add(VaultText.ChangeDeviceUnlockDropped);
         }
 
         string? survivingCopyPath = null;
         if (outcome.HasFlag(VaultPasswordChange.TheOldCopyRemains))
         {
             survivingCopyPath = vaultPath + BackupSuffix;
-            thingsToTell.Add(
-                $"A copy of the vault from before this change is still at {survivingCopyPath}, and " +
-                "the old password still opens it. Delete it once the new file is confirmed working, " +
-                "and treat the old password as compromised until then.");
+            thingsToTell.Add(UiText.Of(VaultText.ChangeOldCopyRemains, ("path", survivingCopyPath)));
         }
 
         if (outcome.HasFlag(VaultPasswordChange.TheRecordsIntegrityCodeDidNotMatch))
         {
-            thingsToTell.Add(
-                "The vault's record did not match its own integrity code before this change. It has " +
-                "been repaired as part of the change, but this was the only chance to learn that — " +
-                "check your keys for anything missing or unexpected.");
+            thingsToTell.Add(VaultText.ChangeIntegrityRepaired);
         }
 
         return new PasswordChangeReport(Changed: true, thingsToTell, survivingCopyPath);

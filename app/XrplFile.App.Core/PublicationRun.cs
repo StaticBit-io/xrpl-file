@@ -1,4 +1,5 @@
 using System.Globalization;
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -470,7 +471,7 @@ public sealed class PublicationRun(
         }
         catch (VaultException ex)
         {
-            failure = VaultErrorMessages.For(ex.Error);
+            failure = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
             finalState = PublicationRunState.Failed;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

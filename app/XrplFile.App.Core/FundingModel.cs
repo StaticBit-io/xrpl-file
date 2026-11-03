@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -104,7 +105,7 @@ public sealed class FundingModel(IKeyVault vault, IConnectionFactory connections
         }
         catch (VaultException ex)
         {
-            Message = VaultErrorMessages.For(ex.Error);
+            Message = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
             CurrentReference = null;
             return;
         }

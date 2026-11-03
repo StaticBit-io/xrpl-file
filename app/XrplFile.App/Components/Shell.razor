@@ -27,7 +27,7 @@
     <div class="xf-vault">
         <section class="xf-card">
             <div class="alert alert-danger mb-0" role="alert">
-                <p>This application could not start.</p>
+                <p>@T[ShellText.StartFailed]</p>
                 <p class="mb-0"><small>@_failure</small></p>
             </div>
         </section>
@@ -53,21 +53,21 @@ else if (_ready)
             <div class="xf-shell">
                 <header class="xf-topbar">
                     <span class="xf-rail-mark" aria-hidden="true">@Mark</span>
-                    <button type="button" class="xf-icon-button" aria-label="Lock the vault" disabled="@Closing.IsClosing" @onclick="LockAsync">@LockIcon</button>
+                    <button type="button" class="xf-icon-button" aria-label="@T[ShellText.LockVault]" disabled="@Closing.IsClosing" @onclick="LockAsync">@LockIcon</button>
                 </header>
 
-                <nav class="xf-rail" aria-label="Main">
+                <nav class="xf-rail" aria-label="@T[ShellText.MainNavigation]">
                     <span class="xf-rail-mark" aria-hidden="true">@Mark</span>
                     @foreach (AppTab tab in RailTabs)
                     {
                         <button type="button" class="xf-rail-item" aria-current="@(Tabs.Tab == tab ? "page" : null)"
                                 disabled="@Closing.IsClosing" @onclick="() => ShowTab(tab)">
-                            @Icon(tab)<span>@tab</span>
+                            @Icon(tab)<span>@T[ShellModel.NameOf(tab)]</span>
                         </button>
                     }
                     <span class="xf-rail-spacer"></span>
-                    <button type="button" class="xf-rail-item" aria-label="Lock the vault" disabled="@Closing.IsClosing" @onclick="LockAsync">
-                        @LockIcon<span aria-hidden="true">Lock</span>
+                    <button type="button" class="xf-rail-item" aria-label="@T[ShellText.LockVault]" disabled="@Closing.IsClosing" @onclick="LockAsync">
+                        @LockIcon<span aria-hidden="true">@T[ShellText.Lock]</span>
                     </button>
                 </nav>
 
@@ -98,25 +98,25 @@ else if (_ready)
                         <ErrorContent>
                             <div class="xf-page">
                                 <div class="alert alert-danger" role="alert">
-                                    This screen stopped because of an error. Choose a tab to carry on.
+                                    @T[ShellText.ScreenFailed]
                                 </div>
                             </div>
                         </ErrorContent>
                     </ScreenErrorBoundary>
                 </main>
 
-                <nav class="xf-tabbar" aria-label="Main">
+                <nav class="xf-tabbar" aria-label="@T[ShellText.MainNavigation]">
                     @foreach (AppTab tab in TabbarTabs)
                     {
                         <button type="button" class="xf-tab" aria-current="@(Tabs.Tab == tab ? "page" : null)"
                                 disabled="@Closing.IsClosing" @onclick="() => ShowTab(tab)">
-                            @Icon(tab)<span>@tab</span>
+                            @Icon(tab)<span>@T[ShellModel.NameOf(tab)]</span>
                         </button>
                     }
                     <button type="button" class="xf-tab" @ref="_moreButton" disabled="@Closing.IsClosing"
                             aria-expanded="@(Tabs.MoreOpen ? "true" : "false")" aria-controls="xf-more"
                             aria-current="@(Tabs.IsMoreCurrent ? "page" : null)" @onclick="ToggleMore">
-                        @MoreIcon<span>More</span>
+                        @MoreIcon<span>@T[ShellText.More]</span>
                     </button>
 
                     @if (Tabs.MoreOpen)
@@ -125,7 +125,7 @@ else if (_ready)
                         <div id="xf-more" class="xf-more">
                             <button type="button" class="xf-more-item" @ref="_firstMoreItem"
                                     aria-current="@(Tabs.Tab == AppTab.Settings ? "page" : null)"
-                                    @onclick="() => ChooseFromMore(AppTab.Settings)">Settings</button>
+                                    @onclick="() => ChooseFromMore(AppTab.Settings)">@T[ShellModel.NameOf(AppTab.Settings)]</button>
                         </div>
                     }
                 </nav>
@@ -137,7 +137,7 @@ else
 {
     <div class="xf-vault">
         <section class="xf-card">
-            <p class="xf-muted mb-0">Loading&hellip;</p>
+            <p class="xf-muted mb-0">@T[ShellText.Loading]</p>
         </section>
     </div>
 }

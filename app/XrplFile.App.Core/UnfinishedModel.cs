@@ -1,3 +1,4 @@
+using XrplFile.App.Core.Localization;
 using XrplFile.Keys;
 
 namespace XrplFile.App.Core;
@@ -230,7 +231,7 @@ public sealed class UnfinishedModel(RunPaths paths, PublicationRun run, IFilePic
             {
                 // Not KeysAsync, which reads a failure as an empty vault: a vault that cannot be
                 // listed (locked, above all) says nothing about whether the payer key is still in it.
-                Message = VaultErrorMessages.For(ex.Error);
+                Message = TextCatalog.For(UiLanguage.English).Render(VaultErrorMessages.For(ex.Error)) /* LOCALIZE(bridge) */;
                 return false;
             }
 

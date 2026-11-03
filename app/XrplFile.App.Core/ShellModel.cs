@@ -1,3 +1,5 @@
+using XrplFile.App.Core.Localization;
+
 namespace XrplFile.App.Core;
 
 /// <summary>The tabs the shell shows once the vault is open.</summary>
@@ -36,6 +38,22 @@ public sealed class ShellModel
     /// user who chose Settings from More would otherwise see no entry marked at all.
     /// </summary>
     public bool IsMoreCurrent => Tab is AppTab.Settings;
+
+    /// <summary>The phrase naming <paramref name="tab"/> on the rail, the tab bar and the back link of a sub-screen.</summary>
+    /// <remarks>
+    /// A <c>switch</c> expression with no default arm on purpose: a tab added to <see cref="AppTab"/>
+    /// without a name here is CS8509 under this repository's <c>TreatWarningsAsErrors</c>.
+    /// </remarks>
+#pragma warning disable CS8524
+    public static TextId NameOf(AppTab tab) => tab switch
+    {
+        AppTab.Accounts => ShellText.TabAccounts,
+        AppTab.Publish => ShellText.TabPublish,
+        AppTab.Read => ShellText.TabRead,
+        AppTab.History => ShellText.TabHistory,
+        AppTab.Settings => ShellText.TabSettings,
+    };
+#pragma warning restore CS8524
 
     /// <summary>Shows <paramref name="tab"/> and closes the More menu.</summary>
     /// <param name="tab">

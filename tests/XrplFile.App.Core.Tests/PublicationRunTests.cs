@@ -644,7 +644,7 @@ public sealed class PublicationRunTests : VaultHarness
         await run.Completion;
 
         Assert.Equal(PublicationRunState.Failed, run.Snapshot.State);
-        Assert.Equal(VaultErrorMessages.For(VaultError.NoSuchEntry), run.Snapshot.Failure);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.NoSuchEntry)), run.Snapshot.Failure);
         Assert.Equal(1, _connections.Connections);
         Assert.Equal(_connections.Connections, _connections.Disposals);
     }

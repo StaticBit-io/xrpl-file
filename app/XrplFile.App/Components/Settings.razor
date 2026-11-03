@@ -28,7 +28,7 @@
     }
     else
     {
-        <h1 class="xf-title">Settings</h1>
+        <h1 class="xf-title">@T[SettingsText.Title]</h1>
 
         <section class="xf-card">
             <h2 class="xf-section-title">@T[SettingsText.LanguageTitle]</h2>
@@ -47,65 +47,54 @@
         </section>
 
         <section class="xf-card">
-            <h2 class="xf-section-title">Vault location</h2>
-            <p>The vault file lives at:</p>
+            <h2 class="xf-section-title">@T[SettingsText.VaultLocationTitle]</h2>
+            <p>@T[SettingsText.VaultLocationIntro]</p>
             <code class="d-block p-2 bg-body-tertiary text-break xf-mono">@LocationModel.CurrentPath</code>
             <button type="button" class="btn btn-outline-secondary mt-2" @onclick="RevealInFileManager">
-                Show in file manager
+                @T[SettingsText.ShowInFileManager]
             </button>
         </section>
 
         <section class="xf-card">
-            <h2 class="xf-section-title">A different vault</h2>
+            <h2 class="xf-section-title">@T[SettingsText.DifferentVaultTitle]</h2>
             <p>
-                Point the application at a vault file kept somewhere else — a copy on a memory
-                stick, a synced folder, a file carried over from another machine. Because the
-                vault file is portable, the copy opens exactly like the original.
+                @T[SettingsText.DifferentVaultIntro]
             </p>
             <p>
-                A vault opened from a different path has no device unlock of its own: "remember on
-                this device" is tied to the exact path a vault was opened from, so it always asks
-                for the master password the first time, even if this switch is on below for the
-                vault at the path above.
+                @T[SettingsText.DifferentVaultDeviceUnlock]
             </p>
             <button type="button" class="btn btn-outline-secondary" disabled="@_choosingVault"
                     @onclick="ChooseVaultAsync">
-                Choose a vault file&hellip;
+                @T[SettingsText.ChooseVaultFile]
             </button>
             @if (_chooseVaultOutcome is { } chooseOutcome)
             {
                 <div class="alert mt-2 @(chooseOutcome.Succeeded ? "alert-info" : "alert-danger")">
-                    @chooseOutcome.Message
+                    @T[chooseOutcome.Message]
                 </div>
             }
         </section>
 
         <section class="xf-card">
-            <h2 class="xf-section-title">Remember on this device</h2>
+            <h2 class="xf-section-title">@T[SettingsText.RememberTitle]</h2>
             <p>
-                Tied to the path above: renaming or moving the vault file asks for the master
-                password once, even with this switched on.
+                @T[SettingsText.RememberIntro]
             </p>
             <div class="form-check form-switch">
                 <input class="form-check-input" type="checkbox" role="switch" id="device-unlock-switch"
                        checked="@_deviceUnlockEnabled" disabled="@_busy" @onchange="ToggleDeviceUnlockAsync" />
-                <label class="form-check-label" for="device-unlock-switch">Unlock with this device</label>
+                <label class="form-check-label" for="device-unlock-switch">@T[SettingsText.DeviceUnlockSwitchLabel]</label>
             </div>
             @if (Model.Problem is { } problem)
             {
-                <div class="alert alert-warning mt-2">@problem</div>
+                <div class="alert alert-warning mt-2">@T[problem]</div>
             }
         </section>
 
         <section class="xf-card">
-            <h2 class="xf-section-title">Node URLs</h2>
+            <h2 class="xf-section-title">@T[SettingsText.NodeUrlsTitle]</h2>
             <p>
-                Which rippled node each network publishes to and reads from. Pick one of the listed
-                servers, or &ldquo;Built-in&rdquo; to use the endpoint this application ships with for
-                that network; &ldquo;Custom URL&rdquo; takes any <code>ws://</code> or
-                <code>wss://</code> address. A network this application does not already know
-                &mdash; a NetworkID, or a private stand &mdash; needs a URL here before anything can
-                be published to it.
+                @Html(UiText.Of(SettingsText.NodeUrlsIntro, ("ws", "ws://"), ("wss", "wss://")), ("ws", "code"), ("wss", "code"))
             </p>
             @foreach (NodeSettingRow row in NodeSettings.Rows)
             {
@@ -118,13 +107,13 @@
                                 @onchange="e => SetServer(row.Network, (string)e.Value!)">
                             @foreach (ServerOption option in KnownServers.Options(row.Network))
                             {
-                                <option value="@option.Value" selected="@(option.Value == selection)">@option.Label</option>
+                                <option value="@option.Value" selected="@(option.Value == selection)">@T[option.Label]</option>
                             }
                         </select>
                         @if (selection == KnownServers.CustomValue)
                         {
                             <input id="node-custom-@row.Network" class="form-control mt-2" placeholder="wss://…"
-                                   aria-label="Custom URL for @row.Network"
+                                   aria-label="@T[UiText.Of(SettingsText.CustomUrlFor, ("network", row.Network))]"
                                    value="@NodeEdit(row.Network)" @oninput="e => SetNodeEdit(row.Network, (string)e.Value!)" />
                         }
                     }
@@ -137,36 +126,35 @@
                 </div>
             }
             <button type="button" class="btn btn-outline-primary mt-2" @onclick="SaveNodes">
-                Save node URLs
+                @T[SettingsText.SaveNodeUrls]
             </button>
 
             <div class="mt-3">
-                <label class="form-label">Add a network not listed above</label>
+                <label class="form-label">@T[SettingsText.AddNetworkLabel]</label>
                 <p class="text-body-secondary mb-2">
-                    A locally run standalone node, for one: its network is a NetworkID such as
-                    <code>1</code>, which has no row until it is added here.
+                    @Html(UiText.Of(SettingsText.AddNetworkHint, ("example", "1")), ("example", "code"))
                 </p>
                 <div class="d-flex flex-wrap gap-2">
-                    <input class="form-control" style="max-width: 12rem;" placeholder="network name or NetworkID"
+                    <input class="form-control" style="max-width: 12rem;" placeholder="@T[SettingsText.NewNetworkNamePlaceholder]"
                            value="@_newNetworkName" @oninput="e => _newNetworkName = (string)e.Value!" />
                     <input class="form-control" style="max-width: 20rem;" placeholder="wss://…"
                            value="@_newNetworkUrl" @oninput="e => _newNetworkUrl = (string)e.Value!" />
-                    <button type="button" class="btn btn-outline-primary" @onclick="AddNetwork">Add</button>
+                    <button type="button" class="btn btn-outline-primary" @onclick="AddNetwork">@T[SettingsText.AddNetworkButton]</button>
                 </div>
             </div>
 
             @if (NodeSettings.Message is { } nodeProblem)
             {
-                <div class="alert alert-warning mt-2">@nodeProblem</div>
+                <div class="alert alert-warning mt-2">@T[nodeProblem]</div>
             }
             else if (_nodesSaved)
             {
-                <div class="alert alert-success mt-2">Saved.</div>
+                <div class="alert alert-success mt-2">@T[SettingsText.NodesSaved]</div>
             }
         </section>
 
         <button type="button" class="btn btn-outline-primary" @onclick="() => _showChangePassword = true">
-            Change master password
+            @T[SettingsText.ChangePasswordButton]
         </button>
     }
 </div>

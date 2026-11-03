@@ -247,7 +247,7 @@ public sealed class AccountsModelTests : VaultHarness
         // RefreshAsync used to be the one exception, reachable from the tab's own initialisation.
         await model.RefreshAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), model.Message);
     }
 
     [Fact]
@@ -426,7 +426,7 @@ public sealed class AccountsModelTests : VaultHarness
         await model.RefreshAsync(token);
         await model.RefreshAllFromLedgerAsync(token);
 
-        Assert.Equal(VaultErrorMessages.For(VaultError.Locked), model.Message);
+        Assert.Equal(TestText.En(VaultErrorMessages.For(VaultError.Locked)), model.Message);
     }
 
     [Fact]

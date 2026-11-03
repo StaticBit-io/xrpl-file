@@ -66,7 +66,7 @@ else if (Model.Closed is { } closed)
 }
 else
 {
-    <BackLink To="Accounts" OnClick="BackAsync" Disabled="_busy" />
+    <BackLink To="AppTab.Accounts" OnClick="BackAsync" Disabled="_busy" />
     <h1 class="xf-title">Close account</h1>
 
     @if (Model.AccountAddress is { } accountAddress)
