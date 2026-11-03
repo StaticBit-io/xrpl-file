@@ -188,26 +188,21 @@ test('refuses a marker on a page without a usable <html lang>, or an unknown mar
   }
 });
 
-const SNIPPET_BODY =
-  '<pre><code><!--@element-snippet--></code></pre><pre><code><!--@element-snippet-alt--></code></pre>';
+const SNIPPET_BODY = '<pre><code><!--@element-snippet--></code></pre>';
 
 test('built index.html contains the 1.1.0 snippet with the integrity from integrity.json', () =>
   buildWithPages({ 'index.html': PAGE('en', SNIPPET_BODY) }, async (f, read) => {
     const html = await read('index.html');
-    for (const marker of ['<!--@element-snippet-->', '<!--@element-snippet-alt-->']) {
-      assert.ok(!html.includes(marker), `no ${marker} is left behind`);
-    }
-    const [primary, alternative] = html.match(/<pre><code>[\s\S]*?<\/code><\/pre>/g);
+    assert.ok(!html.includes('<!--@element-snippet-->'), 'no marker is left behind');
+    const snippets = html.match(/<pre><code>[\s\S]*?<\/code><\/pre>/g);
+    assert.equal(snippets.length, 1);
+    const [snippet] = snippets;
 
-    assert.ok(primary.includes(`src="https://cdn.jsdelivr.net/npm/${ELEMENT_PACKAGE}@1.1.0/xrpl-file-element.js"`));
-    // The snippet is pasted into other sites, so the alternative names the site's own origin.
-    assert.ok(alternative.includes('src="https://xrpl-file.staticbit.io/element/1.1.0/xrpl-file-element.js"'));
-    for (const snippet of [primary, alternative]) {
-      assert.ok(snippet.includes('integrity="sha384-TESTVALUE+/="'));
-      assert.ok(snippet.includes('crossorigin="anonymous"'));
-      assert.ok(!snippet.includes('type="module"'), 'the element is a classic script');
-      assert.match(snippet, /&lt;xrpl-file src="xrpl-file:\/\/mainnet\/[0-9A-F]{64}"/);
-    }
+    assert.ok(snippet.includes(`src="https://cdn.jsdelivr.net/npm/${ELEMENT_PACKAGE}@1.1.0/xrpl-file-element.js"`));
+    assert.ok(snippet.includes('integrity="sha384-TESTVALUE+/="'));
+    assert.ok(snippet.includes('crossorigin="anonymous"'));
+    assert.ok(!snippet.includes('type="module"'), 'the element is a classic script');
+    assert.match(snippet, /&lt;xrpl-file src="xrpl-file:\/\/mainnet\/[0-9A-F]{64}"/);
     assert.ok(!html.includes('sha384-OTHER'), 'only the value for the element script is used');
   }));
 

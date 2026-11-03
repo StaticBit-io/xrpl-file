@@ -74,7 +74,7 @@ function renderPrice(document, container, json, lang) {
   table.append(element(document, 'caption', strings.caption, 'visually-hidden'));
 
   const head = element(document, 'tr');
-  for (const key of ['size', 'fee', 'held', 'returned']) {
+  for (const key of ['size', 'fee']) {
     const label = key === 'size' ? strings[key] : `${strings[key]} (${strings.unit})`;
     const cell = element(document, 'th', label, key === 'size' ? undefined : 'num');
     cell.scope = 'col';
@@ -90,7 +90,7 @@ function renderPrice(document, container, json, lang) {
     const size = element(document, 'th', row.size);
     size.scope = 'row';
     tr.append(size);
-    for (const key of ['fee', 'held', 'returned']) tr.append(element(document, 'td', row[key], 'num'));
+    tr.append(element(document, 'td', row.fee, 'num'));
     body.append(tr);
   }
   table.append(body);
@@ -154,13 +154,12 @@ export function initHome(document, fetchJson = defaultFetchJson) {
     });
   }
 
-  for (const suffix of ['', '-alt']) {
-    const button = document.getElementById(`snippet-copy${suffix}`);
-    if (!button) continue;
+  const copy = document.getElementById('snippet-copy');
+  if (copy) {
     initCopyButton({
-      button,
-      source: document.getElementById(`embed-snippet${suffix}`),
-      status: document.getElementById(`snippet-status${suffix}`),
+      button: copy,
+      source: document.getElementById('embed-snippet'),
+      status: document.getElementById('snippet-status'),
       strings: COPY_STRINGS[lang],
     });
   }

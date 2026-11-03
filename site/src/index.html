@@ -90,7 +90,7 @@
 <div class="container">
 <div class="head">
 <h2 id="price-title">What it costs</h2>
-<p>A file goes into the ledger as roughly one transaction per kilobyte. For each file the publisher opens a throwaway account and deletes it when the file is written. There are two kinds of cost. Fees are spent. A reserve is held while the file is written, and most of the reserve comes back.</p>
+<p>A file goes into the ledger as roughly one transaction per kilobyte, sent from a publishing account in the app. One account can publish any number of files, and when you no longer need it, the app closes it. There are two kinds of cost. Fees are spent. The account's reserve is held while the account exists, and most of it comes back when the account is closed.</p>
 </div>
 <div id="price-data" class="price-data"><p class="hint">The price table is not available right now. The figures are also in the data file, <a href="/data/price.json">price.json</a>.</p></div>
 </div>
@@ -135,14 +135,6 @@
 <div class="snippet__bar">
 <button id="snippet-copy" class="button button--quiet" type="button" aria-label="Copy the embed code: From npm, through jsDelivr">Copy</button>
 <span id="snippet-status" class="snippet__status" role="status"></span>
-</div>
-</div>
-<div class="snippet">
-<p class="snippet__label">The same file from this site</p>
-<pre tabindex="0" aria-label="Embed code: The same file from this site"><code id="embed-snippet-alt"><!--@element-snippet-alt--></code></pre>
-<div class="snippet__bar">
-<button id="snippet-copy-alt" class="button button--quiet" type="button" aria-label="Copy the embed code: The same file from this site">Copy</button>
-<span id="snippet-status-alt" class="snippet__status" role="status"></span>
 </div>
 </div>
 <p class="attributes"><code>width</code> and <code>height</code> set the size, <code>loading</code> says when reading starts, <code>theme</code> sets the light or dark palette, and <code>node</code> names the node to read from. The full list is in the README: <a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">Embed a file</a>.</p>

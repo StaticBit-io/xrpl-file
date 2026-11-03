@@ -35,7 +35,7 @@ test('the home pages carry the same structure, each in its own language', () => 
     assert.match(html, /<meta name="description" content="[^"]{40,}">/);
     assert.match(html, /<main id="main">/);
     for (const marker of ['head', 'header', 'footer']) assert.ok(html.includes(`<!--@chrome:${marker}-->`));
-    assert.ok(html.includes('<!--@element-snippet-->') && html.includes('<!--@element-snippet-alt-->'));
+    assert.ok(html.includes('<!--@element-snippet-->') && !html.includes('<!--@element-snippet-alt-->'));
   }
 });
 

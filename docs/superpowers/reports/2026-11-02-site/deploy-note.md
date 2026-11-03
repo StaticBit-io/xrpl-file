@@ -25,8 +25,8 @@ a snippet that answers 404.
 3. **Owner decision: publish the package first (or in the same sitting as the deploy), never
    after it.** `npm publish web/npm/1.1.0 --access public` is permanent for that version. Verify
    the jsDelivr URL as described under "npm package" below before step 4.
-4. Deploy the site (Cloudflare Pages below). The site's alternative URL under `/element/1.1.0/`
-   works as soon as the site is up; the main snippet works only after step 3.
+4. Deploy the site (Cloudflare Pages below). The snippet loads the element from jsDelivr, so it works
+   only after step 3; the site's own copy under `/element/1.1.0/` serves its pages.
 5. Attach the custom domain (DNS below), then run the checks after the deploy.
 6. Once `1.1.0` is released, `web/integrity/1.1.0.json` is its permanent record: a later change to
    `web/src` needs a new version in `web/package.json`, or the web test fails.
@@ -84,8 +84,8 @@ Notes:
 4. `curl -sI https://xrpl-file.staticbit.io/element/1.1.0/xrpl-file-element.js` shows
    `access-control-allow-origin: *` and `cache-control: public, max-age=31536000, immutable`.
 5. `/nope` answers 404 with the site's 404 page.
-6. The snippet's alternative URL (`https://xrpl-file.staticbit.io/element/1.1.0/…`) works from a
-   page on another origin (for example JSFiddle) with its `integrity` attribute.
+6. The snippet (jsDelivr) works from a page on another origin (for example JSFiddle) with its
+   `integrity` attribute.
 
 ## npm package (step 3 of the order above)
 

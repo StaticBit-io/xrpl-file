@@ -330,11 +330,11 @@ transaction count by a fee: the file's own fee column is what is shown.
 - `HERO_LINK`, `HERO_ASPECT`: the hero file (see above).
 - `PUBLISHER_URL`: the publisher's GitHub Releases URL. While it is `null` the "Download the
   publisher" button is disabled and marked "soon"; set the URL and the button becomes a link.
-- `ELEMENT_PACKAGE`: the npm package name in the first embed snippet
-  (`cdn.jsdelivr.net/npm/<package>@1.1.0/...`). The second snippet is the same file served from this
-  site. `build.mjs` reads the constant, so the snippet follows it.
+- `ELEMENT_PACKAGE`: the npm package name in the embed snippet
+  (`cdn.jsdelivr.net/npm/<package>@1.1.0/...`). `build.mjs` reads the constant, so the snippet follows
+  it. The site serves its own copy under `/element/` for its pages, but does not offer it in the
+  snippet: a CDN outlives this site.
 
-The embed snippets are inserted at build time: `<!--@element-snippet-->` and
-`<!--@element-snippet-alt-->` in a page become the escaped snippets, with the `integrity` value from
-`web/dist/1.1.0/integrity.json`. Both load a classic script (never `type="module"`: the element looks
+The embed snippet is inserted at build time: `<!--@element-snippet-->` in a page becomes the escaped
+snippet, with the `integrity` value from `web/dist/1.1.0/integrity.json`. It loads a classic script (never `type="module"`: the element looks
 for `mp4box.min.js` beside `document.currentScript`).

@@ -330,11 +330,9 @@ export const PRICE_STRINGS = {
     caption: 'What publishing a file costs',
     size: 'File size',
     fee: 'Fees, spent',
-    held: 'Reserve, held',
-    returned: 'Reserve, returned',
     unit: 'XRP',
     reserve: ({ held, returned, kept }) =>
-      `While a file is being published, ${held} XRP is held as the reserve of a throwaway account. When the account is deleted, ${returned} XRP comes back. The other ${kept} XRP stays with the network as the price of deleting the account, whatever the size of the file.`,
+      `A publishing account holds ${held} XRP of reserve for as long as it exists, however many files it publishes. When the account is closed, ${returned} XRP comes back. The other ${kept} XRP stays with the network as the price of deleting the account.`,
     source: ({ network, date }) =>
       `Figures taken from ${NETWORK_NAMES.en[network] ?? network} on ${date}. The network sets fees and reserves, and they can change.`,
   },
@@ -342,11 +340,9 @@ export const PRICE_STRINGS = {
     caption: 'Сколько стоит записать файл',
     size: 'Размер файла',
     fee: 'Комиссии, потрачены',
-    held: 'Резерв, удержан',
-    returned: 'Резерв, возвращён',
     unit: 'XRP',
     reserve: ({ held, returned, kept }) =>
-      `Пока файл записывается, ${held} XRP удерживается как резерв одноразового аккаунта. Когда аккаунт удалён, ${returned} XRP возвращается. Остальные ${kept} XRP остаются у сети как плата за удаление аккаунта, каким бы ни был размер файла.`,
+      `На аккаунте для публикации удерживается ${held} XRP резерва, пока он существует, сколько бы файлов с него ни было записано. Когда аккаунт закрыт, ${returned} XRP возвращается. Остальные ${kept} XRP остаются у сети как плата за удаление аккаунта.`,
     source: ({ network, date }) =>
       `Данные ${NETWORK_NAMES.ru[network] ?? network} на ${date}. Комиссии и резервы задаёт сеть, и они могут меняться.`,
   },
@@ -354,11 +350,9 @@ export const PRICE_STRINGS = {
     caption: 'Was das Veröffentlichen einer Datei kostet',
     size: 'Dateigröße',
     fee: 'Gebühren, verbraucht',
-    held: 'Reserve, gebunden',
-    returned: 'Reserve, zurückgegeben',
     unit: 'XRP',
     reserve: ({ held, returned, kept }) =>
-      `Solange eine Datei veröffentlicht wird, ist ein Betrag von ${held} XRP als Reserve eines Einmalkontos gebunden. Wird das Konto gelöscht, kommen ${returned} XRP zurück. Der Rest, ${kept} XRP, bleibt beim Netzwerk, als Preis für das Löschen des Kontos, unabhängig von der Dateigröße.`,
+      `Auf einem Veröffentlichungskonto ist ein Betrag von ${held} XRP als Reserve gebunden, solange es besteht, unabhängig davon, wie viele Dateien es veröffentlicht. Wird das Konto geschlossen, kommen ${returned} XRP zurück. Der Rest, ${kept} XRP, bleibt beim Netzwerk, als Preis für das Löschen des Kontos.`,
     source: ({ network, date }) =>
       `Angaben aus ${NETWORK_NAMES.de[network] ?? network} vom ${date}. Gebühren und Reserven legt das Netzwerk fest, und sie können sich ändern.`,
   },
@@ -366,11 +360,9 @@ export const PRICE_STRINGS = {
     caption: 'Cuánto cuesta publicar un archivo',
     size: 'Tamaño del archivo',
     fee: 'Comisiones, gastadas',
-    held: 'Reserva, retenida',
-    returned: 'Reserva, devuelta',
     unit: 'XRP',
     reserve: ({ held, returned, kept }) =>
-      `Mientras se publica un archivo, queda retenido un importe de ${held} XRP como reserva de una cuenta desechable. Cuando la cuenta se elimina, se recuperan ${returned} XRP. El resto, ${kept} XRP, se queda en la red como precio de eliminar la cuenta, sea cual sea el tamaño del archivo.`,
+      `En una cuenta de publicación queda retenido un importe de ${held} XRP como reserva mientras la cuenta existe, sean cuantos sean los archivos que publique. Cuando la cuenta se cierra, se recuperan ${returned} XRP. El resto, ${kept} XRP, se queda en la red como precio de eliminar la cuenta.`,
     source: ({ network, date }) =>
       `Datos de ${NETWORK_NAMES.es[network] ?? network} a fecha de ${date}. La red fija las comisiones y las reservas, y pueden cambiar.`,
   },
@@ -378,11 +370,9 @@ export const PRICE_STRINGS = {
     caption: 'Quanto custa publicar um arquivo',
     size: 'Tamanho do arquivo',
     fee: 'Taxas, gastas',
-    held: 'Reserva, retida',
-    returned: 'Reserva, devolvida',
     unit: 'XRP',
     reserve: ({ held, returned, kept }) =>
-      `Enquanto um arquivo é publicado, fica retido um valor de ${held} XRP como reserva de uma conta descartável. Quando a conta é excluída, voltam ${returned} XRP. O restante, ${kept} XRP, fica com a rede como preço da exclusão da conta, seja qual for o tamanho do arquivo.`,
+      `Numa conta de publicação fica retido um valor de ${held} XRP como reserva enquanto a conta existir, seja qual for o número de arquivos publicados. Quando a conta é fechada, voltam ${returned} XRP. O restante, ${kept} XRP, fica com a rede como preço da exclusão da conta.`,
     // The network phrase carries its own "da" ("de" + "a rede"), so an unnamed network gets one too.
     source: ({ network, date }) =>
       `Dados ${NETWORK_NAMES.pt[network] ?? `da rede ${network}`} em ${date}. A rede define as taxas e as reservas, e elas podem mudar.`,
@@ -391,11 +381,9 @@ export const PRICE_STRINGS = {
     caption: '发布一个文件的费用',
     size: '文件大小',
     fee: '手续费，已花费',
-    held: '储备金，已锁定',
-    returned: '储备金，已退还',
     unit: 'XRP',
     reserve: ({ held, returned, kept }) =>
-      `文件发布期间，${held} XRP 作为一次性账户的储备金被锁定。账户删除后，${returned} XRP 会退回。其余 ${kept} XRP 留在网络中，作为删除账户的费用，与文件大小无关。`,
+      `发布账户存在期间，${held} XRP 作为其储备金被锁定，与发布了多少文件无关。账户关闭后，${returned} XRP 会退回。其余 ${kept} XRP 留在网络中，作为删除账户的费用。`,
     source: ({ network, date }) =>
       `数据取自 ${NETWORK_NAMES.zh[network] ?? network}，日期为 ${date}。手续费和储备金由网络设定，可能变化。`,
   },

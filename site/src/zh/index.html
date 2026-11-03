@@ -90,7 +90,7 @@
 <div class="container">
 <div class="head">
 <h2 id="price-title">费用</h2>
-<p>文件写入账本时，大约每千字节对应一笔交易。发布每个文件时，发布工具都会开设一个一次性账户，并在文件写完后将其删除。费用分为两类。手续费会被花掉。储备金在文件写入期间被锁定，其中大部分会退回。</p>
+<p>文件写入账本时，大约每千字节对应一笔交易，由应用中的发布账户发送。一个账户可以发布任意数量的文件，不再需要时，由应用将其关闭。费用分为两类。手续费会被花掉。账户存在期间，其储备金被锁定；账户关闭后，其中大部分会退回。</p>
 </div>
 <div id="price-data" class="price-data"><p class="hint">价格表目前无法显示。数据也可以在数据文件 <a href="/data/price.json">price.json</a> 中查看。</p></div>
 </div>
@@ -135,14 +135,6 @@
 <div class="snippet__bar">
 <button id="snippet-copy" class="button button--quiet" type="button" aria-label="复制嵌入代码：来自 npm，经由 jsDelivr">复制</button>
 <span id="snippet-status" class="snippet__status" role="status"></span>
-</div>
-</div>
-<div class="snippet">
-<p class="snippet__label">同一个文件，来自本站</p>
-<pre tabindex="0" aria-label="嵌入代码：同一个文件，来自本站"><code id="embed-snippet-alt"><!--@element-snippet-alt--></code></pre>
-<div class="snippet__bar">
-<button id="snippet-copy-alt" class="button button--quiet" type="button" aria-label="复制嵌入代码：同一个文件，来自本站">复制</button>
-<span id="snippet-status-alt" class="snippet__status" role="status"></span>
 </div>
 </div>
 <p class="attributes"><code>width</code> 和 <code>height</code> 设置尺寸，<code>loading</code> 指定何时开始读取，<code>theme</code> 选择浅色或深色配色，<code>node</code> 指定读取所用的节点。完整列表见 README：<a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">嵌入文件</a>。</p>

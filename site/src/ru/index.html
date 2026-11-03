@@ -90,7 +90,7 @@
 <div class="container">
 <div class="head">
 <h2 id="price-title">Сколько это стоит</h2>
-<p>Файл записывается примерно по одной транзакции на каждый килобайт. Для каждого файла приложение для публикации открывает одноразовый аккаунт и удаляет его, когда файл записан. Расходы бывают двух видов. Комиссии тратятся. Резерв удерживается, пока файл записывается, и большая часть резерва возвращается.</p>
+<p>Файл записывается примерно по одной транзакции на каждый килобайт, с аккаунта для публикации в приложении. С одного аккаунта можно записать сколько угодно файлов, а когда он больше не нужен, приложение его закрывает. Расходы бывают двух видов. Комиссии тратятся. Резерв аккаунта удерживается, пока аккаунт существует, и большая часть резерва возвращается, когда аккаунт закрыт.</p>
 </div>
 <div id="price-data" class="price-data"><p class="hint">Таблица цен сейчас недоступна. Цифры есть и в файле данных <a href="/data/price.json">price.json</a>.</p></div>
 </div>
@@ -135,14 +135,6 @@
 <div class="snippet__bar">
 <button id="snippet-copy" class="button button--quiet" type="button" aria-label="Копировать код для вставки: Из npm, через jsDelivr">Копировать</button>
 <span id="snippet-status" class="snippet__status" role="status"></span>
-</div>
-</div>
-<div class="snippet">
-<p class="snippet__label">Тот же файл с этого сайта</p>
-<pre tabindex="0" aria-label="Код для вставки: Тот же файл с этого сайта"><code id="embed-snippet-alt"><!--@element-snippet-alt--></code></pre>
-<div class="snippet__bar">
-<button id="snippet-copy-alt" class="button button--quiet" type="button" aria-label="Копировать код для вставки: Тот же файл с этого сайта">Копировать</button>
-<span id="snippet-status-alt" class="snippet__status" role="status"></span>
 </div>
 </div>
 <p class="attributes"><code>width</code> и <code>height</code> задают размер, <code>loading</code> определяет, когда начнётся чтение, <code>theme</code> задаёт светлую или тёмную палитру, а <code>node</code> указывает узел, с которого читается файл. Полный список в README: <a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">Вставка файла</a>.</p>
