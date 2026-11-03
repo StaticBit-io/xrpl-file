@@ -409,3 +409,18 @@ test('every built page of the real site carries a link card, and the banner is i
     await rm(f.root, { recursive: true, force: true });
   }
 });
+
+test('_routes.json reaches the output and invokes the function only on card paths', async () => {
+  const f = await fixture();
+  try {
+    const siteDir = fileURLToPath(new URL('..', import.meta.url));
+    await build({ siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.2.0' });
+    assert.deepEqual(JSON.parse(await readFile(join(f.outDir, '_routes.json'), 'utf8')), {
+      version: 1,
+      include: ['/mainnet/*', '/testnet/*', '/devnet/*', '/og/*'],
+      exclude: [],
+    });
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});

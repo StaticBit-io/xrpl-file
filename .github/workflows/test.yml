@@ -158,4 +158,7 @@ jobs:
           if ! printf '%s' "$projects" | grep -q "\"$PROJECT\""; then
             $WRANGLER pages project create "$PROJECT" --production-branch main
           fi
-      - run: $WRANGLER pages deploy site/dist --project-name "$PROJECT" --branch main --commit-hash "$GITHUB_SHA"
+      # From site/: wrangler looks for functions/ in its working directory, and site/wrangler.toml
+      # names the project and the output directory.
+      - run: $WRANGLER pages deploy --branch main --commit-hash "$GITHUB_SHA"
+        working-directory: site

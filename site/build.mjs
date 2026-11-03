@@ -1,5 +1,5 @@
 // Assembles the deployable site into site/dist:
-//   site/src/**                  -> /            (pages, scripts, styles, fonts, _redirects, _headers)
+//   site/src/**                  -> /            (pages, scripts, styles, fonts, _redirects, _headers, _routes.json)
 //                                   with <!--@chrome:head|header|footer--> markers in a page replaced by
 //                                   the shared markup of chrome-markup.mjs, and <!--@element-snippet--> replaced
 //                                   by the embed snippets (jsDelivr and this site) with the element's integrity
@@ -20,7 +20,7 @@ import { findHtmlRewriteTargets, findShadowed, parseRedirects } from './redirect
 export const ELEMENT_VERSION = '1.2.0';
 // Cloudflare Pages rejects a deployment with any file over 25 MiB.
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
-const HOST_FILES = new Set(['_redirects', '_headers']);
+const HOST_FILES = new Set(['_redirects', '_headers', '_routes.json']);
 
 async function isDirectory(path) {
   try {
