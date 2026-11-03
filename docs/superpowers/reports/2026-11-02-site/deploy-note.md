@@ -77,7 +77,7 @@ Notes:
 ## Checks after the deploy (from the plan)
 
 1. `https://xrpl-file.staticbit.io/` and `/ru/`, `/de/`, `/es/`, `/pt/`, `/zh/` answer 200.
-2. `curl -sI https://xrpl-file.staticbit.io/testnet/2AEB485BB0FAECA2DF4B60F196D5199042288FEB124ED8D95F4313CF06200DB4`
+2. `curl -sI https://xrpl-file.staticbit.io/mainnet/9B1A9E33DBD9B445BFE2854D4D489DC860869D873AD36DA30A69DD19DDBC0DF5`
    answers 200 with no `Location` header (the file page is rewritten, not redirected).
 3. `curl -sI https://xrpl-file.staticbit.io/js/route.mjs` answers 200 with a JavaScript type (the
    pass-through rules win over the file-page rule).

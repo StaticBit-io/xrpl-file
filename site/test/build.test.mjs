@@ -206,7 +206,7 @@ test('built index.html contains the 1.1.0 snippet with the integrity from integr
       assert.ok(snippet.includes('integrity="sha384-TESTVALUE+/="'));
       assert.ok(snippet.includes('crossorigin="anonymous"'));
       assert.ok(!snippet.includes('type="module"'), 'the element is a classic script');
-      assert.match(snippet, /&lt;xrpl-file src="xrpl-file:\/\/testnet\/[0-9A-F]{64}"/);
+      assert.match(snippet, /&lt;xrpl-file src="xrpl-file:\/\/mainnet\/[0-9A-F]{64}"/);
     }
     assert.ok(!html.includes('sha384-OTHER'), 'only the value for the element script is used');
   }));

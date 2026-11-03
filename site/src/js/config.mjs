@@ -1,7 +1,7 @@
 // The few values the site's owner changes by hand. site/README.md says when and how.
 
-/** The file the hero reads: the StaticBit logo (PNG, transparent). After the first mainnet publication: a real mainnet file there. */
-export const HERO_LINK = 'xrpl-file://testnet/2AEB485BB0FAECA2DF4B60F196D5199042288FEB124ED8D95F4313CF06200DB4';
+/** The file the hero reads: the StaticBit logo (PNG, transparent), published on mainnet. */
+export const HERO_LINK = 'xrpl-file://mainnet/9B1A9E33DBD9B445BFE2854D4D489DC860869D873AD36DA30A69DD19DDBC0DF5';
 
 /** Picture width / height (1422 x 1231). The manifest carries no dimensions, so it lives next to the link. */
 export const HERO_ASPECT = 1422 / 1231;

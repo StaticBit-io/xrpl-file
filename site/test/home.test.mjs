@@ -12,7 +12,7 @@ const pages = Object.fromEntries(await Promise.all(ACTIVE_LANGS.map(async (lang)
 const ids = (html) => [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]).sort();
 
 test('config holds the hero file (the transparent StaticBit logo) and its aspect', () => {
-  assert.equal(HERO_LINK, 'xrpl-file://testnet/2AEB485BB0FAECA2DF4B60F196D5199042288FEB124ED8D95F4313CF06200DB4');
+  assert.equal(HERO_LINK, 'xrpl-file://mainnet/9B1A9E33DBD9B445BFE2854D4D489DC860869D873AD36DA30A69DD19DDBC0DF5');
   assert.equal(HERO_ASPECT, 1422 / 1231);
 });
 

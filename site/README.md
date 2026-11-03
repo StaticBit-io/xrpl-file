@@ -266,9 +266,9 @@ chunk, block, manifest, reserve and fee: German keeps "Ledger" and "Chunk", Span
 
 ## The hero file and its durability
 
-The home page's hero is a point cloud driven by the real read of a file from the XRP Ledger. Until
-mainnet, that is the transparent StaticBit logo on the testnet,
-`xrpl-file://testnet/2AEB485BB0FAECA2DF4B60F196D5199042288FEB124ED8D95F4313CF06200DB4`
+The home page's hero is a point cloud driven by the real read of a file from the XRP Ledger: the
+transparent StaticBit logo, published on mainnet from the desktop app,
+`xrpl-file://mainnet/9B1A9E33DBD9B445BFE2854D4D489DC860869D873AD36DA30A69DD19DDBC0DF5`
 (`staticbit-logo.png`, image/png, 1422 x 1231, 122,958 bytes, 123 chunks, 1 block). Each chunk the
 reader accepts becomes a cube, the block's cubes turn lime when its hash matches, and when everything is
 verified a small `<xrpl-file>` card shows the file beside the cloud. The card reads the file a second
@@ -289,33 +289,22 @@ motion, nor when the cloud is off screen or the tab is hidden at that moment; le
 the tab, or a pointer or key on the cloud ends a running turn on its last frame. After that no frame is
 requested.
 
-A testnet reset, or public nodes without the file's history, breaks it: the cloud then keeps the cubes
-it received and shows a quiet message. That is accepted at launch; to bring the hero back, re-publish
-the file and swap the constant.
+On mainnet the file stays readable as long as the element's nodes keep full history
+(`wss://xrplcluster.com`, then `wss://s2.ripple.com`). A node that answers without the file's
+ledgers breaks the read: the cloud then keeps the cubes it received and shows a quiet message.
 
-1. Re-publish. The fixture tool publishes a plan to the testnet only, with faucet-funded throwaway
-   accounts. Its working folder (`run/fixtures`) is git-ignored and holds `links.json` (key to link),
-   `accounts.json` (the throwaway keys, never printed and never committed), `media/` (the source files,
-   `staticbit-logo.png` among them) and `state/<key>/` (resume state). The hero is the `logo` entry of
-   the one-entry plan `run/fixtures/plan-logo.json`:
-   ```json
-   [{"key":"logo","file":"staticbit-logo.png","type":"image/png","name":"staticbit-logo.png","writer":"a","cover":null}]
-   ```
-   - In `run/fixtures/links.json` delete the `logo` line, and delete `run/fixtures/state/logo/` (a
-     finished state would be reused and give the old link back).
-   - Run, from the repository root:
-     ```bash
-     dotnet run --project tools/XrplFile.Fixtures -- run/fixtures/plan-logo.json run/fixtures/media run/fixtures
-     ```
-     Entries that already have a link are skipped, so only `logo` is published. A stopped run is
-     resumed by running the same command again.
-   - The new link is the `logo` value in `run/fixtures/links.json`.
+To show another file:
+
+1. Publish it on mainnet with the desktop app and copy its link.
 2. Swap the constants: set `HERO_LINK` in `site/src/js/config.mjs` to that link, and `HERO_ASPECT` to
-   the picture's width / height (`1422 / 1231` for the logo).
-3. Check the link in a browser at `/testnet/<HASH>`, then rebuild and redeploy the site.
+   the picture's width / height (`1422 / 1231` for the logo). The test in `site/test/home.test.mjs`
+   pins the link, so update it with the constant.
+3. Check the link in a browser at `/mainnet/<HASH>`, then rebuild and redeploy the site.
 
-After the first mainnet publication, `HERO_LINK` becomes the link of a real mainnet file; the steps
-above no longer apply.
+The logo was first published on the testnet
+(`xrpl-file://testnet/2AEB485BB0FAECA2DF4B60F196D5199042288FEB124ED8D95F4313CF06200DB4`) by the
+fixture tool (`tools/XrplFile.Fixtures`, plan `run/fixtures/plan-logo.json`). That copy is no longer
+the hero and is not kept up: a testnet reset removes it.
 
 ## The price table
 
