@@ -49,7 +49,8 @@ The build refuses any `/element/<version>/` path in `src/` that differs from the
 
 ## Host files: `_redirects` and `_headers`
 
-These two files are the only host-specific part of the site. Both live in `src/` and are copied to
+These two files are the host-specific part of the static site (the link-card function adds
+`_routes.json`, `functions/` and `wrangler.toml`, see [File link cards](#file-link-cards)). Both live in `src/` and are copied to
 the root of `dist/`.
 
 ### `_redirects`
@@ -199,6 +200,57 @@ The tool serves `site/dist`, renders it in headless Chrome or Edge (`CHROME` ove
 waits for the read to verify before the shot, so it needs the network. The result is not byte-stable,
 so `test/og-banner.test.mjs` checks only the size. Telegram and X cache a card by URL: give a new
 banner a new file name, or refresh a Telegram preview through @WebpageBot.
+
+### File link cards
+
+A link to one file, `/<network>/<HASH>`, gets a card of its own: the file's name, its type and size
+("PNG image, 123.0 KB, stored in the XRP Ledger."), and a picture. A Pages Function builds it, only
+for link-preview robots (Telegram, X, Facebook, Discord, Slack, WhatsApp, LinkedIn, by user agent).
+A person's browser gets the static file page with no ledger read and no cache lookup in front of it.
+The design is in `docs/superpowers/specs/2026-11-03-link-cards-design.md`.
+
+| Part | Role |
+|---|---|
+| `src/_routes.json` | the function runs only on `/mainnet/*`, `/testnet/*`, `/devnet/*` and `/og/*`; every other path is static and costs no invocation |
+| `functions/[[path]].js` | the Cloudflare adapter: `env.ASSETS`, `caches.default`, `context.waitUntil`, a `LedgerClient` per read |
+| `cards/rules.mjs` | robot user agents, card paths, which files can be their own picture, magic bytes |
+| `cards/card.mjs` | reads the manifest, the cover and the picture through the element's `XrplFileReader`, so every byte is verified against the hash |
+| `cards/html.mjs` | writes the card into the static file page's `<head>`; the rest of the page is unchanged |
+| `cards/handler.mjs` | the requests: deadlines, cache lifetimes, one picture read at a time per file |
+| `wrangler.toml` | project name, output directory, compatibility date and `limits.cpu_ms = 5000` |
+
+The card picture is `/og/<network>/<HASH>`: the file itself when it is a PNG, JPEG, WebP or GIF of at
+most 1 MB whose first bytes match its type, otherwise its cover (section 4.1 of the format), otherwise
+the banner, which a card without a picture names directly. The robot's page request starts the
+picture read in the background, so the picture request that follows usually finds it cached.
+
+| Result | `Cache-Control` (the Cache API keeps it as long) |
+|---|---|
+| a card or picture of a file | `public, max-age=31536000, immutable` |
+| no manifest with that hash on the network | `public, max-age=3600` |
+| anything else: node down, deadline (4 s for the page, 5 s for the picture), no picture | `public, max-age=300` |
+
+Every failure answers the generic card or the banner, never an error status. Pages applies no
+`_redirects` rule on a path the function owns, so the function serves the file page itself for
+every two-segment path it does not take as a card (`/mainnet/xyz` gets the page's "not a link"
+state, as the rule gave it). NetworkID paths (`/21338/<HASH>`) are outside `_routes.json` and keep
+the rule.
+
+`wrangler.toml` is the project's source of truth: the settings it names can no longer be edited in
+the dashboard. Its compatibility date is the newest the pinned wrangler's runtime accepts; raise it
+together with the wrangler version.
+
+`serve.mjs` does not run the function. To see a card locally, from `site/` after both builds:
+
+```bash
+npx --yes wrangler@4.151.1 pages dev
+curl -s -A "TelegramBot (like TwitterBot)" http://127.0.0.1:8788/mainnet/9B1A9E33DBD9B445BFE2854D4D489DC860869D873AD36DA30A69DD19DDBC0DF5 | grep -E 'og:(title|image)'
+curl -sI http://127.0.0.1:8788/og/mainnet/9B1A9E33DBD9B445BFE2854D4D489DC860869D873AD36DA30A69DD19DDBC0DF5
+curl -s -A "Mozilla/5.0" http://127.0.0.1:8788/mainnet/9B1A9E33DBD9B445BFE2854D4D489DC860869D873AD36DA30A69DD19DDBC0DF5 | grep -c '<title>xrpl-file</title>'
+```
+
+The first prints the logo's name in `og:title` and `/og/mainnet/…` in `og:image`, the second `200`
+with `content-type: image/png`, the third `1`.
 
 ## Languages
 
