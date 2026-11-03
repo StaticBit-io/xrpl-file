@@ -2,7 +2,7 @@
 // version's integrity.json, so these pages exercise SRI and never go stale against a rebuild.
 // A site embeds the two-line snippet from the README instead (see snippet.html).
 (async () => {
-  const base = '../dist/1.1.0/';
+  const base = '../dist/1.2.0/';
   const script = document.createElement('script');
   script.src = `${base}xrpl-file-element.js`;
   script.crossOrigin = 'anonymous';
