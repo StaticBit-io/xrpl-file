@@ -14,7 +14,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderChrome } from './chrome-markup.mjs';
 import { ACTIVE_LANGS, DEFAULT_LANG, LANGS, htmlLang, langFromTag } from './src/js/languages.mjs';
-import { ELEMENT_FILE, alternativeSnippetHtml, snippetHtml } from './snippet.mjs';
+import { ELEMENT_FILE, snippetHtml } from './snippet.mjs';
 import { findHtmlRewriteTargets, findShadowed, parseRedirects } from './redirects.mjs';
 
 export const ELEMENT_VERSION = '1.1.0';
@@ -112,10 +112,9 @@ async function inlineChrome(outDir) {
 }
 
 const SNIPPET_MARKER = '<!--@element-snippet-->';
-const ALT_SNIPPET_MARKER = '<!--@element-snippet-alt-->';
 
 /**
- * Fills the embed snippets of a page: both markers get the escaped snippet with the element's integrity
+ * Fills the embed snippet of a page: the marker gets the escaped snippet with the element's integrity
  * from integrity.json.
  */
 async function inlineSnippet(outDir, elementDir, elementVersion) {
@@ -124,7 +123,7 @@ async function inlineSnippet(outDir, elementDir, elementVersion) {
     const relative_ = relative(outDir, file);
     if (!file.endsWith('.html') || relative_.split(sep)[0] === 'element') continue;
     const html = await readFile(file, 'utf8');
-    if (!html.includes(SNIPPET_MARKER) && !html.includes(ALT_SNIPPET_MARKER)) continue;
+    if (!html.includes(SNIPPET_MARKER)) continue;
     if (integrity === null) {
       const values = JSON.parse(await readFile(join(elementDir, 'integrity.json'), 'utf8'));
       integrity = values[ELEMENT_FILE];
@@ -133,12 +132,7 @@ async function inlineSnippet(outDir, elementDir, elementVersion) {
       }
     }
     const options = { version: elementVersion, integrity };
-    await writeFile(
-      file,
-      html
-        .replaceAll(SNIPPET_MARKER, () => snippetHtml(options))
-        .replaceAll(ALT_SNIPPET_MARKER, () => alternativeSnippetHtml(options))
-    );
+    await writeFile(file, html.replaceAll(SNIPPET_MARKER, () => snippetHtml(options)));
   }
 }
 

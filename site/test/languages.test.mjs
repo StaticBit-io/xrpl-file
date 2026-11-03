@@ -120,7 +120,7 @@ test('every active language has its home page, tagged with its own <html lang>',
   }
 });
 
-// The English reserve sentence has no actor: the reserve is part of the throwaway account's own balance,
+// The English reserve sentence has no actor: the reserve is part of the publishing account's own balance,
 // held by the ledger's rules. A translation must not make the network the one who takes or gives it.
 test('the reserve sentence names no actor that holds or returns the reserve, in any language', () => {
   const actor = /bindet das Netzwerk|gibt es .* zurück|la red retiene|devuelve|a rede retém|devolve|сеть удерживает|网络.{0,3}(锁定|退还)/;

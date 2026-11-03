@@ -90,7 +90,7 @@
 <div class="container">
 <div class="head">
 <h2 id="price-title">Cuánto cuesta</h2>
-<p>Un archivo entra en el ledger con aproximadamente una transacción por kilobyte. Para cada archivo, la aplicación de publicación abre una cuenta desechable y la elimina cuando el archivo está escrito. Hay dos tipos de coste. Las comisiones se gastan. Una reserva queda retenida mientras se escribe el archivo, y la mayor parte de la reserva se recupera.</p>
+<p>Un archivo entra en el ledger con aproximadamente una transacción por kilobyte, enviada desde una cuenta de publicación de la aplicación. Una cuenta puede publicar tantos archivos como quieras, y cuando ya no la necesitas, la aplicación la cierra. Hay dos tipos de coste. Las comisiones se gastan. La reserva de la cuenta queda retenida mientras la cuenta existe, y la mayor parte se recupera al cerrarla.</p>
 </div>
 <div id="price-data" class="price-data"><p class="hint">La tabla de precios no está disponible ahora mismo. Las cifras también están en el archivo de datos <a href="/data/price.json">price.json</a>.</p></div>
 </div>
@@ -135,14 +135,6 @@
 <div class="snippet__bar">
 <button id="snippet-copy" class="button button--quiet" type="button" aria-label="Copiar el código para incrustar: Desde npm, a través de jsDelivr">Copiar</button>
 <span id="snippet-status" class="snippet__status" role="status"></span>
-</div>
-</div>
-<div class="snippet">
-<p class="snippet__label">El mismo archivo desde este sitio</p>
-<pre tabindex="0" aria-label="Código para incrustar: El mismo archivo desde este sitio"><code id="embed-snippet-alt"><!--@element-snippet-alt--></code></pre>
-<div class="snippet__bar">
-<button id="snippet-copy-alt" class="button button--quiet" type="button" aria-label="Copiar el código para incrustar: El mismo archivo desde este sitio">Copiar</button>
-<span id="snippet-status-alt" class="snippet__status" role="status"></span>
 </div>
 </div>
 <p class="attributes"><code>width</code> y <code>height</code> fijan el tamaño, <code>loading</code> indica cuándo empieza la lectura, <code>theme</code> elige la paleta clara u oscura y <code>node</code> indica el nodo desde el que se lee. La lista completa está en el README: <a href="https://github.com/StaticBit-io/xrpl-file#embed-a-file">Incrustar un archivo</a>.</p>

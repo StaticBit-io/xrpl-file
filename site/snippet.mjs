@@ -1,16 +1,13 @@
-// The embed snippets shown in "For developers". Both pin one element version with its integrity value
-// and load a classic script (never type="module": the element finds mp4box.min.js beside
-// document.currentScript). The first is the jsDelivr npm URL, the second the same file on this site.
-import { ELEMENT_PACKAGE, HERO_LINK, SITE_ORIGIN } from './src/js/config.mjs';
+// The embed snippet shown in "For developers". It pins one element version with its integrity value
+// and loads a classic script (never type="module": the element finds mp4box.min.js beside
+// document.currentScript) from the jsDelivr npm URL. The site's own copy under /element/ serves its
+// pages; the snippet does not offer it, since a CDN outlives this site.
+import { ELEMENT_PACKAGE, HERO_LINK } from './src/js/config.mjs';
 
 export const ELEMENT_FILE = 'xrpl-file-element.js';
 
 export function npmUrl(version) {
   return `https://cdn.jsdelivr.net/npm/${ELEMENT_PACKAGE}@${version}/${ELEMENT_FILE}`;
-}
-
-export function siteUrl(version) {
-  return `${SITE_ORIGIN}/element/${version}/${ELEMENT_FILE}`;
 }
 
 // Element content only: quotes stay as they are, so the text a reader copies is the snippet itself.
@@ -27,12 +24,7 @@ function snippetOf(url, integrity) {
   ].join('\n');
 }
 
-/** The primary snippet, escaped for the inside of a <code> element. */
+/** The snippet, escaped for the inside of a <code> element. */
 export function snippetHtml({ version, integrity }) {
   return escapeHtml(snippetOf(npmUrl(version), integrity));
-}
-
-/** The alternative snippet (this site's own copy of the same file). */
-export function alternativeSnippetHtml({ version, integrity }) {
-  return escapeHtml(snippetOf(siteUrl(version), integrity));
 }
