@@ -25,5 +25,9 @@ public static class CommonText
 
     public static readonly TextId Bytes = Id();
 
+    // The "Save as type" entries of the system file dialogs.
+    public static readonly TextId FileTypeBackup = Id();
+    public static readonly TextId FileTypeAny = Id();
+
     private static TextId Id([CallerMemberName] string name = "") => TextId.Of("Common", name);
 }

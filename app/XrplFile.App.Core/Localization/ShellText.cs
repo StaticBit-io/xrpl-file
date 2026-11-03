@@ -8,6 +8,8 @@ public static class ShellText
     public static readonly TextId StartFailed = Id();
     public static readonly TextId ScreenFailed = Id();
     public static readonly TextId Loading = Id();
+    public static readonly TextId UnhandledError = Id();
+    public static readonly TextId Reload = Id();
 
     public static readonly TextId MainNavigation = Id();
     public static readonly TextId LockVault = Id();

@@ -202,7 +202,7 @@ else
             // <html lang> picks the glyphs WebView2 draws: without zh-Hans, Han characters can come
             // out in a Japanese face.
             _documentLanguage = Localizer.Language.HtmlTag;
-            await JS.InvokeVoidAsync("xfShell.setLanguage", _documentLanguage);
+            await JS.InvokeVoidAsync("xfShell.setLanguage", _documentLanguage, T[ShellText.UnhandledError], T[ShellText.Reload]);
         }
 
         if (!_watchingWidth && _ready && Model.Stage == UnlockStage.Unlocked)
