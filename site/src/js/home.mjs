@@ -6,6 +6,7 @@ import { initCopyButton } from './copy-button.mjs';
 import { CHECK_LINK_STRINGS, COPY_STRINGS, PRICE_STRINGS, cloudStrings } from './home-strings.mjs';
 import { activeLang, pageLang } from './languages.mjs';
 import { mountCloud } from './cloud.mjs';
+import { hasSeenMosaic, startHeroRead } from './hero-read.mjs';
 import { formatDate, formatXrp, priceRows, reserveSummary } from './price.mjs';
 import { pathFromLink } from './route.mjs';
 
@@ -29,15 +30,21 @@ function initHero(document, lang) {
   // The caption names the network the file was read from; it is derived from the same constant the
   // cloud reads, never written twice.
   const network = pathFromLink(HERO_LINK)?.split('/')[1] ?? '';
-  mountCloud(canvas, {
-    link: HERO_LINK,
-    aspect: HERO_ASPECT,
-    caption,
-    note: document.getElementById('hero-note'),
-    callouts: { file: document.getElementById('co-file'), link: document.getElementById('co-link') },
-    card: document.getElementById('hero-card'),
-    strings: cloudStrings(lang, network),
-  });
+  mountCloud(
+    canvas,
+    {
+      link: HERO_LINK,
+      aspect: HERO_ASPECT,
+      // A visitor who has already seen the hero in this session gets the quick replay.
+      fast: hasSeenMosaic(),
+      caption,
+      note: document.getElementById('hero-note'),
+      callouts: { file: document.getElementById('co-file'), link: document.getElementById('co-link') },
+      card: document.getElementById('hero-card'),
+      strings: cloudStrings(lang, network),
+    },
+    { startRead: startHeroRead },
+  );
 }
 
 /** @param {string|null} [url] the release URL; injectable so a test need not edit config.mjs */
