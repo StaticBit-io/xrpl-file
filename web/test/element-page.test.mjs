@@ -4,6 +4,7 @@ import {
   NodePool, ReadQueue, AbortableSource, SharedSource, PRIORITY, PAGE_HISTORY_RECORDS, pool as pagePool,
 } from '../src/element/page.mjs';
 import { parseLink, XrplFileError } from '../src/link.mjs';
+import { XrplFileReader } from '../src/reader.mjs';
 import { chunkIndexOf } from '../src/tree.mjs';
 import { decodeManifest, encodeManifest } from '../src/manifest.mjs';
 import { utf8Hex } from '../src/hex.mjs';
@@ -241,6 +242,63 @@ test('a block already verified reports its chunks too, and every consumer gets i
   assert.deepEqual(again, first);
   again[0] ^= 0xff;
   assert.deepEqual(await h1.block(2, {}), blocks[2]);
+});
+
+/** What the reader itself reports for one block: the index and ledger of each chunk, in arrival order. */
+async function readerChunks(source, index) {
+  const reader = new XrplFileReader(source);
+  const record = await reader.manifest(link);
+  const list = await reader.blockList(record);
+  const seen = [];
+  await reader.block(record, list[index], ({ index: chunk, ledger }) => seen.push({ index: chunk, ledger }));
+  return seen;
+}
+
+test('onChunk receives index and ledger for a fresh read', async () => {
+  const { source, h1 } = await vectorPage();
+  const expected = await readerChunks(source, 2);
+  const seen = [];
+  await h1.block(2, { onChunk: (chunk) => seen.push(chunk) });
+  assert.equal(expected.length, 453);
+  assert.deepEqual(seen, expected);
+  assert.equal(seen[0].index, 2 * 1024);
+  assert.ok(seen.every((chunk) => Number.isInteger(chunk.ledger) && chunk.ledger > 0));
+});
+
+test('a late joiner gets the chunks already read with their ledgers', async () => {
+  const { source, h1, h2 } = await vectorPage();
+  const expected = await readerChunks(source, 0);
+  const first = [];
+  const second = [];
+  let late;
+  const p1 = h1.block(0, {
+    onChunk: (chunk) => {
+      first.push(chunk);
+      if (first.length === 10) late = h2.block(0, { onChunk: (c) => second.push(c) });
+    },
+  });
+  await p1;
+  await late;
+  assert.deepEqual(first, expected);
+  assert.deepEqual(second, expected);
+});
+
+test('a cached block replays its chunks with their ledgers', async () => {
+  const { source, h1 } = await vectorPage();
+  const expected = await readerChunks(source, 2);
+  await h1.block(2, {});
+  const replayed = [];
+  await h1.block(2, { onChunk: (chunk) => replayed.push(chunk) });
+  assert.deepEqual(replayed, expected);
+});
+
+test('a listener that changes the chunk it was given does not change what later joiners get', async () => {
+  const { source, h1, h2 } = await vectorPage();
+  const expected = await readerChunks(source, 2);
+  await h1.block(2, { onChunk: (chunk) => { chunk.ledger = -1; chunk.index = -1; } });
+  const replayed = [];
+  await h2.block(2, { onChunk: (chunk) => replayed.push({ ...chunk }) });
+  assert.deepEqual(replayed, expected);
 });
 
 test('a throwing progress callback does not fail the read the others share', async () => {
