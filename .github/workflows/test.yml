@@ -7,7 +7,7 @@ on:
 
 jobs:
   unit:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -43,7 +43,7 @@ jobs:
           diff /tmp/v1.json tests/vectors/v1.json
 
   integration:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     # The stand suite is the longest Linux job, so it runs as two shards, each on its own runner
     # with its own stand. Shard "a" names its classes (about half the suite by measured time);
     # shard "b" runs every Integration class shard "a" does not name, so a new stand class can
