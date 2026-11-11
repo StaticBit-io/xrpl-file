@@ -17,6 +17,10 @@ public sealed class ResumeConfirmationTests : VaultHarness
 
         // The fake closes a ledger on every read, so its deadlines pass in milliseconds.
         TransportRetryStep = TimeSpan.FromMilliseconds(1),
+
+        // Ten times the default, as in BatchTestNode: the chain check closes a fake ledger every 5 ms, so a send
+        // held up by a loaded host would otherwise outlive its deadline and use up a memo's three candidates.
+        DeadlineLedgers = 200,
     };
 
     private readonly string _directory = Directory.CreateTempSubdirectory("xrpl-file-resume-confirm-").FullName;
