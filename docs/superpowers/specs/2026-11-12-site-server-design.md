@@ -111,13 +111,16 @@ answered.
    - A missing file (`ENOENT`, `ENOTDIR`) is a miss; any other error reading a file is a 500 and a line
      in the journal, never a quiet 404.
    The dev server keeps its own behaviour (`no-store`, 127.0.0.1, free port).
-2. **Headers.** Pages' defaults first: `Cache-Control: public, max-age=0, must-revalidate` on every
-   static response and `no-store` on the 404 page. Then `_headers`: a new evaluator for the subset of
-   its syntax the site uses (a path pattern with `*` as a splat and `:name` as a segment, followed by
-   indented `Name: value` lines); every block that matches the requested path adds its headers, which
-   is the Pages behaviour the comment at the top of `site/src/_headers` relies on. Where a block sets a
-   header Pages sets by default, the block's value replaces the default. The plan pins this with a
-   table of paths and the headers the live Pages site returns for them today.
+2. **Headers.** Pages' defaults first: `Access-Control-Allow-Origin: *` on every response,
+   `Cache-Control: public, max-age=0, must-revalidate` on every static response and `no-store` on the
+   404 page. Then `_headers`: a new evaluator for the subset of its syntax the site uses (a path
+   pattern with `*` as a splat and `:name` as a segment, followed by indented `Name: value` lines);
+   every block that matches the **requested** path (before any rewrite) adds its headers, which is the
+   Pages behaviour the comment at the top of `site/src/_headers` relies on. Where a block sets a
+   header Pages sets by default, the block's value replaces the default. The headers apply to
+   redirects and to the 404 page too: live, `/index.html` answers 308 with `Cache-Control: no-cache`
+   from the `/*.html` block, and `/nope` carries `nosniff`. The plan pins this with a table of paths
+   and the headers the live Pages site returned for them on 2026-11-12.
 3. **Conditional requests.** Static responses carry an `ETag` made from a hash of the file's content,
    computed once per file per process. `If-None-Match` (a list, `*`, weak comparison) on `GET` or `HEAD`
    answers 304. Pages does the same, and the pages must revalidate, so without it every visit
