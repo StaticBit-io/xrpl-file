@@ -1,0 +1,10 @@
+# Installed by deploy/server/setup.sh as /etc/caddy/Caddyfile. Global options only: the site itself is
+# /etc/caddy/sites/<domain>.caddy, added by deploy/server/cutover.sh once DNS points here, so Caddy
+# never asks for a certificate for a name that still resolves elsewhere. An empty import is allowed.
+{
+	# Not Caddy's default TCP listener, where any local user could reconfigure it. /run/caddy is the unit's
+	# RuntimeDirectory, mode 0700, so only the caddy user reaches the socket.
+	admin unix//run/caddy/admin.sock
+}
+
+import /etc/caddy/sites/*.caddy

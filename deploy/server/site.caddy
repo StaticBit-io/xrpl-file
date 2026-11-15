@@ -1,0 +1,9 @@
+# Installed by deploy/server/cutover.sh as /etc/caddy/sites/<domain>.caddy, with DOMAIN replaced.
+DOMAIN {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080 {
+		# A connection refused while the site restarts during a deploy is retried, not answered 502.
+		lb_try_duration 15s
+		lb_try_interval 250ms
+	}
+}

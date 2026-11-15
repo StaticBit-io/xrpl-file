@@ -1,0 +1,36 @@
+# The xrpl-file site: static pages and link cards, behind Caddy on 127.0.0.1:8080.
+# Installed by deploy/server/setup.sh as /etc/systemd/system/xrpl-file-site.service.
+[Unit]
+Description=xrpl-file site
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=xrpl-file
+Group=xrpl-file
+ExecStart=/usr/bin/node /srv/xrpl-file/current/site/server/main.mjs
+Environment=PORT=8080 HOST=127.0.0.1 CACHE_DIR=/var/cache/xrpl-file
+# SITE_ORIGIN, written by setup.sh from the domain it was given.
+EnvironmentFile=/etc/xrpl-file/site.env
+Restart=on-failure
+RestartSec=2
+# The server drains for at most 5 s on SIGTERM.
+TimeoutStopSec=10
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/cache/xrpl-file
+CapabilityBoundingSet=
+MemoryMax=512M
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
