@@ -71,13 +71,17 @@ Notes:
 
 ## File link cards: owner steps
 
+These steps apply while Pages hosts the site (`SITE_TARGET` unset or `cloudflare`). On the owner's
+server the cards need neither; see "The site on the server" below.
+
 The function reads the ledger for robots only (`site/README.md`, "File link cards"). Before the merge
-into `main` that first ships it:
+into `main` that first ships it on Pages:
 
 1. Switch the Cloudflare account to **Workers Paid**. On the Free plan the function has 10 ms of CPU
    per request, which reads a manifest at best and never a picture; people are not affected either way.
-2. In the Pages project, **Settings → Runtime → Fail open / closed: Fail open**, so a spent daily
-   request allowance serves the static site as if there were no function.
+2. Optional: in the Pages project, **Settings → Runtime → Fail open / closed: Fail open**. It matters
+   only on the Free plan, whose daily request allowance Workers Paid removes; it keeps the static site
+   up if the account ever falls back to Free.
 
 Checks after that deploy:
 
@@ -88,6 +92,15 @@ Checks after that deploy:
    show their picture, the third the banner, all with the file's name, type and size. A link sent
    before the deploy keeps its old preview: refresh it through @WebpageBot.
 3. Post one of the links on X.
+
+## The site on the server
+
+Since 2026-11-12 the site can be hosted on the owner's server (`94.183.189.150`, Ubuntu 24.04, Node
+and Caddy) instead of Pages; the design is `docs/superpowers/specs/2026-11-12-site-server-design.md`.
+The steps, in order, are in `site/README.md`, "Hosting", section "Moving the site to the server":
+`deploy/server/provision.sh`, the three `gh` commands it prints, a first release by hand, the DNS
+change, `deploy/server/cutover.sh`, and `SITE_TARGET=server`. Each step that touches DNS or the
+server is the owner's. The way back is "Back to Pages" in the same section.
 
 ## DNS
 

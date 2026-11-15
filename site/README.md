@@ -1,8 +1,9 @@
 # xrpl-file site
 
-The static site for `xrpl-file.staticbit.io`: plain HTML, CSS and ES modules, no framework and no
-server code. It is deployed to Cloudflare Pages; moving it to another host means copying `site/dist/`
-and translating two files (see [Host files](#host-files-redirects-and-headers)).
+The site for `xrpl-file.staticbit.io`: plain HTML, CSS and ES modules, no framework. The pages are
+static; the only code that runs on a server writes link cards for link-preview robots. It is hosted
+on the owner's server or on Cloudflare Pages, chosen by the repository variable `SITE_TARGET` (see
+[Hosting](#hosting)); both read the same [host files](#host-files-redirects-and-headers).
 
 ```
 site/
@@ -10,7 +11,12 @@ site/
   data/           price.json, the price table (generated, committed)
   build.mjs       assembles site/dist
   serve.mjs       dev server for site/dist
-  redirects.mjs   evaluator for the _redirects subset the site uses (build check and dev server)
+  resolve.mjs     maps a request path to a built file the way Pages does (dev and production servers)
+  redirects.mjs   evaluator for the _redirects subset the site uses (build check and both servers)
+  headers.mjs     evaluator for the _headers subset the site uses (production server)
+  cards/          link cards for robots: rules, reading, HTML, the request handler
+  server/         the production server: static files, the card handler, its disk cache, packing
+  functions/      the Pages Function that runs cards/ when Pages hosts the site
   chrome-markup.mjs  build-time markup of the shared head, header and footer
   tools/          contrast.mjs: the contrast report and its check (not published)
   test/           node:test suites
@@ -129,6 +135,109 @@ rewrites (the file page) gets Pages' default headers, not the ones above. In
 nginx, an `add_header` in a `location` replaces the ones inherited from the server block; repeat
 every header in each location that needs it.
 
+## Hosting
+
+| `SITE_TARGET` | Where a push to `main` deploys | Job |
+|---|---|---|
+| unset or `cloudflare` | Cloudflare Pages, with the link cards as a Pages Function | `deploy-site` in `.github/workflows/test.yml` |
+| `server` | the owner's server, `94.183.189.150` | `.github/workflows/deploy-site-server.yml` |
+
+Any other value fails the deploy with a message naming the variable. The design is in
+`docs/superpowers/specs/2026-11-12-site-server-design.md`.
+
+### The server
+
+```
+internet ──443/80──> Caddy ──127.0.0.1:8080──> node site/server/main.mjs
+```
+
+Caddy holds the TLS certificate and retries for up to 15 s while the site restarts; Node is the whole
+site. It answers like Pages, including Pages' default headers (`Access-Control-Allow-Origin: *`,
+`Referrer-Policy`, `Cache-Control: public, max-age=0, must-revalidate`, `no-store` on the 404 page),
+308 redirects that keep the query string, content-hash ETags, and 404 for the host files themselves.
+`site/test/server-static.test.mjs` holds a table of what the live Pages site answered for a set of
+paths, and the server must answer the same.
+
+| Part | Role |
+|---|---|
+| `server/static.mjs` | the built site with Pages' semantics and headers |
+| `server/app.mjs` | routes `_routes.json` paths to `cards/handler.mjs`; at most 4 ledger reads and 32 card requests at once, past which a robot gets the static answer; 5 s drain on `SIGTERM` |
+| `server/cache.mjs` | the card cache in `/var/cache/xrpl-file`, 256 MiB; card pages are kept per build of `file.html` |
+| `server/main.mjs` | the entry point; `PORT`, `HOST`, `SITE_ORIGIN`, `CACHE_DIR` from the environment |
+| `server/pack.mjs` | packs a release: `node site/server/pack.mjs <out.tar.gz> <commit>` |
+| `deploy/server/` | `provision.sh` and `setup.sh` (prepare the server), `cutover.sh`, the release and smoke scripts, the unit, Caddy and sshd files |
+
+To run the production server locally after both builds:
+
+```bash
+PORT=8090 CACHE_DIR=/tmp/xf-cache node site/server/main.mjs
+```
+
+### Releases
+
+The deploy key in GitHub can do one thing on the server: run `/usr/local/bin/xrpl-file-release`
+(`release <commit>` with the archive on standard input, or `rollback`). The script starts the new
+release on port 8081 and runs `xrpl-file-smoke` against it before visitors see it, then switches the
+`current` link, restarts the service and checks again. A release that fails after the switch is
+replaced by the last good one; a deploy cut off half-way is repaired by the next run. The five newest
+releases stay in `/srv/xrpl-file/releases`.
+
+To roll back by hand:
+
+```bash
+ssh -i ~/.ssh/xrpl-file-deploy deploy@94.183.189.150 rollback
+```
+
+### Moving the site to the server
+
+Merges into `main` pause from step 2 until step 6, so the server and Pages serve the same commit.
+
+1. Prepare the server from the owner's PC (Git Bash), then run the three `gh` commands it prints:
+
+   ```bash
+   deploy/server/provision.sh root@94.183.189.150
+   ```
+
+   It needs the server's ed25519 host key in `~/.ssh/known_hosts` and key login as root. Running it
+   again reports `changed: 0`. If an SSH change ever locks the owner out, the hosting provider's web
+   console is the way back in; the script also undoes its own `sshd` change after five minutes unless
+   a fresh key login succeeds.
+2. Put a release on the server and look at it through a tunnel:
+
+   ```bash
+   gh workflow run deploy-site-server.yml --ref main
+   ssh -L 8080:127.0.0.1:8080 root@94.183.189.150
+   ```
+
+   Then open `http://127.0.0.1:8080/` and try the three `curl` lines from "File link cards" with port
+   8080.
+3. In Cloudflare DNS, delete the `xrpl-file` CNAME record of the Pages project and add an A record
+   `xrpl-file` → `94.183.189.150`, proxy off, TTL 60 s. Then remove the custom domain from the Pages
+   project (Cloudflare documents this order for detaching a custom domain).
+4. Install the Caddy site once DNS points at the server; the script waits for public resolvers, then
+   for HTTPS with a valid certificate:
+
+   ```bash
+   deploy/server/cutover.sh root@94.183.189.150
+   ```
+
+5. If the certificate does not arrive within 15 minutes, the script stops and shows Caddy's log: fix
+   the cause, or go back to Pages (below).
+6. Point the deploys at the server, deploy the current `main` once more, and resume merges:
+
+   ```bash
+   gh variable set SITE_TARGET --body server
+   gh workflow run deploy-site-server.yml --ref main
+   ```
+
+### Back to Pages
+
+Set `SITE_TARGET` to `cloudflare` and let the Pages deploy run, delete the A record, and add
+`xrpl-file.staticbit.io` as a custom domain of the Pages project again, which creates the proxied
+CNAME. Until Pages shows the domain as active, visitors may get errors, so do it at a quiet hour, and
+leave the server running for a day for visitors whose resolvers still hold the A record. The link
+cards then need Workers Paid ("File link cards" above).
+
 ## Visual system and the shared header and footer
 
 `src/css/tokens.css` holds every colour, face, size and space the pages use, `base.css` the element
@@ -219,6 +328,9 @@ The design is in `docs/superpowers/specs/2026-11-03-link-cards-design.md`.
 | `cards/html.mjs` | writes the card into the static file page's `<head>`; the rest of the page is unchanged |
 | `cards/handler.mjs` | the requests: deadlines, cache lifetimes, one picture read at a time per file |
 | `wrangler.toml` | project name, output directory, compatibility date and `limits.cpu_ms = 5000` |
+
+On the owner's server the same `cards/handler.mjs` runs inside `server/app.mjs` (see
+[Hosting](#hosting)), with a disk cache in place of the Cache API and the lifetimes below unchanged.
 
 The card picture is `/og/<network>/<HASH>`: the file itself when it is a PNG, JPEG, WebP or GIF of at
 most 1 MB whose first bytes match its type, otherwise its cover (section 4.1 of the format), otherwise
