@@ -113,3 +113,18 @@ test('a rewrite whose target ends in .html loses the link, as it does on Pages',
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('the dev server answers a request over HTTP with the rules applied', async () => {
+  const { root } = await siteRoot();
+  const server = createDevServer(root);
+  try {
+    await listenOnFreePort(server, 0);
+    const { port } = server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/testnet/${HASH}`);
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), 'file page');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
