@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# The checks a release must pass before and after visitors are switched to it:
+#
+#   xrpl-file-smoke <port> <commit>        with XRPL_FILE_SMOKE_DIST=<release>/site/dist
+#
+# None of them needs the ledger to answer: the generic card and the banner pass.
+set -euo pipefail
+
+port=$1
+commit=$2
+dist=${XRPL_FILE_SMOKE_DIST:?XRPL_FILE_SMOKE_DIST must name the site/dist of the release}
+base="http://127.0.0.1:$port"
+HASH=9B1A9E33DBD9B445BFE2854D4D489DC860869D873AD36DA30A69DD19DDBC0DF5
+ROBOT='TelegramBot (like TwitterBot)'
+
+fail() {
+  echo "smoke: $*" >&2
+  exit 1
+}
+
+# headers <url> [curl args...]: the response headers, lower-cased names, no CR.
+headers() {
+  local url=$1
+  shift
+  curl -sS --max-time 5 -o /dev/null -D - "$@" "$url" | tr -d '\r' | sed 's/^\([^:]*\):/\L\1:/'
+}
+
+status() { head -1 <<<"$1" | awk '{print $2}'; }
+
+home=$(headers "$base/") || fail "/ does not answer"
+[[ $(status "$home") == 200 ]] || fail "/ answers $(status "$home")"
+grep -qx "x-xrpl-file-release: $commit" <<<"$home" || fail "the release answering is not $commit"
+
+page=$(curl -sS --max-time 5 "$base/mainnet/$HASH") || fail "the file page does not answer"
+[[ $page == "$(cat "$dist/file.html")" ]] || fail "/mainnet/<hash> is not the file page"
+
+nope=$(headers "$base/nope") || fail "/nope does not answer"
+[[ $(status "$nope") == 404 ]] || fail "/nope answers $(status "$nope")"
+
+hidden=$(headers "$base/_redirects") || fail "/_redirects does not answer"
+[[ $(status "$hidden") == 404 ]] || fail "/_redirects answers $(status "$hidden")"
+
+version=$(find "$dist/element" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | head -1)
+element=$(headers "$base/element/$version/xrpl-file-element.js") || fail "the element does not answer"
+grep -qx 'access-control-allow-origin: \*' <<<"$element" || fail "the element has no Access-Control-Allow-Origin: *"
+
+card=$(headers "$base/mainnet/$HASH" -A "$ROBOT") || fail "the robot's card does not answer"
+[[ $(status "$card") == 200 ]] || fail "the robot's card answers $(status "$card")"
+grep -q '^content-type: text/html' <<<"$card" || fail "the robot's card is not HTML"
+
+picture=$(headers "$base/og/mainnet/$HASH" -A "$ROBOT") || fail "the card picture does not answer"
+[[ $(status "$picture") == 200 ]] || fail "the card picture answers $(status "$picture")"
+grep -q '^content-type: image/' <<<"$picture" || fail "the card picture is not an image"
