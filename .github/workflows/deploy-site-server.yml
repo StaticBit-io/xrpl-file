@@ -1,0 +1,55 @@
+name: deploy-site-server
+
+# The site on the owner's server (docs/superpowers/specs/2026-11-12-site-server-design.md). Called by
+# test.yml on a push to main when SITE_TARGET is "server", and run by hand to put a release on the
+# server while DNS still points at Pages:
+#
+#   gh workflow run deploy-site-server.yml --ref main
+#
+# The deploy key reaches only the server's release script (a forced command): it uploads the release
+# and the server checks it on a side port before switching visitors to it.
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Deploys in the order they start; the server's own lock covers what this does not.
+    concurrency:
+      group: deploy-site-server
+      cancel-in-progress: false
+    env:
+      SITE_SSH_KEY: ${{ secrets.SITE_SSH_KEY }}
+      SITE_SSH_KNOWN_HOSTS: ${{ secrets.SITE_SSH_KNOWN_HOSTS }}
+      SITE_HOST: ${{ vars.SITE_HOST }}
+    steps:
+      # Printed by deploy/server/provision.sh; without them ssh fails with a message that names none.
+      - name: the server deploy settings are set
+        run: |
+          missing=()
+          [ -n "$SITE_SSH_KEY" ] || missing+=("secret SITE_SSH_KEY")
+          [ -n "$SITE_SSH_KNOWN_HOSTS" ] || missing+=("secret SITE_SSH_KNOWN_HOSTS")
+          [ -n "$SITE_HOST" ] || missing+=("variable SITE_HOST")
+          if [ ${#missing[@]} -gt 0 ]; then
+            printf 'missing: %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node web/build.mjs
+      - run: node site/build.mjs
+      - run: node site/server/pack.mjs "$RUNNER_TEMP/release.tar.gz" "$GITHUB_SHA"
+      - name: release on the server
+        run: |
+          umask 077
+          printf '%s\n' "$SITE_SSH_KEY" > "$RUNNER_TEMP/deploy-key"
+          printf '%s\n' "$SITE_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/known_hosts"
+          ssh -i "$RUNNER_TEMP/deploy-key" -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/known_hosts" -o StrictHostKeyChecking=yes \
+            "deploy@$SITE_HOST" "release $GITHUB_SHA" < "$RUNNER_TEMP/release.tar.gz"
+      - name: forget the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/deploy-key"

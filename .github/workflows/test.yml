@@ -42,6 +42,9 @@ jobs:
       - name: the link-card function bundles
         run: npx --yes wrangler@4.151.1 pages functions build --outdir /tmp/functions-build
         working-directory: site
+      # The site server's deploy scripts: their tests stub sudo, systemctl and node, so they run here.
+      - run: node --test deploy/server/test/*.test.mjs
+      - run: shellcheck deploy/server/*.sh deploy/server/xrpl-file-release deploy/server/xrpl-file-smoke
       - name: the committed vectors are what the code produces
         run: |
           dotnet run --project tools/XrplFile.Vectors --configuration Release --no-build -- /tmp/v1.json
@@ -122,12 +125,37 @@ jobs:
       - run: dotnet build app/XrplFile.App/XrplFile.App.csproj --configuration Release
 
   # A push to main is a release of the site: work lands on dev and reaches main by a merge, and that
-  # merge publishes https://xrpl-file.staticbit.io. The job waits for "unit", which runs the web and
-  # site suites and both builds, so a red suite never goes live. The slower integration and
-  # windows-app jobs do not gate it: neither touches web/ or site/.
-  deploy-site:
+  # merge publishes https://xrpl-file.staticbit.io. Both deploy jobs wait for "unit", which runs the web
+  # and site suites, both builds and the deploy-script tests, so a red suite never goes live. The slower
+  # integration and windows-app jobs do not gate them: neither touches web/ or site/.
+  # Where it deploys: the repository variable SITE_TARGET, "cloudflare" (Pages, the default while it is
+  # unset) or "server" (the owner's server, deploy-site-server.yml). A misspelt value fails here, so a
+  # deploy is never skipped in silence.
+  site-target:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: unit
+    runs-on: ubuntu-latest
+    outputs:
+      target: ${{ steps.choose.outputs.target }}
+    steps:
+      - id: choose
+        env:
+          SITE_TARGET: ${{ vars.SITE_TARGET }}
+        run: |
+          target=${SITE_TARGET:-cloudflare}
+          case "$target" in
+            cloudflare|server) echo "target=$target" >> "$GITHUB_OUTPUT" ;;
+            *) echo "SITE_TARGET must be \"cloudflare\" or \"server\", got \"$SITE_TARGET\"" >&2; exit 1 ;;
+          esac
+
+  deploy-site-server:
+    needs: [unit, site-target]
+    if: needs.site-target.outputs.target == 'server'
+    uses: ./.github/workflows/deploy-site-server.yml
+    secrets: inherit
+
+  deploy-site:
+    needs: [unit, site-target]
+    if: needs.site-target.outputs.target == 'cloudflare'
     runs-on: ubuntu-latest
     # Two merges in quick succession deploy in order; cancelling the older run could leave the
     # earlier commit live if it finished last.
