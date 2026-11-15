@@ -64,3 +64,21 @@ test('a missing file is a miss and any other read error is a 500', async () => {
     assert.equal(missing.status, 404);
   });
 });
+
+test('host files stay hidden behind an encoded slash', async () => {
+  await withSite(async ({ root, rules }) => {
+    for (const path of ['/%2F_redirects', '/js/%2F..%2F_redirects', '//_headers']) {
+      const result = await resolveRequest(root, path, rules, { hidden: HOST_FILES });
+      assert.equal(result.status, 404, path);
+    }
+  });
+});
+
+test('a path the file system rejects is a miss, not a fault', async () => {
+  await withSite(async ({ root, rules }) => {
+    assert.equal((await resolveRequest(root, '/a%00b', rules)).status, 404);
+    for (const code of ['ENAMETOOLONG', 'EINVAL']) {
+      assert.equal((await resolveRequest(root, '/file', rules, { stat: failing(code) })).status, 404, code);
+    }
+  });
+});

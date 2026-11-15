@@ -24,13 +24,16 @@ export const TYPES = {
 /** Files Pages reads as configuration and never publishes. */
 export const HOST_FILES = ['/_redirects', '/_headers', '/_routes.json'];
 
-// Only these mean "no such file"; anything else (permissions, I/O) is a fault the visitor must not
-// see as a quiet 404.
-const MISSING = new Set(['ENOENT', 'ENOTDIR']);
+// These mean "no such file": a missing path, or one the file system will not take (a NUL byte, a
+// segment too long), which scanners send all the time. Anything else (permissions, I/O) is a fault the
+// visitor must not see as a quiet 404.
+const MISSING = new Set(['ENOENT', 'ENOTDIR', 'ENAMETOOLONG', 'EINVAL', 'ERR_INVALID_ARG_VALUE']);
 
 async function readIfFile(root, urlPath, fs) {
   const file = resolve(root, '.' + urlPath);
   if (file !== root && !file.startsWith(root + sep)) return null;
+  // Compared as resolved files, so /%2F_redirects or /js/%2F..%2F_redirects find nothing either.
+  if (fs.concealed.has(file)) return null;
   try {
     if (!(await fs.stat(file)).isFile()) return null;
     return { file, body: await fs.readFile(file) };
@@ -59,7 +62,11 @@ async function notFound(root, fs) {
  */
 export async function resolveRequest(root, pathname, rules, options = {}) {
   const { search = '', htmlStatus = 307, dirStatus = 301, hidden = [] } = options;
-  const fs = { stat: options.stat ?? fsStat, readFile: options.readFile ?? fsReadFile };
+  const fs = {
+    stat: options.stat ?? fsStat,
+    readFile: options.readFile ?? fsReadFile,
+    concealed: new Set(hidden.map((path) => resolve(root, '.' + path))),
+  };
   let urlPath;
   try {
     urlPath = decodeURIComponent(pathname);

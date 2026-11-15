@@ -22,13 +22,19 @@ report() { # report ok|changed <step>
 }
 
 # put <mode> <owner:group> <destination> <source file>: installs only when the content differs.
+# Returns 0 when it installed and 10 when nothing changed; a failed install ends the script, since
+# callers test the result in && and if, where set -e does not reach.
+UNCHANGED=10
 put() {
   local mode=$1 owner=$2 destination=$3 source=$4
   if [[ -f $destination ]] && cmp -s "$source" "$destination" &&
     [[ $(stat -c '%a %U:%G' "$destination") == "${mode#0} $owner" ]]; then
-    return 1
+    return "$UNCHANGED"
   fi
-  install -D -m "$mode" -o "${owner%%:*}" -g "${owner##*:}" "$source" "$destination"
+  if ! install -D -m "$mode" -o "${owner%%:*}" -g "${owner##*:}" "$source" "$destination"; then
+    echo "could not install $destination" >&2
+    exit 1
+  fi
 }
 
 # put_text <mode> <owner:group> <destination> <<< text
@@ -156,11 +162,11 @@ step_sudoers() {
 
 step_directories() {
   local before after
-  before=$(stat -c '%a %U' /srv/xrpl-file /srv/xrpl-file/releases /var/cache/xrpl-file /etc/xrpl-file 2>/dev/null || true)
+  # /var/cache/xrpl-file belongs to the unit (CacheDirectory=), which creates it on every start.
+  before=$(stat -c '%a %U' /srv/xrpl-file /srv/xrpl-file/releases /etc/xrpl-file 2>/dev/null || true)
   install -d -m 0755 -o deploy -g deploy /srv/xrpl-file /srv/xrpl-file/releases
-  install -d -m 0750 -o xrpl-file -g xrpl-file /var/cache/xrpl-file
   install -d -m 0755 -o root -g root /etc/xrpl-file
-  after=$(stat -c '%a %U' /srv/xrpl-file /srv/xrpl-file/releases /var/cache/xrpl-file /etc/xrpl-file)
+  after=$(stat -c '%a %U' /srv/xrpl-file /srv/xrpl-file/releases /etc/xrpl-file)
   if [[ $before != "$after" ]]; then report changed directories; else report ok directories; fi
 }
 
@@ -168,12 +174,14 @@ step_scripts() {
   local did=0
   put 0755 root:root /usr/local/bin/xrpl-file-release "$BUNDLE/xrpl-file-release" && did=1
   put 0755 root:root /usr/local/bin/xrpl-file-smoke "$BUNDLE/xrpl-file-smoke" && did=1
+  put 0755 root:root /usr/local/sbin/xrpl-file-candidate "$BUNDLE/xrpl-file-candidate" && did=1
   if ((did)); then report changed release-scripts; else report ok release-scripts; fi
 }
 
 step_unit() {
   local did=0
   put 0644 root:root /etc/systemd/system/xrpl-file-site.service "$BUNDLE/xrpl-file-site.service" && did=1
+  put 0644 root:root "/etc/systemd/system/xrpl-file-candidate@.service" "$BUNDLE/xrpl-file-candidate@.service" && did=1
   put_text 0644 root:root /etc/xrpl-file/site.env <<<"SITE_ORIGIN=https://$DOMAIN" && did=1
   if ((did)); then
     systemctl daemon-reload
@@ -236,13 +244,27 @@ policy_holds() {
     grep -qE '^permitrootlogin (prohibit-password|without-password)$' <<<"$effective"
 }
 
+# The jobs of the service users never outlive them: only root may use cron.
+step_cron() {
+  if put_text 0644 root:root /etc/cron.allow <<<"root"; then report changed cron; else report ok cron; fi
+}
+
+# provision.sh writes this after a fresh key login under the policy it installed.
+SSHD_PROVEN=/etc/xrpl-file/sshd-proven
+
 step_sshd() {
   local target=/etc/ssh/sshd_config.d/01-xrpl-file.conf
   if [[ -f $target ]] && cmp -s "$BUNDLE/sshd-01-xrpl-file.conf" "$target"; then
-    report ok sshd
-    return
+    # Unchanged on disk is "ok" only once a fresh login proved it and no timer is waiting to undo it:
+    # a run within the five minutes of an unproven one must prove it again.
+    if [[ -f $SSHD_PROVEN && $SSHD_PROVEN -nt $target ]] && ! systemctl is-active --quiet xrpl-file-sshd-revert.timer; then
+      report ok sshd
+      return
+    fi
+  else
+    install -m 0644 -o root -g root "$BUNDLE/sshd-01-xrpl-file.conf" "$target"
   fi
-  install -m 0644 -o root -g root "$BUNDLE/sshd-01-xrpl-file.conf" "$target"
+  rm -f "$SSHD_PROVEN"
   if ! sshd -t || ! policy_holds root || ! policy_holds deploy; then
     rm -f "$target"
     echo "the sshd policy did not check out; the drop-in was removed and sshd left as it was" >&2
@@ -250,6 +272,8 @@ step_sshd() {
   fi
   # Undone in five minutes unless provision.sh proves a fresh key login and stops this timer.
   systemctl stop xrpl-file-sshd-revert.timer >/dev/null 2>&1 || true
+  # A revert unit that failed earlier would make systemd-run refuse the name.
+  systemctl reset-failed xrpl-file-sshd-revert.service xrpl-file-sshd-revert.timer >/dev/null 2>&1 || true
   systemd-run --unit=xrpl-file-sshd-revert --on-active=5min \
     /bin/sh -c "rm -f $target && systemctl try-reload-or-restart ssh.service" >/dev/null
   echo "armed sshd-revert"
@@ -268,5 +292,6 @@ step_scripts
 step_unit
 step_caddy
 step_firewall
+step_cron
 step_sshd
 echo "changed: $changed"

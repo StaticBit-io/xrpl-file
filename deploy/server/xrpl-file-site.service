@@ -22,7 +22,10 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/var/cache/xrpl-file
+# systemd creates /var/cache/xrpl-file, owned by User=, on every start: a cache deleted or chowned
+# by hand never keeps the site down.
+CacheDirectory=xrpl-file
+CacheDirectoryMode=0750
 CapabilityBoundingSet=
 MemoryMax=512M
 ProtectKernelTunables=yes

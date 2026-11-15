@@ -15,17 +15,20 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Deploys in the order they start; the server's own lock covers what this does not.
     concurrency:
       group: deploy-site-server
       cancel-in-progress: false
     env:
-      SITE_SSH_KEY: ${{ secrets.SITE_SSH_KEY }}
-      SITE_SSH_KNOWN_HOSTS: ${{ secrets.SITE_SSH_KNOWN_HOSTS }}
       SITE_HOST: ${{ vars.SITE_HOST }}
+    # The key reaches only the two steps that use it, not checkout, setup-node or the build scripts.
     steps:
       # Printed by deploy/server/provision.sh; without them ssh fails with a message that names none.
       - name: the server deploy settings are set
+        env:
+          SITE_SSH_KEY: ${{ secrets.SITE_SSH_KEY }}
+          SITE_SSH_KNOWN_HOSTS: ${{ secrets.SITE_SSH_KNOWN_HOSTS }}
         run: |
           missing=()
           [ -n "$SITE_SSH_KEY" ] || missing+=("secret SITE_SSH_KEY")
@@ -43,11 +46,16 @@ jobs:
       - run: node site/build.mjs
       - run: node site/server/pack.mjs "$RUNNER_TEMP/release.tar.gz" "$GITHUB_SHA"
       - name: release on the server
+        env:
+          SITE_SSH_KEY: ${{ secrets.SITE_SSH_KEY }}
+          SITE_SSH_KNOWN_HOSTS: ${{ secrets.SITE_SSH_KNOWN_HOSTS }}
         run: |
           umask 077
           printf '%s\n' "$SITE_SSH_KEY" > "$RUNNER_TEMP/deploy-key"
           printf '%s\n' "$SITE_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/known_hosts"
+          # A connection that dies is noticed in a minute, not at the job's timeout.
           ssh -i "$RUNNER_TEMP/deploy-key" -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
             -o UserKnownHostsFile="$RUNNER_TEMP/known_hosts" -o StrictHostKeyChecking=yes \
             "deploy@$SITE_HOST" "release $GITHUB_SHA" < "$RUNNER_TEMP/release.tar.gz"
       - name: forget the key

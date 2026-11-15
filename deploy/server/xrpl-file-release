@@ -11,7 +11,11 @@
 #
 # The XRPL_FILE_* variables exist for the tests. SSH does not pass them: Ubuntu's sshd accepts only
 # LANG and LC_* from the client.
-set -euo pipefail
+set -Eeuo pipefail
+# Without a pty, sshd does not signal this script when the client goes away (a dropped connection, a
+# cancelled Actions job); it keeps running with its output closed. Writing there must not kill it
+# before it has put the last good release back, so SIGPIPE is ignored and `say` cannot fail.
+trap '' PIPE
 
 ROOT=${XRPL_FILE_ROOT:-/srv/xrpl-file}
 MAX_BYTES=$((200 * 1024 * 1024))
@@ -23,7 +27,7 @@ SERVICE=xrpl-file-site
 CANDIDATE_PORT=8081
 SERVICE_PORT=8080
 
-say() { echo "xrpl-file-release: $*" >&2; }
+say() { echo "xrpl-file-release: $*" >&2 2>/dev/null || true; }
 
 request=${SSH_ORIGINAL_COMMAND:-}
 commit=
@@ -71,11 +75,11 @@ record_good() {
   echo "$1" >>"$ROOT/good.log"
 }
 
-# The good release before `$1`, newest first, that still exists.
+# The good release before `$1`, newest first, that still exists and was not rolled back from.
 good_before() {
   [[ -f $ROOT/good.log ]] || return 0
   tac "$ROOT/good.log" | while read -r dir; do
-    if [[ $dir != "$1" && -d $dir ]]; then
+    if [[ $dir != "$1" && -d $dir ]] && ! grep -qxF "$dir" "$ROOT/rolled-back.log" 2>/dev/null; then
       echo "$dir"
       break
     fi
@@ -130,15 +134,19 @@ check_archive() {
   fi
 }
 
+# The candidate runs as the unit xrpl-file-candidate@<name>: the site's user, the site's sandbox and a
+# time limit, never release code run as deploy (/usr/local/sbin/xrpl-file-candidate, setup.sh).
 check_candidate() { # <release dir> <commit>
-  local cache pid status=0
-  cache=$(mktemp -d)
-  PORT=$CANDIDATE_PORT HOST=127.0.0.1 CACHE_DIR=$cache node "$1/site/server/main.mjs" >/dev/null 2>&1 &
-  pid=$!
-  smoke_until "$CANDIDATE_PORT" "$1" "$2" || status=1
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
-  rm -rf "$cache"
+  local name status=0
+  name=$(basename "$1")
+  trap 'sudo -n xrpl-file-candidate stop "$name" >/dev/null 2>&1 || true; exit 1' INT TERM HUP
+  if sudo -n xrpl-file-candidate start "$name"; then
+    smoke_until "$CANDIDATE_PORT" "$1" "$2" || status=1
+  else
+    status=1
+  fi
+  sudo -n xrpl-file-candidate stop "$name" || true
+  trap - INT TERM HUP
   return "$status"
 }
 
@@ -179,12 +187,11 @@ release() {
 
   previous=$(target_of "$ROOT/last-good")
   # From here on, any failure or signal puts the last good release back.
-  trap 'restore "$previous"' ERR INT TERM HUP
+  trap 'restore "$previous" "interrupted after the switch"' ERR INT TERM HUP
   point "$ROOT/current" "$dir"
   restart
   if ! smoke_until "$SERVICE_PORT" "$dir" "$commit"; then
-    say "the release failed its checks after the switch"
-    restore "$previous"
+    restore "$previous" "the release failed its checks after the switch"
   fi
   trap - ERR INT TERM HUP
   record_good "$dir"
@@ -192,17 +199,18 @@ release() {
   say "released $commit as $(basename "$dir")"
 }
 
-restore() { # <previous good dir or empty>
+# restore <previous good dir or empty> <reason>: the link and the restart come before any output.
+restore() {
   trap - ERR INT TERM HUP
   if [[ -n $1 ]]; then
     point "$ROOT/current" "$1"
     restart || true
-    say "back on $(basename "$1")"
+    say "$2; back on $(basename "$1")"
   else
     # The first release has nothing to go back to: without `current` the service cannot start.
     rm -f "$ROOT/current"
     restart || true
-    say "no release to go back to; the site is down"
+    say "$2; no release to go back to, the site is down"
   fi
   exit 1
 }
@@ -218,11 +226,13 @@ rollback() {
   point "$ROOT/current" "$target"
   restart
   if ! smoke_until "$SERVICE_PORT" "$target" "$(commit_of "$target")"; then
-    say "$(basename "$target") failed its checks; going back"
     point "$ROOT/current" "$current"
     restart
+    say "$(basename "$target") failed its checks; back on $(basename "$current")"
     exit 1
   fi
+  # A release rolled back from is never a rollback target again: a second rollback goes further back.
+  echo "$current" >>"$ROOT/rolled-back.log"
   record_good "$target"
   say "rolled back to $(basename "$target")"
 }

@@ -1,0 +1,30 @@
+# A release under its check, before visitors are switched to it: the site's user and sandbox, port
+# 8081, a throw-away cache and a time limit. Started and stopped by /usr/local/sbin/xrpl-file-candidate
+# on behalf of deploy/server/xrpl-file-release; installed by setup.sh as
+# /etc/systemd/system/xrpl-file-candidate@.service. %i is the release directory's name.
+[Unit]
+Description=xrpl-file release candidate %i
+
+[Service]
+Type=simple
+User=xrpl-file
+Group=xrpl-file
+ExecStart=/usr/bin/node /srv/xrpl-file/releases/%i/site/server/main.mjs
+Environment=PORT=8081 HOST=127.0.0.1 CACHE_DIR=/tmp/candidate-cache
+EnvironmentFile=/etc/xrpl-file/site.env
+# A check takes seconds; a candidate nobody stopped goes away on its own.
+RuntimeMaxSec=120
+TimeoutStopSec=10
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+CapabilityBoundingSet=
+MemoryMax=512M
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

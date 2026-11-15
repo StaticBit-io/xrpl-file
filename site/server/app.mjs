@@ -129,8 +129,17 @@ export async function createApp({
 /** The HTTP server in front of the app; requests are read on the configured origin. */
 export function createSiteServer(app, { origin, log = () => {} }) {
   return createServer(async (req, res) => {
+    let request;
     try {
-      await writeResponse(res, await app.handle(toRequest(req, origin)), req.method);
+      request = toRequest(req, origin);
+    } catch {
+      // A method fetch's Request refuses (TRACE, CONNECT): Pages answers those 405 too.
+      res.writeHead(405, { Allow: 'GET, HEAD' });
+      res.end();
+      return;
+    }
+    try {
+      await writeResponse(res, await app.handle(request), req.method);
     } catch (error) {
       log(`request ${req.url}: ${error?.message ?? error}`);
       if (!res.headersSent) res.writeHead(500);

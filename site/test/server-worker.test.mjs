@@ -101,3 +101,22 @@ test('the read cap still counts worker reads', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('a worker that never answers is replaced after the main-side limit', async () => {
+  const stuck = await pngFile();
+  const fine = await pngFile();
+  const reader = createPictureReader({
+    sourceModule: FAKE,
+    sourceData: { hangOn: stuck.hash, ledgers: { [fine.hash]: fine.transactions } },
+    // Room for the replacement worker to start and read under a loaded CPU (test files run in
+    // parallel); the stuck read still ends at this plus the main thread's grace.
+    ceilingMs: 1500,
+  });
+  try {
+    assert.deepEqual(await reader.read({ network: 'mainnet', hash: stuck.hash }), { picture: null, outcome: 'transient' });
+    const after = await reader.read({ network: 'mainnet', hash: fine.hash });
+    assert.equal(after.outcome, 'final');
+  } finally {
+    await reader.close();
+  }
+});

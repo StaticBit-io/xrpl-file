@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp, createSiteServer, shutdown } from '../server/app.mjs';
@@ -185,4 +186,24 @@ test('HEAD writes no body', async () => {
   assert.equal(written.headers['x-a'], '1');
   assert.equal(written.chunks.length, 0);
   assert.equal(written.ended, true);
+});
+
+test('a method fetch cannot build answers 405, not 500', async () => {
+  const { app: a } = await app({ sources: [new FakeSource([])] });
+  const server = createSiteServer(a, { origin: ORIGIN });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = server.address();
+    const status = await new Promise((resolve, reject) => {
+      const req = httpRequest({ host: '127.0.0.1', port, method: 'TRACE', path: '/' }, (res) => {
+        res.resume();
+        resolve(res.statusCode);
+      });
+      req.on('error', reject);
+      req.end();
+    });
+    assert.equal(status, 405);
+  } finally {
+    await shutdown(server, a, 200);
+  }
 });

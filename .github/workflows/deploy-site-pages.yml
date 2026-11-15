@@ -1,0 +1,60 @@
+name: deploy-site-pages
+
+# The site on Cloudflare Pages, with the link cards as a Pages Function. Called by test.yml on a push
+# to main when SITE_TARGET is "cloudflare" or unset, and run by hand to bring Pages up to date before
+# the domain goes back to it (site/README.md, "Back to Pages"):
+#
+#   gh workflow run deploy-site-pages.yml --ref main
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Two merges in quick succession deploy in order; cancelling the older run could leave the
+    # earlier commit live if it finished last.
+    concurrency:
+      group: deploy-site
+      cancel-in-progress: false
+    env:
+      WRANGLER: npx --yes wrangler@4.151.1
+      PROJECT: xrpl-file-site
+    steps:
+      # Without a token wrangler falls back to an interactive login and fails with a message that
+      # does not name the missing secret.
+      - name: the Cloudflare secrets are set
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required to deploy the site" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node web/build.mjs
+      - run: node site/build.mjs
+      # In a non-interactive run, "pages deploy" fails on a missing project instead of offering to
+      # create it, so the first deploy creates it here. A failed lookup (bad token) fails the job
+      # rather than falling through to "create".
+      - name: create the Pages project on first deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          projects=$($WRANGLER pages project list --json)
+          if ! printf '%s' "$projects" | grep -q "\"$PROJECT\""; then
+            $WRANGLER pages project create "$PROJECT" --production-branch main
+          fi
+      # From site/: wrangler looks for functions/ in its working directory, and site/wrangler.toml
+      # names the project and the output directory.
+      - run: $WRANGLER pages deploy --branch main --commit-hash "$GITHUB_SHA"
+        working-directory: site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

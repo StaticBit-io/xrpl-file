@@ -60,6 +60,7 @@ step "setup on the server"
 bundle=$(mktemp -d)
 trap 'rm -rf "$bundle"' EXIT
 cp "$HERE/setup.sh" "$HERE/xrpl-file-release" "$HERE/xrpl-file-smoke" "$HERE/xrpl-file-site.service" \
+  "$HERE/xrpl-file-candidate" "$HERE/xrpl-file-candidate@.service" \
   "$HERE/Caddyfile" "$HERE/caddy-10-xrpl-file.conf" "$HERE/sshd-01-xrpl-file.conf" \
   "$HERE/sudoers-xrpl-file-deploy" "$bundle/"
 cp "$KEY.pub" "$bundle/deploy.pub"
@@ -73,7 +74,7 @@ echo "$output"
 
 if grep -qx 'armed sshd-revert' <<<"$output"; then
   step "fresh key login under the new sshd policy"
-  if "${SSH[@]}" "$TARGET" 'systemctl stop xrpl-file-sshd-revert.timer'; then
+  if "${SSH[@]}" "$TARGET" 'systemctl stop xrpl-file-sshd-revert.timer && touch /etc/xrpl-file/sshd-proven'; then
     echo "ok, the revert timer is stopped"
   else
     echo "a fresh key login failed: the old sshd policy comes back within five minutes" >&2

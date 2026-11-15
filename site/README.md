@@ -139,7 +139,7 @@ every header in each location that needs it.
 
 | `SITE_TARGET` | Where a push to `main` deploys | Job |
 |---|---|---|
-| unset or `cloudflare` | Cloudflare Pages, with the link cards as a Pages Function | `deploy-site` in `.github/workflows/test.yml` |
+| unset or `cloudflare` | Cloudflare Pages, with the link cards as a Pages Function | `.github/workflows/deploy-site-pages.yml` |
 | `server` | the owner's server, `94.183.189.150` | `.github/workflows/deploy-site-server.yml` |
 
 Any other value fails the deploy with a message naming the variable. The design is in
@@ -177,12 +177,15 @@ PORT=8090 CACHE_DIR=/tmp/xf-cache node site/server/main.mjs
 
 The deploy key in GitHub can do one thing on the server: run `/usr/local/bin/xrpl-file-release`
 (`release <commit>` with the archive on standard input, or `rollback`). The script starts the new
-release on port 8081 and runs `xrpl-file-smoke` against it before visitors see it, then switches the
-`current` link, restarts the service and checks again. A release that fails after the switch is
-replaced by the last good one; a deploy cut off half-way is repaired by the next run. The five newest
-releases stay in `/srv/xrpl-file/releases`.
+release as the unit `xrpl-file-candidate@<release>` (the site's user and sandbox, port 8081, two
+minutes at most; release code never runs as `deploy`) and runs `xrpl-file-smoke` against it before
+visitors see it, then switches the `current` link, restarts the service and checks again. A release
+that fails after the switch is replaced by the last good one, also when the deploy's connection has
+dropped; a deploy cut off half-way is repaired by the next run. The five newest releases stay in
+`/srv/xrpl-file/releases`.
 
-To roll back by hand:
+To roll back by hand (a second rollback goes further back: a release rolled back from is never a
+rollback target again):
 
 ```bash
 ssh -i ~/.ssh/xrpl-file-deploy deploy@94.183.189.150 rollback
@@ -232,9 +235,15 @@ Merges into `main` pause from step 2 until step 6, so the server and Pages serve
 
 ### Back to Pages
 
-Set `SITE_TARGET` to `cloudflare` and let the Pages deploy run, delete the A record, and add
-`xrpl-file.staticbit.io` as a custom domain of the Pages project again, which creates the proxied
-CNAME. Until Pages shows the domain as active, visitors may get errors, so do it at a quiet hour, and
+Bring Pages up to date with the current `main` and point the deploys back at it:
+
+```bash
+gh variable set SITE_TARGET --body cloudflare
+gh workflow run deploy-site-pages.yml --ref main
+```
+
+Once that run is green, delete the A record and add `xrpl-file.staticbit.io` as a custom domain of the
+Pages project again, which creates the proxied CNAME. Until Pages shows the domain as active, visitors may get errors, so do it at a quiet hour, and
 leave the server running for a day for visitors whose resolvers still hold the A record. The link
 cards then need Workers Paid ("File link cards" above).
 

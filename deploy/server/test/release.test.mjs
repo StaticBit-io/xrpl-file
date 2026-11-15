@@ -22,7 +22,9 @@ const C3 = '3'.repeat(40);
 const STUBS = {
   sudo: '#!/bin/bash\necho "sudo $*" >> "$STUB_LOG"\n[ "$1" = -n ] && shift\nexec "$@"\n',
   systemctl: '#!/bin/bash\necho "systemctl $*" >> "$STUB_LOG"\n',
+  // Release code must never run as deploy: a node call here fails the test that looks for one.
   node: '#!/bin/bash\necho "node PORT=$PORT $*" >> "$STUB_LOG"\nexec sleep 30\n',
+  'xrpl-file-candidate': '#!/bin/bash\necho "candidate $*" >> "$STUB_LOG"\n',
   'xrpl-file-smoke':
     '#!/bin/bash\necho "smoke $1 $2" >> "$STUB_LOG"\n[ -f "$VERDICTS/$1" ] && [ "$(cat "$VERDICTS/$1")" = fail ] && exit 1\nexit 0\n',
 };
@@ -98,11 +100,16 @@ test('a good release becomes current and last good', { skip: !linux }, async () 
     assert.match(await s.current(), new RegExp(`-${C1.slice(0, 12)}$`));
     assert.equal(await s.current(), await s.lastGood());
     const log = await s.log();
-    const candidate = log.findIndex((l) => l.startsWith('node PORT=8081'));
-    const candidateSmoke = log.findIndex((l) => l === `smoke 8081 ${C1}`);
-    const restart = log.findIndex((l) => l === 'systemctl restart xrpl-file-site');
-    const serviceSmoke = log.findIndex((l) => l === `smoke 8080 ${C1}`);
-    assert.ok(candidate >= 0 && candidate < candidateSmoke && candidateSmoke < restart && restart < serviceSmoke, log.join('\n'));
+    const name = await s.current();
+    const candidate = log.indexOf(`candidate start ${name}`);
+    const candidateSmoke = log.indexOf(`smoke 8081 ${C1}`);
+    const stopped = log.indexOf(`candidate stop ${name}`);
+    const restart = log.indexOf('systemctl restart xrpl-file-site');
+    const serviceSmoke = log.indexOf(`smoke 8080 ${C1}`);
+    assert.ok(candidate >= 0 && candidate < candidateSmoke && candidateSmoke < stopped && stopped < restart && restart < serviceSmoke, log.join('\n'));
+    // The candidate is the sandboxed unit run as the site's user, never release code run as deploy.
+    assert.ok(log.includes(`sudo -n xrpl-file-candidate start ${name}`), log.join('\n'));
+    assert.ok(!log.some((l) => l.startsWith('node ')), log.join('\n'));
   } finally {
     await s.cleanup();
   }
@@ -292,5 +299,78 @@ test('the smoke checks pass against a real release and catch a wrong commit', { 
   } finally {
     child?.kill('SIGKILL');
     await rm(work, { recursive: true, force: true });
+  }
+});
+
+test('a candidate that fails its check is stopped too', { skip: !linux }, async () => {
+  const s = await stand();
+  try {
+    await s.verdict(8081, 'fail');
+    run(s.env, `release ${C1}`, await archive(s.base));
+    const log = await s.log();
+    const started = log.find((l) => l.startsWith('candidate start '));
+    assert.ok(started, log.join('\n'));
+    assert.ok(log.includes(started.replace('start', 'stop')), log.join('\n'));
+  } finally {
+    await s.cleanup();
+  }
+});
+
+test('a dropped connection still puts the last good release back', { skip: !linux }, async () => {
+  const s = await stand();
+  try {
+    await released(s, C1);
+    const good = await s.lastGood();
+    await s.verdict(8080, 'fail');
+    const input = await archive(s.base);
+    // As when the client's connection drops: whatever the script writes to stderr goes nowhere.
+    const child = spawn('bash', [RELEASE], { env: { ...s.env, SSH_ORIGINAL_COMMAND: `release ${C2}` }, stdio: ['pipe', 'pipe', 'pipe'] });
+    child.stderr.destroy();
+    child.stdout.destroy();
+    child.stdin.end(input);
+    await new Promise((resolve) => child.once('exit', resolve));
+    assert.equal(await s.current(), good);
+    assert.equal(await s.lastGood(), good);
+  } finally {
+    await s.cleanup();
+  }
+});
+
+test('rolling back twice goes further back', { skip: !linux }, async () => {
+  const s = await stand();
+  try {
+    await released(s, C1);
+    const first = await s.current();
+    await released(s, C2);
+    const second = await s.current();
+    await released(s, C3);
+    assert.equal(run(s.env, 'rollback').code, 0);
+    assert.equal(await s.current(), second);
+    assert.equal(run(s.env, 'rollback').code, 0);
+    assert.equal(await s.current(), first);
+  } finally {
+    await s.cleanup();
+  }
+});
+
+test('the candidate wrapper takes only start or stop and a release name', { skip: !linux }, async () => {
+  const s = await stand();
+  try {
+    const wrapper = fileURLToPath(new URL('../xrpl-file-candidate', import.meta.url));
+    const name = '20261115T175309Z-03d646620aa2';
+    await mkdir(join(s.root, 'releases', name, 'site', 'server'), { recursive: true });
+    await writeFile(join(s.root, 'releases', name, 'site', 'server', 'main.mjs'), '');
+    const call = (...args) => spawnSync('bash', [wrapper, ...args], { env: s.env, encoding: 'utf8' }).status;
+    assert.equal(call('start', name), 0);
+    assert.equal(call('stop', name), 0);
+    for (const args of [['start', '../etc'], ['start', `${name} other.service`], ['restart', name], ['start', '20261115T175309Z-ffffffffffff'], []]) {
+      assert.equal(call(...args), 2, args.join(' '));
+    }
+    const log = await s.log();
+    assert.ok(log.includes(`systemctl start xrpl-file-candidate@${name}.service`), log.join('\n'));
+    assert.ok(log.includes(`systemctl stop xrpl-file-candidate@${name}.service`), log.join('\n'));
+    assert.equal(log.filter((l) => l.startsWith('systemctl start')).length, 1, log.join('\n'));
+  } finally {
+    await s.cleanup();
   }
 });

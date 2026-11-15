@@ -39,14 +39,19 @@ while true; do
 done
 
 echo "== installing the Caddy site"
+expected=$("${SSH[@]}" "$TARGET" "node -p \"require('/srv/xrpl-file/current/release.json').commit\"")
+echo "the server runs $expected"
+site=/etc/caddy/sites/$DOMAIN.caddy
+# A site file that does not validate would stop Caddy from loading at its next restart: it goes again.
 sed "s/^DOMAIN {/$DOMAIN {/" "$HERE/site.caddy" | "${SSH[@]}" "$TARGET" \
-  "install -D -m 0644 /dev/stdin /etc/caddy/sites/$DOMAIN.caddy && caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null && systemctl reload caddy"
+  "install -D -m 0644 /dev/stdin $site && if caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null; then systemctl reload caddy; else rm -f $site; echo 'the Caddy site does not validate; removed it' >&2; exit 1; fi"
 
 echo "== waiting for https://$DOMAIN/"
 deadline=$((SECONDS + TLS_WAIT_SECONDS))
 while true; do
-  if answer=$(curl -sS --max-time 10 -o /dev/null -D - "https://$DOMAIN/" 2>&1) &&
-    grep -qi '^x-xrpl-file-release:' <<<"$answer"; then
+  # --resolve: this PC's resolver may still hold the old answer; the server is what is being checked.
+  if answer=$(curl -sS --max-time 10 --resolve "$DOMAIN:443:$HOST" -o /dev/null -D - "https://$DOMAIN/" 2>&1) &&
+    grep -qi "^x-xrpl-file-release: $expected" <<<"$answer"; then
     echo "$answer" | tr -d '\r' | grep -i -E '^(HTTP|x-xrpl-file-release)'
     echo "the site is on the server"
     exit 0

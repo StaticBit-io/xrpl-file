@@ -1,5 +1,6 @@
 // The main thread's side of the picture worker: one worker, requests matched to answers by id. A worker
-// that dies answers every read in flight as transient and is started again on the next read.
+// that dies, or does not answer in time, is dropped: its reads in flight answer transient, and the next
+// read starts a new worker.
 import { Worker } from 'node:worker_threads';
 
 const PICTURE_READ_CEILING_MS = 25000;
@@ -19,57 +20,61 @@ export function createPictureReader({
   sourceData = {},
   ceilingMs = PICTURE_READ_CEILING_MS,
 } = {}) {
-  let worker = null;
+  // The current worker and the reads it owes; a worker's 'exit' after it was replaced settles only
+  // its own reads, never those already given to its successor.
+  let current = null;
   let nextId = 0;
-  const pending = new Map();
 
-  function settleAll() {
-    for (const resolve of pending.values()) resolve(TRANSIENT);
-    pending.clear();
+  function drop(entry) {
+    if (current === entry) current = null;
+    for (const resolve of entry.pending.values()) resolve(TRANSIENT);
+    entry.pending.clear();
+    entry.worker.terminate().catch(() => {});
   }
 
   function start() {
-    const started = new Worker(new URL('./picture-worker.mjs', import.meta.url), {
+    const worker = new Worker(new URL('./picture-worker.mjs', import.meta.url), {
       workerData: { sourceModule, sourceData, ceilingMs },
     });
     // An idle worker must not keep the process alive past its shutdown.
-    started.unref();
-    started.on('message', ({ id, picture, outcome }) => {
-      const resolve = pending.get(id);
-      pending.delete(id);
+    worker.unref();
+    const entry = { worker, pending: new Map() };
+    worker.on('message', ({ id, picture, outcome }) => {
+      const resolve = entry.pending.get(id);
+      entry.pending.delete(id);
       resolve?.({ picture: picture ? { bytes: new Uint8Array(picture.bytes), type: picture.type } : null, outcome });
     });
-    const lost = () => {
-      if (worker === started) worker = null;
-      settleAll();
-    };
-    started.on('error', lost);
-    started.on('exit', lost);
-    return started;
+    worker.on('error', () => drop(entry));
+    worker.on('exit', () => drop(entry));
+    return entry;
   }
 
   function read(at) {
-    worker ??= start();
+    current ??= start();
+    const entry = current;
     const id = nextId++;
     return new Promise((resolve) => {
+      // A worker stuck in synchronous code would keep the one CPU and every later read; past the
+      // limit it is terminated and replaced.
       const timer = setTimeout(() => {
-        pending.delete(id);
-        resolve(TRANSIENT);
+        if (entry.pending.has(id)) drop(entry);
       }, ceilingMs + MAIN_GRACE_MS);
       timer.unref?.();
-      pending.set(id, (answer) => {
+      entry.pending.set(id, (answer) => {
         clearTimeout(timer);
         resolve(answer);
       });
-      worker.postMessage({ id, network: at.network, hash: at.hash });
+      entry.worker.postMessage({ id, network: at.network, hash: at.hash });
     });
   }
 
   async function close() {
-    const current = worker;
-    worker = null;
-    settleAll();
-    if (current) await current.terminate();
+    const entry = current;
+    current = null;
+    if (!entry) return;
+    for (const resolve of entry.pending.values()) resolve(TRANSIENT);
+    entry.pending.clear();
+    await entry.worker.terminate();
   }
 
   return { read, close };

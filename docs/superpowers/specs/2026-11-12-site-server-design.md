@@ -55,9 +55,10 @@ rented server instead:
   fresh key login succeeds after it.
 - **A stolen deploy key reaches beyond the site.** The deploy key can upload a release, and a release
   is code, so whoever holds the key can run code as the site's service user. That is accepted, and
-  bounded: no shell for `deploy`, no forwarding, no command but the release script; the service user
-  cannot write the code it runs, the release script, the unit, Caddy's configuration or its admin
-  API, and cannot gain privileges.
+  bounded: no shell for `deploy`, no forwarding, no command but the release script, and release code
+  never runs as `deploy` (the candidate is a unit run as the service user); the service user cannot
+  write the code it runs, the release script, the unit, Caddy's configuration or its admin API, cannot
+  use cron, and cannot gain privileges.
 - **A secret passes through the repository, the chat or a log.** The deploy key is created on the
   owner's PC, and the owner stores it in GitHub with a command the script prints.
 - **A deploy shows visitors a broken release.** A release is started and checked on a side port
@@ -230,15 +231,21 @@ connection never stands in for a real login. It runs these steps in this order:
      to run, the server runs only the release script, which reads the request from
      `SSH_ORIGINAL_COMMAND`;
    - `/etc/sudoers.d/xrpl-file-deploy`: `deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart
-     xrpl-file-site`, nothing else, checked with `visudo -cf` before it is installed; the release
-     script calls `sudo -n`;
+     xrpl-file-site` and `/usr/local/sbin/xrpl-file-candidate` (which takes only `start` or `stop`
+     and a release name, and starts or stops the unit `xrpl-file-candidate@<name>`), nothing else,
+     checked with `visudo -cf` before it is installed; the release script calls `sudo -n`;
+   - `/etc/cron.allow` holding only `root`;
    - ownership: `/srv/xrpl-file` and everything under it belong to `deploy` (it must replace the
      `current` link) and are readable, not writable, by `xrpl-file`; `/var/cache/xrpl-file` belongs to
      `xrpl-file`; the release script, the unit, the sudoers file, the `sshd` drop-in and Caddy's
      configuration belong to root;
    - the systemd unit `xrpl-file-site.service`: `User=xrpl-file`, `ProtectSystem=strict`,
-     `ReadWritePaths=/var/cache/xrpl-file`, `NoNewPrivileges`, `PrivateTmp`, `ProtectHome`,
-     `CapabilityBoundingSet=` (empty), `MemoryMax=512M`, `Restart=on-failure`, `TimeoutStopSec=10`;
+     `CacheDirectory=xrpl-file` (systemd creates the cache directory and owns it to the user on every
+     start, so a cache deleted or chowned by hand never keeps the site down), `NoNewPrivileges`,
+     `PrivateTmp`, `ProtectHome`, `CapabilityBoundingSet=` (empty), `MemoryMax=512M`,
+     `Restart=on-failure`, `TimeoutStopSec=10`;
+   - the template unit `xrpl-file-candidate@.service`: the same user and sandbox, port 8081, a cache
+     in its private `/tmp`, `RuntimeMaxSec=120`;
    - Caddy with its admin API on a Unix socket and no site yet: until cut-over (below) it serves
      nothing public, so it never asks for a certificate while the name still points at Pages;
    - `ufw`: deny incoming by default, allow 22, 80 and 443; 22 is allowed before `ufw` is enabled;
@@ -248,9 +255,12 @@ connection never stands in for a real login. It runs these steps in this order:
      a keyword wins. Before the reload, `sshd -t` must pass and `sshd -T -C user=root,…` and
      `-C user=deploy,…` must show password login off and key login on; otherwise the drop-in is
      removed. Before the reload, `setup.sh` also arms a timer (`systemd-run --on-active=5min`) that
-     removes the drop-in and reloads `sshd` again.
+     removes the drop-in and reloads `sshd` again. An unchanged drop-in counts as done only when
+     `/etc/xrpl-file/sshd-proven` is newer than it and no revert timer is active; otherwise the run
+     arms the timer and asks for proof again.
 4. **Proves the new policy.** The script opens a fresh key login as root. If it succeeds, it disarms
-   the timer; if it fails, the timer restores the old policy within five minutes. It also checks that
+   the timer and writes `/etc/xrpl-file/sshd-proven`; if it fails, the timer restores the old policy
+   within five minutes. It also checks that
    a password login is refused, and that the deploy key gets nothing but the release script's refusal
    for an unknown request.
 5. **Pins the host key.** It takes the IP's ed25519 line from the owner's `known_hosts` with
@@ -284,20 +294,26 @@ good (`/srv/xrpl-file/last-good`), it points `current` back there and restarts.
 3. Unpacks it with `--no-same-owner --no-same-permissions` into
    `/srv/xrpl-file/releases/<UTC time to the second>-<commit12>` (an existing name refuses), and
    checks that it holds `site/server/main.mjs` and `site/dist/index.html`.
-4. **Checks the candidate before visitors see it.** Starts `node site/server/main.mjs` from the new
-   directory on `127.0.0.1:8081`, as `deploy`, with a throw-away cache directory, and runs the smoke
-   checks below against it. Then stops it. A failed check refuses the release; `current` never moved.
+4. **Checks the candidate before visitors see it.** Starts the unit `xrpl-file-candidate@<name>`
+   (through `sudo -n xrpl-file-candidate start <name>`): the new directory's server on
+   `127.0.0.1:8081`, as the service user in its sandbox, with a throw-away cache, and runs the smoke
+   checks below against it. Then stops it, also when the check fails. A failed check refuses the
+   release; `current` never moved.
 5. Points `current` at the new release (a new link renamed over the old one), runs
    `sudo -n systemctl restart xrpl-file-site`, and runs the smoke checks against `127.0.0.1:8080`
    for up to 30 s. On success it records the release as last good. On failure, or if the script is
    interrupted (`trap` on errors and signals), it points `current` back at the last good release,
-   restarts, and exits non-zero. The first release, which has no last good one, stops the service on
+   restarts, and exits non-zero. The link and the restart come before any output: when the client's
+   connection has dropped, sshd does not stop the script, and writing to the closed output must not
+   end it first (`SIGPIPE` is ignored). The first release, which has no last good one, stops the service on
    failure instead.
 6. Keeps the five newest releases plus the last good one and the one before it, and removes staging
    files and failed unpacks.
 
 **`rollback`** points `current` at the last good release before the current one, restarts, runs the
-smoke checks, and records it as last good; if the checks fail it goes back to where it was.
+smoke checks, and records it as last good; if the checks fail it goes back to where it was. The
+release rolled back from is recorded and never chosen by a later rollback, so a second rollback goes
+further back.
 
 **The smoke checks**, each with its own 5 s timeout: `X-Xrpl-File-Release` names the expected commit;
 `/` answers 200; `/mainnet/<a fixed hash>` answers 200 with the file page; `/nope` answers 404;
@@ -355,8 +371,8 @@ attached, until that answer expires (the proxied record's TTL is 300 s). Visitor
 get a TLS error until step 4 finishes. The window is the DNS expiry plus the time to the certificate;
 step 5 bounds how long the owner lets it run.
 
-**Back to Pages:** set `SITE_TARGET=cloudflare` and run the Pages deploy, so the Pages project serves
-the current site; delete the A record and add `xrpl-file.staticbit.io` again as a custom domain of the
+**Back to Pages:** set `SITE_TARGET=cloudflare` and run `deploy-site-pages.yml` by hand
+(`workflow_dispatch`), so the Pages project serves the current site; delete the A record and add `xrpl-file.staticbit.io` again as a custom domain of the
 Pages project, which creates the proxied CNAME. Until Pages shows the domain as active, and until
 resolvers forget the A record, visitors may get errors, so this is done at a quiet hour; the server
 keeps running for a day so that visitors still holding the A record are served. Workers Paid from the

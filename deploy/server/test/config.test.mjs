@@ -13,7 +13,6 @@ test('the unit is sandboxed as the spec says', async () => {
     'User=xrpl-file',
     'ExecStart=/usr/bin/node /srv/xrpl-file/current/site/server/main.mjs',
     'ProtectSystem=strict',
-    'ReadWritePaths=/var/cache/xrpl-file',
     'NoNewPrivileges=yes',
     'PrivateTmp=yes',
     'ProtectHome=yes',
@@ -21,9 +20,31 @@ test('the unit is sandboxed as the spec says', async () => {
     'MemoryMax=512M',
     'Restart=on-failure',
     'TimeoutStopSec=10',
+    'CacheDirectory=xrpl-file',
   ]) {
     assert.ok(unit.includes(expected), expected);
   }
+  // systemd creates the cache directory and fixes its owner on every start: a cache someone deleted
+  // or chowned by hand never keeps the site down (ReadWritePaths= on a missing path fails the unit).
+  assert.ok(!unit.some((line) => line.startsWith('ReadWritePaths=')));
+});
+
+test('the candidate runs in the same sandbox as the site, on its own port, for a limited time', async () => {
+  const unit = lines(await read('xrpl-file-candidate@.service'));
+  for (const expected of [
+    'User=xrpl-file',
+    'ExecStart=/usr/bin/node /srv/xrpl-file/releases/%i/site/server/main.mjs',
+    'ProtectSystem=strict',
+    'NoNewPrivileges=yes',
+    'PrivateTmp=yes',
+    'ProtectHome=yes',
+    'CapabilityBoundingSet=',
+    'MemoryMax=512M',
+    'RuntimeMaxSec=120',
+  ]) {
+    assert.ok(unit.includes(expected), expected);
+  }
+  assert.ok(unit.some((line) => line.startsWith('Environment=') && line.includes('PORT=8081')));
 });
 
 test('sshd turns password login off before cloud-init turns it on', async () => {
@@ -39,8 +60,11 @@ test('sshd turns password login off before cloud-init turns it on', async () => 
   assert.ok(conf.includes('AuthorizedKeysFile .ssh/authorized_keys /etc/ssh/authorized_keys/%u'));
 });
 
-test('deploy may restart the site and nothing else', async () => {
-  assert.deepEqual(lines(await read('sudoers-xrpl-file-deploy')), ['deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart xrpl-file-site']);
+test('deploy may restart the site and start or stop a candidate, nothing else', async () => {
+  assert.deepEqual(lines(await read('sudoers-xrpl-file-deploy')), [
+    'deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart xrpl-file-site',
+    'deploy ALL=(root) NOPASSWD: /usr/local/sbin/xrpl-file-candidate',
+  ]);
 });
 
 test('Caddy keeps its admin API off TCP', async () => {
@@ -54,6 +78,19 @@ test('Caddy keeps its admin API off TCP', async () => {
   const dropIn = lines(await read('caddy-10-xrpl-file.conf'));
   assert.ok(dropIn.includes('RuntimeDirectory=caddy'));
   assert.ok(dropIn.includes('RuntimeDirectoryMode=0700'));
+});
+
+test('setup proves the sshd policy again while a revert timer is still armed', async () => {
+  const setup = await read('setup.sh');
+  // A re-run within the five minutes must not report "ok" and leave the timer to undo the policy.
+  assert.match(setup, /systemctl is-active --quiet xrpl-file-sshd-revert\.timer/);
+  // A failed earlier revert unit would make systemd-run refuse the name.
+  const reset = setup.indexOf('systemctl reset-failed xrpl-file-sshd-revert');
+  assert.ok(reset > 0 && reset < setup.indexOf('systemd-run --unit=xrpl-file-sshd-revert'));
+});
+
+test('setup takes cron away from the service users', async () => {
+  assert.match(await read('setup.sh'), /\/etc\/cron\.allow/);
 });
 
 test('setup arms the sshd fallback before it reloads sshd', async () => {
