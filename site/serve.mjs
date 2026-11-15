@@ -8,7 +8,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseRedirects } from './redirects.mjs';
-import { resolveRequest } from './resolve.mjs';
+import { resolveRequest, TYPES } from './resolve.mjs';
 
 export { resolveRequest };
 
@@ -16,19 +16,6 @@ export const START_PORT = 8791;
 const MAX_PORT_ATTEMPTS = 50;
 const HOST = '127.0.0.1';
 
-const TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.webp': 'image/webp',
-  '.woff2': 'font/woff2',
-  '.txt': 'text/plain; charset=utf-8',
-  '.ico': 'image/x-icon',
-};
 
 async function loadRules(root) {
   try {

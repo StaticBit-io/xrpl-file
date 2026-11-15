@@ -6,6 +6,21 @@ import { readFile as fsReadFile, stat as fsStat } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { applyRedirects } from './redirects.mjs';
 
+/** Content types by extension; anything else is served as application/octet-stream. */
+export const TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8',
+  '.ico': 'image/x-icon',
+};
+
 /** Files Pages reads as configuration and never publishes. */
 export const HOST_FILES = ['/_redirects', '/_headers', '/_routes.json'];
 
@@ -37,12 +52,13 @@ async function notFound(root, fs) {
 /**
  * Maps a request path to { status, file, body }, { status, location }, { status: 400 } or
  * { status: 500, error }.
- * @param {{ search?: string, htmlStatus?: 307 | 308, hidden?: string[], stat?: Function, readFile?: Function }} [options]
+ * @param {{ search?: string, htmlStatus?: 307 | 308, dirStatus?: 301 | 308, hidden?: string[], stat?: Function, readFile?: Function }} [options]
  *   search is appended to redirect locations; htmlStatus is the status of the .html → pretty URL
- *   redirect; hidden paths answer 404.
+ *   redirect and dirStatus that of a folder to its trailing slash (Pages answers both with 308);
+ *   hidden paths answer 404.
  */
 export async function resolveRequest(root, pathname, rules, options = {}) {
-  const { search = '', htmlStatus = 307, hidden = [] } = options;
+  const { search = '', htmlStatus = 307, dirStatus = 301, hidden = [] } = options;
   const fs = { stat: options.stat ?? fsStat, readFile: options.readFile ?? fsReadFile };
   let urlPath;
   try {
@@ -65,7 +81,7 @@ export async function resolveRequest(root, pathname, rules, options = {}) {
       // becomes /x/ by redirect, so a 200 rule must name the extension-less path.
       if (exact && target.endsWith('.html')) return { status: htmlStatus, location: prettyUrl(target) + search };
       if (exact) return { status: 200, ...exact };
-      if (await readIfFile(root, target + '/index.html', fs)) return { status: 301, location: target + '/' + search };
+      if (await readIfFile(root, target + '/index.html', fs)) return { status: dirStatus, location: target + '/' + search };
       const page = await readIfFile(root, target + '.html', fs);
       if (page) return { status: 200, ...page };
     }
