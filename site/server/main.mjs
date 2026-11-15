@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp, createSiteServer, shutdown } from './app.mjs';
 import { createDiskCache } from './cache.mjs';
+import { createPictureReader } from './picture-reader.mjs';
 
 const DRAIN_MS = 5000;
 
@@ -42,12 +43,15 @@ try {
     isPageKey: (key) => key.includes('/__cards/') && key.includes('/page/'),
     log,
   });
+  const ledgerOff = env.SITE_LEDGER === 'off';
+  const pictureReader = createPictureReader({ sourceData: { off: ledgerOff } });
   const app = await createApp({
     siteRoot,
     origin,
     release: await releaseId(),
     cache,
-    ...(env.SITE_LEDGER === 'off' ? { openLedger: () => { throw new Error('ledger reads are off (SITE_LEDGER=off)'); } } : {}),
+    ...(ledgerOff ? { openLedger: () => { throw new Error('ledger reads are off (SITE_LEDGER=off)'); } } : {}),
+    pictureReader,
     log,
   });
   const server = createSiteServer(app, { origin, log });
@@ -57,6 +61,7 @@ try {
     if (stopping) return;
     stopping = true;
     await shutdown(server, app, DRAIN_MS);
+    await pictureReader.close();
     process.exit(0);
   };
   process.on('SIGTERM', stop);

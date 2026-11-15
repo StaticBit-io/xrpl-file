@@ -17,7 +17,11 @@ import { fileCardHtml } from './html.mjs';
  *   pictureDeadlineMs?: number,
  *   pictureReadCeilingMs?: number,
  *   now?: () => number,
+ *   readPicture?: (at: { network: string, hash: string }) => Promise<{ picture: { bytes: Uint8Array, type: string } | null, outcome: string }>,
  * }} Deps
+ *   readPicture, when given, reads the card picture somewhere else (the site server runs it in a
+ *   worker thread) under its own ceiling; openSource is then not used for pictures. Pages does not
+ *   pass it.
  */
 
 // How long the cache keeps an answer. Content addressed by its hash never changes, and neither does
@@ -176,6 +180,14 @@ async function readPictureUnderCeiling(at, deps) {
   }
 }
 
+async function readPictureElsewhere(at, deps) {
+  try {
+    return (await deps.readPicture(at)) ?? { picture: null, outcome: 'transient' };
+  } catch {
+    return { picture: null, outcome: 'transient' };
+  }
+}
+
 /**
  * Reads the card picture once per isolate and caches it, or the fact that there is none, for as long
  * as that answer holds. Resolves to the picture (or null) and that lifetime; never rejects.
@@ -185,7 +197,7 @@ function loadPicture(at, deps) {
   const running = inFlight.get(key);
   if (running && now(deps) - running.startedAt < IN_FLIGHT_MAX_MS) return running.load;
   const load = (async () => {
-    const { picture, outcome } = await readPictureUnderCeiling(at, deps);
+    const { picture, outcome } = deps.readPicture ? await readPictureElsewhere(at, deps) : await readPictureUnderCeiling(at, deps);
     const cacheControl = PICTURE_LIFETIME[outcome];
     try {
       await deps.cache.put(key, picture === null

@@ -18,7 +18,9 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref?.()
  * @param {{ siteRoot: string, origin: string, release: string,
  *   cache: { match(key: string): Promise<Response|undefined>, put(key: string, response: Response): Promise<void> },
  *   openLedger?: (network: string) => { close(): void }, maxReads?: number, maxCardRequests?: number,
- *   log?: (line: string) => void }} options
+ *   pictureReader?: { read(at: { network: string, hash: string }): Promise<object> }, log?: (line: string) => void }} options
+ *   pictureReader moves card picture reads off the main thread (picture-reader.mjs); without it they
+ *   run here through openLedger.
  *   siteRoot is the real path of the built site; its _redirects, _headers and _routes.json are parsed
  *   here, and a file that does not parse rejects, so a broken release never starts.
  */
@@ -30,6 +32,7 @@ export async function createApp({
   openLedger = (network) => new LedgerClient(ENDPOINTS[network]),
   maxReads = 4,
   maxCardRequests = 32,
+  pictureReader = null,
   log = () => {},
 }) {
   const host = (name) => readFile(join(siteRoot, name), 'utf8');
@@ -76,6 +79,18 @@ export async function createApp({
     },
     origin,
   };
+  if (pictureReader) {
+    // Counted against the same cap as the reads on this thread: the CPU is shared all the same.
+    deps.readPicture = async (at) => {
+      const releaseRead = reads.tryAcquire();
+      if (!releaseRead) return { picture: null, outcome: 'transient' };
+      try {
+        return await pictureReader.read(at);
+      } finally {
+        releaseRead();
+      }
+    };
+  }
 
   function named(response) {
     if (response.headers.get('x-xrpl-file-release') === release) return response;
