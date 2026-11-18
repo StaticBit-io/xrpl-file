@@ -478,6 +478,9 @@ call directly. What the Read tab does add on top, so a large file can show progr
 rather than downloading as one uninterruptible call, is a block-by-block loop, and that loop still
 only calls the library's own verifying methods for each block.
 
+The "?" (Tutorials) item on the rail opens short tutorials for the five topics, and the application
+offers them once on first start.
+
 Every key the application manages lives in one vault file, encrypted under a single master password
 chosen when the vault is created. The file is deliberately portable: a backup is a copy of it, and a
 machine that dies does not take the keys with it. The other side of that is a forgotten master

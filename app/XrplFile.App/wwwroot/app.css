@@ -434,6 +434,14 @@ progress { accent-color: var(--mint); }
 .xf-dialog h2 { font-size: 1.0625rem; margin: 0 0 10px; }
 .xf-dialog p { color: var(--text-secondary); }
 .xf-dialog .xf-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+.xf-tutorial-topics { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 8px; }
+.xf-tutorial-topics li { display: grid; gap: 4px; }
+.xf-tutorial-topic {
+    width: 100%; min-height: 44px; text-align: left; padding: 0 14px; background: var(--chips); border: 1px solid var(--control-line);
+    border-radius: 8px; color: var(--text); font: inherit; cursor: pointer;
+}
+.xf-tutorial-topic:hover:not(:disabled) { border-color: var(--mint); }
+.xf-tutorial-topic:disabled { opacity: 0.6; cursor: not-allowed; }
 .xf-card {
     background: var(--box-bg); border: 1px solid var(--dark-gray); border-radius: var(--radius-card);
     padding: 16px 18px; margin-bottom: 14px; min-width: 0;

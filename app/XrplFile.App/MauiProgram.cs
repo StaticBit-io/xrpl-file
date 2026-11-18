@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 
 using XrplFile.App.Core;
 using XrplFile.App.Core.Localization;
+using XrplFile.App.Core.Tutorial;
 using XrplFile.App.Platform;
 using XrplFile.Keys;
 
@@ -301,5 +302,23 @@ public static class MauiProgram
             provider.GetRequiredService<IFilePickerService>(),
             provider.GetRequiredService<IKeepAwake>(),
             line => StartupLog.Write(line)));
+
+        // The tutorial (design "The way in"). Facts are captured on demand from the live singletons,
+        // so the model never holds a stale copy of what the screens show.
+        services.AddSingleton<ITutorialSettingsStore>(new FileTutorialSettingsStore());
+        services.AddSingleton<ITutorialReadTab>(provider => new ReadTab(
+            provider.GetRequiredService<ReadModel>(),
+            provider.GetRequiredService<ReadRun>()));
+        services.AddSingleton(provider => new TutorialModel(
+            provider.GetRequiredService<ITutorialSettingsStore>(),
+            provider.GetRequiredService<ShellModel>(),
+            provider.GetRequiredService<ScreenNavigation>(),
+            provider.GetRequiredService<ITutorialReadTab>(),
+            () => TutorialFacts.Capture(
+                provider.GetRequiredService<IKeyVault>(),
+                provider.GetRequiredService<AccountsModel>(),
+                provider.GetRequiredService<RunModel>(),
+                provider.GetRequiredService<ReadModel>(),
+                provider.GetRequiredService<ReadRun>())));
     }
 }
