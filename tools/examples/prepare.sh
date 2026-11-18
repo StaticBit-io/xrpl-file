@@ -45,6 +45,7 @@ fi
 [ -d "$owner" ] || { echo "owner directory not found: $owner" >&2; exit 2; }
 
 mkdir -p "$out"
+rm -f "$out/prepared.json"
 if [ "$(cd "$owner" && pwd -P)" = "$(cd "$out" && pwd -P)" ]; then
   echo "the output directory must differ from the owner directory" >&2
   exit 2
@@ -130,10 +131,21 @@ for path in "${drawings[@]}"; do
     fail "$name" "not an image ffmpeg can read as a still"
   fi
 
-  case "$ext" in
-    png | jpg | jpeg | webp) native=1 ;;
-    *) native=0 ;;
+  # The extension decides the MIME type that is published, so the content has to be what it claims.
+  codec="$(probe_stream "$path" v codec_name)"
+  case "$codec" in
+    png | mjpeg | webp | gif | bmp | tiff) ;;
+    *) fail "$name" "contains $codec, which is not a still image codec" ;;
   esac
+  case "$ext" in
+    png) native=1; expected=png ;;
+    jpg | jpeg) native=1; expected=mjpeg ;;
+    webp) native=1; expected=webp ;;
+    gif) native=0; expected=gif ;;
+    bmp) native=0; expected=bmp ;;
+    *) native=0; expected=tiff ;;
+  esac
+  [ "$codec" = "$expected" ] || fail "$name" "extension says $expected but the content is $codec"
 
   if [ "$native" -eq 1 ] && [ "$(size_of "$path")" -le "$drawing_max" ]; then
     target="$name"
@@ -147,7 +159,9 @@ for path in "${drawings[@]}"; do
     taken[$target]=1
     converted=0
     for quality in 90 85 80 75 70 65 60 55 50 45 40; do
+      rm -f "$out/$target"
       "${ffmpeg_quiet[@]}" -i "$path" -frames:v 1 -c:v libwebp -quality "$quality" "$out/$target"
+      [ -s "$out/$target" ] || fail "$target" "ffmpeg wrote no file for $name"
       if [ "$(size_of "$out/$target")" -le "$drawing_max" ]; then converted=1; break; fi
     done
     [ "$converted" -eq 1 ] || fail "$target" "$(size_of "$out/$target") bytes at quality 40, still above $drawing_max"
@@ -202,17 +216,23 @@ long_side_scale() {
 
 # encode_cover <input> [-ss args...]: lowers the quality until the WebP is within the cover limit.
 encode_cover() {
-  local input="$1" seek="$2" src_w src_h filter quality
+  local input="$1" seek="$2" src_w src_h filter quality out_w out_h
   src_w="$(probe_stream "$input" v width)"
   src_h="$(probe_stream "$input" v height)"
   filter="$(long_side_scale "$src_w" "$src_h")"
   for quality in 90 85 80 75 70 65 60 55 50 45 40; do
+    rm -f "$out/$cover_target"
     if [ -n "$seek" ]; then
       "${ffmpeg_quiet[@]}" -ss "$seek" -i "$input" -frames:v 1 -vf "$filter" -c:v libwebp -quality "$quality" "$out/$cover_target"
     else
       "${ffmpeg_quiet[@]}" -i "$input" -frames:v 1 -vf "$filter" -c:v libwebp -quality "$quality" "$out/$cover_target"
     fi
+    [ -s "$out/$cover_target" ] || fail "$cover_target" "ffmpeg wrote no cover (is the frame inside the video?)"
     if [ "$(size_of "$out/$cover_target")" -le "$cover_max" ]; then
+      out_w="$(probe_stream "$out/$cover_target" v width)"
+      out_h="$(probe_stream "$out/$cover_target" v height)"
+      { [ -n "$out_w" ] && [ -n "$out_h" ]; } || fail "$cover_target" "the written cover has no readable dimensions"
+      [ "$(( out_w > out_h ? out_w : out_h ))" -le "$cover_long_side" ] || fail "$cover_target" "long side is above $cover_long_side"
       pass "$cover_target" "$(size_of "$out/$cover_target") bytes at quality $quality"
       return
     fi
@@ -224,23 +244,29 @@ if [ -n "$cover_src" ]; then
   [ -z "$cover_at" ] || note "a supplied cover ($(basename "$cover_src")) and --cover-at were both given: the supplied cover wins"
   encode_cover "$cover_src" ""
 elif [ -n "$cover_at" ]; then
+  if awk -v at="$cover_at" -v len="$duration" 'BEGIN { exit !(at >= len) }'; then
+    fail "cover" "--cover-at $cover_at is at or past the end of the video, which lasts $duration s"
+  fi
   encode_cover "$out/$video_target" "$cover_at"
 else
   fail "cover" "no cover.webp / cover.jpg in $owner and no --cover-at <seconds> given"
 fi
 record "$cover_target" image/webp cover
 
-# prepared.json: dimensions and sizes are read back from the files that were written.
-export OUT_DIR="$out"
+# prepared.json: dimensions and sizes are read back from the files that were written. Every row is
+# collected before the manifest is written, so a failed run leaves no partial prepared.json behind.
+rows="$(mktemp)"
+trap 'rm -f "$records" "$rows"' EXIT
 while IFS=$'\t' read -r file type role; do
   w="$(probe_stream "$out/$file" v width)"
   h="$(probe_stream "$out/$file" v height)"
-  [ -n "$w" ] && [ -n "$h" ] || fail "$file" "no dimensions"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$file" "$type" "$(size_of "$out/$file")" "$w" "$h" "$role"
-done < "$records" | node -e '
+  { [ -n "$w" ] && [ -n "$h" ]; } || fail "$file" "no dimensions"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$file" "$type" "$(size_of "$out/$file")" "$w" "$h" "$role" >> "$rows"
+done < "$records"
+OUT_DIR="$out" ROWS_FILE="$rows" node -e '
   const fs = require("node:fs");
-  const rows = fs.readFileSync(0, "utf8").split("\n").filter((line) => line.length > 0).map((line) => {
-    const [file, type, bytes, width, height, role] = line.split("\t");
+  const rows = fs.readFileSync(process.env.ROWS_FILE, "utf8").split(/\r?\n/).filter((line) => line.length > 0).map((line) => {
+    const [file, type, bytes, width, height, role] = line.split(/\t/);
     return { file, type, bytes: Number(bytes), width: Number(width), height: Number(height), role };
   });
   fs.writeFileSync(process.env.OUT_DIR + "/prepared.json", JSON.stringify(rows, null, 2) + "\n");

@@ -139,4 +139,27 @@ if bash "$prepare" --cover-at 0 "$two" "$work/out4" > "$work/log4" 2>&1; then fa
 grep -qi "exactly one video" "$work/log4" || fail "the two-videos failure is not clear: $(cat "$work/log4")"
 pass "two videos fail with a clear message"
 
+# Case 5: --cover-at past the end fails, names the duration and leaves no prepared.json.
+one="$work/owner-one"; mkdir -p "$one"
+cp "$owner/clip.mp4" "$one/clip.mp4"
+if bash "$prepare" --cover-at 50 "$one" "$work/out5" > "$work/log5" 2>&1; then fail "--cover-at 50 on a 3 s clip was accepted"; fi
+grep -q "past the end" "$work/log5" || fail "the cover-at failure does not say why: $(cat "$work/log5")"
+[ ! -e "$work/out5/prepared.json" ] || fail "a failed run left prepared.json"
+[ ! -s "$work/out5/clip-cover.webp" ] || { [ ! -e "$work/out5/clip-cover.webp" ] || fail "a failed run left a cover"; }
+pass "--cover-at past the end fails and leaves no prepared.json"
+
+# Case 6: content that does not match the extension is refused.
+bad="$work/owner-bad"; mkdir -p "$bad"
+cp "$owner/clip.mp4" "$bad/clip.mp4"
+cp "$owner/clip.mp4" "$bad/video.png"
+if bash "$prepare" --cover-at 1 "$bad" "$work/out6" > "$work/log6" 2>&1; then fail "an MP4 renamed .png was accepted"; fi
+grep -q "video.png" "$work/log6" || fail "the renamed-MP4 failure does not name the file: $(cat "$work/log6")"
+[ ! -e "$work/out6/prepared.json" ] || fail "a failed run left prepared.json"
+pass "an MP4 renamed .png is refused"
+
+rm "$bad/video.png"; cp "$owner/photo.jpg" "$bad/photo.png"
+if bash "$prepare" --cover-at 1 "$bad" "$work/out7" > "$work/log7" 2>&1; then fail "a JPEG renamed .png was accepted"; fi
+grep -q "photo.png" "$work/log7" || fail "the renamed-JPEG failure does not name the file: $(cat "$work/log7")"
+pass "a JPEG renamed .png is refused"
+
 echo "OK  all prepare.sh checks passed"
