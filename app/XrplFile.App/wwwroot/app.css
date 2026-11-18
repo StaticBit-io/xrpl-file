@@ -533,8 +533,8 @@ progress { accent-color: var(--mint); }
 .xf-tour-bubble.is-pending { visibility: hidden; }
 .xf-tour-topic { margin: 0 0 4px; font-size: 0.8125rem; color: var(--text-secondary); }
 .xf-tour-bubble h2 { font-size: 1.0625rem; margin: 0 0 8px; }
-.xf-tour-bubble h2:focus { outline: none; }
-.xf-tour-bubble h2:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+.xf-tour-bubble [tabindex="-1"]:focus,
+.xf-tour-bubble [tabindex="-1"]:focus-visible { outline: none; }
 .xf-tour-bubble p { color: var(--text-secondary); }
 .xf-tour-bubble .xf-tour-note { color: var(--text); }
-.xf-tour-bubble .xf-dialog-actions { margin-top: 12px; }
+.xf-tour-bubble .xf-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }

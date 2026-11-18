@@ -566,7 +566,7 @@
   "Tutorial.ListOfferTitle": "Want a quick tour?",
   "Tutorial.ListOfferIntro": "Short tutorials show how to create an account, add and export a key, publish a file and read one by its link.",
   "Tutorial.ListNotNow": "Not now",
-  "Tutorial.ListNotNowHint": "You can open them again any time from {learn} in the menu.",
+  "Tutorial.ListNotNowHint": "You can come back to them any time: choose {learn}.",
   "Tutorial.ListClose": "Close",
   "Tutorial.BusyPublishing": "A publication is running. Try again when it finishes.",
   "Tutorial.BusyReading": "A read is running. Try again when it finishes.",

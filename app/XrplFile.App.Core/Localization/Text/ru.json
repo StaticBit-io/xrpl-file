@@ -583,7 +583,7 @@
   "Tutorial.ListOfferTitle": "Хотите быстро освоиться?",
   "Tutorial.ListOfferIntro": "Короткие уроки покажут, как создать аккаунт, добавить и экспортировать ключ, опубликовать файл и прочитать файл по ссылке.",
   "Tutorial.ListNotNow": "Не сейчас",
-  "Tutorial.ListNotNowHint": "Открыть уроки снова можно в любой момент через «{learn}» в меню.",
+  "Tutorial.ListNotNowHint": "Вернуться к урокам можно в любой момент: выберите «{learn}».",
   "Tutorial.ListClose": "Закрыть",
   "Tutorial.BusyPublishing": "Идёт публикация. Попробуйте, когда она закончится.",
   "Tutorial.BusyReading": "Идёт чтение файла. Попробуйте, когда оно закончится.",
