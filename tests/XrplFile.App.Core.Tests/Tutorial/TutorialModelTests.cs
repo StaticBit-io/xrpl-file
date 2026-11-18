@@ -563,6 +563,91 @@ public sealed class TutorialModelTests
     }
 
     [Fact]
+    public void Start_resets_the_estimate_of_the_tab_already_showing()
+    {
+        _shell.Show(AppTab.Publish);
+        _nav.ShowEstimate(new PublishRequest(1024, "application/octet-stream", "big.bin", "ref-w", "rWriter", "standalone", SourcePath: "big.bin"));
+
+        _model.Start(TutorialTopic.Publish);
+
+        Assert.Null(_nav.Estimate);
+        Assert.Equal(AppTab.Publish, _shell.Tab);
+    }
+
+    [Fact]
+    public void End_with_a_running_real_read_cancels_it_without_navigating()
+    {
+        _model.Start(TutorialTopic.Read);
+        _facts = _facts with { ReadTabEmpty = false, ReadState = ReadState.Running };
+
+        _model.End();
+
+        Assert.Equal(1, _readTab.Cancels);
+        Assert.Equal(0, _readTab.Clears);
+        Assert.Equal(AppTab.Read, _shell.Tab);
+    }
+
+    [Fact]
+    public void End_with_a_real_read_never_started_clears_the_box_without_navigating()
+    {
+        _shell.Show(AppTab.History);
+        _model.Start(TutorialTopic.Read);
+        _facts = _facts with { ReadTabEmpty = false };
+
+        _model.End();
+
+        Assert.Equal(1, _readTab.Clears);
+        Assert.Equal(0, _readTab.Cancels);
+        Assert.Equal(AppTab.Read, _shell.Tab);
+    }
+
+    [Fact]
+    public void A_leave_during_start_is_not_undone_by_the_sample_link()
+    {
+        _shell.Changed += () =>
+        {
+            if (_shell.Tab == AppTab.Read && _model.IsActive) _model.Leave();
+        };
+
+        _model.Start(TutorialTopic.Read);
+
+        Assert.False(_model.IsActive);
+        Assert.Empty(_readTab.Links);
+    }
+
+    [Fact]
+    public void Export_keeps_the_row_it_opened_the_menu_for()
+    {
+        WithKeys();
+        _model.Start(TutorialTopic.ExportKey);
+        _model.Next();
+        Assert.Equal(NotExported, _nav.MenuFor);
+
+        WithKeys(first: "ref-other", notExported: null);
+        _model.Next();
+
+        Assert.Equal(NotExported, _nav.ActiveReference);
+    }
+
+    [Fact]
+    public void Export_latches_the_highlight_with_the_first_row_that_appears()
+    {
+        _facts = _facts with { KeyCount = 2 };
+        _model.Start(TutorialTopic.ExportKey);
+        Assert.Equal([TutorialRegions.AccountsRow], View.Lit);
+
+        WithKeys();
+        _model.Settle();
+        _model.Leave();
+
+        _model.Start(TutorialTopic.ExportKey);
+        Assert.Equal([TutorialRegions.AccountsNotExported], View.Lit);
+        WithKeys(notExported: null);
+        _model.Settle();
+        Assert.Equal([TutorialRegions.AccountsNotExported], View.Lit);
+    }
+
+    [Fact]
     public void Changed_is_not_raised_while_inside_a_lock()
     {
         bool reentered = false;

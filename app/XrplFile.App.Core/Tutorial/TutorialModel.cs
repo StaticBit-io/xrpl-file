@@ -48,6 +48,9 @@ public sealed class TutorialModel(
     private bool _readStarted;
     private TutorialTopic? _finishStarts;
     private TutorialView? _view;
+    private int _run;
+    private string? _reference;
+    private bool? _litNotExported;
 
     /// <summary>Whether the topic list dialog is showing.</summary>
     public bool ListOpen
@@ -84,14 +87,15 @@ public sealed class TutorialModel(
     /// </summary>
     public void OfferIfDue()
     {
+        // Disk and vault reads stay out of the lock; the in-memory conditions are re-checked inside.
+        if (store.WasOffered() || facts().KeyCount > 0)
+        {
+            return;
+        }
+
         lock (_gate)
         {
             if (_offeredThisRun || _active || _listOpen)
-            {
-                return;
-            }
-
-            if (store.WasOffered() || facts().KeyCount > 0)
             {
                 return;
             }
@@ -154,7 +158,9 @@ public sealed class TutorialModel(
     {
         TutorialFacts now = facts();
         TutorialStep first;
+        string? reference;
         bool putLink;
+        int run;
 
         lock (_gate)
         {
@@ -189,15 +195,26 @@ public sealed class TutorialModel(
             _active = true;
             _listOpen = false;
             _listIsOffer = false;
+            _reference = null;
+            _litNotExported = null;
+            run = ++_run;
+            reference = Latch(now);
             _view = BuildView(now);
             first = _steps[0];
             putLink = _readIsReal;
         }
 
         nav.ResetToMain();
-        Navigate(first, now);
 
-        if (putLink)
+        // A Leave or End that lands while the screens redraw must not be undone by what follows.
+        if (!StillRunning(run))
+        {
+            return true;
+        }
+
+        Navigate(first, reference);
+
+        if (putLink && StillRunning(run))
         {
             readTab.PutLink(TutorialScript.SampleLink);
         }
@@ -211,6 +228,8 @@ public sealed class TutorialModel(
     {
         TutorialFacts now = facts();
         TutorialStep? step = null;
+        string? reference = null;
+        int run;
 
         lock (_gate)
         {
@@ -219,9 +238,12 @@ public sealed class TutorialModel(
                 return;
             }
 
+            run = _run;
+
             if (_index < _steps.Count - 1)
             {
                 _index++;
+                reference = Latch(now);
                 _view = BuildView(now);
                 step = _steps[_index];
             }
@@ -233,7 +255,12 @@ public sealed class TutorialModel(
             return;
         }
 
-        Navigate(step, now);
+        if (!StillRunning(run))
+        {
+            return;
+        }
+
+        Navigate(step, reference);
         Changed?.Invoke();
     }
 
@@ -302,7 +329,9 @@ public sealed class TutorialModel(
     {
         TutorialFacts now = facts();
         TutorialStep? step = null;
+        string? reference = null;
         bool changed;
+        int run;
 
         lock (_gate)
         {
@@ -310,6 +339,8 @@ public sealed class TutorialModel(
             {
                 return false;
             }
+
+            run = _run;
 
             if (_readIsReal && now.ReadState != ReadState.Idle)
             {
@@ -329,13 +360,14 @@ public sealed class TutorialModel(
                 step = _steps[_index];
             }
 
+            reference = Latch(now);
             _view = BuildView(now);
             changed = !SameView(before, _view);
         }
 
-        if (step is not null)
+        if (step is not null && StillRunning(run))
         {
-            Navigate(step, now);
+            Navigate(step, reference);
         }
 
         if (changed)
@@ -388,6 +420,7 @@ public sealed class TutorialModel(
             }
 
             _active = false;
+            _run++;
             _view = null;
             _steps = [];
             _index = 0;
@@ -410,7 +443,7 @@ public sealed class TutorialModel(
     }
 
     /// <summary>Shows the screen <paramref name="step"/> needs. Called outside the lock: the screens redraw on these changes.</summary>
-    private void Navigate(TutorialStep step, TutorialFacts now)
+    private void Navigate(TutorialStep step, string? reference)
     {
         TutorialScreen screen = step.Screen;
         shell.Show(screen.Tab);
@@ -420,7 +453,6 @@ public sealed class TutorialModel(
             return;
         }
 
-        string? reference = now.NotExportedReference ?? now.FirstAccountReference;
         AccountsView view = screen.Accounts;
 
         // No row read yet: stay on the list rather than open a screen with nothing to act on.
@@ -442,6 +474,32 @@ public sealed class TutorialModel(
         }
     }
 
+    private bool StillRunning(int run)
+    {
+        lock (_gate) return _active && _run == run;
+    }
+
+    /// <summary>
+    /// Fixes the row the export topic is about the first time a row exists, together with whether it
+    /// is the unexported one, so the menu, the export screen and the highlight cannot disagree later.
+    /// Call under the lock.
+    /// </summary>
+    private string? Latch(TutorialFacts now)
+    {
+        if (_reference is null)
+        {
+            string? reference = now.NotExportedReference ?? now.FirstAccountReference;
+
+            if (reference is not null)
+            {
+                _reference = reference;
+                _litNotExported = now.NotExportedReference is not null;
+            }
+        }
+
+        return _reference;
+    }
+
     private TutorialView BuildView(TutorialFacts now)
     {
         TutorialStep step = _steps[_index];
@@ -449,7 +507,7 @@ public sealed class TutorialModel(
 
         // A key that was never exported is the point of the step; when every key has been, the first row stands in.
         IReadOnlyList<string> lit = step.Lit;
-        if (_topic == TutorialTopic.ExportKey && _finishStarts is null && _index == 0 && now.NotExportedReference is null)
+        if (_topic == TutorialTopic.ExportKey && _finishStarts is null && _index == 0 && !(_litNotExported ?? now.NotExportedReference is not null))
         {
             lit = [R.AccountsRow];
         }
