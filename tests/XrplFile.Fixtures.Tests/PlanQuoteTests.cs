@@ -77,6 +77,32 @@ public sealed class PlanQuoteTests
         Assert.Contains("100.000000", text, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void FormatPrintsTheWorstCaseCapPerEntryAndInTotal()
+    {
+        PlanQuote quote = Two();
+
+        // The byte counts are grouped by the current culture; the figures under test are not.
+        string text = System.Text.RegularExpressions.Regex.Replace(
+            PlanQuote.Format(quote, Writer, Payer, "mainnet"), @"(?<=\d),(?=\d)", "");
+
+        // cover: 40,000 + 9,000 = 49,000 drops; video: 60,000 + 12,000 = 72,000; total 121,000.
+        Assert.Equal(121_000, quote.WorstCaseFeeDrops);
+        Assert.Contains("cover: 1000 bytes, 2 transactions, fee 0.000600 XRP, at most 0.049000 XRP", text, StringComparison.Ordinal);
+        Assert.Contains("video: 2000000 bytes, 2 transactions, fee 0.007300 XRP, at most 0.072000 XRP", text, StringComparison.Ordinal);
+        Assert.Contains("Total: 4 transactions, fee 0.007900 XRP, at most 0.121000 XRP", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheSessionCapIsTheWorstCasePrintedAsAtMost()
+    {
+        PlanQuote quote = Two();
+
+        SpendingApproval approval = quote.ApprovalFor("cover", Writer, Payer);
+
+        Assert.Equal(49_000, approval.WriterCeilingDrops + approval.PayerCeilingDrops);
+    }
+
     [Theory]
     [InlineData("publish to mainnet", true)]
     [InlineData("  publish to mainnet\n", true)]

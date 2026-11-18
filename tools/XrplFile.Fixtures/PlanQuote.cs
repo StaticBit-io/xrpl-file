@@ -23,6 +23,12 @@ internal sealed record PlanQuote(IReadOnlyList<EntryQuote> Entries)
     /// <summary>The expected fees of the whole plan, both accounts, nothing retried.</summary>
     public long FeeDrops => Entries.Sum(entry => entry.Estimate.PayerFeeDrops + entry.Estimate.WriterFeeDrops);
 
+    /// <summary>
+    /// The most the whole plan may spend on fees, both accounts: the sum of the per-file caps the sessions run under.
+    /// Far above <see cref="FeeDrops"/>, because every memo is allowed several tries.
+    /// </summary>
+    public long WorstCaseFeeDrops => Entries.Sum(entry => WorstCaseOf(entry.Estimate));
+
     /// <summary>Batch transactions and solo transactions over every entry.</summary>
     public long Transactions => Entries.Sum(entry => (long)entry.Estimate.Batches + entry.Estimate.SoloTransactions);
 
@@ -48,13 +54,13 @@ internal sealed record PlanQuote(IReadOnlyList<EntryQuote> Entries)
             long transactions = (long)entry.Estimate.Batches + entry.Estimate.SoloTransactions;
             long fee = entry.Estimate.PayerFeeDrops + entry.Estimate.WriterFeeDrops;
             string bound = entry.Resuming ? "resume: at most " : "";
-            text.AppendLine($"  {entry.Key}: {entry.Bytes} bytes, {bound}{transactions} transactions, fee {bound}{Xrp(fee)} XRP");
+            text.AppendLine($"  {entry.Key}: {entry.Bytes} bytes, {bound}{transactions} transactions, fee {bound}{Xrp(fee)} XRP, at most {Xrp(WorstCaseOf(entry.Estimate))} XRP");
         }
 
-        text.AppendLine($"Total: {quote.Transactions} transactions, fee {Xrp(quote.FeeDrops)} XRP");
+        text.AppendLine($"Total: {quote.Transactions} transactions, fee {Xrp(quote.FeeDrops)} XRP, at most {Xrp(quote.WorstCaseFeeDrops)} XRP");
         text.AppendLine($"Writer {writer}: spendable {Xrp(quote.First.WriterSpendableDrops)} XRP, required {Xrp(quote.WriterRequiredDrops)} XRP");
         text.AppendLine($"Payer {payer}: spendable {Xrp(quote.First.PayerSpendableDrops)} XRP, required {Xrp(quote.PayerRequiredDrops)} XRP");
-        text.Append("Required is each account's base reserve once plus the worst-case fees of every file; the expected fee is lower.");
+        text.Append("'At most' is the cap each file's session runs under: the run stops instead of spending more. Required is each account's base reserve once plus those caps; the expected fee is lower.");
 
         return text.ToString();
     }
@@ -62,7 +68,7 @@ internal sealed record PlanQuote(IReadOnlyList<EntryQuote> Entries)
     /// <summary>True only for the exact phrase; surrounding whitespace is trimmed, anything inside it is not.</summary>
     public static bool IsConfirmed(string? line) => string.Equals(line?.Trim(), ConfirmationPhrase, StringComparison.Ordinal);
 
-    /// <summary>The cap for one entry's session: the estimate that was printed for it, with no headroom.</summary>
+    /// <summary>The cap for one entry's session: the worst case that was printed for it as 'at most', with no headroom.</summary>
     public SpendingApproval ApprovalFor(string key, string writer, string payer)
     {
         EntryQuote entry = Entries.FirstOrDefault(candidate => string.Equals(candidate.Key, key, StringComparison.Ordinal))
@@ -94,6 +100,8 @@ internal sealed record PlanQuote(IReadOnlyList<EntryQuote> Entries)
 
         return SpendingApproval.For(remaining, writer, payer);
     }
+
+    private static long WorstCaseOf(BatchPublicationEstimate estimate) => estimate.PayerFeeDropsWorstCase + estimate.WriterFeeDropsWorstCase;
 
     private static string Xrp(long drops) => (drops / 1_000_000m).ToString("0.000000", CultureInfo.InvariantCulture);
 }

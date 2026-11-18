@@ -11,6 +11,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const mediaSource = join(dirname(fileURLToPath(import.meta.url)), 'media');
 
+const ROLES = new Set(['cover', 'video', 'drawing']);
+
 const extras = [
   { file: 'about.txt', type: 'text/plain' },
   { file: 'chunks.svg', type: 'image/svg+xml' },
@@ -25,8 +27,12 @@ export function keyOf(file) {
   return key;
 }
 
-/** Builds the plan from the prepared.json records. Throws on a missing video or cover, or a duplicate key. */
+/** Builds the plan from the prepared.json records. Throws on an unknown role, a missing video or cover, or a duplicate key. */
 export function buildPlan(prepared) {
+  // A role that is none of these would otherwise vanish from the plan without a word.
+  for (const p of prepared) {
+    if (!ROLES.has(p.role)) throw new Error(`"${p.file}" has the unknown role "${p.role}"; expected cover, video or drawing`);
+  }
   const cover = prepared.filter((p) => p.role === 'cover');
   const video = prepared.filter((p) => p.role === 'video');
   const drawings = prepared.filter((p) => p.role === 'drawing');

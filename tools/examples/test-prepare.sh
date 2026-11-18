@@ -162,4 +162,71 @@ if bash "$prepare" --cover-at 1 "$bad" "$work/out7" > "$work/log7" 2>&1; then fa
 grep -q "photo.png" "$work/log7" || fail "the renamed-JPEG failure does not name the file: $(cat "$work/log7")"
 pass "a JPEG renamed .png is refused"
 
+
+# Case 8: upper-case extensions are drawings of their type, not silently dropped (the review's Important 2).
+upper="$work/owner-upper"; mkdir -p "$upper"
+cp "$owner/fits.png" "$upper/Sketch.PNG"
+cp "$owner/photo.jpg" "$upper/IMG_0001.JPG"
+cp "$owner/clip.mp4" "$upper/CLIP.MP4"
+bash "$prepare" --cover-at 1 "$upper" "$work/out8" > "$work/log8" 2>&1 || { cat "$work/log8"; fail "prepare.sh failed on upper-case extensions"; }
+cmp -s "$upper/Sketch.PNG" "$work/out8/Sketch.PNG" || fail "Sketch.PNG is not byte for byte"
+[ "$(json_field "$work/out8/prepared.json" Sketch.PNG type)" = image/png ] || fail "Sketch.PNG has no image/png type"
+[ "$(json_field "$work/out8/prepared.json" Sketch.PNG role)" = drawing ] || fail "Sketch.PNG has no drawing role"
+[ "$(json_field "$work/out8/prepared.json" IMG_0001.JPG type)" = image/jpeg ] || fail "IMG_0001.JPG has no image/jpeg type"
+[ "$(json_field "$work/out8/prepared.json" CLIP.mp4 role)" = video ] || fail "CLIP.MP4 is not prepared as CLIP.mp4"
+pass "Sketch.PNG, IMG_0001.JPG and CLIP.MP4 are prepared with their types"
+
+# Case 9: a failure inside the MIME lookup stops the script: a drawing whose extension has no MIME type
+# (a converted name always ends in .webp, so this needs a native type; none is missing today, so the
+# lookup is exercised through a copy that stubs the table).
+sed 's/\*\.png) echo image\/png ;;/*.png) fail "$1" "no MIME type for this extension" ;;/' "$prepare" > "$work/prepare-nomime.sh"
+cp "$here/../fixtures/top-boxes.mjs" "$work/top-boxes.mjs" 2>/dev/null || true
+mkdir -p "$work/tools-copy/examples" "$work/tools-copy/fixtures"
+cp "$work/prepare-nomime.sh" "$work/tools-copy/examples/prepare.sh"
+cp "$here/../fixtures/top-boxes.mjs" "$work/tools-copy/fixtures/top-boxes.mjs"
+cp "$here/scan-metadata.mjs" "$work/tools-copy/examples/scan-metadata.mjs"
+if bash "$work/tools-copy/examples/prepare.sh" --cover-at 1 "$upper" "$work/out9" > "$work/log9" 2>&1; then fail "a MIME failure did not stop the script"; fi
+grep -q "no MIME type" "$work/log9" || fail "the MIME failure is not reported: $(cat "$work/log9")"
+[ ! -e "$work/out9/prepared.json" ] || fail "a MIME failure left prepared.json"
+pass "a failure inside the MIME lookup stops the script"
+
+# Case 10: H.264 that browsers do not play (4:4:4) is refused, naming the pixel format.
+p444="$work/owner-444"; mkdir -p "$p444"
+"${ffmpeg_quiet[@]}" -f lavfi -i testsrc2=size=320x240:rate=25 -t 1 -c:v libx264 -pix_fmt yuv444p -movflags +faststart "$p444/clip.mp4"
+if bash "$prepare" --cover-at 0 "$p444" "$work/out10" > "$work/log10" 2>&1; then fail "a yuv444p clip was accepted"; fi
+grep -q "yuv444p" "$work/log10" || fail "the 4:4:4 failure does not name the pixel format: $(cat "$work/log10")"
+[ ! -e "$work/out10/prepared.json" ] || fail "a refused clip left prepared.json"
+pass "a yuv444p H.264 clip is refused, naming the pixel format"
+
+# Case 11: metadata is reported, not stripped. EXIF with GPS in a JPEG, a location tag in a video.
+meta="$work/owner-meta"; mkdir -p "$meta"
+node -e '
+  const fs = require("node:fs");
+  const jpeg = fs.readFileSync(process.argv[1]);
+  const exif = Buffer.from([0x45, 0x78, 0x69, 0x66, 0, 0]);
+  const tiff = Buffer.from([0x49, 0x49, 0x2a, 0, 8, 0, 0, 0, 1, 0, 0x25, 0x88, 4, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const body = Buffer.concat([exif, tiff]);
+  const header = Buffer.from([0xff, 0xe1, (body.length + 2) >> 8, (body.length + 2) & 0xff]);
+  fs.writeFileSync(process.argv[2], Buffer.concat([jpeg.subarray(0, 2), header, body, jpeg.subarray(2)]));
+' "$owner/photo.jpg" "$meta/tagged.jpg"
+"${ffmpeg_quiet[@]}" -i "$owner/clip.mp4" -c copy -metadata location="+48.8577+002.2950/" -movflags +faststart "$meta/located.mp4"
+bash "$prepare" --cover-at 1 "$meta" "$work/out11" > "$work/log11" 2>&1 || { cat "$work/log11"; fail "prepare.sh failed on files with metadata"; }
+cmp -s "$meta/tagged.jpg" "$work/out11/tagged.jpg" || fail "tagged.jpg was changed: metadata must not be stripped"
+grep -q "WARN  tagged.jpg carries metadata: EXIF with GPS location" "$work/log11" || fail "no EXIF/GPS warning for tagged.jpg: $(cat "$work/log11")"
+grep -q "WARN  located.mp4 carries metadata:.*location" "$work/log11" || fail "no location warning for located.mp4: $(cat "$work/log11")"
+grep -q "published permanently" "$work/log11" || fail "the warning does not say the metadata is permanent"
+pass "EXIF/GPS in a JPEG and a location tag in a video are reported, and the bytes are not changed"
+
+# A file without metadata raises no warning.
+if grep -q "WARN  fits.png" "$work/log1"; then fail "a PNG without metadata was warned about"; fi
+pass "a PNG without metadata raises no warning"
+
+# Case 12: extra streams are not published: a clip with two audio tracks is remuxed to video and the first audio.
+twoaudio="$work/owner-two-audio"; mkdir -p "$twoaudio"
+"${ffmpeg_quiet[@]}" -f lavfi -i testsrc2=size=320x240:rate=25 -f lavfi -i sine=frequency=440 -f lavfi -i sine=frequency=880 -t 1 \
+  -map 0 -map 1 -map 2 -c:v libx264 -pix_fmt yuv420p -c:a aac -movflags +faststart "$twoaudio/clip.mp4"
+bash "$prepare" --cover-at 0 "$twoaudio" "$work/out12" > "$work/log12" 2>&1 || { cat "$work/log12"; fail "prepare.sh failed on a clip with two audio tracks"; }
+[ "$(probe -show_entries stream=index -of csv=p=0 "$work/out12/clip.mp4" | grep -c .)" = 2 ] || fail "the extra audio track was published"
+pass "a clip with two audio tracks is remuxed to one video and one audio stream"
+
 echo "OK  all prepare.sh checks passed"

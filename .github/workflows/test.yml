@@ -36,6 +36,8 @@ jobs:
       # The site tests run from the repository root. They build their fixtures themselves; the
       # build step then proves the site assembles from the element that web/ just produced.
       - run: node --test site/test/*.test.mjs
+      # The examples tooling needs nothing but Node; test-prepare.sh needs ffmpeg and is run by hand.
+      - run: node --test tools/examples/*.test.mjs
       - run: node web/build.mjs
       - run: node site/build.mjs
       # The link-card function is otherwise first bundled by "pages deploy" on main: an import that

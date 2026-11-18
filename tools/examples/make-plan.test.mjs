@@ -44,3 +44,12 @@ test('a missing cover or a duplicate key is refused', () => {
   assert.throws(() => buildPlan(prepared.filter((p) => p.role !== 'cover')), /cover/);
   assert.throws(() => buildPlan([...prepared, { file: 'second.jpg', type: 'image/jpeg', role: 'drawing' }]), /share the key/);
 });
+
+test('a record with an unknown or empty role is refused, not dropped', () => {
+  for (const role of ['', undefined, 'poster']) {
+    assert.throws(
+      () => buildPlan([...prepared, { file: 'Sketch.PNG', type: 'image/png', role }]),
+      /Sketch\.PNG.*unknown role/,
+    );
+  }
+});

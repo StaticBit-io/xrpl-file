@@ -10,8 +10,14 @@
 #
 # A drawing the owner made as PNG, JPEG or WebP and that already fits in 1,000,000 bytes is copied
 # byte for byte: the bytes are the owner's work, and re-encoding them is not ours to do. Anything
-# else becomes WebP. The video must be H.264/AAC; it is remuxed with +faststart, never re-encoded,
-# when its moov box is not before mdat. Each failed check stops the script.
+# else becomes WebP. The video must be H.264/AAC in a pixel format and profile browsers decode
+# (8-bit 4:2:0, Constrained Baseline, Baseline, Main or High); it is remuxed with +faststart, never
+# re-encoded, when its moov box is not before mdat or it carries more than one video and one audio
+# stream. Each failed check stops the script. Extensions are matched without regard to case.
+#
+# Metadata is never stripped (the bytes are the owner's). Every prepared file is scanned instead, and
+# a WARN line names what it carries (EXIF/GPS/XMP/text chunks in a still, global and stream tags such
+# as location or creation_time in the video), because the files are published permanently.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,8 +73,10 @@ records="$(mktemp)"
 trap 'rm -f "$records"' EXIT
 record() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$records"; }
 
+# mime_of <file>: call it as an assignment (mime="$(mime_of "$f")"), so that its `fail` stops the script:
+# `exit` inside a command substitution leaves only the substitution, and errexit ignores it as an argument.
 mime_of() {
-  case "$1" in
+  case "$(lower "$1")" in
     *.png) echo image/png ;;
     *.jpg | *.jpeg) echo image/jpeg ;;
     *.webp) echo image/webp ;;
@@ -117,8 +125,16 @@ if [ "${#drawings[@]}" -eq 0 ]; then
   echo "WARN  no drawings in $owner, only the video is prepared" >&2
 fi
 
-# Drawings.
+# Drawings. Names are claimed in lower case: two files that differ only in case would overwrite
+# each other on a case-insensitive file system.
 declare -A taken=()
+# claim <target> <message>: refuses a name another published file already has.
+claim() {
+  local slot
+  slot="$(lower "$1")"
+  [ -z "${taken[$slot]+x}" ] || fail "$1" "$2"
+  taken[$slot]=1
+}
 for path in "${drawings[@]}"; do
   name="$(basename "$path")"
   lname="$(lower "$name")"
@@ -149,14 +165,12 @@ for path in "${drawings[@]}"; do
 
   if [ "$native" -eq 1 ] && [ "$(size_of "$path")" -le "$drawing_max" ]; then
     target="$name"
-    [ -z "${taken[$target]+x}" ] || fail "$target" "two drawings would be published under this name"
-    taken[$target]=1
+    claim "$target" "two drawings would be published under this name"
     cp "$path" "$out/$target"
     pass "$target" "$(size_of "$out/$target") bytes, copied unchanged"
   else
     target="$base.webp"
-    [ -z "${taken[$target]+x}" ] || fail "$target" "two drawings would be published under this name"
-    taken[$target]=1
+    claim "$target" "two drawings would be published under this name"
     converted=0
     for quality in 90 85 80 75 70 65 60 55 50 45 40; do
       rm -f "$out/$target"
@@ -167,7 +181,8 @@ for path in "${drawings[@]}"; do
     [ "$converted" -eq 1 ] || fail "$target" "$(size_of "$out/$target") bytes at quality 40, still above $drawing_max"
     pass "$target" "$(size_of "$out/$target") bytes, converted from $name at quality $quality"
   fi
-  record "$target" "$(mime_of "$target")" drawing
+  mime="$(mime_of "$target")"
+  record "$target" "$mime" drawing
 done
 
 # Video.
@@ -180,23 +195,39 @@ audio_codec="$(probe_stream "$video_src" a codec_name)"
 if [ -n "$audio_codec" ] && [ "$audio_codec" != aac ]; then
   fail "$video_name" "audio codec is $audio_codec, expected aac"
 fi
+# H.264 is not enough: High 4:4:4, 4:2:2 and 10-bit streams are H.264 too and no mainstream browser plays them.
+pix_fmt="$(probe_stream "$video_src" v pix_fmt)"
+profile="$(probe_stream "$video_src" v profile)"
+case "$pix_fmt" in
+  yuv420p | yuvj420p) ;;
+  *) fail "$video_name" "pixel format is ${pix_fmt:-unknown} (profile ${profile:-unknown}); browsers decode only 8-bit 4:2:0 (yuv420p)" ;;
+esac
+case "$profile" in
+  "Constrained Baseline" | Baseline | Main | High) ;;
+  *) fail "$video_name" "H.264 profile is ${profile:-unknown}; browsers decode Constrained Baseline, Baseline, Main and High" ;;
+esac
+stream_count="$(probe -show_entries stream=index -of csv=p=0 "$video_src" | grep -c .)"
 
 video_target="$video_base.mp4"
-[ -z "${taken[$video_target]+x}" ] || fail "$video_target" "a drawing is already published under this name"
-taken[$video_target]=1
+claim "$video_target" "a drawing is already published under this name"
 video_ext="$(lower "${video_name##*.}")"
 list=" $(node "$boxes_tool" "$video_src" | tr '\n' ' ') "
 moov_first=0
 if box_before "$list" moov mdat; then moov_first=1; fi
 
-if [ "$video_ext" = mp4 ] && [ "$moov_first" -eq 1 ]; then
+# Extra streams (timecode, data, subtitles) would be published with the file, so only a file that is exactly
+# one video and at most one audio stream is copied as it is.
+expected_streams=1
+[ -z "$audio_codec" ] || expected_streams=2
+if [ "$video_ext" = mp4 ] && [ "$moov_first" -eq 1 ] && [ "$stream_count" -eq "$expected_streams" ]; then
   cp "$video_src" "$out/$video_target"
   pass "$video_target" "moov before mdat, copied unchanged"
 else
-  "${ffmpeg_quiet[@]}" -i "$video_src" -map 0:v:0 -map '0:a:0?' -c copy -movflags +faststart "$out/$video_target"
+  # bitexact keeps ffmpeg from adding its own encoder tag to the owner's file.
+  "${ffmpeg_quiet[@]}" -i "$video_src" -map 0:v:0 -map '0:a:0?' -c copy -fflags +bitexact -movflags +faststart "$out/$video_target"
   list=" $(node "$boxes_tool" "$out/$video_target" | tr '\n' ' ') "
   box_before "$list" moov mdat || fail "$video_target" "moov is not before mdat after the remux:$list"
-  pass "$video_target" "remuxed with +faststart, no re-encode"
+  pass "$video_target" "remuxed with +faststart (video and first audio stream only), no re-encode"
 fi
 record "$video_target" video/mp4 video
 
@@ -207,7 +238,7 @@ echo "INFO  $video_target  ${width}x${height}, ${duration} s, $(size_of "$out/$v
 
 # Cover.
 cover_target="$video_base-cover.webp"
-[ -z "${taken[$cover_target]+x}" ] || fail "$cover_target" "a drawing is already published under this name"
+claim "$cover_target" "a drawing is already published under this name"
 
 # long_side_scale <width> <height>: a scale filter that caps the long side without enlarging.
 long_side_scale() {
@@ -252,6 +283,32 @@ else
   fail "cover" "no cover.webp / cover.jpg in $owner and no --cover-at <seconds> given"
 fi
 record "$cover_target" image/webp cover
+
+# Metadata warnings. Each prepared file is published byte for byte and permanently, so what it carries
+# is named here; the owner may strip it from the source and run again.
+warn_metadata() {
+  echo "WARN  $1 carries metadata: $2. It will be published permanently, byte for byte; strip it from the source and run this again if you do not want that." >&2
+}
+
+# Container tags that say nothing about the owner: brand, language and the track handler's name.
+benign_tags=" major_brand minor_version compatible_brands language handler_name vendor_id "
+while IFS=$'\t' read -r file type role; do
+  case "$type" in
+    video/mp4)
+      tags=""
+      while IFS= read -r line; do
+        key="${line#TAG:}"; key="$(lower "${key%%=*}")"
+        case "$benign_tags" in *" $key "*) continue ;; esac
+        case " $tags " in *" $key "*) ;; *) tags="${tags:+$tags, }$key" ;; esac
+      done < <(probe -show_entries format_tags:stream_tags -of default=nw=1:nk=0 "$out/$file" | grep '^TAG:' || true)
+      [ -z "$tags" ] || warn_metadata "$file" "$tags"
+      ;;
+    *)
+      found="$(node "$here/scan-metadata.mjs" "$out/$file")"
+      [ -z "$found" ] || warn_metadata "$file" "$found"
+      ;;
+  esac
+done < "$records"
 
 # prepared.json: dimensions and sizes are read back from the files that were written. Every row is
 # collected before the manifest is written, so a failed run leaves no partial prepared.json behind.

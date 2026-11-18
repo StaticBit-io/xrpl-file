@@ -352,6 +352,16 @@ internal sealed class FixtureRun : IAsyncDisposable
 
         FixtureRun run = new(plan, options, accounts, null, null, client, links);
 
+        try
+        {
+            await NodeNetwork.RequireAsync(client, options.NetworkName, options.NodeUrl, cancellationToken);
+        }
+        catch (Exception)
+        {
+            await run.DisposeAsync();
+            throw;
+        }
+
         foreach (string role in accounts.Unfunded().ToList())
         {
             await run.FundAsync(role, cancellationToken);
@@ -368,7 +378,7 @@ internal sealed class FixtureRun : IAsyncDisposable
     /// <summary>
     /// Own-accounts mode: the owner's two accounts, on the named network. The links file is checked and the seeds are
     /// read before the first connection, so a wrong network or a refused prompt costs nothing; the signing rights are
-    /// checked right after connecting and before anything is priced. No account book is read or written and the faucet
+    /// checked right after connecting and before anything is priced; the node's own network id is checked first of all. No account book is read or written and the faucet
     /// is never reached from this path.
     /// </summary>
     public static async Task<FixtureRun> ConnectOwnAsync(IReadOnlyList<PlanEntry> plan, RunOptions options, CancellationToken cancellationToken)
@@ -390,6 +400,7 @@ internal sealed class FixtureRun : IAsyncDisposable
         try
         {
             await client.Connect(cancellationToken);
+            await NodeNetwork.RequireAsync(client, options.NetworkName, options.NodeUrl, cancellationToken);
             await OwnAccounts.RequireSigningRightsAsync(client, writer, options.NetworkName, cancellationToken);
             await OwnAccounts.RequireSigningRightsAsync(client, payer, options.NetworkName, cancellationToken);
         }
@@ -617,6 +628,11 @@ internal sealed class FixtureRun : IAsyncDisposable
         foreach (string path in Directory.EnumerateFiles(stateDirectory, "*.json"))
         {
             PublicationState state = PublicationState.Load(path);
+
+            if (!string.Equals(state.Network, network, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"entry '{key}': {path} belongs to {state.Network}, this run is on {network}; use another out-dir");
+            }
 
             if (!string.Equals(state.Phase, "done", StringComparison.Ordinal)) unfinished.Add(path);
             else if (state.ManifestHash is { } hash) finished = new XrplFileLink(network, hash);
