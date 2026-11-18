@@ -7,6 +7,7 @@
       "src\\XrplFile.Keys\\XrplFile.Keys.csproj",
       "tests\\XrplFile.App.Core.Tests\\XrplFile.App.Core.Tests.csproj",
       "tests\\XrplFile.Core.Tests\\XrplFile.Core.Tests.csproj",
+      "tests\\XrplFile.Fixtures.Tests\\XrplFile.Fixtures.Tests.csproj",
       "tests\\XrplFile.Keys.Tests\\XrplFile.Keys.Tests.csproj",
       "tests\\XrplFile.MemoryProbe\\XrplFile.MemoryProbe.csproj",
       "tests\\XrplFile.ResumeMemoryProbe\\XrplFile.ResumeMemoryProbe.csproj",

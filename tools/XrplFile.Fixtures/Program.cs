@@ -16,9 +16,21 @@ using XrplFile;
 // arguments: keys already in links.json are skipped and a state file left under <out-dir>/state/<key>
 // is resumed through the Batch ResumeAsync.
 
-if (args.Length != 3)
+const string Usage = """
+    usage: XrplFile.Fixtures <plan.json> <media-dir> <out-dir>
+           XrplFile.Fixtures <plan.json> <media-dir> <out-dir> --network <testnet|mainnet> --writer <address> --payer <address> [--node <wss-url>]
+    """;
+
+RunOptions options;
+
+try
 {
-    Console.Error.WriteLine("usage: XrplFile.Fixtures <plan.json> <media-dir> <out-dir>");
+    options = RunOptions.Parse(args);
+}
+catch (PlanException e)
+{
+    foreach (string problem in e.Problems) Console.Error.WriteLine($"arguments: {problem}");
+    Console.Error.WriteLine(Usage);
     return 2;
 }
 
@@ -31,10 +43,11 @@ Console.CancelKeyPress += (_, e) =>
 
 try
 {
-    IReadOnlyList<PlanEntry> plan = Plan.Load(args[0]);
-    Plan.Validate(plan, args[1]);
+    IReadOnlyList<PlanEntry> plan = Plan.Load(options.PlanPath);
+    Plan.Validate(plan, options.MediaDirectory);
+    if (options.OwnAccounts) Plan.ValidateOwnAccounts(plan);
 
-    await using FixtureRun run = await FixtureRun.ConnectAsync(plan, args[1], args[2], cancel.Token);
+    await using FixtureRun run = await FixtureRun.ConnectAsync(plan, options.MediaDirectory, options.OutDirectory, cancel.Token);
     return await run.PublishAllAsync(cancel.Token);
 }
 catch (PlanException e)
@@ -138,6 +151,25 @@ internal static partial class Plan
             {
                 problems.Add($"{where}: cover '{cover.Key}' is by writer {cover.Writer}; only a key ending in '{BrokenCoverSuffix}' may take another writer's cover");
             }
+        }
+
+        if (problems.Count > 0) throw new PlanException(problems);
+    }
+
+    /// <summary>
+    /// The own-accounts mode has one writer and one payer, so a plan that needs a second writer, or the
+    /// broken-cover fixture that borrows another writer's cover, cannot be published from it.
+    /// </summary>
+    public static void ValidateOwnAccounts(IReadOnlyList<PlanEntry> plan)
+    {
+        List<string> problems = [];
+
+        foreach (PlanEntry entry in plan)
+        {
+            string where = $"entry '{entry.Key}'";
+
+            if (!string.Equals(entry.Writer, "a", StringComparison.Ordinal)) problems.Add($"{where}: writer '{entry.Writer}' is not available with your own accounts, only writer 'a'");
+            if (entry.Key.EndsWith(BrokenCoverSuffix, StringComparison.Ordinal)) problems.Add($"{where}: a broken-cover entry cannot be published with your own accounts");
         }
 
         if (problems.Count > 0) throw new PlanException(problems);
@@ -333,11 +365,12 @@ internal sealed class FixtureRun : IAsyncDisposable
     /// <returns>The process exit code: 0 when every entry of the plan has a link.</returns>
     public async Task<int> PublishAllAsync(CancellationToken cancellationToken)
     {
+        Links.RequireNetwork(_links, Network, _linksPath);
+
         foreach (PlanEntry entry in _plan)
         {
             if (_links.TryGetValue(entry.Key, out string? existing))
             {
-                RequireTestnetLink(entry.Key, existing);
                 Console.WriteLine($"{entry.Key} -> {existing}");
                 continue;
             }
@@ -569,14 +602,6 @@ internal sealed class FixtureRun : IAsyncDisposable
             ? JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path), Json) ?? []
             : [];
 
-    private static void RequireTestnetLink(string key, string text)
-    {
-        if (!XrplFileLink.TryParse(text, out XrplFileLink? link) || !string.Equals(link.Network, Network, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException($"links.json: '{key}' is not a {Network} link");
-        }
-    }
-
     /// <summary>Written after every entry, in plan order, beside and then moved into place.</summary>
     private void SaveLinks()
     {
@@ -589,5 +614,20 @@ internal sealed class FixtureRun : IAsyncDisposable
         string temporary = _linksPath + ".writing";
         File.WriteAllText(temporary, JsonSerializer.Serialize(ordered, Json) + "\n");
         File.Move(temporary, _linksPath, overwrite: true);
+    }
+}
+
+internal static class Links
+{
+    /// <summary>Refuses a links.json that holds a link of another network, which would otherwise be skipped as already published.</summary>
+    public static void RequireNetwork(IReadOnlyDictionary<string, string> links, string network, string path)
+    {
+        foreach ((string key, string text) in links)
+        {
+            if (!XrplFileLink.TryParse(text, out XrplFileLink? link) || !string.Equals(link.Network, network, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"{path}: '{key}' is not a {network} link");
+            }
+        }
     }
 }

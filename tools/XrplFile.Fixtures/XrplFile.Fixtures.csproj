@@ -9,6 +9,9 @@
     <RuntimeHostConfigurationOption Include="System.GC.LOHThreshold" Value="4194304" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="XrplFile.Fixtures.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\XrplFile.Core\XrplFile.Core.csproj" />
   </ItemGroup>
 </Project>
