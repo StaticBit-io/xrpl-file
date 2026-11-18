@@ -9,3 +9,5 @@
 *.jpg binary
 # Vendored bundles are kept byte for byte: a page pins them with an SRI hash.
 web/vendor/*.js binary
+# Bytes committed for the mainnet examples are compared with the ledger copy, so git must not touch them.
+tools/examples/media/* -text
