@@ -27,7 +27,7 @@ public sealed class FileTutorialSettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void An_empty_or_unreadable_file_counts_as_offered()
+    public void An_empty_file_counts_as_offered()
     {
         string path = Path.Combine(_directory, "tutorial-offered.txt");
         File.WriteAllText(path, string.Empty);

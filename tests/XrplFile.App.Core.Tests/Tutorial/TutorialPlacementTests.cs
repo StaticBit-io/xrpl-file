@@ -34,6 +34,32 @@ public sealed class TutorialPlacementTests
     }
 
     [Fact]
+    public void Hole_ignores_rects_wholly_outside_the_view()
+    {
+        Assert.Null(TutorialPlacement.Hole([new TourRect(1200, 100, 50, 20), new TourRect(-80, 10, 50, 20), new TourRect(10, 800, 50, 20)], 1100, 713));
+
+        Assert.Equal(new TourRect(94, 94, 62, 32), TutorialPlacement.Hole([new TourRect(1200, 100, 50, 20), new TourRect(100, 100, 50, 20)], 1100, 713));
+    }
+
+    [Fact]
+    public void A_bubble_larger_than_the_view_is_pinned_to_the_margin()
+    {
+        Assert.Equal(new TourPoint(TutorialPlacement.Margin, TutorialPlacement.Margin), TutorialPlacement.Place(null, 500, 400, 300, 200));
+        Assert.Equal(new TourPoint(TutorialPlacement.Margin, TutorialPlacement.Margin), TutorialPlacement.Place(new TourRect(100, 50, 50, 50), 500, 400, 300, 200));
+    }
+
+    [Fact]
+    public void A_zero_size_view_gives_a_finite_result()
+    {
+        Assert.Null(TutorialPlacement.Hole([new TourRect(0, 0, 10, 10)], 0, 0));
+
+        TourPoint at = TutorialPlacement.Place(new TourRect(0, 0, 0, 0), 320, 160, 0, 0);
+
+        Assert.True(double.IsFinite(at.Left) && double.IsFinite(at.Top));
+        Assert.True(double.IsFinite(TutorialPlacement.Place(null, 320, 160, 0, 0).Left));
+    }
+
+    [Fact]
     public void No_hole_centres_the_bubble()
     {
         Assert.Equal(new TourPoint(390, 276.5), TutorialPlacement.Place(null, 320, 160, 1100, 713));

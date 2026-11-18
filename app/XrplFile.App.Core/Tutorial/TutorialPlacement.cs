@@ -23,7 +23,7 @@ public static class TutorialPlacement
 
     /// <summary>
     /// The spotlight over the union of the lit rectangles, grown by <see cref="HolePadding"/> and
-    /// clamped to the view; null when no rectangle has an area (an element that is not on screen).
+    /// clamped to the view; null when no rectangle has any area inside the view.
     /// </summary>
     public static TourRect? Hole(IReadOnlyList<TourRect> lit, double viewWidth, double viewHeight)
     {
@@ -32,13 +32,18 @@ public static class TutorialPlacement
 
         foreach (TourRect rect in lit)
         {
-            if (rect.Width <= 0 || rect.Height <= 0) continue;
+            // Clip first: an element scrolled or laid out wholly off screen must not pull the hole there.
+            double clippedLeft = Math.Max(0, rect.X);
+            double clippedTop = Math.Max(0, rect.Y);
+            double clippedRight = Math.Min(viewWidth, rect.X + rect.Width);
+            double clippedBottom = Math.Min(viewHeight, rect.Y + rect.Height);
+            if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) continue;
 
             any = true;
-            left = Math.Min(left, rect.X);
-            top = Math.Min(top, rect.Y);
-            right = Math.Max(right, rect.X + rect.Width);
-            bottom = Math.Max(bottom, rect.Y + rect.Height);
+            left = Math.Min(left, clippedLeft);
+            top = Math.Min(top, clippedTop);
+            right = Math.Max(right, clippedRight);
+            bottom = Math.Max(bottom, clippedBottom);
         }
 
         if (!any) return null;
