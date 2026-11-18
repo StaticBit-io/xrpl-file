@@ -103,4 +103,44 @@ public sealed class PlanQuoteTests
     [Fact]
     public void ApprovalForAnUnknownKeyIsRefused() =>
         Assert.Throws<KeyNotFoundException>(() => Two().ApprovalFor("nope", Writer, Payer));
+
+    [Fact]
+    public void ACheaperRemainderIsApprovedAtItsOwnCeilings()
+    {
+        PlanQuote quote = Two();
+        BatchPublicationEstimate remainder = Estimate(100, 50, 20_000, 4_000);
+
+        SpendingApproval approval = quote.ResumeApprovalFor("video", new ResumeQuote(Writer, Payer, 2, null, remainder), Writer, Payer);
+
+        Assert.Equal(SpendingApproval.For(remainder, Writer, Payer), approval);
+        Assert.Equal(20_000, approval.PayerCeilingDrops);
+        Assert.Equal(4_000, approval.WriterCeilingDrops);
+    }
+
+    [Fact]
+    public void ADearerRemainderIsRefused()
+    {
+        PlanQuote quote = Two();
+        BatchPublicationEstimate remainder = Estimate(100, 50, 60_001, 4_000);
+
+        InvalidOperationException e = Assert.Throws<InvalidOperationException>(
+            () => quote.ResumeApprovalFor("video", new ResumeQuote(Writer, Payer, 2, null, remainder), Writer, Payer));
+
+        Assert.Contains("run again for a new quote", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AResumeWithoutABatchEstimateIsRefused() =>
+        Assert.Throws<InvalidOperationException>(
+            () => Two().ResumeApprovalFor("video", new ResumeQuote(Writer, Payer, 2, null, null), Writer, Payer));
+
+    [Fact]
+    public void AResumingEntryIsPrintedAsAnUpperBound()
+    {
+        PlanQuote quote = new([new EntryQuote("video", 2_000, Estimate(500, 100, 40_000, 9_000), Resuming: true)]);
+
+        string text = PlanQuote.Format(quote, Writer, Payer, "testnet");
+
+        Assert.Contains("resume: at most", text, StringComparison.Ordinal);
+    }
 }

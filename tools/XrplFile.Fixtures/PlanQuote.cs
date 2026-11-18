@@ -3,8 +3,11 @@ using System.Text;
 
 namespace XrplFile;
 
-/// <summary>One plan entry as priced before the run: what it holds and what the Batch writer expects to spend on it.</summary>
-internal sealed record EntryQuote(string Key, long Bytes, BatchPublicationEstimate Estimate);
+/// <summary>
+/// One plan entry as priced before the run: what it holds and what the Batch writer expects to spend on it.
+/// <paramref name="Resuming"/> marks an entry with an unfinished state, whose figures are then an upper bound.
+/// </summary>
+internal sealed record EntryQuote(string Key, long Bytes, BatchPublicationEstimate Estimate, bool Resuming = false);
 
 /// <summary>
 /// The whole plan priced at once, which is what the owner confirms. A per-entry estimate counts the base
@@ -44,7 +47,8 @@ internal sealed record PlanQuote(IReadOnlyList<EntryQuote> Entries)
         {
             long transactions = (long)entry.Estimate.Batches + entry.Estimate.SoloTransactions;
             long fee = entry.Estimate.PayerFeeDrops + entry.Estimate.WriterFeeDrops;
-            text.AppendLine($"  {entry.Key}: {entry.Bytes} bytes, {transactions} transactions, fee {Xrp(fee)} XRP");
+            string bound = entry.Resuming ? "resume: at most " : "";
+            text.AppendLine($"  {entry.Key}: {entry.Bytes} bytes, {bound}{transactions} transactions, fee {bound}{Xrp(fee)} XRP");
         }
 
         text.AppendLine($"Total: {quote.Transactions} transactions, fee {Xrp(quote.FeeDrops)} XRP");
@@ -64,6 +68,31 @@ internal sealed record PlanQuote(IReadOnlyList<EntryQuote> Entries)
         EntryQuote entry = Entries.FirstOrDefault(candidate => string.Equals(candidate.Key, key, StringComparison.Ordinal))
             ?? throw new KeyNotFoundException($"no quote for '{key}'");
         return SpendingApproval.For(entry.Estimate, writer, payer);
+    }
+
+    /// <summary>
+    /// What a resume may spend: the estimate of the work that is left, provided neither account's worst case exceeds the
+    /// printed one. Approving the printed figure again would let a crashed run spend its whole ceiling a second time.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The remainder costs more than was printed, or the quote carries no Batch estimate; nothing is submitted.</exception>
+    public SpendingApproval ResumeApprovalFor(string key, ResumeQuote resume, string writer, string payer)
+    {
+        ArgumentNullException.ThrowIfNull(resume);
+        SpendingApproval printed = ApprovalFor(key, writer, payer);
+
+        if (resume.Batch is not { } remaining)
+        {
+            throw new InvalidOperationException($"entry '{key}': the resume carries no Batch estimate; nothing was submitted");
+        }
+
+        if (remaining.WriterFeeDropsWorstCase > printed.WriterCeilingDrops || remaining.PayerFeeDropsWorstCase > printed.PayerCeilingDrops)
+        {
+            throw new InvalidOperationException(
+                $"entry '{key}': the remaining work now costs more than the printed estimate (writer {remaining.WriterFeeDropsWorstCase} of {printed.WriterCeilingDrops} drops, "
+                + $"payer {remaining.PayerFeeDropsWorstCase} of {printed.PayerCeilingDrops}); nothing was submitted, run again for a new quote");
+        }
+
+        return SpendingApproval.For(remaining, writer, payer);
     }
 
     private static string Xrp(long drops) => (drops / 1_000_000m).ToString("0.000000", CultureInfo.InvariantCulture);

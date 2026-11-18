@@ -466,7 +466,8 @@ internal sealed class FixtureRun : IAsyncDisposable
             BatchPublicationEstimate estimate = await PublicationSession.EstimateAsync(
                 _source, _writerKey!.Account, _payerKey!.Account, file.Length, options, cancellationToken);
 
-            entries.Add(new EntryQuote(entry.Key, file.Length, estimate));
+            bool resuming = FindState(options.StateDirectory, entry.Key, _network).Unfinished is not null;
+            entries.Add(new EntryQuote(entry.Key, file.Length, estimate, resuming));
         }
 
         if (entries.Count == 0) return null;
@@ -518,7 +519,7 @@ internal sealed class FixtureRun : IAsyncDisposable
                 Cover = cover,
                 SourcePath = path,
                 Approval = quote.ApprovalFor(entry.Key, WriterAddress(entry), PayerAddress),
-                ApproveResume = (_, _) => Task.FromResult(quote.ApprovalFor(entry.Key, WriterAddress(entry), PayerAddress)),
+                ApproveResume = (resume, _) => Task.FromResult(quote.ResumeApprovalFor(entry.Key, resume, WriterAddress(entry), PayerAddress)),
             };
 
         XrplFileLink link;
