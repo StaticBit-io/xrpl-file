@@ -72,8 +72,9 @@ public sealed class ScreenNavigation
                 nameof(reference));
         }
 
-        // Import always opens on its first tab; the tab a previous visit ended on is not worth keeping.
-        ImportTab nextTab = view == AccountsView.AddKey ? ImportTab.Seed : ImportTab;
+        // Import always opens on its first tab, and leaving it drops the tab too, so a stale Backup
+        // cannot survive into the next visit by any route.
+        ImportTab nextTab = ImportTab.Seed;
         bool changed = AccountsView != view || ActiveReference != reference || MenuFor is not null || ImportTab != nextTab;
 
         AccountsView = view;

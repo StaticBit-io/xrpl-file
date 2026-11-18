@@ -147,6 +147,7 @@ else
     public EventCallback OnDone { get; set; }
 
     private readonly ScreenLifetime _lifetime = new();
+    private bool _disposed;
 
     private string _label = string.Empty;
     private string _network = string.Empty;
@@ -161,7 +162,23 @@ else
     private string? _stored;
     private bool _busy;
 
-    protected override void OnInitialized() => Choices.Refresh();
+    protected override void OnInitialized()
+    {
+        Nav.Changed += OnNavChanged;
+        Choices.Refresh();
+    }
+
+    /// <summary>
+    /// Redraws when something outside this component moves the import tab. Through InvokeAsync and
+    /// behind the _disposed check for the reason Shell.razor's OnTabChanged gives.
+    /// </summary>
+    private void OnNavChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
+    });
 
     private void SwitchMode(ImportTab tab)
     {
@@ -290,6 +307,8 @@ else
 
     public void Dispose()
     {
+        _disposed = true;
+        Nav.Changed -= OnNavChanged;
         // Design's own rule for this screen (task-12 brief): a multi-key backup's decrypted seeds,
         // and whatever SelectContainerKey most recently prepared from them, must not simply wait on
         // the garbage collector once the add-key screen is dismissed -- whichever way it is dismissed,

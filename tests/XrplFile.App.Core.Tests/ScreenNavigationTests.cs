@@ -73,6 +73,18 @@ public sealed class ScreenNavigationTests
     }
 
     [Fact]
+    public void Leaving_import_resets_the_tab_to_seed()
+    {
+        ScreenNavigation nav = Create(out _);
+        nav.OpenAccounts(AccountsView.AddKey);
+        nav.ShowImportTab(ImportTab.Backup);
+
+        nav.OpenAccounts(AccountsView.List);
+
+        Assert.Equal(ImportTab.Seed, nav.ImportTab);
+    }
+
+    [Fact]
     public void ToggleMenu_opens_closes_and_moves()
     {
         ScreenNavigation nav = Create(out _);
