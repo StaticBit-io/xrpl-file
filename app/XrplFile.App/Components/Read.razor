@@ -74,7 +74,7 @@ else
             {
                 <div class="alert alert-success">
                     <p class="mb-2">@T[snapshot.Name is { } name ? UiText.Of(ReadText.SucceededNamed, ("name", name)) : UiText.Of(ReadText.Succeeded)]</p>
-                    <button type="button" class="btn btn-outline-secondary" disabled="@snapshot.Saving" @onclick="SaveAsync">
+                    <button type="button" class="btn btn-outline-secondary" disabled="@snapshot.Saving" data-tour="@TutorialRegions.ReadSave" @onclick="SaveAsync">
                         @T[ReadText.SaveButton]
                     </button>
                     @if (snapshot.Saved)
@@ -97,13 +97,13 @@ else
             }
         }
 
-        <section class="xf-card">
+        <section class="xf-card" data-tour="@TutorialRegions.ReadLink">
             <div class="mb-3">
                 <label for="read-link" class="form-label">@T[ReadText.LinkLabel]</label>
                 <input id="read-link" class="form-control xf-mono" @bind="Model.Link" @bind:event="oninput" />
             </div>
 
-            <button type="button" class="btn btn-outline-primary" disabled="@Model.LookingUp" @onclick="LookUpAsync">
+            <button type="button" class="btn btn-outline-primary" disabled="@Model.LookingUp" data-tour="@TutorialRegions.ReadLookup" @onclick="LookUpAsync">
                 @T[ReadText.LookUpButton]
             </button>
         </section>
@@ -115,7 +115,7 @@ else
 
         @if (lookup.Manifest is { } manifest)
         {
-            <section class="xf-card">
+            <section class="xf-card" data-tour="@TutorialRegions.ReadResult">
                 <p class="mb-1">@(manifest.Manifest.Name ?? T[ReadText.NoName])</p>
                 <p class="mb-1">@T[UiText.Of(CommonText.Bytes, ("count", manifest.Manifest.Size))]</p>
                 <p class="mb-1">@T[UiText.Of(ReadText.ReadTime, ("duration", DurationText.Of(lookup.ReadDuration!.Value)))]</p>
@@ -125,7 +125,7 @@ else
                 <p class="mb-1">@Html(UiText.Of(ReadText.Node, ("url", lookup.NodeUrl ?? string.Empty)), ("url", "code"))</p>
             </section>
 
-            <button type="button" class="btn btn-primary" disabled="@(!lookup.CanRead)" @onclick="StartRead">
+            <button type="button" class="btn btn-primary" disabled="@(!lookup.CanRead)" data-tour="@TutorialRegions.ReadRead" @onclick="StartRead">
                 @T[ReadText.ReadButton]
             </button>
         }

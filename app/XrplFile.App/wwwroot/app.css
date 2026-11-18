@@ -515,3 +515,26 @@ progress { accent-color: var(--mint); }
 #blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: 0.75rem; top: 0.5rem; }
 .blazor-error-boundary { background: rgba(214, 119, 106, 0.14); color: var(--negative); padding: 1rem; border-radius: var(--radius-chip); }
 .blazor-error-boundary::after { content: "An error has occurred."; }
+
+/* ---- Tutorial overlay ---- */
+
+.xf-tour { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
+.xf-tour-dim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.62); pointer-events: none; }
+/* The shadow is the dimming: one box lights the hole and darkens everything around it. */
+.xf-tour-hole {
+    position: fixed; box-sizing: border-box; pointer-events: none; border-radius: var(--radius-chip);
+    outline: 2px solid var(--mint); box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.62);
+}
+.xf-tour-bubble {
+    position: fixed; box-sizing: border-box; width: min(340px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto;
+    pointer-events: auto; background: var(--box-bg); border: 1px solid var(--control-line);
+    border-radius: var(--radius-card); padding: 16px 18px; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+.xf-tour-bubble.is-pending { visibility: hidden; }
+.xf-tour-topic { margin: 0 0 4px; font-size: 0.8125rem; color: var(--text-secondary); }
+.xf-tour-bubble h2 { font-size: 1.0625rem; margin: 0 0 8px; }
+.xf-tour-bubble h2:focus { outline: none; }
+.xf-tour-bubble h2:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+.xf-tour-bubble p { color: var(--text-secondary); }
+.xf-tour-note { color: var(--text) !important; }
+.xf-tour-bubble .xf-dialog-actions { margin-top: 12px; }

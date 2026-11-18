@@ -30,7 +30,7 @@ else
             <button type="button" class="nav-link @(Nav.ImportTab == ImportTab.Seed ? "active" : "")" @onclick="() => SwitchMode(ImportTab.Seed)">@T[KeysText.TabSeed]</button>
         </li>
         <li class="nav-item">
-            <button type="button" class="nav-link @(Nav.ImportTab == ImportTab.Backup ? "active" : "")" @onclick="() => SwitchMode(ImportTab.Backup)">@T[KeysText.TabBackup]</button>
+            <button type="button" data-tour="@TutorialRegions.ImportBackupTab" class="nav-link @(Nav.ImportTab == ImportTab.Backup ? "active" : "")" @onclick="() => SwitchMode(ImportTab.Backup)">@T[KeysText.TabBackup]</button>
         </li>
     </ul>
 
@@ -39,7 +39,7 @@ else
         <div class="alert alert-danger">@T[problem]</div>
     }
 
-    <section class="xf-card">
+    <section class="xf-card" data-tour="@TutorialRegions.ImportBackup">
         @switch (Nav.ImportTab)
         {
             case ImportTab.Seed:
@@ -51,11 +51,11 @@ else
                     <label for="add-import-network" class="form-label">@T[CommonText.FieldNetwork]</label>
                     <NetworkSelect Id="add-import-network" @bind-Value="_network" Disabled="_busy" />
                 </div>
-                <div class="mb-3">
+                <div class="mb-3" data-tour="@TutorialRegions.ImportSeed">
                     <label for="add-import-seed" class="form-label">@T[KeysText.SeedLabel]</label>
                     <input id="add-import-seed" type="password" class="form-control" @bind="_seed" @bind:event="oninput" disabled="@_busy" />
                 </div>
-                <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoImport">@T[KeysText.PreviewButton]</button>
+                <button type="button" class="btn btn-primary" disabled="@_busy" data-tour="@TutorialRegions.ImportPreview" @onclick="DoImport">@T[KeysText.PreviewButton]</button>
                 break;
 
             case ImportTab.Backup:

@@ -24,12 +24,12 @@
     }
 
     <section class="xf-card">
-        <div class="mb-3">
+        <div class="mb-3" data-tour="@TutorialRegions.ExportPassword">
             <label class="form-label">@T[KeysText.BackupPasswordLabel]</label>
             <input type="password" class="form-control" @bind="_password" @bind:event="oninput" disabled="@_busy" />
         </div>
 
-        <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="CreateAsync">@T[KeysText.CreateBackupButton]</button>
+        <button type="button" class="btn btn-primary" disabled="@_busy" data-tour="@TutorialRegions.ExportCreate" @onclick="CreateAsync">@T[KeysText.CreateBackupButton]</button>
     </section>
     <button type="button" class="btn btn-outline-secondary" @onclick="BackAsync">@T[KeysText.SkipButton]</button>
 }

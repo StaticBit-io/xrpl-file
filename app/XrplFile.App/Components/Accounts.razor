@@ -45,10 +45,10 @@
             <div class="xf-page-head">
                 <h1 class="xf-title">@T[AccountsText.Title]</h1>
                 <div class="xf-page-actions">
-                    <button type="button" class="btn btn-outline-secondary" @onclick="() => Nav.OpenAccounts(AccountsView.AddKey)">
+                    <button type="button" class="btn btn-outline-secondary" data-tour="@TutorialRegions.AccountsImport" @onclick="() => Nav.OpenAccounts(AccountsView.AddKey)">
                         @T[AccountsText.ImportKeyButton]
                     </button>
-                    <button type="button" class="btn btn-primary" @onclick="() => Nav.OpenAccounts(AccountsView.New)">
+                    <button type="button" class="btn btn-primary" data-tour="@TutorialRegions.AccountsNew" @onclick="() => Nav.OpenAccounts(AccountsView.New)">
                         @T[AccountsText.NewAccountButton]
                     </button>
                 </div>
@@ -64,12 +64,12 @@
                 <Damage OnChanged="StateHasChanged" />
             }
 
-            @Section(AccountsText.PublishingTitle,
+            @Section(TutorialRegions.AccountsPublishing, AccountsText.PublishingTitle,
                 AccountsText.PublishingDescription,
                 AccountsText.PublishingEmpty,
                 Model.ThrowawayRows)
 
-            @Section(AccountsText.KeysTitle,
+            @Section(TutorialRegions.AccountsKeys, AccountsText.KeysTitle,
                 AccountsText.KeysDescription,
                 AccountsText.KeysEmpty,
                 Model.ImportedRows)
@@ -149,8 +149,8 @@
     /// its own empty-state line. Both sections go through here so they cannot drift apart in columns
     /// or actions; their differences are the text passed in and the rows the model sorted into them.
     /// </summary>
-    private RenderFragment Section(TextId title, TextId description, TextId emptyText, IReadOnlyList<AccountRow> rows) =>
-        @<section class="xf-section" aria-label="@T[title]">
+    private RenderFragment Section(string region, TextId title, TextId description, TextId emptyText, IReadOnlyList<AccountRow> rows) =>
+        @<section class="xf-section" data-tour="@region" aria-label="@T[title]">
             <div class="xf-section-head">
                 <h2>@T[title]</h2>
                 <p>@T[description]</p>
@@ -175,13 +175,13 @@
                         </li>
                         @foreach (AccountRow row in rows)
                         {
-                            <li class="xf-account">
+                            <li class="xf-account" data-tour="@TutorialRegions.AccountsRow">
                                 <div class="xf-account-id">
                                     <div class="xf-account-name">
                                         <span>@row.Label</span>
                                         @if (row.NeedsExporting)
                                         {
-                                            <span class="xf-tag xf-tag-danger" title="@T[AccountsText.NotExportedHint]">
+                                            <span class="xf-tag xf-tag-danger" data-tour="@TutorialRegions.AccountsNotExported" title="@T[AccountsText.NotExportedHint]">
                                                 @T[AccountsText.NotExportedTag]
                                             </span>
                                         }
@@ -208,7 +208,7 @@
                                 <div class="xf-account-actions">
                                     @if (row.HasActions)
                                     {
-                                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" data-tour="@TutorialRegions.AccountsFund"
                                                 @onclick="() => OpenFunding(row.Reference)">
                                             @T[AccountsText.FundButton]
                                         </button>
@@ -278,7 +278,7 @@
                             @onclick="() => FromMenu(() => OpenReveal(row.Reference))">
                         @T[AccountsText.MenuRevealSecret]
                     </button>
-                    <button type="button" role="menuitem" class="xf-menu-item"
+                    <button type="button" role="menuitem" class="xf-menu-item" data-tour="@TutorialRegions.AccountsMenuExport"
                             disabled="@VaultList.WritesAreRefused"
                             @onclick="() => FromMenu(() => OpenExport(row.Reference))">
                         @T[AccountsText.MenuExportKey]

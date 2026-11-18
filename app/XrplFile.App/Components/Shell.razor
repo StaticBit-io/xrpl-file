@@ -1,6 +1,5 @@
 @implements IDisposable
 @using XrplFile.App
-@using XrplFile.App.Core.Tutorial
 @inject UnlockModel Model
 @inject ShellModel Tabs
 @inject ScreenNavigation Nav
@@ -63,7 +62,7 @@ else if (_ready)
                     <span class="xf-rail-mark" aria-hidden="true">@Mark</span>
                     @foreach (AppTab tab in RailTabs)
                     {
-                        <button type="button" class="xf-rail-item" aria-current="@(Tabs.Tab == tab ? "page" : null)"
+                        <button type="button" class="xf-rail-item" data-tour="@(tab == AppTab.History ? TutorialRegions.TabHistory : null)" aria-current="@(Tabs.Tab == tab ? "page" : null)"
                                 disabled="@Closing.IsClosing" @onclick="() => ShowTab(tab)">
                             @Icon(tab)<span>@T[ShellModel.NameOf(tab)]</span>
                         </button>
@@ -114,7 +113,7 @@ else if (_ready)
                 <nav class="xf-tabbar" aria-label="@T[ShellText.MainNavigation]">
                     @foreach (AppTab tab in TabbarTabs)
                     {
-                        <button type="button" class="xf-tab" aria-current="@(Tabs.Tab == tab ? "page" : null)"
+                        <button type="button" class="xf-tab" data-tour="@(tab == AppTab.History ? TutorialRegions.TabHistory : null)" aria-current="@(Tabs.Tab == tab ? "page" : null)"
                                 disabled="@Closing.IsClosing" @onclick="() => ShowTab(tab)">
                             @Icon(tab)<span>@T[ShellModel.NameOf(tab)]</span>
                         </button>
@@ -142,6 +141,13 @@ else if (_ready)
                     <TutorialList OnDismissed="ReturnFocusFromTutorials" />
                 }
             </div>
+
+            @* A sibling of .xf-shell, not a child: tour.js makes everything outside the lit controls
+               inert, and an inert .xf-shell must not take the bubble with it. *@
+            @if (Tutorial.IsActive)
+            {
+                <TutorialOverlay />
+            }
             break;
     }
 }
@@ -186,6 +192,7 @@ else
     private bool _focusMoreButton;
     private bool _focusContent;
     private bool _focusLearn;
+    private bool _tutorialWasActive;
     private ElementReference _learnButton;
     private bool _watchingWidth;
     private DotNetObjectReference<Shell>? _self;
@@ -234,6 +241,22 @@ else
             // Idempotent: the model offers at most once a run and only while the vault holds no key.
             Tutorial.OfferIfDue();
         }
+
+        // The bubble held focus; once the topic is over it is handed to the screen that was left
+        // showing instead of falling to the page body.
+        bool tutorialActive = Tutorial.IsActive;
+        if (_tutorialWasActive && !tutorialActive && _ready && Model.Stage == UnlockStage.Unlocked && !Tutorial.ListOpen)
+        {
+            try
+            {
+                await _content.FocusAsync();
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        _tutorialWasActive = tutorialActive;
 
         if (_focusLearn)
         {

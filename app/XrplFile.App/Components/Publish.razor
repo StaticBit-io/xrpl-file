@@ -37,7 +37,7 @@ else
             <Run />
         }
 
-        <section class="xf-card">
+        <section class="xf-card" data-tour="@TutorialRegions.PublishFile">
             <h2 class="xf-section-title">@T[PublishText.FileTitle]</h2>
             <div class="xf-file-pick">
                 <button type="button" class="btn btn-outline-secondary" @onclick="PickAsync">
@@ -57,7 +57,7 @@ else
             </div>
         </section>
 
-        <section class="xf-card">
+        <section class="xf-card" data-tour="@TutorialRegions.PublishFrom">
             <h2 class="xf-section-title" id="xf-publish-account">@T[PublishText.AccountTitle]</h2>
             @if (Model.Keys.Count == 0)
             {
@@ -84,6 +84,7 @@ else
 
             @if (Model.SelectedKey is not null)
             {
+                <div data-tour="@TutorialRegions.PublishPayer">
                 <label class="form-label mt-3" for="xf-payer">@T[PublishText.PaidByLabel]</label>
                 <select id="xf-payer" class="form-select" disabled="@Model.PayerLocked"
                         value="@(Model.SelectedPayer?.Reference ?? string.Empty)" @onchange="OnPayerChanged">
@@ -97,6 +98,7 @@ else
                 {
                     <p class="form-text xf-muted mt-2 mb-0">@T[note]</p>
                 }
+                </div>
             }
         </section>
 
@@ -106,7 +108,7 @@ else
         }
 
         <div class="xf-actionbar">
-            <button type="button" class="btn btn-primary" disabled="@(!Model.CanEstimate)" @onclick="EstimateAsync">
+            <button type="button" class="btn btn-primary" disabled="@(!Model.CanEstimate)" data-tour="@TutorialRegions.PublishEstimate" @onclick="EstimateAsync">
                 @T[PublishText.EstimateButton]
             </button>
         </div>

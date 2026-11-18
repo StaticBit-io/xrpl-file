@@ -1,0 +1,232 @@
+@using System.Globalization
+@implements IAsyncDisposable
+@inject TutorialModel Tutorial
+@inject IJSRuntime JS
+
+@* The spotlight and the bubble of a running topic. What to say and which regions to light is
+   TutorialModel.Current; where the hole and the bubble go is TutorialPlacement; the script only
+   measures the screen and fences off everything the step does not use. This markup binds. *@
+@if (Tutorial.Current is { } view)
+{
+    string pending = _shown ? string.Empty : " is-pending";
+    <div id="xf-tour" class="xf-tour">
+        @if (_hole is TourRect hole)
+        {
+            <div class="xf-tour-hole" style="@HoleStyle(hole)"></div>
+        }
+        else
+        {
+            <div class="xf-tour-dim"></div>
+        }
+        <div class="xf-tour-bubble@(pending)" role="dialog" aria-labelledby="xf-tour-title" @ref="_bubble" style="@BubbleStyle()">
+            <p class="xf-tour-topic">@T[view.TopicName]</p>
+            <h2 id="xf-tour-title" tabindex="-1" @ref="_title">@T[view.Title]</h2>
+            <p>@T[view.Body]</p>
+            @if (view.Note is { } note)
+            {
+                <p class="xf-tour-note">@T[note]</p>
+            }
+            <p class="mb-0"><small>@T[UiText.Of(TutorialText.StepOf, ("number", view.Number), ("count", view.Count))]</small></p>
+            <div class="xf-dialog-actions">
+                <button type="button" class="btn btn-outline-secondary" @onclick="Tutorial.Leave">@T[TutorialText.Leave]</button>
+                @if (!view.IsLast)
+                {
+                    <button type="button" class="btn btn-primary" @onclick="Tutorial.Next">@T[TutorialText.Next]</button>
+                }
+                else if (view.FinishStartsTopic is not null)
+                {
+                    <button type="button" class="btn btn-primary" @onclick="Tutorial.FinishInto">@T[TutorialText.ShowCreateAccount]</button>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-primary" @onclick="Tutorial.Next">@T[TutorialText.Finish]</button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private sealed record Rect(double X, double Y, double Width, double Height);
+
+    private sealed record Measurement(List<Rect> Rects, double ViewWidth, double ViewHeight, double BubbleWidth, double BubbleHeight);
+
+    private static readonly TimeSpan SettleInterval = TimeSpan.FromMilliseconds(500);
+
+    private ElementReference _bubble;
+    private ElementReference _title;
+    private DotNetObjectReference<TutorialOverlay>? _self;
+    private Timer? _settleTimer;
+    private TutorialView? _lastView;
+    private TourRect? _hole;
+    private TourPoint? _point;
+    private bool _shown;
+    private bool _focusTitle;
+    private bool _watching;
+    private bool _measuring;
+    private bool _measureAgain;
+    private bool _disposed;
+
+    protected override void OnInitialized()
+    {
+        Tutorial.Changed += OnChanged;
+        _settleTimer = new Timer(OnSettleTick, state: null, SettleInterval, SettleInterval);
+    }
+
+    private static string Px(double value) => value.ToString("0.##", CultureInfo.InvariantCulture) + "px";
+
+    private static string HoleStyle(TourRect hole) =>
+        $"left:{Px(hole.X)};top:{Px(hole.Y)};width:{Px(hole.Width)};height:{Px(hole.Height)}";
+
+    private string BubbleStyle() => _point is TourPoint point ? $"left:{Px(point.Left)};top:{Px(point.Top)}" : string.Empty;
+
+    private void OnChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
+    });
+
+    /// <summary>
+    /// Settle can move the bubble (the Read topic follows the read), so it runs on the renderer
+    /// dispatcher, ordered against a click on Next or Leave rather than racing it.
+    /// </summary>
+    private void OnSettleTick(object? state) => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            Tutorial.Settle();
+        }
+    });
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_disposed || Tutorial.Current is not { } view)
+        {
+            return;
+        }
+
+        if (!_watching)
+        {
+            _watching = true;
+            _self = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("xfTour.watch", _self);
+        }
+
+        // Whether the render that just finished showed the bubble: focus can only land on a
+        // visible element, so a first step waits for the render after its first measurement.
+        bool wasShown = _shown;
+
+        if (!ReferenceEquals(view, _lastView))
+        {
+            _lastView = view;
+            _focusTitle = true;
+            await MeasureAsync();
+        }
+
+        if (_focusTitle && wasShown)
+        {
+            _focusTitle = false;
+            try
+            {
+                await _title.FocusAsync(preventScroll: true);
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+    }
+
+    /// <summary>Called by tour.js, at most once per animation frame, when the layout under the overlay moved.</summary>
+    [JSInvokable]
+    public Task OnLayoutChanged() => InvokeAsync(async () =>
+    {
+        if (!_disposed)
+        {
+            await MeasureAsync();
+        }
+    });
+
+    /// <summary>Called by tour.js on Escape while a topic runs: leaving loses nothing, so nothing is asked.</summary>
+    [JSInvokable]
+    public Task OnEscape() => InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            Tutorial.Leave();
+        }
+    });
+
+    private async Task MeasureAsync()
+    {
+        // A measurement requested while another is in flight runs once more afterwards.
+        if (_measuring)
+        {
+            _measureAgain = true;
+            return;
+        }
+
+        _measuring = true;
+        try
+        {
+            do
+            {
+                _measureAgain = false;
+                if (Tutorial.Current is not { } view)
+                {
+                    return;
+                }
+
+                string[] keep = view.Usable.Select(name => $"[data-tour=\"{name}\"]").ToArray();
+                await JS.InvokeVoidAsync("xfTour.isolate", (object)keep);
+                Measurement m = await JS.InvokeAsync<Measurement>("xfTour.measure", view.Lit, _bubble);
+
+                TourRect[] lit = m.Rects.Select(r => new TourRect(r.X, r.Y, r.Width, r.Height)).ToArray();
+                TourRect? hole = TutorialPlacement.Hole(lit, m.ViewWidth, m.ViewHeight);
+                TourPoint point = TutorialPlacement.Place(hole, m.BubbleWidth, m.BubbleHeight, m.ViewWidth, m.ViewHeight);
+
+                if (!_shown || hole != _hole || _point != point)
+                {
+                    _hole = hole;
+                    _point = point;
+                    _shown = true;
+                    StateHasChanged();
+                }
+            }
+            while (_measureAgain && !_disposed);
+        }
+        catch (JSException)
+        {
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        finally
+        {
+            _measuring = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        // Set first, for the reason Shell.razor gives in Dispose: a tick already queued must find it.
+        _disposed = true;
+        Tutorial.Changed -= OnChanged;
+        _settleTimer?.Dispose();
+
+        try
+        {
+            await JS.InvokeVoidAsync("xfTour.unwatch");
+            await JS.InvokeVoidAsync("xfTour.release");
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (JSException)
+        {
+        }
+
+        _self?.Dispose();
+    }
+}
