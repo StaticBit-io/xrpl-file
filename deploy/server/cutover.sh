@@ -7,7 +7,7 @@
 # reloads Caddy, then waits for HTTPS with a valid certificate and the site's release header. Caddy
 # asks for the certificate only now, when the name already resolves here, so failed validations do
 # not pile up against the issuer's rate limits.
-# Spec: docs/superpowers/specs/2026-11-12-site-server-design.md, "Cut-over".
+# Spec: docs/design/2026-11-12-site-server-design.md, "Cut-over".
 set -euo pipefail
 
 TARGET=${1:?usage: cutover.sh <root@ip> [domain]}

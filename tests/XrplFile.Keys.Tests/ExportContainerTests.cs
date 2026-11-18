@@ -12,7 +12,7 @@ namespace XrplFile.Keys.Tests;
 /// <para>
 /// The class keeps its name and file from the <c>XFK1</c> container it was written for, and so do
 /// the tests that pinned behaviour rather than layout. The tests that pinned the old header byte
-/// for byte are gone; each is named in the task report against what replaced it.
+/// for byte are gone, replaced by the wallet-format tests.
 /// </para>
 /// <para>
 /// The rollback tests that used to live here are gone too, for a better reason than a format

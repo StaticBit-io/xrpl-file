@@ -4,7 +4,7 @@ namespace XrplFile.Keys;
 /// Base45 as defined by RFC 9285.
 /// </summary>
 /// <remarks>
-/// Lifted from the Wallet project (<c>SB.WalletApp.Security</c>), file
+/// Lifted from StaticBit's Wallet project (a private repository), file
 /// <c>Encoding/Base45.cs</c>. Unchanged except for the namespace and this header.
 ///
 /// Public rather than internal, unlike the Wallet's own copy: a later task puts

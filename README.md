@@ -12,7 +12,7 @@ transaction; the manifest names the ledger range holding the file's bytes in mem
 Merkle root to verify them. Nothing to pin, nothing to expire, and every byte checked.
 
 The format is specified in [docs/spec/xrpl-file-v1.md](docs/spec/xrpl-file-v1.md). The design
-and its reasoning are in [docs/superpowers/specs](docs/superpowers/specs). A manifest opens with a
+and its reasoning are in [docs/design](docs/design). A manifest opens with a
 `format` member holding this repository's URL, so a person who finds the JSON in an explorer can
 see what it is and where the rules are; readers never look at it.
 
@@ -27,6 +27,8 @@ see what it is and where the rules are; readers never look at it.
 | `tools/XrplFile.Vectors` | regenerates the vectors from the .NET code |
 | `app/XrplFile.App.Core` | models for the desktop application's screens — no MAUI, no UI |
 | `app/XrplFile.App` | the desktop application itself: MAUI Blazor Hybrid, Windows only so far |
+| `site/` | [xrpl-file.staticbit.io](https://xrpl-file.staticbit.io): opens a link in the browser and gives each file link its own preview card; see [site/README.md](site/README.md) |
+| `deploy/server` | how that site is provisioned and released on its own server |
 
 A command-line uploader and an HTTP gateway are planned next. The desktop application below already
 does the rest: publishing a file, reclaiming a throwaway account's reserve, and reading a link back.
@@ -460,7 +462,7 @@ built with none touches nothing, and the vault only ever locks when something ca
 
 `app/XrplFile.App` is a MAUI Blazor Hybrid application, Windows only for now, built on
 `XrplFile.Keys`. It is the first slice of a larger application (design in
-[docs/superpowers/specs](docs/superpowers/specs)): today it creates and unlocks a vault, lists keys,
+[docs/design](docs/design)): today it creates and unlocks a vault, lists keys,
 adds one by generating it, importing a typed seed, or opening a backup container and choosing a key
 out of it, exports and reveals a seed, changes the master password, turns "remember on this device"
 on and off, deletes a key, and reports damage. It also spends XRP: the Publish tab writes a file into
@@ -580,6 +582,10 @@ To regenerate the vectors after a deliberate change to the format:
 dotnet run --project tools/XrplFile.Vectors -- tests/vectors/v1.json
 ```
 
+## Reporting a vulnerability
+
+See [SECURITY.md](SECURITY.md).
+
 ## Licence
 
-MIT.
+MIT, see [LICENSE](LICENSE).

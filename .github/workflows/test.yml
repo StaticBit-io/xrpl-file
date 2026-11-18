@@ -7,7 +7,7 @@ on:
 
 jobs:
   unit:
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -25,7 +25,7 @@ jobs:
       # 217 tests behind this branch's interoperability claim -- WalletCompatibilityTests above
       # all -- could not fail CI.
       # Category=Slow is excluded everywhere: the memory test (spec S27) runs for tens of minutes and
-      # the 50 MB stand runs (Task 21) for longer. They are run by hand before a release.
+      # the 50 MB stand runs for longer. They are run by hand before a release.
       - run: dotnet run --project tests/XrplFile.Core.Tests --configuration Release --no-build -- -trait- "Category=Integration" -trait- "Category=Slow"
       - run: dotnet run --project tests/XrplFile.Keys.Tests --configuration Release --no-build -- -trait- "Category=Integration" -trait- "Category=Slow"
       - run: dotnet run --project tests/XrplFile.App.Core.Tests --configuration Release --no-build -- -trait- "Category=Integration" -trait- "Category=Slow"
@@ -44,7 +44,7 @@ jobs:
         working-directory: site
       # The site server's deploy scripts: their tests stub sudo, systemctl and node, so they run here.
       - run: node --test deploy/server/test/*.test.mjs
-      # From a pinned image: the self-hosted runner (LINUX_RUNNER) need not have shellcheck installed.
+      # From a pinned image, so the shellcheck version does not move with the runner image.
       - run: >-
           docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0
           deploy/server/provision.sh deploy/server/setup.sh deploy/server/cutover.sh
@@ -55,7 +55,7 @@ jobs:
           diff /tmp/v1.json tests/vectors/v1.json
 
   integration:
-    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     # The stand suite is the longest Linux job, so it runs as two shards, each on its own runner
     # with its own stand. Shard "a" names its classes (about half the suite by measured time);
     # shard "b" runs every Integration class shard "a" does not name, so a new stand class can
@@ -94,7 +94,7 @@ jobs:
       - run: docker compose -p xrpl-file-ci -f .ci-config/docker-compose.ci.yml up -d
       - name: wait for the stand to answer
         run: |
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if curl -sf -X POST http://localhost:5005 -H 'Content-Type: application/json' \
                  -d '{"method":"server_info","params":[{}]}' | grep -q '"status" *: *"success"'; then
               exit 0

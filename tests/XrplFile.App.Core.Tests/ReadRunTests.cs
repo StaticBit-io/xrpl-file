@@ -247,7 +247,7 @@ public sealed class ReadRunTests : IDisposable
         // able to be retried.
         Assert.Equal(ReadState.Succeeded, snapshot.State);
 
-        // Task 6 fix round 1, Minor 2's other half: Saving clears on the failure outcome exactly
+        // Saving clears on the failure outcome exactly
         // the way it clears on a success (see Saving_is_true_only_while_the_save_dialog_is_open
         // below for that side), not only while nothing goes wrong.
         Assert.False(snapshot.Saving);
@@ -256,7 +256,7 @@ public sealed class ReadRunTests : IDisposable
     [Fact]
     public async Task Saving_is_true_only_while_the_save_dialog_is_open()
     {
-        // Task 6 fix round 1, Minor 2: Read.razor disables the Save button off this flag so a
+        // Read.razor disables the Save button off this flag so a
         // double-click cannot open two file dialogs. Proven reachable, not merely present in the
         // source, using the same GatedFilePicker the generation test just below holds a save open
         // with, long enough to observe it mid-flight.

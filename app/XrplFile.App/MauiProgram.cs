@@ -288,8 +288,7 @@ public static class MauiProgram
         services.AddSingleton<CloseAccountModel>();
 
         // Which tab the shell shows (design 4.4) — a model rather than a private field of
-        // Shell.razor, so something outside that markup (the publications list, once Task 6 adds
-        // it) can put a link on ReadModel and then switch the shell to the Read tab itself.
+        // Shell.razor, so something outside that markup (the publications list) can put a link on ReadModel and then switch the shell to the Read tab itself.
         services.AddSingleton<ShellModel>();
 
         // The Read tab (design 4.1/4.2). Both singletons for the same reason every model here is:

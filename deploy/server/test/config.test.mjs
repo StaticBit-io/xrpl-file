@@ -1,5 +1,5 @@
 // The files setup.sh installs on the server say what the spec says
-// (docs/superpowers/specs/2026-11-12-site-server-design.md, "Preparing the server").
+// (docs/design/2026-11-12-site-server-design.md, "Preparing the server").
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';

@@ -6,7 +6,7 @@
 # Proves key login, creates the deploy key, runs setup.sh on the server, proves the new sshd policy
 # with a fresh login, and prints the GitHub commands that store the deploy key. It never runs them:
 # the key leaves this PC only through the owner's own `gh secret set`.
-# Spec: docs/superpowers/specs/2026-11-12-site-server-design.md, "Preparing the server".
+# Spec: docs/design/2026-11-12-site-server-design.md, "Preparing the server".
 set -euo pipefail
 
 TARGET=${1:?usage: provision.sh <root@ip> [domain]}

@@ -1,7 +1,7 @@
 /**
  * mp4box.js outside a browser.
  *
- * Adapted from E:\GIT\XRPL\xrpl-video-platform tests/Platform.Web.Js/helpers/mp4box.mjs: the same `vm`
+ * Adapted from StaticBit's XRPL video platform (a private repository), tests/Platform.Web.Js/helpers/mp4box.mjs: the same `vm`
  * sandbox, pointed at this repository's vendored `web/vendor/mp4box-0.5.4.min.js`. The library is a
  * UMD bundle that expects `window`; node has none, so it is evaluated in a context with a stand-in.
  * Loading the vendored file rather than an npm copy is the point: a test exercises the bytes the

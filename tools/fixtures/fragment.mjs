@@ -1,7 +1,7 @@
 // Rebuilds an ordinary MP4 as the fragmented MP4 the element streams.
 // Usage: node tools/fixtures/fragment.mjs <path to the platform's remux.mjs> <in.mp4> <out.mp4>
 //
-// Adapted from E:\GIT\XRPL\xrpl-video-platform: the vm loader is that repository's
+// Adapted from StaticBit's XRPL video platform (a private repository): the vm loader is that repository's
 // tests/Platform.Web.Js/helpers/mp4box.mjs, and the segmentation is the one `remuxSample` there and
 // `toFragmented` in src/Platform.Web/wwwroot/js/remux.mjs do (one segment per track, whole track).
 // `assembleFragmented` is imported from the platform's own remux.mjs, by file URL, rather than
