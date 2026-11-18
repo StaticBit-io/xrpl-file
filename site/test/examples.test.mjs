@@ -8,6 +8,7 @@ import { EXAMPLE_FILE_LINK, EXAMPLE_STRINGS } from '../src/js/examples-strings.m
 import { HERO_LINK } from '../src/js/config.mjs';
 import { ACTIVE_LANGS } from '../src/js/languages.mjs';
 import { renderExamples } from '../examples-markup.mjs';
+import { escapeHtml } from '../chrome-markup.mjs';
 import { build, ELEMENT_VERSION } from '../build.mjs';
 import { builtSite } from './support/built-site.mjs';
 
@@ -33,7 +34,7 @@ test('cardsAreStaticHtml', () => {
   const html = renderExamples('en');
   for (const example of EXAMPLES) {
     assert.ok(html.includes(`src="${example.link}"`), example.key);
-    assert.ok(html.includes(`<h2>${EXAMPLE_STRINGS.en[example.key].title}</h2>`), example.key);
+    assert.ok(html.includes(`<h2>${escapeHtml(EXAMPLE_STRINGS.en[example.key].title)}</h2>`), example.key);
     assert.ok(html.includes(`href="${hrefOf(example.link)}"`), example.key);
   }
   assert.ok(!html.includes('caption="off"'));

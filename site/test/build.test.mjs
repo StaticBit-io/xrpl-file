@@ -8,6 +8,7 @@ import { build, checkElementVersion, elementVersionsIn, ELEMENT_VERSION, MAX_FIL
 import { ELEMENT_PACKAGE, SITE_ORIGIN } from '../src/js/config.mjs';
 import { ICON_LINKS } from '../chrome-markup.mjs';
 import { ACTIVE_LANGS, LANGS, htmlLang } from '../src/js/languages.mjs';
+import { builtSite } from './support/built-site.mjs';
 
 // A pass-through rule for every language folder the build can ship, as the real _redirects has.
 const FOLDER_RULES = LANGS.filter((lang) => lang !== 'en').map((lang) => `/${lang}/:file /${lang}/:file 200\n`).join('');
@@ -422,5 +423,23 @@ test('_routes.json reaches the output and invokes the function only on card path
     });
   } finally {
     await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('the built examples pages have cards, a canonical link, six alternates and x-default', async () => {
+  const { outDir } = await builtSite();
+  for (const lang of ACTIVE_LANGS) {
+    const file = lang === 'en' ? 'examples.html' : `${lang}/examples.html`;
+    const html = await readFile(join(outDir, file), 'utf8');
+    const path = lang === 'en' ? '/examples' : `/${lang}/examples`;
+    assert.ok(html.includes(`<link rel="canonical" href="${SITE_ORIGIN}${path}">`), lang);
+    for (const code of ACTIVE_LANGS) {
+      const alt = code === 'en' ? '/examples' : `/${code}/examples`;
+      assert.ok(html.includes(`<link rel="alternate" hreflang="${htmlLang(code)}" href="${SITE_ORIGIN}${alt}">`), `${lang} -> ${code}`);
+    }
+    assert.ok(html.includes(`hreflang="x-default" href="${SITE_ORIGIN}/examples"`), lang);
+    assert.ok(!html.includes('<!--@'), `${lang} has no marker left`);
+    assert.equal((html.match(/<figure /g) ?? []).length, 6, lang);
+    assert.ok(html.includes(`<a href="${path}">`), `${lang} footer link`);
   }
 });

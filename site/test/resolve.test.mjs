@@ -82,3 +82,18 @@ test('a path the file system rejects is a miss, not a fault', async () => {
     }
   });
 });
+
+test('the examples pages are served at their pretty URLs and a trailing slash is not one of them', async () => {
+  await withSite(async ({ root, rules }) => {
+    await writeFile(join(root, 'examples.html'), 'examples');
+    await writeFile(join(root, 'ru', 'examples.html'), 'ru examples');
+    const en = await resolveRequest(root, '/examples', rules);
+    assert.equal(en.status, 200);
+    assert.equal(en.body.toString(), 'examples');
+    const ru = await resolveRequest(root, '/ru/examples', rules);
+    assert.equal(ru.status, 200);
+    assert.equal(ru.body.toString(), 'ru examples');
+    const slash = await resolveRequest(root, '/ru/examples/', rules);
+    assert.notEqual(slash.body?.toString(), 'ru examples');
+  });
+});

@@ -122,6 +122,7 @@ every unknown path with `index.html`. The site needs a real `404.html`.
 |---|---|---|
 | `/element/*`: `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=31536000, immutable` | The element build is versioned in its path and never changes. Embedding sites fetch `mp4box.min.js` from it cross-origin. | `location /element/ { add_header Access-Control-Allow-Origin "*" always; add_header Cache-Control "public, max-age=31536000, immutable" always; }` |
 | `/`, `/ru/`, `/de/`, `/es/`, `/pt/`, `/zh/`, `/*.html`: `Cache-Control: no-cache` | Pages are revalidated on every load. | `location = / { add_header Cache-Control "no-cache" always; }` and the same for `= /ru/` and the other language homes, and `~ \.html$` |
+| `/examples`, `/ru/examples`, `/de/examples`, `/es/examples`, `/pt/examples`, `/zh/examples`: `Cache-Control: no-cache` | The examples pages are pretty URLs, so neither `/*.html` nor a language home matches them. | `location ~ ^/((ru\|de\|es\|pt\|zh)/)?examples$ { add_header Cache-Control "no-cache" always; }` |
 | `/favicon.svg`, `/favicon.ico`, `/apple-touch-icon.png`: `Cache-Control: public, max-age=604800` | The icons keep their names when they change, so they cannot be immutable; a week spares the request every page makes for them. | `location ~ ^/(favicon\.(svg\|ico)\|apple-touch-icon\.png)$ { add_header Cache-Control "public, max-age=604800" always; }` |
 
 The `/*` block sets `X-Content-Type-Options: nosniff` for every path: the site's files are served with
@@ -134,6 +135,27 @@ do not overlap. Pages also applies redirects before headers: a request that a `_
 rewrites (the file page) gets Pages' default headers, not the ones above. In
 nginx, an `add_header` in a `location` replaces the ones inherited from the server block; repeat
 every header in each location that needs it.
+
+## Examples page
+
+Six pages, one per language: `/examples`, `/ru/examples`, `/de/examples`, `/es/examples`, `/pt/examples`,
+`/zh/examples` (sources `src/examples.html` and `src/<lang>/examples.html`). There is no trailing-slash
+form: `/ru/examples/` is taken by the file-page rule `/:network/:hash/` in `_redirects` and shows the
+file page's "not a link" state. `_redirects` needs no rule of its own, `_headers` has one entry per URL
+(see [`_headers`](#_headers)). The pages are fixed-language, so the build writes their canonical link
+and the alternates like the home pages'. They are reached from the hero (`#examples-link`, same id in
+every home) and from the footer of every page; the footer link is `data-examples-link` on the file page
+and the 404, where `chrome.mjs` repoints it at the language in use.
+
+The cards are not in the page sources: `<!--@examples-->` is replaced by `renderExamples(lang)`
+(`examples-markup.mjs`) from the list in `src/js/examples.mjs` and the words in
+`src/js/examples-strings.mjs`. `src/js/examples-page.mjs` makes the elements follow the site theme.
+
+To add or replace an example:
+
+1. Add or change its entry in `EXAMPLES` (`key`, `link`, `kind`, `bytes` and, for a picture or a video, `width` and `height`).
+2. Add the same `key` to `EXAMPLE_STRINGS` in all six languages: a title and one line.
+3. `node --test site/test/*.test.mjs`: the tests fail on a language without the key.
 
 ## Hosting
 

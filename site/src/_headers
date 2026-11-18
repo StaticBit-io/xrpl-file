@@ -37,3 +37,17 @@
   Cache-Control: no-cache
 /zh/
   Cache-Control: no-cache
+
+# The pretty URLs of the examples pages match neither /*.html nor a language home.
+/examples
+  Cache-Control: no-cache
+/ru/examples
+  Cache-Control: no-cache
+/de/examples
+  Cache-Control: no-cache
+/es/examples
+  Cache-Control: no-cache
+/pt/examples
+  Cache-Control: no-cache
+/zh/examples
+  Cache-Control: no-cache

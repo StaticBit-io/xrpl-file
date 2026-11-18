@@ -208,6 +208,12 @@ ${themeToggle(page)}
 </header>`;
 }
 
+// A page with one URL for every language is built once, so its link names the build language's page
+// and chrome.mjs repoints it when the visitor's language is another.
+function examplesHref(page) {
+  return equivalentPath('/examples', page.lang);
+}
+
 function renderFooter(page) {
   const { text, i18n } = labels(page);
   return `<footer class="site-footer">
@@ -217,6 +223,7 @@ function renderFooter(page) {
 <ul class="site-footer__list">
 <li><a href="${REPOSITORY_URL}"${i18n('repository')}>${text('repository')}</a></li>
 <li><a href="${SPECIFICATION_URL}"${i18n('specification')}>${text('specification')}</a></li>
+<li><a href="${examplesHref(page)}"${page.langFromStorage ? ' data-examples-link' : ''}${i18n('examples')}>${text('examples')}</a></li>
 </ul>
 </div>
 <div role="group" aria-labelledby="footer-language">

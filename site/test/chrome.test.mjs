@@ -609,3 +609,32 @@ test('choosing English in the menu is remembered before the page is left', () =>
   assert.equal(storage.data.get('xf-lang'), 'en');
   assert.equal(event.defaultPrevented, false);
 });
+
+test('every page links to the examples page of its language from the footer', () => {
+  for (const lang of ACTIVE_LANGS) {
+    const href = equivalentPath('/examples', lang);
+    assert.equal(href, lang === 'en' ? '/examples' : `/${lang}/examples`);
+    const footer = renderChrome('footer', fixedPage(lang, homePath(lang)));
+    assert.ok(footer.includes(`<a href="${href}">${STRINGS[lang].examples}</a>`), lang);
+  }
+  const stored = renderChrome('footer', { lang: 'en', pagePath: '/file', langFromStorage: true });
+  assert.match(stored, /<a href="\/examples" data-examples-link data-i18n="examples">Examples<\/a>/);
+});
+
+test('on a stored-language page the footer examples link follows the language in use', () => {
+  for (const start of ACTIVE_LANGS) {
+    const doc = fakeDocument({ lang: 'en', langSource: 'storage' });
+    const links = langLinks(doc);
+    const examples = doc.add(['[data-examples-link]'], { href: '/examples' });
+    initChrome({ document: doc, location: { pathname: `/testnet/${HASH}` }, storage: memoryStorage({ 'xf-lang': start }), navigatorLanguages: ['en-US'] });
+    assert.equal(examples.getAttribute('href'), equivalentPath('/examples', start), `stored ${start}`);
+    for (const chosen of ACTIVE_LANGS) {
+      links[chosen].click();
+      assert.equal(examples.getAttribute('href'), equivalentPath('/examples', chosen), `${start} then ${chosen}`);
+    }
+  }
+});
+
+test('the chrome strings name the examples in every language', () => {
+  for (const lang of ACTIVE_LANGS) assert.ok(STRINGS[lang].examples, lang);
+});

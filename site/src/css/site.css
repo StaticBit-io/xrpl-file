@@ -1093,3 +1093,66 @@
 .notice-page h1 {
   font-size: var(--text-section);
 }
+
+/* Home: the link to the examples page under the hero's actions. */
+.hero__more {
+  font-size: var(--text-sm);
+}
+
+/* Examples page: a grid of figures. The box reserves a picture's or video's shape before the file loads;
+   columns are at least 20rem, so a tall portrait video stays within about two screens' height of a
+   landscape drawing beside it and one column fits a 375 px phone with no sideways scroll. */
+.examples {
+  padding-block: var(--space-7) var(--section-gap);
+}
+
+.examples__intro > * + * {
+  margin-top: var(--space-4);
+}
+
+.examples__intro {
+  max-width: var(--measure);
+  margin-bottom: var(--space-8);
+}
+
+.examples__share {
+  color: var(--ink-2);
+}
+
+.examples__grid {
+  display: grid;
+  gap: var(--space-7) var(--gap-columns);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+  align-items: start;
+}
+
+.example {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+}
+
+.example__box {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.example__box > xrpl-file {
+  width: 100%;
+  height: 100%;
+}
+
+.example figcaption > * + * {
+  margin-top: var(--space-2);
+}
+
+.example h2 {
+  font-size: var(--text-lg);
+}
+
+.example figcaption p {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}

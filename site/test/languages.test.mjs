@@ -222,3 +222,28 @@ test('the Chinese home says 条目 for the ledger entry throughout, not 记录, 
   assert.ok(!home.includes('记录'));
   assert.ok(!home.includes('倒闭'));
 });
+
+const ids = (html) => [...html.matchAll(/id="([^"]+)"/g)].map((match) => match[1]).sort();
+const homeUrl = (lang) => new URL(`../src/${lang === 'en' ? '' : `${lang}/`}index.html`, import.meta.url);
+const pages = Object.fromEntries(await Promise.all(ACTIVE_LANGS.map(async (lang) => [lang, await readFile(homeUrl(lang), 'utf8')])));
+const examplesUrl = (lang) => new URL(`../src/${lang === 'en' ? '' : `${lang}/`}examples.html`, import.meta.url);
+const examplePages = Object.fromEntries(await Promise.all(ACTIVE_LANGS.map(async (lang) => [lang, await readFile(examplesUrl(lang), 'utf8')])));
+
+test('the examples pages carry the English page ids and their own <html lang>', () => {
+  for (const lang of ACTIVE_LANGS) {
+    assert.match(examplePages[lang], new RegExp(`<html lang="${htmlLang(lang)}">`), lang);
+    assert.deepEqual(ids(examplePages[lang]), ids(examplePages.en), `${lang} has the ids of the English page`);
+    assert.match(examplePages[lang], /<meta name="description" content="[^"]{40,}">/, lang);
+    for (const marker of ['head', 'header', 'footer']) assert.ok(examplePages[lang].includes(`<!--@chrome:${marker}-->`), `${lang} ${marker}`);
+    assert.ok(examplePages[lang].includes('<!--@examples-->'), lang);
+    assert.ok(examplePages[lang].includes('src="/element/1.2.0/xrpl-file-element.js"'), lang);
+    assert.ok(!examplePages[lang].includes('\u2014'), `${lang} has no long dash`);
+  }
+});
+
+test('every home page links to the examples page of its language with the same id', () => {
+  for (const lang of ACTIVE_LANGS) {
+    const href = lang === 'en' ? '/examples' : `/${lang}/examples`;
+    assert.ok(pages[lang].includes(`<a id="examples-link" href="${href}">`), lang);
+  }
+});
