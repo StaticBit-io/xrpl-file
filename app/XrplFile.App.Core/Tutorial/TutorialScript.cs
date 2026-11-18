@@ -150,6 +150,11 @@ public static class TutorialScript
         [.. CreateAccountSteps, .. AddKeySteps, .. ExportKeySteps, .. PublishSteps, .. ReadSteps, .. ReadShownSteps, .. ExportWithoutKeySteps];
 
     /// <summary>The list line of <paramref name="topic"/>.</summary>
+    /// <remarks>
+    /// A <c>switch</c> expression with no default arm on purpose: a topic added to <see cref="TutorialTopic"/>
+    /// without an entry here is CS8509 under this repository's <c>TreatWarningsAsErrors</c>.
+    /// </remarks>
+#pragma warning disable CS8524
     public static TextId NameOf(TutorialTopic topic) => topic switch
     {
         TutorialTopic.CreateAccount => TutorialText.TopicCreateAccount,
@@ -157,10 +162,15 @@ public static class TutorialScript
         TutorialTopic.ExportKey => TutorialText.TopicExportKey,
         TutorialTopic.Publish => TutorialText.TopicPublish,
         TutorialTopic.Read => TutorialText.TopicRead,
-        _ => throw new ArgumentOutOfRangeException(nameof(topic), topic, null),
     };
+#pragma warning restore CS8524
 
     /// <summary>The steps of <paramref name="topic"/>; for Read, the list that is done for real.</summary>
+    /// <remarks>
+    /// A <c>switch</c> expression with no default arm on purpose: a topic added to <see cref="TutorialTopic"/>
+    /// without an entry here is CS8509 under this repository's <c>TreatWarningsAsErrors</c>.
+    /// </remarks>
+#pragma warning disable CS8524
     public static IReadOnlyList<TutorialStep> StepsOf(TutorialTopic topic) => topic switch
     {
         TutorialTopic.CreateAccount => CreateAccountSteps,
@@ -168,8 +178,8 @@ public static class TutorialScript
         TutorialTopic.ExportKey => ExportKeySteps,
         TutorialTopic.Publish => PublishSteps,
         TutorialTopic.Read => ReadSteps,
-        _ => throw new ArgumentOutOfRangeException(nameof(topic), topic, null),
     };
+#pragma warning restore CS8524
 
     private static TutorialStep Step(
         TutorialScreen screen,
