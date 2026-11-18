@@ -9,6 +9,11 @@ public class ConcurrentHistoryTests
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
+    // Four lanes left with the work of one take about as long as one walk (a ratio near 1); sharing
+    // it took 0.25-0.5 of a walk. Exactly half failed on a loaded hosted runner at 0.51, so the bar
+    // sits between the two outcomes rather than at the edge of the good one.
+    private const double SharedWorkRatio = 0.75;
+
     /// <summary>
     /// A node's account_tx as far as paging goes: records in canonical order, a page of
     /// <see cref="PageSize"/> per answer, each answer after <see cref="PageDelay"/>, every walk counted.
@@ -262,7 +267,7 @@ public class ConcurrentHistoryTests
         together.Stop();
 
         Assert.InRange(lanes.PeakInFlight, 2, 4);
-        Assert.True(together.Elapsed < walk.Elapsed / 2, $"four lanes took {together.Elapsed}, one walk {walk.Elapsed}");
+        Assert.True(together.Elapsed < walk.Elapsed * SharedWorkRatio, $"four lanes took {together.Elapsed}, one walk {walk.Elapsed}");
     }
 
     [Fact]
@@ -283,7 +288,7 @@ public class ConcurrentHistoryTests
         Assert.Equal(records, await ReadAllAsync(new ConcurrentHistory(lanes, 4), 1, 300_000, Token));
         together.Stop();
 
-        Assert.True(together.Elapsed < walk.Elapsed / 2, $"four lanes took {together.Elapsed}, one walk {walk.Elapsed}");
+        Assert.True(together.Elapsed < walk.Elapsed * SharedWorkRatio, $"four lanes took {together.Elapsed}, one walk {walk.Elapsed}");
     }
 
     [Fact]
