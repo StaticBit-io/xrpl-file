@@ -25,14 +25,19 @@ public sealed class WindowConflictTests : IDisposable
         return node;
     }
 
-    private static BatchStrategyFactory Factory(BatchTestNode node) =>
-        (budget, fence) => new BatchStrategy(node.Sink, node.Ledger, node.Writer, node.Payer, budget, fence, BatchTestNode.FastOptions);
+    // The 40 chunks are five batches, all inside the default window of 16: a cancel at the second send
+    // stops nothing already in flight, and on a runner with many cores every chunk lands before it.
+    // One send at a time makes the cancel the last thing the run does, so chunks stay unsent.
+    private static BatchStrategyOptions OneInFlight { get; } = BatchTestNode.FastOptions with { InitialWindow = 1, MaxWindow = 1 };
 
-    private async Task<(PublicationSession Session, byte[] File)> InterruptedAsync(BatchTestNode node, int stopAtOrdinal = 1)
+    private static BatchStrategyFactory Factory(BatchTestNode node, BatchStrategyOptions? options = null) =>
+        (budget, fence) => new BatchStrategy(node.Sink, node.Ledger, node.Writer, node.Payer, budget, fence, options ?? BatchTestNode.FastOptions);
+
+    private async Task<(PublicationSession Session, byte[] File)> InterruptedAsync(BatchTestNode node, int stopAtOrdinal = 1, BatchStrategyOptions? options = null)
     {
         byte[] file = VectorStream.Bytes("conflict", 40_000);
         PublicationSession session = await PublicationSession.StartAsync(
-            Factory(node), node.Ledger, file, "text/plain", null, node.Writer.Account, "key-w", node.Payer.Account, "key-p", "testnet", Options, Token);
+            Factory(node, options), node.Ledger, file, "text/plain", null, node.Writer.Account, "key-w", node.Payer.Account, "key-p", "testnet", Options, Token);
         using CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(Token);
         node.Sink.Transmitting = transmission =>
         {
@@ -157,7 +162,7 @@ public sealed class WindowConflictTests : IDisposable
     public async Task A_record_of_another_account_carrying_this_files_marker_is_ignored()
     {
         BatchTestNode node = Funded();
-        (PublicationSession first, byte[] file) = await InterruptedAsync(node);
+        (PublicationSession first, byte[] file) = await InterruptedAsync(node, options: OneInFlight);
         IReadOnlyDictionary<string, List<LedgerTransaction>> landed = await node.LandedByMarkerAsync();
         int unsent = Enumerable.Range(0, (int)ChunkReads.ChunkCount(file.Length)).First(index => !landed.ContainsKey(MemoLayout.ChunkMarkerHex(index)));
 

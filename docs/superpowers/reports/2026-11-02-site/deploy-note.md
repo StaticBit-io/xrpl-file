@@ -46,7 +46,8 @@ creates the project.
 | Project name | `xrpl-file-site` |
 | Production branch | `main` |
 | Deployed by | the `deploy-site` job, wrangler `4.151.1` |
-| Build output directory | `site/dist` |
+| Build output directory | `site/dist` (named in `site/wrangler.toml`; the job deploys from `site/`) |
+| Function | `site/functions/[[path]].js`, file link cards, on `/mainnet/*`, `/testnet/*`, `/devnet/*`, `/og/*` |
 | Custom domain | `xrpl-file.staticbit.io` |
 
 The job needs two repository secrets, set once by the owner:
@@ -63,9 +64,43 @@ Notes:
 - `web/build.mjs` refuses to overwrite an existing `web/dist/<version>` with different content. A
   clean runner starts without `web/dist`, so no `--force` is needed there.
 - A manual deploy, for example while CI is unavailable: `node web/build.mjs && node site/build.mjs`
-  locally, then `npx wrangler@4.151.1 pages deploy site/dist --project-name xrpl-file-site --branch main`.
+  locally, then from `site/`: `npx wrangler@4.151.1 pages deploy --branch main` (the project
+  name, the output directory and the function come from `site/wrangler.toml` and `site/functions/`).
 - `_redirects` and `_headers` are in `site/src` and are copied into `site/dist`; `site/README.md`
   explains each rule and its nginx equivalent.
+
+## File link cards: owner steps
+
+These steps apply while Pages hosts the site (`SITE_TARGET` unset or `cloudflare`). On the owner's
+server the cards need neither; see "The site on the server" below.
+
+The function reads the ledger for robots only (`site/README.md`, "File link cards"). Before the merge
+into `main` that first ships it on Pages:
+
+1. Switch the Cloudflare account to **Workers Paid**. On the Free plan the function has 10 ms of CPU
+   per request, which reads a manifest at best and never a picture; people are not affected either way.
+2. Optional: in the Pages project, **Settings → Runtime → Fail open / closed: Fail open**. It matters
+   only on the Free plan, whose daily request allowance Workers Paid removes; it keeps the static site
+   up if the account ever falls back to Free.
+
+Checks after that deploy:
+
+1. The three `curl` lines from `site/README.md` against `https://xrpl-file.staticbit.io`: the
+   logo's name in `og:title`, `/og/mainnet/…` answering `200` with `content-type: image/png`, and `1`
+   for a browser's user agent.
+2. In Telegram, send a link to a picture, a video with a cover and a file with neither; the first two
+   show their picture, the third the banner, all with the file's name, type and size. A link sent
+   before the deploy keeps its old preview: refresh it through @WebpageBot.
+3. Post one of the links on X.
+
+## The site on the server
+
+Since 2026-11-12 the site can be hosted on the owner's server (`94.183.189.150`, Ubuntu 24.04, Node
+and Caddy) instead of Pages; the design is `docs/superpowers/specs/2026-11-12-site-server-design.md`.
+The steps, in order, are in `site/README.md`, "Hosting", section "Moving the site to the server":
+`deploy/server/provision.sh`, the three `gh` commands it prints, a first release by hand, the DNS
+change, `deploy/server/cutover.sh`, and `SITE_TARGET=server`. Each step that touches DNS or the
+server is the owner's. The way back is "Back to Pages" in the same section.
 
 ## DNS
 

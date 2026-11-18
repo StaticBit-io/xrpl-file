@@ -17,6 +17,10 @@ public sealed class PublicationRunBatchTests : VaultHarness
         // The fake closes a ledger on every read, so its deadlines pass in milliseconds: a 400 ms
         // retry step would meet a resolved candidate instead of its resend.
         TransportRetryStep = TimeSpan.FromMilliseconds(1),
+
+        // Ten times the default, as in BatchTestNode: the chain check closes a fake ledger every 5 ms, so a send
+        // held up by a loaded host would otherwise outlive its deadline and use up a memo's three candidates.
+        DeadlineLedgers = 200,
     };
 
     private readonly string _directory = Directory.CreateTempSubdirectory("xrpl-file-run-batch-").FullName;

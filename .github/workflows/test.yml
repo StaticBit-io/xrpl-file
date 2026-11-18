@@ -7,7 +7,7 @@ on:
 
 jobs:
   unit:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -37,13 +37,25 @@ jobs:
       - run: node --test site/test/*.test.mjs
       - run: node web/build.mjs
       - run: node site/build.mjs
+      # The link-card function is otherwise first bundled by "pages deploy" on main: an import that
+      # does not resolve would surface only at release. Same wrangler pin as deploy-site.
+      - name: the link-card function bundles
+        run: npx --yes wrangler@4.151.1 pages functions build --outdir /tmp/functions-build
+        working-directory: site
+      # The site server's deploy scripts: their tests stub sudo, systemctl and node, so they run here.
+      - run: node --test deploy/server/test/*.test.mjs
+      # From a pinned image: the self-hosted runner (LINUX_RUNNER) need not have shellcheck installed.
+      - run: >-
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0
+          deploy/server/provision.sh deploy/server/setup.sh deploy/server/cutover.sh
+          deploy/server/xrpl-file-release deploy/server/xrpl-file-smoke deploy/server/xrpl-file-candidate
       - name: the committed vectors are what the code produces
         run: |
           dotnet run --project tools/XrplFile.Vectors --configuration Release --no-build -- /tmp/v1.json
           diff /tmp/v1.json tests/vectors/v1.json
 
   integration:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER || 'ubuntu-latest' }}
     # The stand suite is the longest Linux job, so it runs as two shards, each on its own runner
     # with its own stand. Shard "a" names its classes (about half the suite by measured time);
     # shard "b" runs every Integration class shard "a" does not name, so a new stand class can
@@ -117,45 +129,36 @@ jobs:
       - run: dotnet build app/XrplFile.App/XrplFile.App.csproj --configuration Release
 
   # A push to main is a release of the site: work lands on dev and reaches main by a merge, and that
-  # merge publishes https://xrpl-file.staticbit.io. The job waits for "unit", which runs the web and
-  # site suites and both builds, so a red suite never goes live. The slower integration and
-  # windows-app jobs do not gate it: neither touches web/ or site/.
-  deploy-site:
+  # merge publishes https://xrpl-file.staticbit.io. Both deploy jobs wait for "unit", which runs the web
+  # and site suites, both builds and the deploy-script tests, so a red suite never goes live. The slower
+  # integration and windows-app jobs do not gate them: neither touches web/ or site/.
+  # Where it deploys: the repository variable SITE_TARGET, "cloudflare" (Pages, the default while it is
+  # unset) or "server" (the owner's server, deploy-site-server.yml). A misspelt value fails here, so a
+  # deploy is never skipped in silence.
+  site-target:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: unit
     runs-on: ubuntu-latest
-    # Two merges in quick succession deploy in order; cancelling the older run could leave the
-    # earlier commit live if it finished last.
-    concurrency:
-      group: deploy-site
-      cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      WRANGLER: npx --yes wrangler@4.151.1
-      PROJECT: xrpl-file-site
+    outputs:
+      target: ${{ steps.choose.outputs.target }}
     steps:
-      # Without a token wrangler falls back to an interactive login and fails with a message that
-      # does not name the missing secret.
-      - name: the Cloudflare secrets are set
+      - id: choose
+        env:
+          SITE_TARGET: ${{ vars.SITE_TARGET }}
         run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required to deploy the site" >&2
-            exit 1
-          fi
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - run: node web/build.mjs
-      - run: node site/build.mjs
-      # In a non-interactive run, "pages deploy" fails on a missing project instead of offering to
-      # create it, so the first deploy creates it here. A failed lookup (bad token) fails the job
-      # rather than falling through to "create".
-      - name: create the Pages project on first deploy
-        run: |
-          projects=$($WRANGLER pages project list --json)
-          if ! printf '%s' "$projects" | grep -q "\"$PROJECT\""; then
-            $WRANGLER pages project create "$PROJECT" --production-branch main
-          fi
-      - run: $WRANGLER pages deploy site/dist --project-name "$PROJECT" --branch main --commit-hash "$GITHUB_SHA"
+          target=${SITE_TARGET:-cloudflare}
+          case "$target" in
+            cloudflare|server) echo "target=$target" >> "$GITHUB_OUTPUT" ;;
+            *) echo "SITE_TARGET must be \"cloudflare\" or \"server\", got \"$SITE_TARGET\"" >&2; exit 1 ;;
+          esac
+
+  deploy-site-server:
+    needs: [unit, site-target]
+    if: needs.site-target.outputs.target == 'server'
+    uses: ./.github/workflows/deploy-site-server.yml
+    secrets: inherit
+
+  deploy-site:
+    needs: [unit, site-target]
+    if: needs.site-target.outputs.target == 'cloudflare'
+    uses: ./.github/workflows/deploy-site-pages.yml
+    secrets: inherit

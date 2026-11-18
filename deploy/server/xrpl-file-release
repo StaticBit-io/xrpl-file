@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+# The deploy key's forced command (authorized_keys: command="/usr/local/bin/xrpl-file-release",restrict).
+# Whatever the client asks to run arrives in SSH_ORIGINAL_COMMAND; only two requests are served:
+#
+#   release <40-hex commit>   a .tar.gz of the release on standard input
+#   rollback                  back to the last good release before the current one
+#
+# A candidate is started and checked on a side port before visitors are switched to it; a release that
+# fails after the switch is replaced by the last good one; a run cut off half-way is repaired by the
+# next. Spec: docs/superpowers/specs/2026-11-12-site-server-design.md, "Releases on the server".
+#
+# The XRPL_FILE_* variables exist for the tests. SSH does not pass them: Ubuntu's sshd accepts only
+# LANG and LC_* from the client.
+set -Eeuo pipefail
+# Without a pty, sshd does not signal this script when the client goes away (a dropped connection, a
+# cancelled Actions job); it keeps running with its output closed. Writing there must not kill it
+# before it has put the last good release back, so SIGPIPE is ignored and `say` cannot fail.
+trap '' PIPE
+
+ROOT=${XRPL_FILE_ROOT:-/srv/xrpl-file}
+MAX_BYTES=$((200 * 1024 * 1024))
+MAX_ENTRIES=${XRPL_FILE_MAX_ENTRIES:-10000}
+CHECK_SECONDS=${XRPL_FILE_CHECK_SECONDS:-30}
+LOCK_WAIT=${XRPL_FILE_LOCK_WAIT:-60}
+KEEP=5
+SERVICE=xrpl-file-site
+CANDIDATE_PORT=8081
+SERVICE_PORT=8080
+
+say() { echo "xrpl-file-release: $*" >&2 2>/dev/null || true; }
+
+request=${SSH_ORIGINAL_COMMAND:-}
+commit=
+if [[ $request =~ ^release\ ([0-9a-f]{40})$ ]]; then
+  action=release
+  commit=${BASH_REMATCH[1]}
+elif [[ $request == rollback ]]; then
+  action=rollback
+else
+  say "refused: '$request' (expected 'release <40 hex>' or 'rollback')"
+  exit 2
+fi
+
+exec 9>"$ROOT/.lock"
+if ! flock -w "$LOCK_WAIT" 9; then
+  say "another release is running; try again later"
+  exit 3
+fi
+
+target_of() { readlink -e "$1" 2>/dev/null || true; }
+
+point() { # point <link> <directory>, atomically
+  ln -sfn "$2" "$1.new"
+  mv -T "$1.new" "$1"
+}
+
+restart() { sudo -n systemctl restart "$SERVICE"; }
+
+commit_of() {
+  sed -n 's/.*"commit" *: *"\([0-9a-f]\{40\}\)".*/\1/p' "$1/release.json" 2>/dev/null || true
+}
+
+# smoke_until <port> <release dir> <commit>: retries for CHECK_SECONDS while the server starts.
+smoke_until() {
+  local deadline=$((SECONDS + CHECK_SECONDS))
+  while true; do
+    if XRPL_FILE_SMOKE_DIST="$2/site/dist" xrpl-file-smoke "$1" "$3"; then return 0; fi
+    ((SECONDS < deadline)) || return 1
+    sleep 1
+  done
+}
+
+record_good() {
+  point "$ROOT/last-good" "$1"
+  echo "$1" >>"$ROOT/good.log"
+}
+
+# The good release before `$1`, newest first, that still exists and was not rolled back from.
+good_before() {
+  [[ -f $ROOT/good.log ]] || return 0
+  tac "$ROOT/good.log" | while read -r dir; do
+    if [[ $dir != "$1" && -d $dir ]] && ! grep -qxF "$dir" "$ROOT/rolled-back.log" 2>/dev/null; then
+      echo "$dir"
+      break
+    fi
+  done
+}
+
+repair() {
+  local good current
+  good=$(target_of "$ROOT/last-good")
+  current=$(target_of "$ROOT/current")
+  if [[ -n $good && $current != "$good" ]]; then
+    say "repairing an interrupted run: current is '$current', last good is '$good'"
+    point "$ROOT/current" "$good"
+    restart
+  fi
+}
+
+prune() {
+  local good previous dir
+  good=$(target_of "$ROOT/last-good")
+  previous=$(good_before "$good")
+  rm -rf "$ROOT"/releases/.incoming-*
+  local -a all
+  mapfile -t all < <(find "$ROOT/releases" -mindepth 1 -maxdepth 1 -type d ! -name '.*' | sort -r)
+  local kept=0
+  for dir in "${all[@]}"; do
+    if ((kept < KEEP)) || [[ $dir == "$good" || $dir == "$previous" ]]; then
+      kept=$((kept + 1))
+      continue
+    fi
+    rm -rf "$dir"
+  done
+}
+
+# Refuses an archive with anything but regular files and directories, an absolute name, a ".."
+# component, or too many entries, before a byte of it is written to disk outside the staging file.
+check_archive() {
+  local listing names
+  listing=$(tar -tvzf "$1") || { say "the archive does not list"; return 1; }
+  if (($(wc -l <<<"$listing") > MAX_ENTRIES)); then
+    say "the archive has more than $MAX_ENTRIES entries"
+    return 1
+  fi
+  if grep -qv '^[-d]' <<<"$listing"; then
+    say "the archive holds something other than files and directories"
+    return 1
+  fi
+  names=$(tar -tzf "$1")
+  if grep -qE '^/|(^|/)\.\.(/|$)' <<<"$names"; then
+    say "the archive has a name outside its directory"
+    return 1
+  fi
+}
+
+# The candidate runs as the unit xrpl-file-candidate@<name>: the site's user, the site's sandbox and a
+# time limit, never release code run as deploy (/usr/local/sbin/xrpl-file-candidate, setup.sh).
+check_candidate() { # <release dir> <commit>
+  local name status=0
+  name=$(basename "$1")
+  trap 'sudo -n xrpl-file-candidate stop "$name" >/dev/null 2>&1 || true; exit 1' INT TERM HUP
+  if sudo -n xrpl-file-candidate start "$name"; then
+    smoke_until "$CANDIDATE_PORT" "$1" "$2" || status=1
+  else
+    status=1
+  fi
+  sudo -n xrpl-file-candidate stop "$name" || true
+  trap - INT TERM HUP
+  return "$status"
+}
+
+release() {
+  local stage dir previous
+  stage=$(mktemp -d "$ROOT/releases/.incoming-XXXXXX")
+  head -c $((MAX_BYTES + 1)) >"$stage/release.tar.gz"
+  if (($(stat -c %s "$stage/release.tar.gz") > MAX_BYTES)); then
+    say "the archive is larger than $MAX_BYTES bytes"
+    rm -rf "$stage"
+    exit 1
+  fi
+  if ! check_archive "$stage/release.tar.gz"; then
+    rm -rf "$stage"
+    exit 1
+  fi
+  dir="$ROOT/releases/$(date -u +%Y%m%dT%H%M%SZ)-${commit:0:12}"
+  if [[ -e $dir ]]; then
+    say "'$dir' already exists"
+    rm -rf "$stage"
+    exit 1
+  fi
+  mkdir "$stage/tree"
+  tar -xzf "$stage/release.tar.gz" --no-same-owner --no-same-permissions -C "$stage/tree"
+  if [[ ! -f $stage/tree/site/server/main.mjs || ! -f $stage/tree/site/dist/index.html ]]; then
+    say "the archive is not a site release (no site/server/main.mjs or site/dist/index.html)"
+    rm -rf "$stage"
+    exit 1
+  fi
+  mv "$stage/tree" "$dir"
+  rm -rf "$stage"
+
+  if ! check_candidate "$dir" "$commit"; then
+    say "the candidate failed its checks on port $CANDIDATE_PORT; nothing changed"
+    rm -rf "$dir"
+    exit 1
+  fi
+
+  previous=$(target_of "$ROOT/last-good")
+  # From here on, any failure or signal puts the last good release back.
+  trap 'restore "$previous" "interrupted after the switch"' ERR INT TERM HUP
+  point "$ROOT/current" "$dir"
+  restart
+  if ! smoke_until "$SERVICE_PORT" "$dir" "$commit"; then
+    restore "$previous" "the release failed its checks after the switch"
+  fi
+  trap - ERR INT TERM HUP
+  record_good "$dir"
+  prune
+  say "released $commit as $(basename "$dir")"
+}
+
+# restore <previous good dir or empty> <reason>: the link and the restart come before any output.
+restore() {
+  trap - ERR INT TERM HUP
+  if [[ -n $1 ]]; then
+    point "$ROOT/current" "$1"
+    restart || true
+    say "$2; back on $(basename "$1")"
+  else
+    # The first release has nothing to go back to: without `current` the service cannot start.
+    rm -f "$ROOT/current"
+    restart || true
+    say "$2; no release to go back to, the site is down"
+  fi
+  exit 1
+}
+
+rollback() {
+  local current target
+  current=$(target_of "$ROOT/current")
+  target=$(good_before "$current")
+  if [[ -z $target ]]; then
+    say "no earlier good release to roll back to"
+    exit 1
+  fi
+  point "$ROOT/current" "$target"
+  restart
+  if ! smoke_until "$SERVICE_PORT" "$target" "$(commit_of "$target")"; then
+    point "$ROOT/current" "$current"
+    restart
+    say "$(basename "$target") failed its checks; back on $(basename "$current")"
+    exit 1
+  fi
+  # A release rolled back from is never a rollback target again: a second rollback goes further back.
+  echo "$current" >>"$ROOT/rolled-back.log"
+  record_good "$target"
+  say "rolled back to $(basename "$target")"
+}
+
+repair
+"$action"

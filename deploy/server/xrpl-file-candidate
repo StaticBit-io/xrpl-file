@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Starts or stops the candidate unit of a release. deploy runs it through sudo
+# (sudoers-xrpl-file-deploy) and passes any arguments it likes, so this script is the boundary: one
+# of two actions, and a name that can only be a release directory.
+#
+#   xrpl-file-candidate start|stop <release name>      (installed as /usr/local/sbin/xrpl-file-candidate)
+#
+# sudo resets the environment, so deploy cannot set XRPL_FILE_ROOT; it exists for the tests.
+set -euo pipefail
+
+ROOT=${XRPL_FILE_ROOT:-/srv/xrpl-file}
+action=${1:-}
+name=${2:-}
+
+if [[ $# -ne 2 || ($action != start && $action != stop) ]]; then
+  echo "usage: xrpl-file-candidate start|stop <release name>" >&2
+  exit 2
+fi
+if [[ ! $name =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$ ]]; then
+  echo "not a release name: '$name'" >&2
+  exit 2
+fi
+unit="xrpl-file-candidate@$name.service"
+
+if [[ $action == start ]]; then
+  if [[ ! -f $ROOT/releases/$name/site/server/main.mjs ]]; then
+    echo "no release '$name'" >&2
+    exit 2
+  fi
+  systemctl reset-failed "$unit" >/dev/null 2>&1 || true
+  systemctl start "$unit"
+else
+  systemctl stop "$unit" >/dev/null 2>&1 || true
+fi

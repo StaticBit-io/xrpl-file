@@ -7,4 +7,6 @@ run/
 .superpowers/
 web/dist/
 site/dist/
+# wrangler pages dev state
+site/.wrangler/
 web/npm/

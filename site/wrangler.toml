@@ -1,0 +1,14 @@
+# The Pages project's configuration, read by `wrangler pages deploy` and `wrangler pages dev` run
+# from site/. With this file in the deployment, these settings are no longer editable in the
+# dashboard: this file is where they change.
+name = "xrpl-file-site"
+pages_build_output_dir = "./dist"
+# The newest date the workerd of the pinned wrangler (4.151.1, as deploy-site uses) knows; a later
+# date makes `wrangler pages dev` refuse to start.
+compatibility_date = "2026-10-19"
+
+# Workers Paid allows 30 s of CPU per request by default and bills past the included amount with no
+# cap. A card reads at most a 1 MB picture, about 0.3 s of CPU; five seconds is far above any real
+# card and still stops a runaway request from running up the bill.
+[limits]
+cpu_ms = 5000
