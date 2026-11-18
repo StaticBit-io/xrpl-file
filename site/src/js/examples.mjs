@@ -13,6 +13,6 @@ export const EXAMPLES = [
   { key: 'stand-in-drawing-small', link: 'xrpl-file://testnet/500190E5BBE2E9334A1D5845F29153F672B174C67E9FC471EED4BAED311528A1', kind: 'drawing', bytes: 59972, width: 800, height: 600 },
   { key: 'stand-in-clip', link: 'xrpl-file://testnet/9B3FBDF2E0FFF6F6EB4CACCF95216FADB36CDAC31C3892BF3E005732EB5FD42B', kind: 'video', bytes: 383570, width: 640, height: 360 },
   { key: 'chunks', link: 'xrpl-file://testnet/6345AA97EBA5A536814E6CC8AA31D23B1F78571A22F6D27E95CF3FAA85C8949C', kind: 'svg', bytes: 1618 },
-  { key: 'about', link: 'xrpl-file://testnet/3109A8759DF34C027BE2285B4EB4CC8FD46661F81013C681ACAB2956427E87ED', kind: 'text', bytes: 2231 },
+  { key: 'about', link: 'xrpl-file://testnet/3109A8759DF34C027BE2285B4EB4CC8FD46661F81013C681ACAB2956427E87ED', kind: 'text', bytes: 2202 },
   { key: 'logo', link: HERO_LINK, kind: 'logo', bytes: 122958, width: 1422, height: 1231 },
 ];
