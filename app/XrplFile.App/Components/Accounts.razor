@@ -3,6 +3,7 @@
 @inject VaultListModel VaultList
 @inject DeleteKeyModel DeleteModel
 @inject ScreenNavigation Nav
+@inject TutorialModel Tutorial
 
 @* Design 4.1 and 6: every account the vault holds, in two sections -- the throwaway accounts this
    application generated, and the keys the person imported -- and the screens each row opens into.
@@ -173,15 +174,20 @@
                             <span>@T[AccountsText.ColumnBalance]</span>
                             <span>@T[AccountsText.ColumnStatus]</span>
                         </li>
+                        @{
+                            // The tutorial lights one row; which one is the model's answer, not this markup's.
+                            string? markedRow = Tutorial.MarkedRow;
+                            string? fundRow = Tutorial.MarkedFundRow;
+                        }
                         @foreach (AccountRow row in rows)
                         {
-                            <li class="xf-account" data-tour="@TutorialRegions.AccountsRow">
+                            <li class="xf-account" data-tour="@(row.Reference == markedRow ? TutorialRegions.AccountsRow : null)">
                                 <div class="xf-account-id">
                                     <div class="xf-account-name">
                                         <span>@row.Label</span>
                                         @if (row.NeedsExporting)
                                         {
-                                            <span class="xf-tag xf-tag-danger" data-tour="@TutorialRegions.AccountsNotExported" title="@T[AccountsText.NotExportedHint]">
+                                            <span class="xf-tag xf-tag-danger" data-tour="@(row.Reference == markedRow ? TutorialRegions.AccountsNotExported : null)" title="@T[AccountsText.NotExportedHint]">
                                                 @T[AccountsText.NotExportedTag]
                                             </span>
                                         }
@@ -208,7 +214,7 @@
                                 <div class="xf-account-actions">
                                     @if (row.HasActions)
                                     {
-                                        <button type="button" class="btn btn-sm btn-outline-secondary" data-tour="@TutorialRegions.AccountsFund"
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" data-tour="@(row.Reference == fundRow ? TutorialRegions.AccountsFund : null)"
                                                 @onclick="() => OpenFunding(row.Reference)">
                                             @T[AccountsText.FundButton]
                                         </button>
