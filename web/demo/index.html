@@ -4,8 +4,9 @@
   the testnet and is written into this page literally.
 
   After a testnet reset the links are dead. To publish them again: delete run/fixtures/accounts.json,
-  run/fixtures/links.json and run/fixtures/state/, run Steps 2 and 7 of Task 4 of the plan
-  (the fixture script and the publication) again, then replace the links in index.html, many.html,
+  run/fixtures/links.json and run/fixtures/state/, publish the media again with
+  `dotnet run --project tools/XrplFile.Fixtures -- tools/fixtures/plan.json run/fixtures/media run/fixtures`
+  (tools/fixtures/make-media.sh builds the media), then replace the links in index.html, many.html,
   snippet.html and head.html with the new run/fixtures/links.json.
 
   Build the element with `cd web && npm run build`, serve it with `node web/demo/serve.mjs 8790`

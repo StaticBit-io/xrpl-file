@@ -44,7 +44,7 @@ public class Pbkdf2KdfTests
     [Fact]
     public void The_default_iteration_count_is_the_measured_one_and_inside_the_shared_range()
     {
-        // Task 0 measured this: 1,000,000 at 122-126 ms on this machine, the top of the range the
+        // Measured before the format was fixed: 1,000,000 at 122-126 ms on this machine, the top of the range the
         // shared format accepts. It travels inside every container's header, and the Wallet refuses
         // a count outside the range before it runs the derivation.
         Assert.Equal(1_000_000, Pbkdf2Kdf.DefaultIterations);

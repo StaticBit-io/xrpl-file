@@ -1,5 +1,5 @@
 // So a test file in this project can call PublishAsync unqualified, the way the reading tests
-// (and Task 4's differential test, which needs this identical fixture) are written to.
+// (and the differential test, which needs this identical fixture) are written to.
 global using static XrplFile.App.Core.Tests.PublishedFileFixture;
 
 using Xrpl.Wallet;
@@ -13,7 +13,7 @@ namespace XrplFile.App.Core.Tests;
 /// <see cref="SequenceStrategy"/> over the fake sink, a signer, and
 /// <see cref="PublicationSession.StartAsync(ISubmissionStrategy, ILedgerSource, ReadOnlyMemory{byte}, string, string, string, string, string, SessionOptions, CancellationToken)"/> + <see cref="PublicationSession.RunAsync"/>.
 ///
-/// Kept in its own file rather than inlined in a test class: Task 4's differential test needs the
+/// Kept in its own file rather than inlined in a test class: the differential test needs the
 /// identical fixture, and two copies of a publishing helper would drift the way this project has
 /// already had to fix three times.
 /// </summary>

@@ -924,7 +924,7 @@ public sealed class PublicationRun(
 
     /// <summary>
     /// Removes a finished run's state file. One that cannot be removed now is removed at the next
-    /// start-up, which finds its link already listed (<c>PublicationHistory.RecordFinishedRuns</c>, Task 22).
+    /// start-up, which finds its link already listed (<c>PublicationHistory.RecordFinishedRuns</c>).
     /// </summary>
     private static void DeleteState(string statePath)
     {

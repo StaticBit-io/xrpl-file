@@ -1,5 +1,5 @@
 /* The xrpl-file theme: xrpl-vanity-generator's palette and type on top of Bootstrap 5.3.3.
-   Contract: docs/superpowers/specs/2026-10-13-dark-theme-design.md. ThemeTokensTests reads the
+   Contract: docs/design/2026-10-13-dark-theme-design.md. ThemeTokensTests reads the
    :root block below; keep every colour token a six-digit hex value. */
 
 @font-face { font-family: "Inter"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/Inter-Regular.woff2") format("woff2"); }

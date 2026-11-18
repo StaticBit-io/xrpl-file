@@ -127,7 +127,7 @@ public class Argon2idKdfTests
     [Fact]
     public void The_default_parameters_are_the_measured_ones()
     {
-        // Task 0 measured these. A change here is a change to every vault already written,
+        // Measured before the vault format was fixed. A change here is a change to every vault already written,
         // so it must be a deliberate bump of kdfId, not an edit of this constant.
         Assert.Equal(262144, KdfParameters.Default.MemoryKib);
         Assert.Equal(3, KdfParameters.Default.Iterations);

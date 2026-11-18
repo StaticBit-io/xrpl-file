@@ -362,7 +362,7 @@ public class XrplClientLedgerSourceTests
         // answer: RequestManager.HandleResponse rejects the request's promise with a
         // RippledException for any response whose status is "error", before this class ever sees a
         // JSON element. The JSON-embedded shape above is a fixture convenience only the tests use;
-        // this is the shape Task 7's funding wait actually polls, and it must also read as zero.
+        // this is the shape the funding wait actually polls, and it must also read as zero.
         ScriptedNode node = new();
         node.Throw(new Xrpl.Client.Exceptions.RippledException(
             "actNotFound", new Xrpl.Models.Subscriptions.ErrorResponse { Error = "actNotFound" }));

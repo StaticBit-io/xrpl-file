@@ -1,6 +1,6 @@
 // A card picture read off the main thread: verifying a 1 MB file is hundreds of milliseconds of CPU,
-// and on the one main thread a person's page waited behind it (measured on the server, Task 10 of
-// docs/superpowers/plans/2026-11-12-site-server.md). Here the operating system shares the CPU instead.
+// and on the one main thread a person's page waited behind it (measured on the server: four 1 MB
+// reads delayed it by about 500 ms). Here the operating system shares the CPU instead.
 import { parentPort, workerData } from 'node:worker_threads';
 import { readPicture } from '../cards/card.mjs';
 

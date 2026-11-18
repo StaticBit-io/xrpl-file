@@ -1,6 +1,6 @@
 // Computes WCAG 2.x contrast for every text/background and UI/background pair the site's tokens
 // form, in both themes, plus the <xrpl-file> element's own palettes on the site's paper, and writes
-// the table to docs/superpowers/reports/2026-11-02-site/contrast.md.
+// the table to docs/design/site-contrast.md.
 //
 //   node site/tools/contrast.mjs            rewrite the report
 //   node site/tools/contrast.mjs --check    fail when a required pair misses its threshold
@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { contrast, over, parseColor, toHex } from './color.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-export const REPORT_PATH = join(here, '..', '..', 'docs', 'superpowers', 'reports', '2026-11-02-site', 'contrast.md');
+export const REPORT_PATH = join(here, '..', '..', 'docs', 'design', 'site-contrast.md');
 const TOKENS_PATH = join(here, '..', 'src', 'css', 'tokens.css');
 const BASE_PATH = join(here, '..', 'src', 'css', 'base.css');
 const README_PATH = join(here, '..', '..', 'README.md');

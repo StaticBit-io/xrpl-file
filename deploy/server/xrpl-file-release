@@ -7,7 +7,7 @@
 #
 # A candidate is started and checked on a side port before visitors are switched to it; a release that
 # fails after the switch is replaced by the last good one; a run cut off half-way is repaired by the
-# next. Spec: docs/superpowers/specs/2026-11-12-site-server-design.md, "Releases on the server".
+# next. Spec: docs/design/2026-11-12-site-server-design.md, "Releases on the server".
 #
 # The XRPL_FILE_* variables exist for the tests. SSH does not pass them: Ubuntu's sshd accepts only
 # LANG and LC_* from the client.

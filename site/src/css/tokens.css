@@ -1,7 +1,7 @@
 /* Design tokens, hallmark's Vantage theme. Every page style reads colours, faces, sizes and spacing from
    here and nowhere else.
 
-   Palette notes (the contrast table is docs/superpowers/reports/2026-11-02-site/contrast.md and is
+   Palette notes (the contrast table is docs/design/site-contrast.md and is
    checked by site/test/contrast.test.mjs, so a token edit that breaks AA fails the suite):
    - dark is the default theme (a blue-black ground, pale steel ink, one lime signal); light is the same
      page as a survey sheet in daylight: a cool pale grey ground, never white, and the lime deepens to

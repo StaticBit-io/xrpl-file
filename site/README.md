@@ -143,7 +143,7 @@ every header in each location that needs it.
 | `server` | the owner's server, `94.183.189.150` | `.github/workflows/deploy-site-server.yml` |
 
 Any other value fails the deploy with a message naming the variable. The design is in
-`docs/superpowers/specs/2026-11-12-site-server-design.md`.
+`docs/design/2026-11-12-site-server-design.md`.
 
 ### The server
 
@@ -267,7 +267,7 @@ subsets, the OFL licence and the download sources with checksums in `SOURCES.txt
 the site). Chinese falls back to the system CJK faces named in `--font-body`. A monospace is only for
 real values (`code`, `.value`) and is the visitor's own system face. Geologica has no check mark and
 no thin space: draw a check mark (SVG) instead of typing U+2713, and use margins, not U+2009.
-`site/tools/contrast.mjs` regenerates the AA table in `docs/superpowers/reports/2026-11-02-site/contrast.md`,
+`site/tools/contrast.mjs` regenerates the AA table in `docs/design/site-contrast.md`,
 and `site/test/contrast.test.mjs` fails when a pair misses its threshold.
 
 A page uses the shared chrome by putting three markers in its source; `build.mjs` replaces them:
@@ -291,7 +291,7 @@ browser's), switches the header and footer text in place on a click, stores the 
 page that creates the element later must copy `document.documentElement.dataset.theme` into it.
 
 Contrast is computed, not eyeballed: `node site/tools/contrast.mjs` rewrites
-`docs/superpowers/reports/2026-11-02-site/contrast.md` from the tokens and the element palettes in the
+`docs/design/site-contrast.md` from the tokens and the element palettes in the
 repository README, and `test/contrast.test.mjs` fails when a required pair misses WCAG AA or the report
 is out of date.
 
@@ -326,7 +326,7 @@ A link to one file, `/<network>/<HASH>`, gets a card of its own: the file's name
 for link-preview robots (Telegram, X, Facebook, Discord, Slack, WhatsApp's link fetcher, LinkedIn,
 by user agent).
 A person's browser gets the static file page with no ledger read and no cache lookup in front of it.
-The design is in `docs/superpowers/specs/2026-11-03-link-cards-design.md`.
+The design is in `docs/design/2026-11-03-link-cards-design.md`.
 
 | Part | Role |
 |---|---|

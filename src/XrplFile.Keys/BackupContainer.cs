@@ -15,7 +15,7 @@ namespace XrplFile.Keys;
 /// that was never the problem.
 /// </summary>
 /// <remarks>
-/// Lifted from the Wallet project (<c>SB.WalletApp.Security</c>), file <c>Backup/BackupContainer.cs</c>.
+/// Lifted from StaticBit's Wallet project (a private repository), file <c>Backup/BackupContainer.cs</c>.
 /// Unchanged except for the namespace and the cross-references. It replaces the single
 /// <see cref="VaultError.Corrupt"/> the <c>XFK1</c> container reported for every failure.
 /// </remarks>
@@ -81,7 +81,7 @@ public enum BackupUnpackError
 /// </summary>
 /// <remarks>
 /// <para>
-/// Lifted from the Wallet project (<c>SB.WalletApp.Security</c>), file
+/// Lifted from StaticBit's Wallet project (a private repository), file
 /// <c>Backup/BackupContainer.cs</c>, so that a key can move between the two products. The Wallet's
 /// assembly is deliberately not referenced -- it carries MAUI and wallet-domain types, and coupling
 /// two applications through a security library makes both harder to change. What is adopted is a
@@ -205,7 +205,7 @@ public static class BackupContainer
     /// <para>
     /// Lifted from the Wallet, where it is the bound a caller applies to a file's length before
     /// reading it into memory at all -- the file picker refuses anything past it, so their
-    /// container code never sees an oversized array in the first place. Task 3's first pass left
+    /// container code never sees an oversized array in the first place. The first port left
     /// this unlifted, reasoning that nothing here read a container from a file yet; that stopped
     /// being true once container import entered scope (design 5.1, 5.3), so the bound now guards
     /// <see cref="TryUnpack"/> itself instead of a caller this library does not have yet. Without

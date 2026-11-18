@@ -353,7 +353,7 @@ public class BatchStrategyTests
         await BatchTestNode.EventuallyAsync(() => strategy.Trace.Contains("halt:diverged"));
         payer.Release();
 
-        // Whether the run then completes or fails is Task 9's business (identity); here the
+        // Whether the run then completes or fails is for the identity tests; here the
         // discarded blob must never have reached the node.
         Exception? outcome = await Record.ExceptionAsync(() => run);
         Assert.True(outcome is null or XrplFileException, outcome?.ToString());

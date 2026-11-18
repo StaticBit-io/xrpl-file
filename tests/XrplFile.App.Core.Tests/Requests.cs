@@ -14,7 +14,7 @@ public static class Requests
 
     /// <summary>
     /// A fee-unit ceiling no test node reaches. Not <see cref="long.MaxValue"/>: the session prices the
-    /// worst cases at the approved ceiling (Task 11), and that product must stay a number of drops.
+    /// worst cases at the approved ceiling, and that product must stay a number of drops.
     /// </summary>
     public const long UnboundedFeeDrops = 1_000;
 }

@@ -10,10 +10,9 @@ namespace XrplFile.Keys.Tests;
 /// <remarks>
 /// <para>
 /// <c>fixtures/wallet-container.bin</c> was produced once, by the Wallet project's own
-/// <c>SB.WalletApp.Security.Backup.BackupContainer.Pack</c> and its own <c>ManagedPbkdf2Kdf</c>
+/// <c>BackupContainer.Pack</c> (a private StaticBit repository) and its own <c>ManagedPbkdf2Kdf</c>
 /// (<c>kdfId</c> 1), from a throwaway program in that repository that was deleted afterwards. The
-/// payload and password it was given are restated below, and the task report records how it was
-/// generated. Nothing in this repository can regenerate it, which is the point: if a change here
+/// payload and password it was given are restated below. Nothing in this repository can regenerate it, which is the point: if a change here
 /// stops it opening, the change broke the format rather than the fixture.
 /// </para>
 /// <para>

@@ -7,7 +7,7 @@
 # checks before it changes anything and prints "ok <step>" or "changed <step>"; the last line is
 # "changed: <n>", so a second run on a prepared server reports 0. A line "armed sshd-revert" means the
 # sshd policy changed and a timer will undo it in five minutes unless provision.sh disarms it after a
-# fresh key login. Spec: docs/superpowers/specs/2026-11-12-site-server-design.md.
+# fresh key login. Spec: docs/design/2026-11-12-site-server-design.md.
 set -euo pipefail
 
 BUNDLE=${1:?usage: setup.sh <bundle dir> <domain>}

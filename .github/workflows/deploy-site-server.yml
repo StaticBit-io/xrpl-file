@@ -1,6 +1,6 @@
 name: deploy-site-server
 
-# The site on the owner's server (docs/superpowers/specs/2026-11-12-site-server-design.md). Called by
+# The site on the owner's server (docs/design/2026-11-12-site-server-design.md). Called by
 # test.yml on a push to main when SITE_TARGET is "server", and run by hand to put a release on the
 # server while DNS still points at Pages:
 #

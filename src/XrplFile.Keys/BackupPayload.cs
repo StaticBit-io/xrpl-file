@@ -5,7 +5,7 @@ namespace XrplFile.Keys;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Lifted from the Wallet project (<c>SB.WalletApp.Security</c>), file <c>Backup/BackupPayload.cs</c>.
+/// Lifted from StaticBit's Wallet project (a private repository), file <c>Backup/BackupPayload.cs</c>.
 /// Unchanged except for the namespace, this header, and the four optional trailing parameters this
 /// application needs -- see the second remarks block below. The eight leading parameters are theirs,
 /// in their order, because a key that moves between the two products is a key both readers
@@ -96,7 +96,7 @@ public sealed record BackupWalletEntry(
 /// and encryption <see cref="BackupContainer"/> applies on top.
 /// </summary>
 /// <remarks>
-/// Lifted from the Wallet project (<c>SB.WalletApp.Security</c>), file <c>Backup/BackupPayload.cs</c>.
+/// Lifted from StaticBit's Wallet project (a private repository), file <c>Backup/BackupPayload.cs</c>.
 /// Unchanged except for the namespace and this header.
 /// </remarks>
 public sealed class BackupPayload
