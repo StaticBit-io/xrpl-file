@@ -30,6 +30,7 @@ Requires Node 22 or newer. There are no npm dependencies.
 ```bash
 cd web && node build.mjs && cd ..   # builds web/dist/1.3.0 (the element and the reader)
 node site/build.mjs                  # writes site/dist
+node site/build.mjs --allow-testnet-examples   # local preview with the testnet stand-in examples
 node site/serve.mjs                  # http://127.0.0.1:8791/ (next free port if taken)
 node --test site/test/*.test.mjs     # site tests
 ```
@@ -39,7 +40,8 @@ node --test site/test/*.test.mjs     # site tests
 
 - `web/dist/1.3.0` does not exist,
 - any file is larger than 25 MiB (the Cloudflare Pages per-file limit), or
-- a static file would be shadowed by a `_redirects` rule (next section).
+- a static file would be shadowed by a `_redirects` rule (next section), or
+- an `EXAMPLES` link is not on mainnet (see [Examples page](#examples-page)).
 
 `serve.mjs` binds to `127.0.0.1` only, starts at port 8791 and moves to the next port when one is
 busy; it never touches a process it did not start. It applies `_redirects` with the same evaluator
@@ -156,6 +158,13 @@ To add or replace an example:
 1. Add or change its entry in `EXAMPLES` (`key`, `link`, `kind`, `bytes` and, for a picture or a video, `width` and `height`).
 2. Add the same `key` to `EXAMPLE_STRINGS` in all six languages: a title and one line.
 3. `node --test site/test/*.test.mjs`: the tests fail on a language without the key.
+
+**The build guard.** The page says every file is read from mainnet, so `node site/build.mjs` fails when any
+`EXAMPLES` link is not an `xrpl-file://mainnet/` link, and every deploy workflow runs it that way. The
+branch that adds the page carries testnet stand-ins, which therefore block the production build (and CI,
+which builds the site) until phase 2 swaps in the owner's mainnet links; that is intended. Pass
+`--allow-testnet-examples` (or `allowTestnetExamples: true` to `build()`) only for a local preview. The
+site tests that build pass it where they need the stand-ins.
 
 How the owner's own files get onto mainnet and into this list: [`tools/examples/README.md`](../tools/examples/README.md).
 

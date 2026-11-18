@@ -54,7 +54,7 @@ async function withFixture(redirects, body) {
 
 test('copies the element under /element/1.3.0, the site sources and the price table', () =>
   withFixture(undefined, async (f) => {
-    await build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' });
+    await build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true });
     assert.equal(await readFile(join(f.outDir, 'element', '1.3.0', 'xrpl-file-reader.mjs'), 'utf8'), '// reader');
     assert.equal(await readFile(join(f.outDir, 'element', '1.3.0', 'xrpl-file-element.js'), 'utf8'), '// element');
     assert.equal(await readFile(join(f.outDir, 'data', 'price.json'), 'utf8'), '{"rows":[]}');
@@ -66,7 +66,7 @@ test('copies the element under /element/1.3.0, the site sources and the price ta
 test('refuses a missing element version and leaves no output behind', () =>
   withFixture(undefined, async (f) => {
     await assert.rejects(
-      build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '9.9.9' }),
+      build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '9.9.9', allowTestnetExamples: true }),
       /9\.9\.9/,
     );
     assert.equal(await exists(f.outDir), false);
@@ -77,7 +77,7 @@ test('refuses a file over the size limit and names it', () =>
     await writeFile(join(f.siteDir, 'src', 'big.bin'), Buffer.alloc(2048));
     await assert.rejects(
       build({
-        siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', maxFileBytes: 1024,
+        siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', maxFileBytes: 1024, allowTestnetExamples: true,
       }),
       /big\.bin/,
     );
@@ -91,7 +91,7 @@ test('the default limit is the Cloudflare Pages 25 MiB per file', () => {
 test('refuses a static file that the file-page rewrite would shadow', () =>
   withFixture('/:network/:hash /file 200\n', async (f) => {
     await assert.rejects(
-      build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' }),
+      build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true }),
       /\/js\/a\.mjs/,
     );
     assert.equal(await exists(f.outDir), false);
@@ -102,7 +102,7 @@ test('refuses a 200 rule whose destination ends in .html, /index or /index.html'
     const redirects = `/js/:file /js/:file 200\n/data/:file /data/:file 200\n/:network/:hash ${destination} 200\n`;
     await withFixture(redirects, async (f) => {
       await assert.rejects(
-        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' }),
+        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true }),
         /\.html|\/index/,
       );
       assert.equal(await exists(f.outDir), false);
@@ -119,7 +119,7 @@ async function buildWithPages(pages, check) {
       await mkdir(join(f.siteDir, 'src', name.includes('/') ? name.slice(0, name.lastIndexOf('/')) : '.'), { recursive: true });
       await writeFile(join(f.siteDir, 'src', name), html);
     }
-    await build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' });
+    await build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true });
     await check(f, (name) => readFile(join(f.outDir, name), 'utf8'));
   });
 }
@@ -181,7 +181,7 @@ test('refuses a marker on a page without a usable <html lang>, or an unknown mar
     await withFixture(undefined, async (f) => {
       await writeFile(join(f.siteDir, 'src', 'bad.html'), html);
       await assert.rejects(
-        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' }),
+        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true }),
         /bad\.html/,
       );
       assert.equal(await exists(f.outDir), false);
@@ -220,7 +220,7 @@ test('refuses a snippet marker when integrity.json has no value for the element 
     await writeFile(join(f.webDistDir, '1.3.0', 'integrity.json'), '{}');
     await writeFile(join(f.siteDir, 'src', 'index.html'), PAGE('en', '<code><!--@element-snippet--></code>'));
     await assert.rejects(
-      build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' }),
+      build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true }),
       /integrity/,
     );
     assert.equal(await exists(f.outDir), false);
@@ -260,7 +260,7 @@ test('refuses a built language folder whose language is not active, and says how
     await mkdir(join(f.siteDir, 'src', inactive), { recursive: true });
     await writeFile(join(f.siteDir, 'src', inactive, 'index.html'), '<!doctype html>');
     await assert.rejects(
-      build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' }),
+      build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true }),
       new RegExp(`${inactive}.*ACTIVE_LANGS`),
     );
     assert.equal(await exists(f.outDir), false);
@@ -272,7 +272,7 @@ test('refuses an active language that has no home page and names the missing fil
     await withFixture(undefined, async (f) => {
       await rm(join(f.siteDir, 'src', lang), { recursive: true, force: true });
       await assert.rejects(
-        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' }),
+        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true }),
         new RegExp(`${lang}/index\\.html`),
       );
       assert.equal(await exists(f.outDir), false);
@@ -288,7 +288,7 @@ test('refuses a page whose <html lang> is not the language of its folder', async
     await withFixture(undefined, async (f) => {
       await writeFile(join(f.siteDir, 'src', name), html);
       await assert.rejects(
-        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' }),
+        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true }),
         new RegExp(name.replace('.', '\\.')),
         name,
       );
@@ -301,7 +301,7 @@ test('refuses a language-folder page that would be shadowed because _redirects h
   for (const lang of ACTIVE_FOLDERS) {
     await withFixture(rules, async (f) => {
       await assert.rejects(
-        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' }),
+        build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true }),
         new RegExp(`/${lang}/index\\.html`),
       );
     });
@@ -316,7 +316,7 @@ test('refuses a source that names another element version and says which', () =>
   withFixture(undefined, async (f) => {
     await writeFile(join(f.siteDir, 'src', 'js', 'b.mjs'), "import '../element/1.0.0/xrpl-file-reader.mjs';");
     await assert.rejects(
-      build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' }),
+      build({ siteDir: f.siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true }),
       /js\/b\.mjs names \/element\/1\.0\.0\//,
     );
     assert.equal(await exists(f.outDir), false);
@@ -352,7 +352,7 @@ test('every built page of the real site carries the icon links, and the icons ar
   const f = await fixture();
   try {
     const siteDir = fileURLToPath(new URL('..', import.meta.url));
-    await build({ siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' });
+    await build({ siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true });
     const pages = await htmlFiles(f.outDir);
     for (const page of ['index.html', 'file.html', '404.html', ...ACTIVE_FOLDERS.map((lang) => `${lang}/index.html`)]) {
       assert.ok(pages.includes(page), `${page} was not built`);
@@ -398,7 +398,7 @@ test('every built page of the real site carries a link card, and the banner is i
   const f = await fixture();
   try {
     const siteDir = fileURLToPath(new URL('..', import.meta.url));
-    await build({ siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' });
+    await build({ siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true });
     for (const page of (await htmlFiles(f.outDir)).filter((name) => !name.startsWith('element/'))) {
       const html = await readFile(join(f.outDir, page), 'utf8');
       for (const tag of ['og:title', 'og:description', 'og:image', 'twitter:card']) {
@@ -415,7 +415,7 @@ test('_routes.json reaches the output and invokes the function only on card path
   const f = await fixture();
   try {
     const siteDir = fileURLToPath(new URL('..', import.meta.url));
-    await build({ siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0' });
+    await build({ siteDir, webDistDir: f.webDistDir, outDir: f.outDir, elementVersion: '1.3.0', allowTestnetExamples: true });
     assert.deepEqual(JSON.parse(await readFile(join(f.outDir, '_routes.json'), 'utf8')), {
       version: 1,
       include: ['/mainnet/*', '/testnet/*', '/devnet/*', '/og/*'],

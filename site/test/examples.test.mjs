@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { access } from 'node:fs/promises';
 import { EXAMPLES } from '../src/js/examples.mjs';
 import { EXAMPLE_FILE_LINK, EXAMPLE_STRINGS } from '../src/js/examples-strings.mjs';
 import { HERO_LINK } from '../src/js/config.mjs';
 import { ACTIVE_LANGS } from '../src/js/languages.mjs';
 import { renderExamples } from '../examples-markup.mjs';
 import { escapeHtml } from '../chrome-markup.mjs';
-import { build, ELEMENT_VERSION } from '../build.mjs';
+import { build, ELEMENT_VERSION, nonMainnetExamples } from '../build.mjs';
 import { builtSite } from './support/built-site.mjs';
 
 const hrefOf = (link) => link.replace(/^xrpl-file:\/\//, '/');
@@ -110,7 +111,7 @@ async function pageWithMarker(lang) {
 test('buildFillsTheMarker', async () => {
   const f = await pageWithMarker('en');
   try {
-    await build(f);
+    await build({ ...f, allowTestnetExamples: true });
     const page = await readFile(join(f.outDir, 'examples.html'), 'utf8');
     assert.ok(!page.includes('<!--@examples-->'));
     for (const example of EXAMPLES) assert.ok(page.includes(example.link), example.key);
@@ -122,7 +123,7 @@ test('buildFillsTheMarker', async () => {
 test('buildRefusesAPageInALanguageWithoutStrings', async () => {
   const f = await pageWithMarker('fr');
   try {
-    await assert.rejects(build(f), /examples marker/);
+    await assert.rejects(build({ ...f, allowTestnetExamples: true }), /examples marker/);
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
@@ -131,4 +132,39 @@ test('buildRefusesAPageInALanguageWithoutStrings', async () => {
 test('theRealBuildStillSucceeds', async () => {
   const { outDir } = await builtSite();
   assert.ok(outDir);
+});
+
+const MAINNET_LINK = `xrpl-file://mainnet/${'A'.repeat(64)}`;
+const TESTNET_LINK = `xrpl-file://testnet/${'B'.repeat(64)}`;
+
+test('onlyNonMainnetLinksAreStrangers', () => {
+  const strangers = nonMainnetExamples([
+    { key: 'a', link: MAINNET_LINK },
+    { key: 'b', link: TESTNET_LINK },
+    { key: 'c', link: `xrpl-file://devnet/${'C'.repeat(64)}` },
+  ]);
+  assert.deepEqual(strangers.map((example) => example.key), ['b', 'c']);
+});
+
+test('buildRefusesATestnetExampleUnlessAllowed', async () => {
+  const f = await pageWithMarker('en');
+  try {
+    const examples = [{ key: 'stand-in-clip', link: TESTNET_LINK, kind: 'drawing', bytes: 1 }];
+    await assert.rejects(build({ ...f, examples }), /not on mainnet: stand-in-clip.*--allow-testnet-examples/s);
+    await assert.rejects(access(f.outDir), 'a refused build must leave no output');
+    await build({ ...f, examples, allowTestnetExamples: true });
+    await access(f.outDir);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('buildAcceptsMainnetExamplesWithoutTheOption', async () => {
+  const f = await pageWithMarker('en');
+  try {
+    await build({ ...f, examples: EXAMPLES.map((example) => ({ ...example, link: MAINNET_LINK })) });
+    await access(f.outDir);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
 });

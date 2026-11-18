@@ -17,7 +17,7 @@ async function buildOnce() {
   await writeFile(join(elementDir, 'xrpl-file-element.js'), '// element');
   await writeFile(join(elementDir, 'integrity.json'), JSON.stringify({ 'xrpl-file-element.js': 'sha384-TESTVALUE' }));
   const outDir = join(root, 'dist');
-  await build({ siteDir: fileURLToPath(new URL('../..', import.meta.url)), webDistDir, outDir });
+  await build({ siteDir: fileURLToPath(new URL('../..', import.meta.url)), webDistDir, outDir, allowTestnetExamples: true });
   process.once('exit', () => rmSync(root, { recursive: true, force: true }));
   return {
     outDir,

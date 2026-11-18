@@ -10,6 +10,8 @@
 // The site loads the element and the reader from that one copy; nothing else carries reader code.
 //
 //   node site/build.mjs            (run `cd web && node build.mjs` first)
+//   node site/build.mjs --allow-testnet-examples
+//                                  local preview only: lets the examples page keep links that are not on mainnet
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +20,7 @@ import { ACTIVE_LANGS, DEFAULT_LANG, LANGS, htmlLang, langFromTag } from './src/
 import { ELEMENT_FILE, snippetHtml } from './snippet.mjs';
 import { EXAMPLES_MARKER, renderExamples } from './examples-markup.mjs';
 import { EXAMPLE_STRINGS } from './src/js/examples-strings.mjs';
+import { EXAMPLES } from './src/js/examples.mjs';
 import { findHtmlRewriteTargets, findShadowed, parseRedirects } from './redirects.mjs';
 
 export const ELEMENT_VERSION = '1.3.0';
@@ -148,6 +151,15 @@ async function inlineSnippet(outDir, elementDir, elementVersion) {
   }
 }
 
+/**
+ * The examples whose link is not on mainnet. The page says every file is read from the mainnet, so a
+ * testnet stand-in must never reach a deployable build: it would show a test pattern as a published
+ * example and break at the next testnet reset.
+ */
+export function nonMainnetExamples(examples) {
+  return examples.filter((example) => !/^xrpl-file:[/][/]mainnet[/]/.test(example.link));
+}
+
 /** Fills the examples page's cards; a page in a language without example strings is refused. */
 async function inlineExamples(outDir) {
   for (const file of await listFiles(outDir)) {
@@ -233,7 +245,16 @@ async function checkRewrites(outDir) {
 /**
  * @param {{ siteDir: string, webDistDir: string, outDir: string, elementVersion?: string, maxFileBytes?: number }} options
  */
-export async function build({ siteDir, webDistDir, outDir, elementVersion = ELEMENT_VERSION, maxFileBytes = MAX_FILE_BYTES }) {
+export async function build({
+  siteDir, webDistDir, outDir, elementVersion = ELEMENT_VERSION, maxFileBytes = MAX_FILE_BYTES,
+  allowTestnetExamples = false, examples = EXAMPLES,
+}) {
+  const strangers = nonMainnetExamples(examples);
+  if (strangers.length > 0 && !allowTestnetExamples) {
+    throw new Error(
+      `the examples page links to files that are not on mainnet: ${strangers.map((e) => e.key).join(', ')}. `
+      + 'Replace them in site/src/js/examples.mjs (tools/examples/README.md, step 7), or pass --allow-testnet-examples for a local preview.');
+  }
   const elementDir = join(webDistDir, elementVersion);
   if (!(await isDirectory(elementDir))) {
     throw new Error(`element build ${elementVersion} not found at ${elementDir}; run "node build.mjs" in web/ first`);
@@ -271,7 +292,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const outDir = join(here, 'dist');
   try {
-    await build({ siteDir: here, webDistDir: join(here, '..', 'web', 'dist'), outDir });
+    await build({
+      siteDir: here, webDistDir: join(here, '..', 'web', 'dist'), outDir,
+      allowTestnetExamples: process.argv.includes('--allow-testnet-examples'),
+    });
     console.log(`site built into ${outDir}`);
   } catch (error) {
     console.error(error.message);
