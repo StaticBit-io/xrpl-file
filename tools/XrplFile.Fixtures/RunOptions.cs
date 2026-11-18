@@ -49,6 +49,21 @@ internal sealed record RunOptions(
                 }
 
                 string value = args[++index];
+                bool alreadyGiven = argument switch
+                {
+                    "--network" => network is not null,
+                    "--writer" => writer is not null,
+                    "--payer" => payer is not null,
+                    _ => node is not null,
+                };
+
+                // Taking the last one silently would let a typo in a long command line pick the account that pays.
+                if (alreadyGiven)
+                {
+                    problems.Add($"{argument} is given twice");
+                    continue;
+                }
+
                 if (argument == "--network") network = value;
                 else if (argument == "--writer") writer = value;
                 else if (argument == "--payer") payer = value;

@@ -1,5 +1,6 @@
 using System.Text;
 using Xrpl.Client;
+using Xrpl.Client.Exceptions;
 using Xrpl.Models.Common;
 using Xrpl.Models.Methods;
 using Xrpl.Wallet;
@@ -63,40 +64,57 @@ internal static class OwnAccounts
         Console.Error.Write(label);
         StringBuilder typed = new();
 
-        while (true)
+        try
         {
-            ConsoleKeyInfo pressed = Console.ReadKey(intercept: true);
-
-            if (pressed.Key == ConsoleKey.Enter) break;
-
-            if (pressed.Key == ConsoleKey.Backspace)
+            while (true)
             {
-                if (typed.Length > 0) typed.Length--;
+                ConsoleKeyInfo pressed = Console.ReadKey(intercept: true);
+
+                if (pressed.Key == ConsoleKey.Enter) break;
+
+                if (pressed.Key == ConsoleKey.Backspace)
+                {
+                    if (typed.Length > 0) typed.Length--;
+                }
+                else if (!char.IsControl(pressed.KeyChar))
+                {
+                    typed.Append(pressed.KeyChar);
+                }
             }
-            else if (!char.IsControl(pressed.KeyChar))
-            {
-                typed.Append(pressed.KeyChar);
-            }
+
+            Console.Error.WriteLine();
+            return typed.ToString().Trim();
         }
-
-        Console.Error.WriteLine();
-        return typed.ToString().Trim();
+        finally
+        {
+            // A StringBuilder cannot be zeroed, but emptying it drops its chunks' reference to the seed text sooner.
+            typed.Clear();
+        }
     }
 
     /// <summary>
     /// A regular key signs only while the account still names it, so a stale or wrong seed is caught before any
     /// transaction is built. A master key needs no lookup: it always signs unless disabled, and the node says so.
     /// </summary>
-    public static async Task RequireSigningRightsAsync(XrplClient client, OwnKey key, CancellationToken cancellationToken)
+    public static async Task RequireSigningRightsAsync(XrplClient client, OwnKey key, string network, CancellationToken cancellationToken)
     {
         if (!key.IsRegularKey) return;
 
-        AccountInfo info = await client.AccountInfo(
-            new AccountInfoRequest(key.Account)
-            {
-                LedgerIndex = new LedgerIndex(LedgerIndexType.Validated),
-            },
-            cancellationToken).Typed().ConfigureAwait(false);
+        AccountInfo info;
+
+        try
+        {
+            info = await client.AccountInfo(
+                new AccountInfoRequest(key.Account)
+                {
+                    LedgerIndex = new LedgerIndex(LedgerIndexType.Validated),
+                },
+                cancellationToken).Typed().ConfigureAwait(false);
+        }
+        catch (RippledException e) when (string.Equals(e.Classify().RawError, XrplErrorCodes.ActNotFound, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"account {key.Account} does not exist on {network}");
+        }
 
         string derived = Xrpl.Keypairs.XrplKeypairs.DeriveAddress(key.Wallet.PublicKey);
 

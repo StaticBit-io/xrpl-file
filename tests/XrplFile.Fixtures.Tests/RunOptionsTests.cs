@@ -84,6 +84,27 @@ public sealed class RunOptionsTests
         Assert.True(e.Problems.Count >= 4, string.Join("; ", e.Problems));
     }
 
+    [Theory]
+    [InlineData("--writer")]
+    [InlineData("--payer")]
+    [InlineData("--network")]
+    [InlineData("--node")]
+    public void ARepeatedOptionIsAProblem(string option)
+    {
+        string[] first = option switch
+        {
+            "--writer" => [option, Writer],
+            "--payer" => [option, Payer],
+            "--network" => [option, "testnet"],
+            _ => [option, "wss://a.example"],
+        };
+        string[] second = [option, option == "--writer" ? Payer : option == "--payer" ? Writer : option == "--network" ? "mainnet" : "wss://b.example"];
+
+        PlanException e = Assert.Throws<PlanException>(() => RunOptions.Parse(Own([.. first, .. second, "--writer", Writer, "--payer", Payer])));
+
+        Assert.Contains(e.Problems, problem => problem.Contains(option, StringComparison.Ordinal) && problem.Contains("given twice", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void TestnetWithOwnAccountsIsAllowed()
     {
@@ -108,7 +129,8 @@ public sealed class RunOptionsTests
     {
         PlanException e = Assert.Throws<PlanException>(() => Plan.ValidateOwnAccounts([Entry("cover"), Entry("big-broken-cover", cover: "cover")]));
 
-        Assert.Contains("broken-cover", e.Problems[0], StringComparison.Ordinal);
+        Assert.Single(e.Problems);
+        Assert.Contains("cannot be published with your own accounts", e.Problems[0], StringComparison.Ordinal);
     }
 
     [Fact]
