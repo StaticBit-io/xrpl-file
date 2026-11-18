@@ -126,7 +126,15 @@
         {
             _watching = true;
             _self = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("xfTour.watch", _self);
+            try
+            {
+                await JS.InvokeVoidAsync("xfTour.watch", _self);
+            }
+            catch (Exception e) when (e is JSException or JSDisconnectedException)
+            {
+                // Without the watch the layout is measured on each render only; the bubble still works.
+                StartupLog.Write("Tutorial: xfTour.watch failed", e);
+            }
         }
 
         // Whether the render that just finished showed the bubble: focus can only land on a
@@ -151,8 +159,9 @@
             {
                 await _title.FocusAsync(preventScroll: true);
             }
-            catch (InvalidOperationException)
+            catch (Exception e) when (e is InvalidOperationException or JSException or JSDisconnectedException)
             {
+                // Focus is a courtesy; the bubble is usable without it.
             }
         }
     }
@@ -215,11 +224,19 @@
             }
             while (_measureAgain && !_disposed);
         }
-        catch (JSException)
+        catch (Exception e) when (e is JSException or JSDisconnectedException)
         {
-        }
-        catch (JSDisconnectedException)
-        {
+            StartupLog.Write("Tutorial: measuring the step failed", e);
+
+            // A bubble left pending stays invisible over a page the script may already have made
+            // inert. Showing it centred on a full dim keeps Next and Leave reachable.
+            if (!_disposed && Tutorial.Current is { } failed)
+            {
+                _hole = null;
+                _point = null;
+                _measuredStep = (failed.TopicName, failed.Number);
+                StateHasChanged();
+            }
         }
         finally
         {
