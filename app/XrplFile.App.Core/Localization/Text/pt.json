@@ -603,7 +603,7 @@
   "Tutorial.AddKeyDoneTitle": "Suas chaves",
   "Tutorial.AddKeyDoneBody": "As chaves importadas aparecem junto com as demais e publicam como qualquer outra.",
   "Tutorial.ExportKeyRowTitle": "Uma chave em um só lugar",
-  "Tutorial.ExportKeyRowBody": "Uma chave que nunca foi exportada existe somente neste cofre. Esta é a que vamos exportar.",
+  "Tutorial.ExportKeyRowBody": "Uma chave que nunca foi exportada existe somente neste cofre. Os próximos passos mostram como exportá-la.",
   "Tutorial.ExportKeyMenuTitle": "O menu da linha",
   "Tutorial.ExportKeyMenuBody": "O menu de ações da linha tem “{exportKey}”. A tela de exportação desta linha abre quando você continuar.",
   "Tutorial.ExportKeyPasswordTitle": "Uma senha para o backup",

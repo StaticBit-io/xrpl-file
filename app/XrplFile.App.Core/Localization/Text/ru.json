@@ -620,7 +620,7 @@
   "Tutorial.AddKeyDoneTitle": "Ваши ключи",
   "Tutorial.AddKeyDoneBody": "Импортированные ключи отображаются среди ваших ключей и публикуют так же, как любые другие.",
   "Tutorial.ExportKeyRowTitle": "Ключ только в одном месте",
-  "Tutorial.ExportKeyRowBody": "Ключ, который ни разу не экспортировали, есть только в этом хранилище. Его мы и экспортируем.",
+  "Tutorial.ExportKeyRowBody": "Ключ, который ни разу не экспортировали, есть только в этом хранилище. Следующие шаги покажут, как его экспортировать.",
   "Tutorial.ExportKeyMenuTitle": "Меню строки",
   "Tutorial.ExportKeyMenuBody": "В меню действий строки есть пункт «{exportKey}». Экран экспорта для этой строки откроется, когда вы продолжите.",
   "Tutorial.ExportKeyPasswordTitle": "Пароль для копии",

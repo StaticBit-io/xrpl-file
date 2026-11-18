@@ -603,7 +603,7 @@
   "Tutorial.AddKeyDoneTitle": "Tus claves",
   "Tutorial.AddKeyDoneBody": "Las claves importadas aparecen junto al resto de tus claves y publican como cualquier otra.",
   "Tutorial.ExportKeyRowTitle": "Una clave en un solo sitio",
-  "Tutorial.ExportKeyRowBody": "Una clave que nunca se exportó solo existe en esta caja fuerte. Esta es la que vamos a exportar.",
+  "Tutorial.ExportKeyRowBody": "Una clave que nunca se exportó solo existe en esta caja fuerte. Los siguientes pasos muestran cómo exportarla.",
   "Tutorial.ExportKeyMenuTitle": "El menú de la fila",
   "Tutorial.ExportKeyMenuBody": "El menú de acciones de la fila incluye «{exportKey}». La pantalla de exportación de esta fila se abrirá cuando continúes.",
   "Tutorial.ExportKeyPasswordTitle": "Una contraseña para la copia",

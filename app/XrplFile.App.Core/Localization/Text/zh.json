@@ -586,7 +586,7 @@
   "Tutorial.AddKeyDoneTitle": "我的密钥",
   "Tutorial.AddKeyDoneBody": "导入的密钥会和其他密钥列在一起，发布时与任何其他密钥一样。",
   "Tutorial.ExportKeyRowTitle": "只存在一处的密钥",
-  "Tutorial.ExportKeyRowBody": "从未导出的密钥只存在于这个保险库中。我们就导出这一个。",
+  "Tutorial.ExportKeyRowBody": "从未导出的密钥只存在于这个保险库中。接下来的步骤会演示如何导出它。",
   "Tutorial.ExportKeyMenuTitle": "该行的菜单",
   "Tutorial.ExportKeyMenuBody": "该行的操作菜单中有“{exportKey}”。继续后会自动打开这一行的导出界面。",
   "Tutorial.ExportKeyPasswordTitle": "备份密码",

@@ -603,7 +603,7 @@
   "Tutorial.AddKeyDoneTitle": "Ihre Schlüssel",
   "Tutorial.AddKeyDoneBody": "Importierte Schlüssel stehen bei Ihren übrigen Schlüsseln und veröffentlichen wie jeder andere.",
   "Tutorial.ExportKeyRowTitle": "Ein Schlüssel an nur einem Ort",
-  "Tutorial.ExportKeyRowBody": "Ein Schlüssel, der nie exportiert wurde, existiert nur in diesem Tresor. Diesen exportieren wir.",
+  "Tutorial.ExportKeyRowBody": "Ein Schlüssel, der nie exportiert wurde, existiert nur in diesem Tresor. Die nächsten Schritte zeigen, wie Sie ihn exportieren.",
   "Tutorial.ExportKeyMenuTitle": "Das Menü der Zeile",
   "Tutorial.ExportKeyMenuBody": "Das Aktionsmenü der Zeile enthält „{exportKey}“. Die Exportansicht dieser Zeile öffnet sich, wenn Sie weitergehen.",
   "Tutorial.ExportKeyPasswordTitle": "Ein Passwort für das Backup",
