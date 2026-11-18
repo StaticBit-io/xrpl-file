@@ -140,4 +140,73 @@ public sealed class TutorialPlacementTests
 
         Assert.False(overlapsX && overlapsY, $"Bubble at {at} covers the hole");
     }
+
+    [Fact]
+    public void Covers_less_than_the_roomiest_side_when_no_side_fits()
+    {
+        // Right has the most room (250) but its clamp pushes the bubble 58px into the hole;
+        // below has 190 and its clamp leaves the bubble clear of it.
+        TourRect hole = new TourRect(100, 100, 814, 430);
+
+        TourPoint at = TutorialPlacement.Place(hole, BubbleWidth, BubbleHeight, 1184, 740);
+
+        TourPoint roomiest = new TourPoint(856, 100);
+        double chosen = OverlapArea(hole, at);
+        double old = OverlapArea(hole, roomiest);
+
+        Assert.True(old > 0);
+        Assert.True(chosen < old, $"Chosen overlap {chosen} is not below {old}");
+        Assert.Equal(new TourPoint(100, 532), at);
+    }
+
+    public static TheoryData<double, double, double, double, double, double> HoleWithNoRoomOnAnySide() => new()
+    {
+        { 1184, 740, 100, 100, 814, 430 },
+        { 1184, 740, 200, 100, 800, 540 },
+        { 1184, 740, 120, 100, 800, 540 },
+        { 1184, 740, 8, 200, 1168, 340 },
+        { 1184, 740, 8, 190, 1168, 340 },
+        { 1184, 740, 0, 0, 1184, 740 },
+        { 600, 400, 100, 60, 400, 280 },
+    };
+
+    [Theory]
+    [MemberData(nameof(HoleWithNoRoomOnAnySide))]
+    public void Overlaps_no_more_than_any_clamped_side_when_none_fits(double viewWidth, double viewHeight, double x, double y, double width, double height)
+    {
+        TourRect hole = new TourRect(x, y, width, height);
+        Assert.True(viewHeight - TutorialPlacement.Margin - (y + height + TutorialPlacement.Gap) < BubbleHeight);
+        Assert.True(y - TutorialPlacement.Gap - TutorialPlacement.Margin < BubbleHeight);
+        Assert.True(viewWidth - TutorialPlacement.Margin - (x + width + TutorialPlacement.Gap) < BubbleWidth);
+        Assert.True(x - TutorialPlacement.Gap - TutorialPlacement.Margin < BubbleWidth);
+
+        TourPoint at = TutorialPlacement.Place(hole, BubbleWidth, BubbleHeight, viewWidth, viewHeight);
+
+        double chosen = OverlapArea(hole, at);
+        TourPoint[] candidates =
+        [
+            new TourPoint(ClampLeft(x, viewWidth), ClampTop(y + height + TutorialPlacement.Gap, viewHeight)),
+            new TourPoint(ClampLeft(x, viewWidth), ClampTop(y - TutorialPlacement.Gap - BubbleHeight, viewHeight)),
+            new TourPoint(ClampLeft(x + width + TutorialPlacement.Gap, viewWidth), ClampTop(y, viewHeight)),
+            new TourPoint(ClampLeft(x - TutorialPlacement.Gap - BubbleWidth, viewWidth), ClampTop(y, viewHeight)),
+        ];
+
+        foreach (TourPoint candidate in candidates)
+        {
+            Assert.True(chosen <= OverlapArea(hole, candidate), $"Chosen {chosen} exceeds candidate {candidate}");
+        }
+    }
+
+    private static double ClampLeft(double value, double viewWidth) =>
+        Math.Clamp(value, TutorialPlacement.Margin, viewWidth - BubbleWidth - TutorialPlacement.Margin);
+
+    private static double ClampTop(double value, double viewHeight) =>
+        Math.Clamp(value, TutorialPlacement.Margin, viewHeight - BubbleHeight - TutorialPlacement.Margin);
+
+    private static double OverlapArea(TourRect hole, TourPoint at)
+    {
+        double width = Math.Min(hole.X + hole.Width, at.Left + BubbleWidth) - Math.Max(hole.X, at.Left);
+        double height = Math.Min(hole.Y + hole.Height, at.Top + BubbleHeight) - Math.Max(hole.Y, at.Top);
+        return width > 0 && height > 0 ? width * height : 0;
+    }
 }

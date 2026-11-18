@@ -58,8 +58,8 @@ public static class TutorialPlacement
 
     /// <summary>
     /// The top left corner for a bubble of the given size. Tries below, above, right, then left of
-    /// the hole and takes the first side with room; when none has, takes the side with the most room
-    /// and accepts overlap. The result always lies inside the view by <see cref="Margin"/>, or at
+    /// the hole and takes the first side with room; when none has, takes the clamped position that
+    /// covers the least of the hole (ties keep that order) and accepts the overlap. The result always lies inside the view by <see cref="Margin"/>, or at
     /// <see cref="Margin"/> when the bubble is larger than the view.
     /// </summary>
     public static TourPoint Place(TourRect? hole, double bubbleWidth, double bubbleHeight, double viewWidth, double viewHeight)
@@ -76,34 +76,51 @@ public static class TutorialPlacement
         double right = viewWidth - Margin - (h.X + h.Width + Gap);
         double left = h.X - Gap - Margin;
 
-        Side side;
-        if (below >= bubbleHeight) side = Side.Below;
-        else if (above >= bubbleHeight) side = Side.Above;
-        else if (right >= bubbleWidth) side = Side.Right;
-        else if (left >= bubbleWidth) side = Side.Left;
-        else side = MostRoom(below, above, right, left);
+        if (below >= bubbleHeight) return BelowAt(h, bubbleWidth, bubbleHeight, viewWidth, viewHeight);
+        if (above >= bubbleHeight) return AboveAt(h, bubbleWidth, bubbleHeight, viewWidth, viewHeight);
+        if (right >= bubbleWidth) return RightAt(h, bubbleWidth, bubbleHeight, viewWidth, viewHeight);
+        if (left >= bubbleWidth) return LeftAt(h, bubbleWidth, bubbleHeight, viewWidth, viewHeight);
 
-        return side switch
+        // Room is a poor proxy once the clamp pushes the bubble back over the hole: the roomiest side
+        // can cover more than a tighter one, so compare the clamped rectangles by overlap area.
+        TourPoint best = BelowAt(h, bubbleWidth, bubbleHeight, viewWidth, viewHeight);
+        double bestOverlap = OverlapArea(h, best, bubbleWidth, bubbleHeight);
+
+        foreach (TourPoint candidate in new[]
         {
-            Side.Below => new TourPoint(Clamp(h.X, bubbleWidth, viewWidth), Clamp(h.Y + h.Height + Gap, bubbleHeight, viewHeight)),
-            Side.Above => new TourPoint(Clamp(h.X, bubbleWidth, viewWidth), Clamp(h.Y - Gap - bubbleHeight, bubbleHeight, viewHeight)),
-            Side.Right => new TourPoint(Clamp(h.X + h.Width + Gap, bubbleWidth, viewWidth), Clamp(h.Y, bubbleHeight, viewHeight)),
-            _ => new TourPoint(Clamp(h.X - Gap - bubbleWidth, bubbleWidth, viewWidth), Clamp(h.Y, bubbleHeight, viewHeight)),
-        };
-    }
-
-    private enum Side { Below, Above, Right, Left }
-
-    private static Side MostRoom(double below, double above, double right, double left)
-    {
-        Side best = Side.Below;
-        double room = below;
-
-        if (above > room) { best = Side.Above; room = above; }
-        if (right > room) { best = Side.Right; room = right; }
-        if (left > room) best = Side.Left;
+            AboveAt(h, bubbleWidth, bubbleHeight, viewWidth, viewHeight),
+            RightAt(h, bubbleWidth, bubbleHeight, viewWidth, viewHeight),
+            LeftAt(h, bubbleWidth, bubbleHeight, viewWidth, viewHeight),
+        })
+        {
+            double overlap = OverlapArea(h, candidate, bubbleWidth, bubbleHeight);
+            if (overlap < bestOverlap)
+            {
+                best = candidate;
+                bestOverlap = overlap;
+            }
+        }
 
         return best;
+    }
+
+    private static TourPoint BelowAt(TourRect h, double bubbleWidth, double bubbleHeight, double viewWidth, double viewHeight) =>
+        new(Clamp(h.X, bubbleWidth, viewWidth), Clamp(h.Y + h.Height + Gap, bubbleHeight, viewHeight));
+
+    private static TourPoint AboveAt(TourRect h, double bubbleWidth, double bubbleHeight, double viewWidth, double viewHeight) =>
+        new(Clamp(h.X, bubbleWidth, viewWidth), Clamp(h.Y - Gap - bubbleHeight, bubbleHeight, viewHeight));
+
+    private static TourPoint RightAt(TourRect h, double bubbleWidth, double bubbleHeight, double viewWidth, double viewHeight) =>
+        new(Clamp(h.X + h.Width + Gap, bubbleWidth, viewWidth), Clamp(h.Y, bubbleHeight, viewHeight));
+
+    private static TourPoint LeftAt(TourRect h, double bubbleWidth, double bubbleHeight, double viewWidth, double viewHeight) =>
+        new(Clamp(h.X - Gap - bubbleWidth, bubbleWidth, viewWidth), Clamp(h.Y, bubbleHeight, viewHeight));
+
+    private static double OverlapArea(TourRect h, TourPoint at, double bubbleWidth, double bubbleHeight)
+    {
+        double width = Math.Min(h.X + h.Width, at.Left + bubbleWidth) - Math.Max(h.X, at.Left);
+        double height = Math.Min(h.Y + h.Height, at.Top + bubbleHeight) - Math.Max(h.Y, at.Top);
+        return width > 0 && height > 0 ? width * height : 0;
     }
 
     // A bubble wider than the view has no valid range; pinning it to the margin keeps its start visible.
