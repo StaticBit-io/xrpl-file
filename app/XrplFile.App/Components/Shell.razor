@@ -131,7 +131,7 @@ else if (_ready)
                             <button type="button" class="xf-more-item" @ref="_firstMoreItem"
                                     aria-current="@(Tabs.Tab == AppTab.Settings ? "page" : null)"
                                     @onclick="() => ChooseFromMore(AppTab.Settings)">@T[ShellModel.NameOf(AppTab.Settings)]</button>
-                            <button type="button" class="xf-more-item" @onclick="OpenTutorialsFromMore">@T[ShellText.Learn]</button>
+                            <button type="button" class="xf-more-item" @onclick="OpenTutorials">@T[ShellText.Learn]</button>
                         </div>
                     }
                 </nav>
@@ -236,10 +236,10 @@ else
             await JS.InvokeVoidAsync("xfShell.watchWidth", _self);
         }
 
-        if (_ready && Model.Stage == UnlockStage.Unlocked)
+        if (_ready)
         {
-            // Idempotent: the model offers at most once a run and only while the vault holds no key.
-            Tutorial.OfferIfDue();
+            // The model offers the tutorial only on entering the unlocked stage, not on every render.
+            Tutorial.NoticeStage(Model.Stage);
         }
 
         // The bubble held focus; once the topic is over it is handed to the screen that was left
@@ -305,21 +305,22 @@ else
 
     /// <summary>
     /// Choosing a tab, even the one already open, is also how a screen that failed inside the
-    /// boundary is left: the boundary drops its error before the chosen screen is drawn.
+    /// boundary is left: the boundary drops its error before the chosen screen is drawn. The
+    /// sub-screen state outlives the screens (ScreenNavigation is a singleton), so a failed
+    /// sub-screen is also put back on its main screen, or it would be drawn and fail again.
     /// </summary>
     private void ShowTab(AppTab tab)
     {
+        if (_boundary?.HasFailed == true)
+        {
+            Nav.ResetToMain();
+        }
+
         _boundary?.Recover();
         Tabs.Show(tab);
     }
 
     private void OpenTutorials() => Tutorial.OpenList();
-
-    private void OpenTutorialsFromMore()
-    {
-        Tabs.CloseMore();
-        Tutorial.OpenList();
-    }
 
     private void ReturnFocusFromTutorials() => _focusLearn = true;
 
@@ -400,12 +401,9 @@ else
     {
         if (!_disposed)
         {
-            // The offer can open over an open More panel; closing it keeps Escape from reaching both.
-            if (Tutorial.ListOpen || Tutorial.IsActive)
-            {
-                Tabs.CloseMore();
-            }
-
+            // Starting or leaving a topic on the tab already showing raises no tab change, so a failed
+            // screen would stay replaced by its error; the model has already reset the sub-screens.
+            _boundary?.Recover();
             StateHasChanged();
         }
     });

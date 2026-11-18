@@ -11,6 +11,9 @@ namespace XrplFile.App.Components;
 /// </summary>
 public sealed class ScreenErrorBoundary : ErrorBoundary
 {
+    /// <summary>Whether the screen has failed and the error content is showing.</summary>
+    public bool HasFailed => CurrentException is not null;
+
     protected override Task OnErrorAsync(Exception exception)
     {
         StartupLog.Write("Screen failed", exception);
