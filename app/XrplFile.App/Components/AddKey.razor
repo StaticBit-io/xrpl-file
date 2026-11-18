@@ -1,5 +1,6 @@
 @implements IDisposable
 @inject AddKeyModel Model
+@inject ScreenNavigation Nav
 @inject IFilePickerService FilePicker
 @inject NetworkChoices Choices
 
@@ -26,10 +27,10 @@ else
 
     <ul class="nav nav-tabs mb-3">
         <li class="nav-item">
-            <button type="button" class="nav-link @(_mode == Mode.Import ? "active" : "")" @onclick="() => SwitchMode(Mode.Import)">@T[KeysText.TabSeed]</button>
+            <button type="button" class="nav-link @(Nav.ImportTab == ImportTab.Seed ? "active" : "")" @onclick="() => SwitchMode(ImportTab.Seed)">@T[KeysText.TabSeed]</button>
         </li>
         <li class="nav-item">
-            <button type="button" class="nav-link @(_mode == Mode.Container ? "active" : "")" @onclick="() => SwitchMode(Mode.Container)">@T[KeysText.TabBackup]</button>
+            <button type="button" class="nav-link @(Nav.ImportTab == ImportTab.Backup ? "active" : "")" @onclick="() => SwitchMode(ImportTab.Backup)">@T[KeysText.TabBackup]</button>
         </li>
     </ul>
 
@@ -39,9 +40,9 @@ else
     }
 
     <section class="xf-card">
-        @switch (_mode)
+        @switch (Nav.ImportTab)
         {
-            case Mode.Import:
+            case ImportTab.Seed:
                 <div class="mb-3">
                     <label for="add-import-label" class="form-label">@T[CommonText.FieldLabel]</label>
                     <input id="add-import-label" class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
@@ -57,7 +58,7 @@ else
                 <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoImport">@T[KeysText.PreviewButton]</button>
                 break;
 
-            case Mode.Container:
+            case ImportTab.Backup:
                 @if (Model.ContainerKeys.Count == 0)
                 {
                     <div class="mb-3">
@@ -145,14 +146,7 @@ else
     [Parameter]
     public EventCallback OnDone { get; set; }
 
-    private enum Mode
-    {
-        Import,
-        Container,
-    }
-
     private readonly ScreenLifetime _lifetime = new();
-    private Mode _mode = Mode.Import;
 
     private string _label = string.Empty;
     private string _network = string.Empty;
@@ -169,14 +163,14 @@ else
 
     protected override void OnInitialized() => Choices.Refresh();
 
-    private void SwitchMode(Mode mode)
+    private void SwitchMode(ImportTab tab)
     {
-        if (_mode == mode)
+        if (Nav.ImportTab == tab)
         {
             return;
         }
 
-        _mode = mode;
+        Nav.ShowImportTab(tab);
 
         // A Preview left over from the tab just left belongs to input this screen is no longer
         // showing; clearing it here is what keeps the address in "Add to vault" always matching the

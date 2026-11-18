@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject PublishModel Model
 @inject RunModel Run
+@inject ScreenNavigation Nav
 
 @* Design 4.1 and F13: the Publish tab renders one of three stops -- the running publication alone
    while one is under way (RunModel.IsRunning), the estimate once one has been taken, or the picker
@@ -22,9 +23,9 @@
 {
     <Run />
 }
-else if (_estimated)
+else if (Nav.Estimate is { } estimate)
 {
-    <Estimate Request="_request!" OnBack="() => _estimated = false" OnStarted="Started" />
+    <Estimate Request="estimate" OnBack="Nav.CloseEstimate" OnStarted="Started" />
 }
 else
 {
@@ -124,11 +125,21 @@ else
     private readonly ScreenLifetime _lifetime = new();
     private Timer? _pollTimer;
     private bool _disposed;
-    private bool _estimated;
-    private PublishRequest? _request;
+    /// <summary>
+    /// Redraws when something outside this component moves a sub-screen (a tab change, the tutorial).
+    /// Through InvokeAsync and behind the _disposed check for the reason Shell.razor's OnTabChanged gives.
+    /// </summary>
+    private void OnNavChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
+    });
 
     protected override async Task OnInitializedAsync()
     {
+        Nav.Changed += OnNavChanged;
         await Model.RefreshKeysAsync(_lifetime.Token);
         await Model.RefreshPayerAsync(_lifetime.Token);
 
@@ -182,8 +193,7 @@ else
             return;
         }
 
-        _request = request;
-        _estimated = true;
+        Nav.ShowEstimate(request);
     }
 
     /// <summary>
@@ -194,13 +204,14 @@ else
     /// </summary>
     private void Started()
     {
-        _estimated = false;
+        Nav.CloseEstimate();
     }
 
     public void Dispose()
     {
         // Set before the timer is disposed, for the reason Shell.razor's own Dispose explains.
         _disposed = true;
+        Nav.Changed -= OnNavChanged;
         _pollTimer?.Dispose();
         _lifetime.End();
     }

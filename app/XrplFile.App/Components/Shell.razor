@@ -2,6 +2,7 @@
 @using XrplFile.App
 @inject UnlockModel Model
 @inject ShellModel Tabs
+@inject ScreenNavigation Nav
 @inject CloseAccountModel Closing
 @inject IJSRuntime JS
 @inject Localizer Localizer
@@ -357,6 +358,7 @@ else
                 return;
             }
 
+            Nav.ResetToMain();
             Tabs.Show(AppTab.Accounts);
 
             // One file read, here, rather than one per tick: NoticeLock deliberately leaves
@@ -389,6 +391,7 @@ else
     private async Task LockAsync()
     {
         await Model.LockAsync();
+        Nav.ResetToMain();
         Tabs.Show(AppTab.Accounts);
         StateHasChanged();
     }
