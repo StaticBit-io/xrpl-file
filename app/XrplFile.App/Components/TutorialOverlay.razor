@@ -237,23 +237,41 @@
         // Both calls are dispatched before either is awaited, release first: the interop queue is
         // ordered, so anything Shell asks of the page after this component is gone (focus on the
         // content region) runs after the inert flags are cleared, not after a second round trip.
-        Task release = JS.InvokeVoidAsync("xfTour.release").AsTask();
-        Task unwatch = JS.InvokeVoidAsync("xfTour.unwatch").AsTask();
+        Task release = Dispatch("xfTour.release");
+        Task unwatch = Dispatch("xfTour.unwatch");
 
-        foreach (Task call in new[] { release, unwatch })
+        try
         {
-            try
+            foreach (Task call in new[] { release, unwatch })
             {
-                await call;
-            }
-            catch (JSDisconnectedException)
-            {
-            }
-            catch (JSException)
-            {
+                try
+                {
+                    await call;
+                }
+                catch (JSDisconnectedException)
+                {
+                }
+                catch (JSException)
+                {
+                }
             }
         }
+        finally
+        {
+            _self?.Dispose();
+        }
+    }
 
-        _self?.Dispose();
+    /// <summary>Starts a JS call; a throw while starting it (a disconnected runtime) is returned as a failed task.</summary>
+    private Task Dispatch(string identifier)
+    {
+        try
+        {
+            return JS.InvokeVoidAsync(identifier).AsTask();
+        }
+        catch (Exception e) when (e is JSDisconnectedException or JSException or InvalidOperationException)
+        {
+            return Task.FromException(e);
+        }
     }
 }

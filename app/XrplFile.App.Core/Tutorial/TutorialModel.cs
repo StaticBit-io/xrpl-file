@@ -559,6 +559,9 @@ public sealed class TutorialModel(
 
     private static bool SameView(TutorialView? a, TutorialView? b) =>
         a is not null && b is not null
-        && a.Title.Equals(b.Title) && Equals(a.Note, b.Note) && a.Number == b.Number
-        && a.TopicName == b.TopicName && a.Lit.SequenceEqual(b.Lit, StringComparer.Ordinal);
+        && a.TopicName == b.TopicName && a.Title.Equals(b.Title) && a.Body.Equals(b.Body) && Equals(a.Note, b.Note)
+        && a.Number == b.Number && a.Count == b.Count && a.IsLast == b.IsLast
+        && a.FinishStartsTopic == b.FinishStartsTopic
+        && a.Lit.SequenceEqual(b.Lit, StringComparer.Ordinal)
+        && a.Usable.SequenceEqual(b.Usable, StringComparer.Ordinal);
 }
