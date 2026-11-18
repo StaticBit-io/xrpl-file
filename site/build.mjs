@@ -4,6 +4,7 @@
 //                                   the shared markup of chrome-markup.mjs, and <!--@element-snippet--> replaced
 //                                   by the embed snippets (jsDelivr and this site) with the element's integrity
 //                                   from integrity.json
+//                                   and <!--@examples--> replaced by the example cards (examples-markup.mjs)
 //   web/dist/<version>/*         -> /element/<version>/   (the element and the reader bundle)
 //   site/data/price.json         -> /data/price.json
 // The site loads the element and the reader from that one copy; nothing else carries reader code.
@@ -15,6 +16,8 @@ import { fileURLToPath } from 'node:url';
 import { renderChrome } from './chrome-markup.mjs';
 import { ACTIVE_LANGS, DEFAULT_LANG, LANGS, htmlLang, langFromTag } from './src/js/languages.mjs';
 import { ELEMENT_FILE, snippetHtml } from './snippet.mjs';
+import { EXAMPLES_MARKER, renderExamples } from './examples-markup.mjs';
+import { EXAMPLE_STRINGS } from './src/js/examples-strings.mjs';
 import { findHtmlRewriteTargets, findShadowed, parseRedirects } from './redirects.mjs';
 
 export const ELEMENT_VERSION = '1.3.0';
@@ -145,6 +148,23 @@ async function inlineSnippet(outDir, elementDir, elementVersion) {
   }
 }
 
+/** Fills the examples page's cards; a page in a language without example strings is refused. */
+async function inlineExamples(outDir) {
+  for (const file of await listFiles(outDir)) {
+    const relative_ = relative(outDir, file);
+    if (!file.endsWith('.html') || relative_.split(sep)[0] === 'element') continue;
+    const html = await readFile(file, 'utf8');
+    if (!html.includes(EXAMPLES_MARKER)) continue;
+    const tag = /<html\b[^>]*\blang="([^"]*)"/i.exec(html)?.[1];
+    const lang = langFromTag(tag);
+    if (lang === null || htmlLang(lang) !== tag || !EXAMPLE_STRINGS[lang]) {
+      throw new Error(`${relative_.split(sep).join('/')} uses the examples marker but its <html lang="${tag}"> has no example strings`);
+    }
+    const cards = renderExamples(lang);
+    await writeFile(file, html.replaceAll(EXAMPLES_MARKER, () => cards));
+  }
+}
+
 const TEXT_FILE = /\.(?:html|mjs|js|css)$/;
 const ELEMENT_PATH = /\/element\/([0-9A-Za-z][0-9A-Za-z.+-]*)\//g;
 
@@ -233,6 +253,7 @@ export async function build({ siteDir, webDistDir, outDir, elementVersion = ELEM
     await checkElementVersion(outDir, elementVersion);
     await inlineChrome(outDir);
     await inlineSnippet(outDir, elementDir, elementVersion);
+    await inlineExamples(outDir);
     await cp(elementDir, join(outDir, 'element', elementVersion), { recursive: true });
     await mkdir(join(outDir, 'data'), { recursive: true });
     await cp(priceFile, join(outDir, 'data', 'price.json'));
