@@ -536,5 +536,5 @@ progress { accent-color: var(--mint); }
 .xf-tour-bubble h2:focus { outline: none; }
 .xf-tour-bubble h2:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
 .xf-tour-bubble p { color: var(--text-secondary); }
-.xf-tour-note { color: var(--text) !important; }
+.xf-tour-bubble .xf-tour-note { color: var(--text); }
 .xf-tour-bubble .xf-dialog-actions { margin-top: 12px; }

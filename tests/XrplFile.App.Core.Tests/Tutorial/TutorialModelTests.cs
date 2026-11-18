@@ -393,6 +393,20 @@ public sealed class TutorialModelTests
     }
 
     [Fact]
+    public void Settle_that_changes_nothing_keeps_the_same_view_instance()
+    {
+        _model.Start(TutorialTopic.Read);
+        TutorialView before = View;
+
+        Assert.False(_model.Settle());
+        Assert.Same(before, View);
+
+        _facts = _facts with { ReadTabEmpty = false, LookupSucceeded = true };
+        Assert.True(_model.Settle());
+        Assert.NotSame(before, View);
+    }
+
+    [Fact]
     public void Read_moves_on_when_the_lookup_succeeds()
     {
         _model.Start(TutorialTopic.Read);

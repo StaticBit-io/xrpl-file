@@ -8,7 +8,8 @@
    measures the screen and fences off everything the step does not use. This markup binds. *@
 @if (Tutorial.Current is { } view)
 {
-    string pending = _shown ? string.Empty : " is-pending";
+    // Hidden until this step has been measured, so new text never shows at the previous position.
+    string pending = IsMeasured(view) ? string.Empty : " is-pending";
     <div id="xf-tour" class="xf-tour">
         @if (_hole is TourRect hole)
         {
@@ -60,7 +61,21 @@
     private TutorialView? _lastView;
     private TourRect? _hole;
     private TourPoint? _point;
-    private bool _shown;
+    private (TextId Topic, int Number)? _measuredStep;
+
+    private bool IsMeasured(TutorialView view) => _measuredStep == (view.TopicName, view.Number);
+
+    /// <summary>
+    /// A step is identified by value: the model may hand out a fresh view object for the same step
+    /// (a note changed, a settle tick), and that must neither steal focus nor restart the step.
+    /// </summary>
+    private static bool SameStep(TutorialView? a, TutorialView? b) =>
+        a is not null && b is not null && a.TopicName == b.TopicName && a.Number == b.Number;
+
+    /// <summary>Whether the lit regions or the text height may differ, so the layout is measured again.</summary>
+    private static bool SameLayout(TutorialView? a, TutorialView? b) =>
+        SameStep(a, b) && a!.Title.Equals(b!.Title) && Equals(a.Note, b.Note)
+        && a.Lit.SequenceEqual(b.Lit, StringComparer.Ordinal) && a.Usable.SequenceEqual(b.Usable, StringComparer.Ordinal);
     private bool _focusTitle;
     private bool _watching;
     private bool _measuring;
@@ -116,12 +131,16 @@
 
         // Whether the render that just finished showed the bubble: focus can only land on a
         // visible element, so a first step waits for the render after its first measurement.
-        bool wasShown = _shown;
+        bool wasShown = IsMeasured(view);
 
-        if (!ReferenceEquals(view, _lastView))
+        if (!SameLayout(view, _lastView))
         {
+            if (!SameStep(view, _lastView))
+            {
+                _focusTitle = true;
+            }
+
             _lastView = view;
-            _focusTitle = true;
             await MeasureAsync();
         }
 
@@ -186,11 +205,11 @@
                 TourRect? hole = TutorialPlacement.Hole(lit, m.ViewWidth, m.ViewHeight);
                 TourPoint point = TutorialPlacement.Place(hole, m.BubbleWidth, m.BubbleHeight, m.ViewWidth, m.ViewHeight);
 
-                if (!_shown || hole != _hole || _point != point)
+                if (!IsMeasured(view) || hole != _hole || _point != point)
                 {
                     _hole = hole;
                     _point = point;
-                    _shown = true;
+                    _measuredStep = (view.TopicName, view.Number);
                     StateHasChanged();
                 }
             }
@@ -215,16 +234,24 @@
         Tutorial.Changed -= OnChanged;
         _settleTimer?.Dispose();
 
-        try
+        // Both calls are dispatched before either is awaited, release first: the interop queue is
+        // ordered, so anything Shell asks of the page after this component is gone (focus on the
+        // content region) runs after the inert flags are cleared, not after a second round trip.
+        Task release = JS.InvokeVoidAsync("xfTour.release").AsTask();
+        Task unwatch = JS.InvokeVoidAsync("xfTour.unwatch").AsTask();
+
+        foreach (Task call in new[] { release, unwatch })
         {
-            await JS.InvokeVoidAsync("xfTour.unwatch");
-            await JS.InvokeVoidAsync("xfTour.release");
-        }
-        catch (JSDisconnectedException)
-        {
-        }
-        catch (JSException)
-        {
+            try
+            {
+                await call;
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+            catch (JSException)
+            {
+            }
         }
 
         _self?.Dispose();

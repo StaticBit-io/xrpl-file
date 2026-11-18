@@ -379,6 +379,12 @@ public sealed class TutorialModel(
             reference = Latch(now);
             _view = BuildView(now);
             changed = !SameView(before, _view);
+
+            // An unchanged bubble keeps its instance, so a consumer comparing references sees no step.
+            if (!changed)
+            {
+                _view = before;
+            }
         }
 
         if (step is not null && StillRunning(run))
