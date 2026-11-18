@@ -8,8 +8,9 @@
 @{
     bool offer = Tutorial.ListIsOffer;
     IReadOnlyList<TutorialTopic> topics = TutorialScript.Topics;
-    TopicAvailability[] availability = topics.Select(Tutorial.AvailabilityOf).ToArray();
-    int firstUsable = Array.FindIndex(availability, a => a.CanStart);
+    Refresh();
+    TopicAvailability[] availability = _availability;
+    int firstUsable = _firstUsable;
 }
 <div class="xf-dialog-backdrop">
     <div class="xf-dialog xf-tutorial-list" role="dialog" aria-modal="true" aria-labelledby="tutorial-list-title"
@@ -65,8 +66,17 @@
     private ElementReference _close;
     private bool _focusPending = true;
     private bool _disposed;
+    private TopicAvailability[] _availability = [];
+    private int _firstUsable = -1;
 
     protected override void OnInitialized() => Tutorial.Changed += OnChanged;
+
+    /// <summary>One snapshot per render; the focus target below is picked from the same one.</summary>
+    private void Refresh()
+    {
+        _availability = Tutorial.AvailabilityOfAll().ToArray();
+        _firstUsable = Array.FindIndex(_availability, a => a.CanStart);
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -79,7 +89,7 @@
         try
         {
             // The first topic is only rendered with a ref when one can start.
-            if (Array.Exists(TutorialScript.Topics.Select(Tutorial.AvailabilityOf).ToArray(), a => a.CanStart))
+            if (_firstUsable >= 0)
             {
                 await _firstTopic.FocusAsync();
             }

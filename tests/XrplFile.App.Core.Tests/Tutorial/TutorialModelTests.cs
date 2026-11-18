@@ -121,6 +121,26 @@ public sealed class TutorialModelTests
     }
 
     [Fact]
+    public void AvailabilityOfAll_follows_topic_order_and_reads_the_facts_once()
+    {
+        int reads = 0;
+        TutorialModel model = new(_settings, _shell, _nav, _readTab, () =>
+        {
+            reads++;
+            return _facts with { PublicationRunning = true };
+        });
+
+        IReadOnlyList<TopicAvailability> all = model.AvailabilityOfAll();
+
+        Assert.Equal(1, reads);
+        Assert.Equal(TutorialScript.Topics.Count, all.Count);
+        for (int i = 0; i < all.Count; i++)
+        {
+            Assert.Equal(TutorialScript.Topics[i] != TutorialTopic.Publish, all[i].CanStart);
+        }
+    }
+
+    [Fact]
     public void Read_is_unavailable_while_a_read_runs()
     {
         _facts = _facts with { ReadState = ReadState.Running };

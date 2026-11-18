@@ -150,6 +150,22 @@ public sealed class TutorialModel(
     public TopicAvailability AvailabilityOf(TutorialTopic topic) => AvailabilityOf(topic, facts());
 
     /// <summary>
+    /// The availability of every topic in <see cref="TutorialScript.Topics"/> order, from one snapshot
+    /// of the facts, so a list drawn from it cannot show two topics against two different moments.
+    /// </summary>
+    public IReadOnlyList<TopicAvailability> AvailabilityOfAll()
+    {
+        TutorialFacts now = facts();
+        List<TopicAvailability> all = new(TutorialScript.Topics.Count);
+        foreach (TutorialTopic topic in TutorialScript.Topics)
+        {
+            all.Add(AvailabilityOf(topic, now));
+        }
+
+        return all;
+    }
+
+    /// <summary>
     /// Starts <paramref name="topic"/> from its first step. Returns false, changing nothing, when a
     /// topic already runs or this one is unavailable. Every sub-screen is put back on its main screen
     /// first, the tab already showing included, because moving to the same tab does nothing.

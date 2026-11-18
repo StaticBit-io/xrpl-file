@@ -186,7 +186,6 @@ else
     private bool _focusMoreButton;
     private bool _focusContent;
     private bool _focusLearn;
-    private bool _learnOpenedFromMore;
     private ElementReference _learnButton;
     private bool _watchingWidth;
     private DotNetObjectReference<Shell>? _self;
@@ -241,10 +240,10 @@ else
             _focusLearn = false;
             try
             {
-                // On the phone layout the rail is hidden, and focus belongs on the More button.
-                await (_learnOpenedFromMore ? _moreButton : _learnButton).FocusAsync();
+                // The rail item is hidden on the phone layout; the script falls back to More.
+                await JS.InvokeVoidAsync("xfShell.focusVisible", _learnButton, _moreButton);
             }
-            catch (InvalidOperationException)
+            catch (JSException)
             {
             }
         }
@@ -288,15 +287,10 @@ else
         Tabs.Show(tab);
     }
 
-    private void OpenTutorials()
-    {
-        _learnOpenedFromMore = false;
-        Tutorial.OpenList();
-    }
+    private void OpenTutorials() => Tutorial.OpenList();
 
     private void OpenTutorialsFromMore()
     {
-        _learnOpenedFromMore = true;
         Tabs.CloseMore();
         Tutorial.OpenList();
     }
@@ -380,6 +374,12 @@ else
     {
         if (!_disposed)
         {
+            // The offer can open over an open More panel; closing it keeps Escape from reaching both.
+            if (Tutorial.ListOpen || Tutorial.IsActive)
+            {
+                Tabs.CloseMore();
+            }
+
             StateHasChanged();
         }
     });
