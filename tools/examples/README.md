@@ -18,13 +18,15 @@ Three rules govern everything below:
 | Path | Purpose |
 |---|---|
 | `prepare.sh` | Turns the owner's raw drawings and video into publishable files and writes `prepared.json`. |
-| `test-prepare.sh` | Tests `prepare.sh` against generated inputs. |
+| `scan-metadata.mjs` | Names the EXIF, GPS, XMP and text-chunk metadata a still carries; `prepare.sh` calls it for its warnings. |
+| `test-prepare.sh` | Tests `prepare.sh` against generated inputs (needs `ffmpeg`). |
 | `make-plan.mjs` | Turns `prepared.json` into `plan.json` and copies `about.txt` and `chunks.svg` next to the prepared files. |
 | `plan.json` | The publication plan read by `tools/XrplFile.Fixtures`. The committed one lists stand-in files. |
 | `make-stand-ins.sh` | Generates stand-in files from ffmpeg test patterns, used before the owner's files exist. |
 | `media/about.txt`, `media/chunks.svg` | The text and the SVG written for the page; their bytes on the ledger are the bytes in git. |
 
-Requirements: Bash, `ffmpeg` and `ffprobe`, Node.js, and the .NET SDK. The owner's raw and prepared
+Requirements: Bash for `prepare.sh` and the testnet rehearsal, `ffmpeg` and `ffprobe`, Node.js, and the .NET SDK.
+The mainnet command is the exception to Bash: run it from PowerShell, cmd or Windows Terminal (step 4). The owner's raw and prepared
 files live under `run/examples/`, which git ignores.
 
 ## 1. Prepare the owner's files
@@ -41,9 +43,18 @@ files live under `run/examples/`, which git ignores.
    A supplied cover wins over `--cover-at`; with neither, the script stops.
 3. Read the `PASS` lines. Each promised property is checked: a drawing that is already PNG, JPEG or WebP
    and at most 1,000,000 bytes is copied unchanged, a larger one becomes WebP under 1,000,000 bytes, the
-   video gets `+faststart` without re-encoding when needed, and the cover is WebP, at most 65,536 bytes,
-   at most 960 px on the long side. Any `FAIL` stops the script.
-4. Check `run/examples/media/prepared.json`: it lists every file with type, size and pixel dimensions.
+   video is 8-bit 4:2:0 H.264 in Constrained Baseline, Baseline, Main or High (what browsers decode) and
+   gets `+faststart` without re-encoding when needed, and the cover is WebP, at most 65,536 bytes,
+   at most 960 px on the long side. File extensions may be in any case (`Sketch.PNG`). Any `FAIL` stops the
+   script.
+4. Read the `WARN` lines. The files are published permanently and byte for byte, and the script does not
+   strip anything: it names the metadata it finds instead. A drawing may carry EXIF (camera, serial
+   number, author, a GPS location), XMP or PNG text chunks; a phone video often carries a `location` tag
+   and a `creation_time`. A line reads `WARN  <file> carries metadata: <what>`. If the owner does not want
+   that on a public ledger forever, they strip it from the source file (export the drawing again without
+   metadata; for a video, `ffmpeg -i in.mp4 -map_metadata -1 -c copy out.mp4`) and run the script again.
+   A file that is not listed has nothing the script looks for.
+5. Check `run/examples/media/prepared.json`: it lists every file with type, size and pixel dimensions.
    The dimensions and sizes go into the site later.
 
 ## 2. Regenerate the plan
@@ -74,7 +85,10 @@ accounts are throwaways funded by the faucet and nothing costs anything.
 2. Wait for the final line `N of N files have links`. Each file is read back from the ledger and
    verified before its link is written to `run/examples-testnet/links.json`.
 3. To exercise the own-accounts path, including the quote and the prompts, run it with two testnet
-   accounts (`--network testnet --writer <rAddress> --payer <rAddress>`). On testnet the tool reads the
+   accounts into a folder of its own, never the mainnet one
+   (`--network testnet --writer <rAddress> --payer <rAddress> tools/examples/plan.json run/examples/media run/examples-own-testnet`;
+   a later mainnet run on `run/examples` refuses a folder that holds testnet links). The tool asks the node
+   which network it serves and stops when that is not the one named by `--network`. On testnet the tool reads the
    seeds from redirected input, so a script can drive it. A seed that belongs to a regular key of the
    writer or the payer is also accepted: the tool confirms it against the account's `RegularKey` before
    anything is priced or submitted. A regular key was published and verified this way on testnet.
@@ -86,7 +100,10 @@ Only the owner runs this. Use two different accounts of your own: a writer and a
 the same address twice. Each account must hold its base reserve plus the fees it pays; the quote shows
 both. Nothing is created or deleted on the accounts, and the run spends only fees.
 
-1. Run the command with your own addresses:
+1. Run the command with your own addresses, **from PowerShell, cmd or Windows Terminal**. Git Bash and
+   other mintty terminals report their input as redirected, and on mainnet the tool refuses seeds from
+   redirected input, so there the run stops at the first prompt. The tool also stops when the node does
+   not serve mainnet.
 
    ```bash
    dotnet run --project tools/XrplFile.Fixtures -- --network mainnet --writer <rAddress> --payer <rAddress> \
@@ -98,10 +115,11 @@ both. Nothing is created or deleted on the accounts, and the run spends only fee
    differs from the one on the command line is accepted only as that account's regular key, and only if
    the account's `RegularKey` names it.
 3. Read the quote. The tool prices the whole plan from the live network before any transaction. It
-   prints one line per file (bytes, transactions, fee in XRP), then the totals, and what the writer and the
-   payer hold against what each needs. "Required" is each account's base reserve once plus the
-   worst-case fees of every file, so the expected fee is lower. The tool stops without submitting if
-   either account falls short.
+   prints one line per file (bytes, transactions, the expected fee and `at most`, the cap of that file's
+   session), then the totals, and what the writer and the payer hold against what each needs. The
+   `at most` figure is the worst case, far above the expected fee, because every memo is allowed several
+   tries; it is the real limit. "Required" is each account's base reserve once plus the `at most` figures of
+   every file. The tool stops without submitting if either account falls short.
 4. To go ahead, type the confirmation phrase exactly:
 
    ```text
@@ -112,9 +130,9 @@ both. Nothing is created or deleted on the accounts, and the run spends only fee
 5. Wait for the final line `N of N files have links`. The links are in `run/examples/links.json`.
    Every file was read back from the ledger and verified before its link was written.
 
-Each file's session is capped at the fee estimate printed for it, with no headroom. If a fee rises after
-the owner confirmed, the run stops instead of spending more, and running it again prints a new quote and
-asks again.
+Each file's session is capped at the `at most` figure printed for it, with no headroom: the printed worst
+case, not the expected fee next to it. If a fee rises after the owner confirmed, the run stops instead of
+spending more, and running it again prints a new quote and asks again.
 
 ## 5. Resume after an interruption
 
@@ -124,9 +142,9 @@ state under `run/examples/state/<key>`.
 
 A resumed run asks for both seeds and the confirmation phrase again, because it prices what is left and
 the owner must see that number. A file being resumed is printed with `resume: at most`: transactions
-already submitted are not repeated, so the work left costs no more than the printed figure and may cost
-less. That figure is the cap for the resume. If the remainder would cost more than was printed, the
-tool stops without submitting.
+already submitted are not repeated, so the work left costs no more than the printed figures and may cost
+less. The resume is capped at the worst case of the work that is left. If that would exceed the `at most`
+figure printed for the file, the tool stops without submitting.
 
 If the tool reports that a state was started for another writer or another cover, the run was begun
 with different arguments. Delete that state folder only when the owner means to start that file again.

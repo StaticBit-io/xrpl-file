@@ -55,7 +55,9 @@ internal static class OwnAccounts
         {
             if (network == FixtureNetwork.Mainnet)
             {
-                throw new InvalidOperationException("mainnet seeds are only accepted at an interactive prompt, not from redirected input");
+                throw new InvalidOperationException(
+                    "mainnet seeds are only accepted at an interactive prompt, not from redirected input; "
+                    + "Git Bash and other mintty terminals report their input as redirected, so run this command from PowerShell, cmd or Windows Terminal");
             }
 
             return input.ReadLine()?.Trim() ?? throw new InvalidOperationException("no seed on the input");

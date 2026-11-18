@@ -1,6 +1,6 @@
 # Mainnet examples and the examples page
 
-Status: design, awaiting the owner's approval.
+Status: design, approved by the owner on 2026-11-18.
 
 ## Why
 

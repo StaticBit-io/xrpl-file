@@ -66,7 +66,12 @@ public sealed class OwnAccountsTests
     {
         using StringReader input = new("sEdTM1uX8pu2do5XvTnutH6HsouMaM2\n");
 
-        Assert.Throws<InvalidOperationException>(() => OwnAccounts.ReadSeed("writer seed for rX: ", FixtureNetwork.Mainnet, input, inputRedirected: true));
+        InvalidOperationException e = Assert.Throws<InvalidOperationException>(
+            () => OwnAccounts.ReadSeed("writer seed for rX: ", FixtureNetwork.Mainnet, input, inputRedirected: true));
+
+        // Git Bash reports a redirected input on a console, so the refusal has to say where to run the command.
+        Assert.Contains("PowerShell", e.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("sEdTM1uX8pu2do5XvTnutH6HsouMaM2", e.Message, StringComparison.Ordinal);
     }
 
     [Fact]
