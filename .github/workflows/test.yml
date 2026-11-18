@@ -44,7 +44,11 @@ jobs:
         working-directory: site
       # The site server's deploy scripts: their tests stub sudo, systemctl and node, so they run here.
       - run: node --test deploy/server/test/*.test.mjs
-      - run: shellcheck deploy/server/*.sh deploy/server/xrpl-file-release deploy/server/xrpl-file-smoke
+      # From a pinned image: the self-hosted runner (LINUX_RUNNER) need not have shellcheck installed.
+      - run: >-
+          docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:v0.10.0
+          deploy/server/provision.sh deploy/server/setup.sh deploy/server/cutover.sh
+          deploy/server/xrpl-file-release deploy/server/xrpl-file-smoke deploy/server/xrpl-file-candidate
       - name: the committed vectors are what the code produces
         run: |
           dotnet run --project tools/XrplFile.Vectors --configuration Release --no-build -- /tmp/v1.json
