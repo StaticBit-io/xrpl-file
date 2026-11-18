@@ -1100,8 +1100,8 @@
 }
 
 /* Examples page: a grid of figures. The box reserves a picture's or video's shape before the file loads;
-   columns are at least 20rem, so a tall portrait video stays within about two screens' height of a
-   landscape drawing beside it and one column fits a 375 px phone with no sideways scroll. */
+   columns are at least 20rem so one column fits a 375 px phone with no sideways scroll, and a box is
+   never taller than 80vh, so a portrait video does not run past the screen (the element letterboxes). */
 .examples {
   padding-block: var(--space-7) var(--section-gap);
 }
@@ -1135,6 +1135,7 @@
 
 .example__box {
   width: 100%;
+  max-height: 80vh;
   min-width: 0;
   overflow: hidden;
 }

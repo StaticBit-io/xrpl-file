@@ -24,7 +24,7 @@ export const EXAMPLE_STRINGS = {
   ru: {
     'stand-in-drawing-large': { title: DRAWING_TITLE.ru, line: DRAWING_LINE.ru },
     'stand-in-drawing-small': { title: DRAWING_TITLE.ru, line: DRAWING_LINE.ru },
-    'stand-in-clip': { title: 'Короткое видео', line: 'Видео начинает играть, не дожидаясь, пока будет прочитан весь файл.' },
+    'stand-in-clip': { title: 'Короткое видео', line: 'Видео начинает воспроизводиться, не дожидаясь, пока будет прочитан весь файл.' },
     chunks: { title: 'Файл SVG', line: 'Элемент не рисует этот SVG, а предлагает его скачать: SVG может содержать скрипт.' },
     about: { title: 'Текст на шести языках', line: 'Текстовый файл, записанный в реестр, на шести языках этого сайта.' },
     logo: { title: 'Логотип StaticBit', line: 'Картинка с главной страницы, прочитанная из реестра тем же способом.' },
@@ -33,7 +33,7 @@ export const EXAMPLE_STRINGS = {
     'stand-in-drawing-large': { title: DRAWING_TITLE.de, line: DRAWING_LINE.de },
     'stand-in-drawing-small': { title: DRAWING_TITLE.de, line: DRAWING_LINE.de },
     'stand-in-clip': { title: 'Kurzes Video', line: 'Ein Video, das abgespielt wird, bevor die ganze Datei gelesen ist.' },
-    chunks: { title: 'SVG-Datei', line: 'Das Element zeichnet dieses SVG nicht, sondern bietet es zum Download an, weil ein SVG Skripte enthalten kann.' },
+    chunks: { title: 'SVG-Datei', line: 'Das Element zeichnet diese SVG-Datei nicht, sondern bietet sie zum Download an, weil eine SVG-Datei Skripte enthalten kann.' },
     about: { title: 'Text in sechs Sprachen', line: 'Eine Textdatei im Ledger, in den sechs Sprachen dieser Website.' },
     logo: { title: 'Das StaticBit-Logo', line: 'Das Bild von der Startseite, auf dieselbe Weise aus dem Ledger gelesen.' },
   },

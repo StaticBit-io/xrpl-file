@@ -94,6 +94,7 @@ test('the examples pages are served at their pretty URLs and a trailing slash is
     assert.equal(ru.status, 200);
     assert.equal(ru.body.toString(), 'ru examples');
     const slash = await resolveRequest(root, '/ru/examples/', rules);
-    assert.notEqual(slash.body?.toString(), 'ru examples');
+    assert.equal(slash.status, 200);
+    assert.equal(slash.body.toString(), 'file page');
   });
 });
