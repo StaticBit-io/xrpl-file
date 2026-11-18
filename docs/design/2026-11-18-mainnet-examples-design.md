@@ -149,6 +149,10 @@ git history.
 
 Both are committed before publishing, so the bytes on the ledger are the bytes in git.
 
+Element 1.2.0 never draws an SVG, because an SVG can carry script: it shows a download card. So
+`chunks.svg` is kept as an example of a file the element offers for download, not as a drawing the page
+shows, and its caption says so.
+
 ### 3. The mainnet mode of `XrplFile.Fixtures`
 
 The current behaviour (testnet, faucet-funded throwaway accounts in `accounts.json`) stays the
@@ -221,6 +225,10 @@ exercises the cover-then-video order, the read-back and the page against real li
 built and checked in a browser with the testnet links first; the mainnet links replace them once the
 owner has published.
 
+The regular-key path was rehearsed too: a regular key was set on a testnet account, the tool accepted
+its seed for that account, confirmed it against `RegularKey` and published a file that was then
+verified.
+
 ### 5. The examples page
 
 **URLs and files.** `site/src/examples.html` and `site/src/<lang>/examples.html` for the five other
@@ -247,6 +255,9 @@ strings and escaped like the embed snippet. Changing a link is one line in one f
   example demonstrates (a picture checked block by block, a video that starts before it is fully
   read), with no title of the work and no credit line;
 - a link to the file page (`/mainnet/<HASH>`), which is also the link whose card Telegram and X show.
+
+An SVG example is the exception to the card above: element 1.2.0 shows a download card for it instead of
+drawing it, and the page's caption says why.
 
 The logo's entry is written from what `site/README.md` records about it: `image/png`, 1422 x 1231,
 122,958 bytes. Nothing is read from the ledger at build time.

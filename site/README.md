@@ -157,6 +157,8 @@ To add or replace an example:
 2. Add the same `key` to `EXAMPLE_STRINGS` in all six languages: a title and one line.
 3. `node --test site/test/*.test.mjs`: the tests fail on a language without the key.
 
+How the owner's own files get onto mainnet and into this list: [`tools/examples/README.md`](../tools/examples/README.md).
+
 ## Hosting
 
 | `SITE_TARGET` | Where a push to `main` deploys | Job |
