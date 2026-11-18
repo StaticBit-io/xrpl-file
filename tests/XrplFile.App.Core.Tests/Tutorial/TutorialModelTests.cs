@@ -89,6 +89,159 @@ public sealed class TutorialModelTests
     }
 
     [Fact]
+    public void NoticeStage_offers_when_the_vault_unlocks_with_no_key()
+    {
+        _model.NoticeStage(UnlockStage.Unlocked);
+
+        Assert.True(_model.ListOpen);
+        Assert.True(_model.ListIsOffer);
+    }
+
+    [Fact]
+    public void NoticeStage_does_not_offer_when_the_last_key_goes_during_the_session()
+    {
+        WithKeys();
+        _model.NoticeStage(UnlockStage.Unlocked);
+
+        _facts = _facts with { KeyCount = 0, FirstAccountReference = null, NotExportedReference = null };
+        _model.NoticeStage(UnlockStage.Unlocked);
+
+        Assert.False(_model.ListOpen);
+        Assert.Equal(0, _settings.Marks);
+    }
+
+    [Fact]
+    public void NoticeStage_offers_on_the_next_unlock_when_not_yet_offered()
+    {
+        WithKeys();
+        _model.NoticeStage(UnlockStage.Unlocked);
+        _model.NoticeStage(UnlockStage.Locked);
+        _facts = _facts with { KeyCount = 0, FirstAccountReference = null, NotExportedReference = null };
+
+        _model.NoticeStage(UnlockStage.Unlocked);
+        Assert.True(_model.ListOpen);
+        Assert.Equal(1, _settings.Marks);
+
+        _model.CloseList();
+        _model.NoticeStage(UnlockStage.Locked);
+        _model.NoticeStage(UnlockStage.Unlocked);
+
+        Assert.False(_model.ListOpen);
+        Assert.Equal(1, _settings.Marks);
+    }
+
+    [Fact]
+    public void NoticeStage_reads_nothing_while_the_stage_stays_the_same()
+    {
+        int reads = 0;
+        TutorialModel model = new(_settings, _shell, _nav, _readTab, () =>
+        {
+            reads++;
+            return _facts with { KeyCount = 1 };
+        });
+
+        model.NoticeStage(UnlockStage.Unlocked);
+        int afterEntering = reads;
+        model.NoticeStage(UnlockStage.Unlocked);
+        model.NoticeStage(UnlockStage.Unlocked);
+
+        Assert.Equal(afterEntering, reads);
+    }
+
+    [Fact]
+    public void NoticeStage_ignores_stages_other_than_unlocked()
+    {
+        _model.NoticeStage(UnlockStage.NoVault);
+        _model.NoticeStage(UnlockStage.Locked);
+
+        Assert.False(_model.ListOpen);
+        Assert.Equal(0, _settings.Marks);
+    }
+
+    [Fact]
+    public void The_offer_flag_is_written_outside_the_lock()
+    {
+        bool? readable = null;
+        _settings.OnMark = () => readable = Task.Run(() => _model.ListOpen).Wait(TimeSpan.FromSeconds(2));
+
+        _model.OfferIfDue();
+
+        Assert.True(readable);
+        Assert.True(_model.ListOpen);
+        Assert.Equal(1, _settings.Marks);
+    }
+
+    [Fact]
+    public void Opening_the_list_closes_More()
+    {
+        _shell.ToggleMore();
+
+        _model.OpenList();
+
+        Assert.False(_shell.MoreOpen);
+    }
+
+    [Fact]
+    public void The_offer_closes_More()
+    {
+        _shell.ToggleMore();
+
+        _model.OfferIfDue();
+
+        Assert.False(_shell.MoreOpen);
+    }
+
+    [Fact]
+    public void Starting_a_topic_closes_More()
+    {
+        _shell.ToggleMore();
+
+        _model.Start(TutorialTopic.AddKey);
+
+        Assert.False(_shell.MoreOpen);
+    }
+
+    [Fact]
+    public void MarkedRow_is_the_latched_export_row_only_while_a_topic_runs()
+    {
+        WithKeys();
+        Assert.Null(_model.MarkedRow);
+
+        _model.Start(TutorialTopic.ExportKey);
+        Assert.Equal(NotExported, _model.MarkedRow);
+
+        _facts = _facts with { NotExportedReference = "ref-later" };
+        _model.Settle();
+        Assert.Equal(NotExported, _model.MarkedRow);
+
+        _model.Leave();
+        Assert.Null(_model.MarkedRow);
+    }
+
+    [Fact]
+    public void MarkedRow_falls_back_to_the_first_row_when_every_key_was_exported()
+    {
+        WithKeys(notExported: null);
+
+        _model.Start(TutorialTopic.ExportKey);
+
+        Assert.Equal(First, _model.MarkedRow);
+    }
+
+    [Fact]
+    public void MarkedFundRow_is_the_key_only_row_while_a_topic_runs()
+    {
+        _facts = _facts with { KeyCount = 2, FirstAccountReference = First, KeyOnlyReference = "ref-key-only" };
+        Assert.Null(_model.MarkedFundRow);
+
+        _model.Start(TutorialTopic.CreateAccount);
+        Assert.Equal("ref-key-only", _model.MarkedFundRow);
+
+        _facts = _facts with { KeyOnlyReference = null };
+        Assert.Null(_model.MarkedFundRow);
+    }
+
+    [Fact]
     public void OpenList_is_not_an_offer()
     {
         _model.OpenList();

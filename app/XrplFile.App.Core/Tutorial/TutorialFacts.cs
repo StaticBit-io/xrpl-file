@@ -15,6 +15,7 @@ namespace XrplFile.App.Core.Tutorial;
 /// <param name="ReadTabEmpty">No link typed, no lookup shown, no lookup running.</param>
 /// <param name="LookupSucceeded">The lookup found a file that can be read.</param>
 /// <param name="LookupFailed">The lookup ended with a message.</param>
+/// <param name="KeyOnlyReference">The first such row whose account was never seen on the ledger: the one the Fund step points at.</param>
 public sealed record TutorialFacts(
     int KeyCount,
     string? FirstAccountReference,
@@ -23,7 +24,8 @@ public sealed record TutorialFacts(
     ReadState ReadState,
     bool ReadTabEmpty,
     bool LookupSucceeded,
-    bool LookupFailed)
+    bool LookupFailed,
+    string? KeyOnlyReference = null)
 {
     /// <summary>Reads the facts from the live models.</summary>
     public static TutorialFacts Capture(IKeyVault vault, AccountsModel accounts, RunModel run, ReadModel read, ReadRun readRun)
@@ -49,6 +51,7 @@ public sealed record TutorialFacts(
             readRun.Snapshot.State,
             read.Link.Length == 0 && lookup.Manifest is null && lookup.Message is null && !read.LookingUp,
             lookup.CanRead,
-            lookup.Message is not null);
+            lookup.Message is not null,
+            rows.FirstOrDefault(row => row.Stage == AccountStage.KeyOnly)?.Reference);
     }
 }

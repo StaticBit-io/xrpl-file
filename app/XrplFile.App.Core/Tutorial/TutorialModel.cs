@@ -51,6 +51,7 @@ public sealed class TutorialModel(
     private int _run;
     private string? _reference;
     private bool? _litNotExported;
+    private UnlockStage? _lastStage;
 
     /// <summary>Whether the topic list dialog is showing.</summary>
     public bool ListOpen
@@ -76,8 +77,58 @@ public sealed class TutorialModel(
         get { lock (_gate) return _view; }
     }
 
+    /// <summary>
+    /// The row the export topic acts on, latched when the topic started, or null while none runs.
+    /// The Accounts screen puts its row markers here, so the lit row is the row the menu opens on.
+    /// </summary>
+    public string? MarkedRow
+    {
+        get { lock (_gate) return _active ? _reference : null; }
+    }
+
+    /// <summary>
+    /// The row whose Fund button the Create topic points at: a key-only row if there is one, else
+    /// null and the bubble stays centred. Read live, because creating the account is what makes the row.
+    /// </summary>
+    public string? MarkedFundRow
+    {
+        get
+        {
+            lock (_gate)
+            {
+                if (!_active)
+                {
+                    return null;
+                }
+            }
+
+            return facts().KeyOnlyReference;
+        }
+    }
+
     /// <summary>Raised once per observable move, outside any lock.</summary>
     public event Action? Changed;
+
+    /// <summary>
+    /// Reports the stage the shell shows. The first-run offer is considered only on entering the
+    /// unlocked stage: a user who deletes their last key mid-session is not welcomed as a newcomer,
+    /// and no per-render check touches the disk or the vault.
+    /// </summary>
+    public void NoticeStage(UnlockStage stage)
+    {
+        bool entered;
+
+        lock (_gate)
+        {
+            entered = stage == UnlockStage.Unlocked && _lastStage != UnlockStage.Unlocked;
+            _lastStage = stage;
+        }
+
+        if (entered)
+        {
+            OfferIfDue();
+        }
+    }
 
     /// <summary>
     /// Opens the list as the first-run offer when the vault holds no key and the offer was never
@@ -101,11 +152,14 @@ public sealed class TutorialModel(
             }
 
             _offeredThisRun = true;
-            store.TryMarkOffered();
             _listOpen = true;
             _listIsOffer = true;
         }
 
+        // The in-memory guard above already makes this the only writer of the run, so the write
+        // needs no lock and a slow disk cannot stall readers of the model.
+        store.TryMarkOffered();
+        shell.CloseMore();
         Changed?.Invoke();
     }
 
@@ -123,6 +177,7 @@ public sealed class TutorialModel(
             _listIsOffer = false;
         }
 
+        shell.CloseMore();
         Changed?.Invoke();
     }
 
@@ -221,6 +276,7 @@ public sealed class TutorialModel(
         }
 
         nav.ResetToMain();
+        shell.CloseMore();
 
         // A Leave or End that lands while the screens redraw must not be undone by what follows.
         if (!StillRunning(run))

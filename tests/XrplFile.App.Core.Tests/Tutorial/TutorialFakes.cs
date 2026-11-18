@@ -25,11 +25,14 @@ internal sealed class FakeTutorialSettings : ITutorialSettingsStore
 
     public int Marks { get; private set; }
 
+    public Action? OnMark { get; set; }
+
     public bool WasOffered() => Offered;
 
     public bool TryMarkOffered()
     {
         Marks++;
+        OnMark?.Invoke();
         return MarkSucceeds;
     }
 }
