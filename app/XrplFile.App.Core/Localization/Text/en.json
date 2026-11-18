@@ -617,7 +617,7 @@
   "Tutorial.PublishFromTitle": "Publish from",
   "Tutorial.PublishFromBody": "This account writes the file to the ledger and is named in its link.",
   "Tutorial.PublishPayerTitle": "Paid by",
-  "Tutorial.PublishPayerBody": "Large files can be paid for by a second account. With \"Nobody\" it is slower and holds reserve while it runs. This choice appears only when it applies.",
+  "Tutorial.PublishPayerBody": "Large files can be paid for by a second account. With “Nobody” it is slower and holds reserve while it runs. This choice appears only when it applies.",
   "Tutorial.PublishEstimateTitle": "See the price first",
   "Tutorial.PublishEstimateBody": "Choose {estimate} to see the cost and the time first. Nothing is spent until you start the run from that screen.",
   "Tutorial.PublishHistoryTitle": "Nothing gets lost",
