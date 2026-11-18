@@ -498,6 +498,20 @@ at up to 1,000,000 iterations — adopted so that a key is not locked into which
 products happened to create it. The vault file itself is untouched by that and stays Argon2id; the
 container is a different artifact, the one that actually travels.
 
+### Downloading it
+
+Each release on the [releases page](https://github.com/StaticBit-io/xrpl-file/releases/latest) carries
+a portable ZIP for Windows 10 (1809 or newer) and Windows 11, x64: unpack it anywhere and run
+`XRPL File.exe`. Nothing is installed, and no .NET is needed on the machine. The ZIP is built by
+`.github/workflows/desktop-release.yml` from a tag on `main`, its SHA-256 is in the release notes,
+and the build is attested (`gh attestation verify <zip> -R StaticBit-io/xrpl-file`).
+
+To publish a release: set `XrplFileAppVersion` in `Directory.Build.props`, bring the change to
+`main`, then push the tag `app-v<version>` on that commit. The workflow refuses a tag that is not on
+`main` or does not match the version. `app/build-portable.ps1` builds the same ZIP locally, and
+`gh workflow run desktop-release.yml --ref <branch>` builds it on the release runner as a run
+artifact, with no tag and no release.
+
 ### Building and running it
 
 .NET 10 SDK with the `maui-windows` workload:

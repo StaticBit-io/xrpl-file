@@ -7,6 +7,13 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!--
+      The desktop application's version, in one place. XrplFile.App takes it for its display version
+      and its file version; the release workflow refuses a tag app-v<version> that does not match it.
+      The libraries are not versioned by it.
+    -->
+    <XrplFileAppVersion>1.0.0</XrplFileAppVersion>
+
+    <!--
       Turned on so that the compiler checks the documentation this repository is full of, rather
       than only storing it. The review that prompted this found three cref attributes pointing at a
       member that does not exist, and nothing had caught them, because CS1574 is raised only when

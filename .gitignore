@@ -10,3 +10,4 @@ site/dist/
 # wrangler pages dev state
 site/.wrangler/
 web/npm/
+artifacts/

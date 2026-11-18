@@ -127,6 +127,9 @@ jobs:
       - if: steps.dotnet-cache.outputs.cache-hit != 'true'
         run: dotnet workload install maui-windows
       - run: dotnet build app/XrplFile.App/XrplFile.App.csproj --configuration Release
+      # The portable ZIP's launcher is Native AOT, linked otherwise only by desktop-release.yml: an
+      # AOT or linker break would surface on release day.
+      - run: dotnet publish app/XrplFile.Launcher/XrplFile.Launcher.csproj --configuration Release -r win-x64 -o launcher-check
 
   # A push to main is a release of the site: work lands on dev and reaches main by a merge, and that
   # merge publishes https://xrpl-file.staticbit.io. Both deploy jobs wait for "unit", which runs the web

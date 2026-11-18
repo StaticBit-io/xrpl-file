@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The one executable at the top of the portable ZIP. The application itself is several hundred
+    files - the .NET runtime, the Windows App SDK, WebView2 - and they live in app\, so a person who
+    unpacks the archive finds a single thing to run. Native AOT keeps this file small and free of any
+    runtime of its own. app\build-portable.ps1 publishes it and names it "XRPL File.exe".
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <!-- The application's own icon, generated from app\XrplFile.App\Resources\AppIcon\appicon.svg. -->
+    <ApplicationIcon>XrplFile.ico</ApplicationIcon>
+    <AssemblyTitle>XRPL File</AssemblyTitle>
+    <Product>XRPL File</Product>
+    <Company>StaticBit</Company>
+    <Version>$(XrplFileAppVersion)</Version>
+  </PropertyGroup>
+
+</Project>

@@ -41,6 +41,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XrplFile.SitePrice", "tools
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XrplFile.SitePrice.Tests", "tests\XrplFile.SitePrice.Tests\XrplFile.SitePrice.Tests.csproj", "{7E6265CE-C3F9-4E8F-B189-8893BD4A2368}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "XrplFile.Launcher", "app\XrplFile.Launcher\XrplFile.Launcher.csproj", "{E72198E5-56F8-47DF-BAEE-6A23660F5E66}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -231,6 +233,18 @@ Global
 		{7E6265CE-C3F9-4E8F-B189-8893BD4A2368}.Release|x64.Build.0 = Release|Any CPU
 		{7E6265CE-C3F9-4E8F-B189-8893BD4A2368}.Release|x86.ActiveCfg = Release|Any CPU
 		{7E6265CE-C3F9-4E8F-B189-8893BD4A2368}.Release|x86.Build.0 = Release|Any CPU
+		{E72198E5-56F8-47DF-BAEE-6A23660F5E66}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E72198E5-56F8-47DF-BAEE-6A23660F5E66}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E72198E5-56F8-47DF-BAEE-6A23660F5E66}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E72198E5-56F8-47DF-BAEE-6A23660F5E66}.Debug|x64.Build.0 = Debug|Any CPU
+		{E72198E5-56F8-47DF-BAEE-6A23660F5E66}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E72198E5-56F8-47DF-BAEE-6A23660F5E66}.Debug|x86.Build.0 = Debug|Any CPU
+		{E72198E5-56F8-47DF-BAEE-6A23660F5E66}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E72198E5-56F8-47DF-BAEE-6A23660F5E66}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E72198E5-56F8-47DF-BAEE-6A23660F5E66}.Release|x64.ActiveCfg = Release|Any CPU
+		{E72198E5-56F8-47DF-BAEE-6A23660F5E66}.Release|x64.Build.0 = Release|Any CPU
+		{E72198E5-56F8-47DF-BAEE-6A23660F5E66}.Release|x86.ActiveCfg = Release|Any CPU
+		{E72198E5-56F8-47DF-BAEE-6A23660F5E66}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -251,5 +265,6 @@ Global
 		{F4211C14-EC13-4C65-95C6-06E9C89CB1F9} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 		{AE0A7B03-F0CC-4040-BA5C-4189761A5983} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 		{7E6265CE-C3F9-4E8F-B189-8893BD4A2368} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{E72198E5-56F8-47DF-BAEE-6A23660F5E66} = {F95F473B-E98A-ACD6-1986-755F447BE36F}
 	EndGlobalSection
 EndGlobal
