@@ -959,8 +959,11 @@
   transition: opacity 250ms;
 }
 
-/* After `load` the file is verified, but the cubes may only just have appeared: the element stays out of
-   sight while they light up and settle. visibility keeps its box, so the canvas keeps its size. */
+/* The element stays out of sight while the cloud is the loader (is-reading, from mount): a video draws its
+   player shell on the first verified block, long before `load`. After `load` the cubes may only just have
+   appeared, so a file other than a video stays hidden while they settle (is-settling). visibility keeps
+   the box, so the canvas keeps its size. */
+.file__stage.is-reading xrpl-file,
 .file__stage.is-settling xrpl-file {
   visibility: hidden;
 }

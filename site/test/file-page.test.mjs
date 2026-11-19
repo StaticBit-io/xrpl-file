@@ -699,6 +699,44 @@ test('error before the manifest hides the canvas without throwing', () => {
   assert.equal(doc.nodes['file-download'].disabled, true, 'a file that did not load cannot be saved');
 });
 
+test('the stage is marked is-reading from mount, before any event', () => {
+  const { doc } = open(CANONICAL);
+  assert.equal(doc.stage.classList.contains('is-reading'), true, 'the element is out of sight while the cloud is the loader');
+});
+
+test('a video load ends the cloud at once, with no hold, even when cubes are still settling', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { doc, cloud } = open(CANONICAL, { reducedMotion: false });
+  cloud.settle = 2000;
+  doc.file.load({ ...DETAIL, name: 'clip.mp4', type: 'video/mp4' });
+  assert.equal(doc.stage.classList.contains('is-reading'), false, 'the video view is visible');
+  assert.equal(doc.stage.classList.contains('is-settling'), false, 'no hold for a video');
+  assert.equal(doc.nodes['file-cloud'].classList.contains('is-gone'), true);
+  assert.equal(doc.nodes['file-title'].textContent, 'clip.mp4');
+  t.mock.timers.tick(250);
+  assert.equal(doc.nodes['file-cloud'].hidden, true);
+  assert.equal(cloud.destroyed, 1);
+});
+
+test('an image load keeps the hold and drops is-reading only when the cloud ends', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { doc, cloud } = open(CANONICAL, { reducedMotion: false });
+  cloud.settle = 2000;
+  doc.file.load(DETAIL);
+  assert.equal(doc.stage.classList.contains('is-settling'), true);
+  assert.equal(doc.stage.classList.contains('is-reading'), true, 'still hidden during the hold');
+  t.mock.timers.tick(2000);
+  assert.equal(doc.stage.classList.contains('is-settling'), false);
+  assert.equal(doc.stage.classList.contains('is-reading'), false);
+  assert.equal(doc.nodes['file-cloud'].classList.contains('is-gone'), true);
+});
+
+test('error removes is-reading at once', () => {
+  const { doc } = open(CANONICAL);
+  doc.file.fail();
+  assert.equal(doc.stage.classList.contains('is-reading'), false, 'the element error view becomes visible');
+});
+
 test('a later event does not end the cloud twice', () => {
   const { doc, cloud } = open(CANONICAL);
   doc.file.load(DETAIL);

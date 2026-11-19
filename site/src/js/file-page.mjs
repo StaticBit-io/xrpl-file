@@ -39,9 +39,9 @@ function saveErrorKey(error) {
 const CLOUD_FADE_MS = 250;
 
 /**
- * The longest the file stays hidden after `load` for the cubes to light up and the sweep to pass. The
- * element can deliver a small file in a few milliseconds, which would end the cloud before a cube is
- * visible; a slow sweep is cut here so the file never waits long.
+ * The longest a file other than a video stays hidden after `load` for the cubes to light up and the sweep
+ * to pass. The element can deliver a small file in a few milliseconds, which would end the cloud before a
+ * cube is visible; a slow sweep is cut here so the file never waits long.
  */
 export const HOLD_MAX_MS = 3000;
 
@@ -182,9 +182,14 @@ export function initFilePage(doc, location, {
   const stage = canvas.parentElement;
   let cloudEnded = false;
   let holdTimer = null;
+  // The element is out of sight for as long as the cloud is the loader: a video shows its own player
+  // shell (status overlay, bar) as soon as the first block is verified, which is well before `load`, and
+  // it would cover a cloud that is still running. visibility keeps the box the canvas fills.
+  stage.classList.add('is-reading');
   const endCloud = () => {
     if (cloudEnded) return;
     cloudEnded = true;
+    stage.classList.remove('is-reading');
     if (holdTimer !== null) {
       clearTimeout(holdTimer);
       holdTimer = null;
@@ -206,7 +211,7 @@ export function initFilePage(doc, location, {
     else setTimeout(remove, CLOUD_FADE_MS);
   };
   // The file is already verified at `load`, but the cubes are drawn as the chunks arrive, so the cloud
-  // may have nothing on screen yet. The element is hidden (its box stays) while they settle.
+  // may have nothing on screen yet. The element stays hidden (is-reading, its box stays) while they settle.
   const settleCloud = () => {
     if (cloudEnded || holdTimer !== null) return;
     const delay = reducedMotion ? 0 : Math.min(HOLD_MAX_MS, cloud.settleDelay());
@@ -258,7 +263,10 @@ export function initFilePage(doc, location, {
   };
 
   element.addEventListener('load', (event) => {
-    settleCloud();
+    // A video fires `load` on its first verified frame and is playable from then on, and the visitor has
+    // already waited for the cloud; the hold exists for files the element only draws at `load`.
+    if (typeof event.detail?.type === 'string' && event.detail.type.startsWith('video/')) endCloud();
+    else settleCloud();
     detail = event.detail ?? {};
     // A picture with transparent parts shows on the page itself. Until it loads, and for any other
     // type, the box stays: the loader, a message, a text file or a video need a ground of their own.
