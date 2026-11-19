@@ -55,6 +55,29 @@ test('a node attribute replaces the built-in endpoints', () => {
   assert.deepEqual(endpointsFor({ network: '21337' }, 'wss://node.example'), ['wss://node.example']);
 });
 
+test('a node attribute may list several nodes, tried in the order given', () => {
+  assert.deepEqual(
+    endpointsFor({ network: 'mainnet' }, 'wss://one.example wss://two.example'),
+    ['wss://one.example', 'wss://two.example'],
+  );
+  assert.deepEqual(
+    endpointsFor({ network: 'mainnet' }, ' wss://one.example,wss://two.example ,\n wss://three.example '),
+    ['wss://one.example', 'wss://two.example', 'wss://three.example'],
+  );
+});
+
+test('a node listed twice is asked once, at its first place', () => {
+  assert.deepEqual(
+    endpointsFor({ network: 'mainnet' }, 'wss://one.example wss://two.example wss://one.example'),
+    ['wss://one.example', 'wss://two.example'],
+  );
+});
+
+test('one bad address refuses the whole list rather than quietly dropping a node', () => {
+  for (const bad of ['wss://one.example ws://example.com', 'wss://one.example, http://x'])
+    assert.throws(() => endpointsFor({ network: 'mainnet' }, bad), (e) => e.sentence === BAD_NODE, bad);
+});
+
 test('ws:// is accepted for localhost and 127.0.0.1 only', () => {
   assert.deepEqual(endpointsFor({ network: 'testnet' }, 'ws://localhost:6006'), ['ws://localhost:6006']);
   assert.deepEqual(endpointsFor({ network: 'testnet' }, 'ws://127.0.0.1:6006'), ['ws://127.0.0.1:6006']);

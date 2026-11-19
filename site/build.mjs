@@ -17,7 +17,7 @@ import { ACTIVE_LANGS, DEFAULT_LANG, LANGS, htmlLang, langFromTag } from './src/
 import { ELEMENT_FILE, snippetHtml } from './snippet.mjs';
 import { findHtmlRewriteTargets, findShadowed, parseRedirects } from './redirects.mjs';
 
-export const ELEMENT_VERSION = '1.2.1';
+export const ELEMENT_VERSION = '1.3.0';
 // Cloudflare Pages rejects a deployment with any file over 25 MiB.
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const HOST_FILES = new Set(['_redirects', '_headers', '_routes.json']);
@@ -116,7 +116,7 @@ async function inlineChrome(outDir) {
 const SNIPPET_MARKER = '<!--@element-snippet-->';
 
 // Cloudflare's Email Address Obfuscation (on for the staticbit.io zone) reads
-// "xrpl-file-element@1.2.1/xrpl-file-element.js" as an address and serves "[email protected]" in its
+// "xrpl-file-element@1.3.0/xrpl-file-element.js" as an address and serves "[email protected]" in its
 // place, restored only by a script it injects. Cloudflare leaves the text between these comments alone,
 // and comments are not part of the textContent the copy button takes.
 const EMAIL_OFF = '<!--email_off-->';

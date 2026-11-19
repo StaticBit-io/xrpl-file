@@ -6,7 +6,7 @@ import { headersFor, parseHeaders } from '../headers.mjs';
 const rules = parseHeaders(await readFile(new URL('../src/_headers', import.meta.url), 'utf8'));
 
 test('every matching block adds its headers', () => {
-  const element = headersFor('/element/1.2.1/x.js', rules);
+  const element = headersFor('/element/1.3.0/x.js', rules);
   assert.deepEqual(
     element.filter(([name]) => name !== 'Cache-Control'),
     [['X-Content-Type-Options', 'nosniff'], ['Access-Control-Allow-Origin', '*']],

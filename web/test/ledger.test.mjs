@@ -1064,3 +1064,130 @@ test('a node marked busy again during a wait is still asked by the request that 
     client.close();
   });
 });
+
+// A marker means something only to the node that issued it. Measured on mainnet (2026-11-19): a
+// marker from xrplcluster.com names the next transaction to return, one from s2.ripple.com names the
+// last one returned, so xrplcluster's marker sent to s2 skips a transaction -- a missing chunk.
+
+/** One writer's history across ledgers, in canonical forward order. */
+const HISTORY = [
+  ['H1', 100], ['H2', 100], ['H3', 100], ['H4', 101], ['H5', 101], ['H6', 102], ['H7', 102],
+].map(([hash, ledger]) => ({ hash, ledger_index: ledger, validated: true, meta: { TransactionResult: 'tesSUCCESS' }, tx_json: { Account: 'rWriter' } }));
+
+/**
+ * account_tx over HISTORY, paged the way one node does it. 'next' markers name the first record of
+ * the next page (xrplcluster); 'last' markers name the last record of this one (s2).
+ */
+function pagedNode(style, { busyOn = () => false } = {}) {
+  let calls = 0;
+  return (command, frame) => {
+    calls++;
+    if (busyOn(calls)) return busy('tooBusy');
+    const forward = frame.forward;
+    const order = HISTORY.map((record, index) => ({ record, index }))
+      .filter(({ record }) => record.ledger_index >= frame.ledger_index_min && record.ledger_index <= frame.ledger_index_max);
+    if (!forward) order.reverse();
+    let start = 0;
+    if (frame.marker) {
+      const at = order.findIndex(({ index }) => index === frame.marker.seq);
+      start = style === 'next' ? at : at + 1;
+    }
+    const page = order.slice(start, start + frame.limit);
+    const rest = order.slice(start + frame.limit);
+    const marker = rest.length === 0 ? undefined : { seq: style === 'next' ? rest[0].index : page.at(-1).index };
+    return ok({ transactions: page.map(({ record }) => record), ...(marker ? { marker } : {}) });
+  };
+}
+
+async function walkAll(client, forward = true) {
+  const read = [];
+  for await (const tx of client.accountTransactions('rWriter', 100, 102, forward)) read.push(tx.hash);
+  return read;
+}
+
+test('a page answered by another node than the one that issued the marker loses no transaction', async () => {
+  const script = {
+    'wss://cluster.invalid': pagedNode('next', { busyOn: (call) => call >= 2 }),
+    'wss://s2.invalid': pagedNode('last'),
+  };
+  await withScript(script, async ({ timers }) => {
+    const client = new LedgerClient(['wss://cluster.invalid', 'wss://s2.invalid'], { ...timers, pageSize: 2 });
+
+    assert.deepEqual(await walkAll(client), ['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7']);
+    client.close();
+  });
+});
+
+test('a hand-off the other way yields no transaction twice', async () => {
+  const script = {
+    'wss://s2.invalid': pagedNode('last', { busyOn: (call) => call >= 2 }),
+    'wss://cluster.invalid': pagedNode('next'),
+  };
+  await withScript(script, async ({ timers }) => {
+    const client = new LedgerClient(['wss://s2.invalid', 'wss://cluster.invalid'], { ...timers, pageSize: 2 });
+
+    assert.deepEqual(await walkAll(client), ['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7']);
+    client.close();
+  });
+});
+
+test('a backward walk handed off mid-ledger loses and repeats nothing', async () => {
+  const script = {
+    'wss://cluster.invalid': pagedNode('next', { busyOn: (call) => call >= 2 }),
+    'wss://s2.invalid': pagedNode('last'),
+  };
+  await withScript(script, async ({ timers }) => {
+    const client = new LedgerClient(['wss://cluster.invalid', 'wss://s2.invalid'], { ...timers, pageSize: 3 });
+
+    assert.deepEqual(await walkAll(client, false), ['H7', 'H6', 'H5', 'H4', 'H3', 'H2', 'H1']);
+    client.close();
+  });
+});
+
+test('a hand-off before anything was read restarts from the walk\'s own range', async () => {
+  const empty = (command, frame) => (frame.marker ? pagedNode('next')(command, frame) : ok({ transactions: [], marker: { seq: 0 } }));
+  let clusterCalls = 0;
+  const script = {
+    'wss://cluster.invalid': (command, frame) => (++clusterCalls >= 2 ? busy('tooBusy') : empty(command, frame)),
+    'wss://s2.invalid': pagedNode('last'),
+  };
+  await withScript(script, async ({ timers }) => {
+    const client = new LedgerClient(['wss://cluster.invalid', 'wss://s2.invalid'], { ...timers, pageSize: 2 });
+
+    assert.deepEqual(await walkAll(client), ['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7']);
+    client.close();
+  });
+});
+
+test('pages that stay on one node follow its markers without restarting', async () => {
+  const script = { 'wss://s2.invalid': pagedNode('last'), 'wss://cluster.invalid': pagedNode('next') };
+  await withScript(script, async ({ timers }) => {
+    const client = new LedgerClient(['wss://s2.invalid', 'wss://cluster.invalid'], { ...timers, pageSize: 2 });
+
+    assert.deepEqual(await walkAll(client), ['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7']);
+    assert.equal(ScriptedSocket.requests.filter((url) => url === 'wss://s2.invalid').length, 4);
+    assert.equal(ScriptedSocket.requests.filter((url) => url === 'wss://cluster.invalid').length, 0);
+    client.close();
+  });
+});
+
+test('nodes that keep taking the walk from each other end it as unreachable instead of looping', async () => {
+  // Each node is busy for its own markers only, so every continuation lands on the other node and
+  // every restart reads back the same full page of one ledger: nothing new is ever yielded.
+  const crowded = Array.from({ length: 4 }, (_, i) => ({ hash: `C${i}`, ledger_index: 100, validated: true, meta: { TransactionResult: 'tesSUCCESS' }, tx_json: { Account: 'rWriter' } }));
+  const node = (name) => (command, frame) => {
+    if (frame.marker?.node === name) return busy('tooBusy', 'retry in ~1000ms');
+    return ok({ transactions: crowded.slice(0, frame.limit), marker: { node: name, seq: frame.limit } });
+  };
+  await withScript({ 'wss://a.invalid': node('a'), 'wss://b.invalid': node('b') }, async ({ timers }) => {
+    const client = new LedgerClient(['wss://a.invalid', 'wss://b.invalid'], { ...timers, pageSize: 2 });
+    const read = [];
+
+    await assert.rejects(
+      (async () => { for await (const tx of client.accountTransactions('rWriter', 100, 100, true)) read.push(tx.hash); })(),
+      (e) => e.code === 'NodeUnreachable' && /kept moving between nodes/.test(e.message),
+    );
+    assert.deepEqual(read, ['C0', 'C1']);
+    client.close();
+  });
+});

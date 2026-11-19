@@ -43,7 +43,7 @@ test('static two-segment paths are served as themselves, never rewritten to the 
 });
 
 test('single-segment and deeper paths are untouched by the file-page rule', () => {
-  for (const path of ['/', '/index.html', '/file.html', '/ru/', '/element/1.2.1/xrpl-file-element.js']) {
+  for (const path of ['/', '/index.html', '/file.html', '/ru/', '/element/1.3.0/xrpl-file-element.js']) {
     assert.equal(applyRedirects(path, rules), null, path);
   }
 });
@@ -51,7 +51,7 @@ test('single-segment and deeper paths are untouched by the file-page rule', () =
 test('findShadowed reports a file whose URL a rule sends elsewhere', () => {
   const bad = parseRedirects('/:network/:hash /file 200\n');
   assert.deepEqual(findShadowed(['index.html', 'js/a.mjs', 'ru/index.html'], bad), ['/js/a.mjs', '/ru/index.html']);
-  assert.deepEqual(findShadowed(['index.html', 'js/a.mjs', 'ru/index.html', 'element/1.2.1/x.js'], rules), []);
+  assert.deepEqual(findShadowed(['index.html', 'js/a.mjs', 'ru/index.html', 'element/1.3.0/x.js'], rules), []);
 });
 
 test('findHtmlRewriteTargets reports 200 rules that point at .html, /index or /index.html', () => {
