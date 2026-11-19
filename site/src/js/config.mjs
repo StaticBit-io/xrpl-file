@@ -7,7 +7,7 @@ export const HERO_LINK = 'xrpl-file://mainnet/9B1A9E33DBD9B445BFE2854D4D489DC860
 export const HERO_ASPECT = 1422 / 1231;
 
 /** The publisher's GitHub Releases URL. Null keeps the download button visible, disabled and marked "soon". */
-export const PUBLISHER_URL = null;
+export const PUBLISHER_URL = 'https://github.com/StaticBit-io/xrpl-file/releases/latest';
 
 /** The origin the embed snippet names, so it keeps working when pasted into another site. */
 export const SITE_ORIGIN = 'https://xrpl-file.staticbit.io';
