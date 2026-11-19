@@ -1161,57 +1161,107 @@
   font-size: var(--text-sm);
 }
 
-/* A card's embed code: closed by default so the grid stays a gallery; the summary draws its own
-   disclosure arrow on a full-height target. The code scrolls sideways inside its box, never the page. */
-.example__code {
+/* A card's embed code: a small "</>" button laid over the top right of the preview opens a modal dialog
+   with the code and a copy button. The button is always visible, since a phone has no hover, and sits
+   on a dark translucent plate so it reads on a picture, a video and an empty box alike. */
+.example__media {
+  position: relative;
   min-width: 0;
 }
 
-.example__code > summary {
+.example__code-button {
+  position: absolute;
+  z-index: 1;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 0.28);
+  border-radius: var(--radius-control);
+  background: rgb(10 12 14 / 0.62);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background-color var(--dur-micro) var(--ease-out);
+}
+
+/* A text file scrolls inside its box: the button keeps clear of that box's scroll bar. */
+.example--text .example__code-button {
+  right: calc(var(--space-2) + 0.875rem);
+}
+
+.example__code-button:hover {
+  background: rgb(10 12 14 / 0.85);
+}
+
+.example__code-button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.code-dialog {
+  width: min(44rem, calc(100vw - 2 * var(--space-4)));
+  max-height: calc(100dvh - 2 * var(--space-4));
+  padding: var(--space-5);
+  border: var(--rule-hair) solid var(--rule);
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  color: var(--ink);
+  overflow: auto;
+}
+
+.code-dialog::backdrop {
+  background: rgb(0 0 0 / 0.6);
+}
+
+.code-dialog__head {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: fit-content;
-  min-height: var(--target);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.code-dialog__title {
+  font-size: var(--text-lg);
+}
+
+.code-dialog__close {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--target);
+  height: var(--target);
+  margin: calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
   color: var(--ink-2);
-  font-size: var(--text-sm);
-  list-style: none;
   cursor: pointer;
 }
 
-.example__code > summary::-webkit-details-marker {
-  display: none;
-}
-
-.example__code > summary::before {
-  content: "";
-  border-block: 0.3em solid transparent;
-  border-inline-start: 0.45em solid currentColor;
-  transition: transform var(--dur-micro) var(--ease-out);
-}
-
-.example__code[open] > summary::before {
-  transform: rotate(90deg);
-}
-
-.example__code > summary:hover {
+.code-dialog__close:hover {
+  background: var(--paper);
   color: var(--ink);
 }
 
-.example__code pre {
-  overflow-x: auto;
-  margin-top: var(--space-2);
+/* The code wraps instead of scrolling sideways: the copy button takes the text, not the layout. */
+.code-dialog pre {
   padding: var(--space-4);
   border: var(--rule-hair) solid var(--rule-2);
   border-radius: var(--radius-control);
   background: var(--paper);
   color: var(--ink-2);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 
-.example__code pre code {
+.code-dialog pre code {
   font-size: inherit;
-  overflow-wrap: normal;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

@@ -17,17 +17,31 @@ const BOXED = new Set(['drawing', 'video', 'logo']);
 const EMAIL_OFF = '<!--email_off-->';
 const EMAIL_ON = '<!--/email_off-->';
 
-/** The card's embed code: the pinned script and this example's element, ready to copy. */
-function codeBlock(example, title, code, snippet) {
+const CODE_ICON =
+  '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg>';
+const CLOSE_ICON =
+  '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+
+/** The "</>" button laid over the preview; examples-page.mjs opens the card's dialog from it. */
+function codeButton(id, title, code) {
+  const name = escapeHtml(code.show(title));
+  return `<button class="example__code-button" type="button" aria-haspopup="dialog" aria-controls="${id}" aria-label="${name}" title="${name}">${CODE_ICON}</button>`;
+}
+
+/** The card's embed code in a modal dialog: the pinned script and this example's element, ready to copy. */
+function codeDialog(example, id, title, code, snippet) {
   return [
-    '  <details class="example__code">',
-    `    <summary>${escapeHtml(code.summary)}</summary>`,
-    `    <pre tabindex="0" aria-label="${escapeHtml(code.code(title))}"><code>${EMAIL_OFF}${snippetHtml({ ...snippet, link: example.link })}${EMAIL_ON}</code></pre>`,
+    `  <dialog class="code-dialog" id="${id}" aria-labelledby="${id}-title">`,
+    '    <div class="code-dialog__head">',
+    `      <h2 class="code-dialog__title" id="${id}-title">${escapeHtml(code.code(title))}</h2>`,
+    `      <button class="code-dialog__close" type="button" aria-label="${escapeHtml(code.close)}">${CLOSE_ICON}</button>`,
+    '    </div>',
+    `    <pre tabindex="0"><code>${EMAIL_OFF}${snippetHtml({ ...snippet, link: example.link })}${EMAIL_ON}</code></pre>`,
     '    <div class="snippet__bar">',
-    `      <button class="button button--quiet example__copy" type="button" aria-label="${escapeHtml(code.copyLabel(title))}">${escapeHtml(code.copy)}</button>`,
+    `      <button class="button example__copy" type="button" aria-label="${escapeHtml(code.copyLabel(title))}">${escapeHtml(code.copy)}</button>`,
     '      <span class="snippet__status" role="status"></span>',
     '    </div>',
-    '  </details>',
+    '  </dialog>',
   ].join('\n');
 }
 
@@ -37,10 +51,12 @@ function card(example, strings, linkText, code, snippet) {
   const words = strings[example.key];
   if (!words) throw new Error(`no strings for example "${example.key}"`);
   const element = `<xrpl-file src="${escapeHtml(example.link)}" loading="lazy"></xrpl-file>`;
-  const media =
+  const preview =
     BOXED.has(example.kind) && example.width && example.height
       ? `<div class="example__box" style="aspect-ratio: ${example.width} / ${example.height}">${element}</div>`
       : element;
+  const id = `code-${escapeHtml(example.key)}`;
+  const media = snippet ? `<div class="example__media">${preview}${codeButton(id, words.title, code)}</div>` : preview;
   const href = `/${match[1]}/${match[2].toUpperCase()}`;
   return [
     `<figure class="example example--${escapeHtml(example.kind)}">`,
@@ -50,7 +66,7 @@ function card(example, strings, linkText, code, snippet) {
     `    <p>${escapeHtml(words.line)}</p>`,
     `    <a href="${escapeHtml(href)}">${escapeHtml(linkText)}</a>`,
     '  </figcaption>',
-    ...(snippet ? [codeBlock(example, words.title, code, snippet)] : []),
+    ...(snippet ? [codeDialog(example, id, words.title, code, snippet)] : []),
     '</figure>',
   ].join('\n');
 }
