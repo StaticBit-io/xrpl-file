@@ -76,6 +76,10 @@ function initLanguage(document, location, storage, browserLanguages) {
       const href = fromStorage ? location.pathname : equivalentPath(location.pathname, link.dataset.langLink);
       link.setAttribute('href', href);
     }
+    // The footer's examples link, for the same reason: the build wrote the English page's address.
+    if (fromStorage) {
+      for (const link of document.querySelectorAll('[data-examples-link]')) link.setAttribute('href', equivalentPath('/examples', lang));
+    }
     // The wordmark's home link: a stored-language page is built once, so its build-time "/" is the English home.
     if (fromStorage) {
       for (const link of document.querySelectorAll('[data-home]')) link.setAttribute('href', homePath(lang));

@@ -536,6 +536,7 @@ dotnet run --project tests/XrplFile.Core.Tests -- -trait- "Category=Integration"
 dotnet run --project tests/XrplFile.App.Core.Tests -- -trait- "Category=Integration"
 dotnet run --project tests/XrplFile.Keys.Tests -- -trait- "Category=Integration"
 dotnet run --project tests/XrplFile.SitePrice.Tests
+dotnet run --project tests/XrplFile.Fixtures.Tests
 node --test site/test/*.test.mjs
 cd web && node --test test/*.test.mjs
 ```

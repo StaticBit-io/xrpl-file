@@ -4,17 +4,23 @@
 //                                   the shared markup of chrome-markup.mjs, and <!--@element-snippet--> replaced
 //                                   by the embed snippets (jsDelivr and this site) with the element's integrity
 //                                   from integrity.json
+//                                   and <!--@examples--> replaced by the example cards (examples-markup.mjs)
 //   web/dist/<version>/*         -> /element/<version>/   (the element and the reader bundle)
 //   site/data/price.json         -> /data/price.json
 // The site loads the element and the reader from that one copy; nothing else carries reader code.
 //
 //   node site/build.mjs            (run `cd web && node build.mjs` first)
+//   node site/build.mjs --allow-testnet-examples
+//                                  local preview only: lets the examples page keep links that are not on mainnet
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderChrome } from './chrome-markup.mjs';
 import { ACTIVE_LANGS, DEFAULT_LANG, LANGS, htmlLang, langFromTag } from './src/js/languages.mjs';
 import { ELEMENT_FILE, snippetHtml } from './snippet.mjs';
+import { EXAMPLES_MARKER, renderExamples } from './examples-markup.mjs';
+import { EXAMPLE_STRINGS } from './src/js/examples-strings.mjs';
+import { EXAMPLES } from './src/js/examples.mjs';
 import { findHtmlRewriteTargets, findShadowed, parseRedirects } from './redirects.mjs';
 
 export const ELEMENT_VERSION = '1.3.0';
@@ -122,6 +128,16 @@ const SNIPPET_MARKER = '<!--@element-snippet-->';
 const EMAIL_OFF = '<!--email_off-->';
 const EMAIL_ON = '<!--/email_off-->';
 
+/** The element script's sha384 integrity value from the build's integrity.json. */
+async function elementIntegrity(elementDir, elementVersion) {
+  const values = JSON.parse(await readFile(join(elementDir, 'integrity.json'), 'utf8'));
+  const integrity = values[ELEMENT_FILE];
+  if (typeof integrity !== 'string' || !integrity.startsWith('sha384-')) {
+    throw new Error(`integrity.json of element ${elementVersion} has no sha384 value for ${ELEMENT_FILE}`);
+  }
+  return integrity;
+}
+
 /**
  * Fills the embed snippet of a page: the marker gets the escaped snippet with the element's integrity
  * from integrity.json, fenced off from Cloudflare's email obfuscation.
@@ -133,15 +149,40 @@ async function inlineSnippet(outDir, elementDir, elementVersion) {
     if (!file.endsWith('.html') || relative_.split(sep)[0] === 'element') continue;
     const html = await readFile(file, 'utf8');
     if (!html.includes(SNIPPET_MARKER)) continue;
-    if (integrity === null) {
-      const values = JSON.parse(await readFile(join(elementDir, 'integrity.json'), 'utf8'));
-      integrity = values[ELEMENT_FILE];
-      if (typeof integrity !== 'string' || !integrity.startsWith('sha384-')) {
-        throw new Error(`integrity.json of element ${elementVersion} has no sha384 value for ${ELEMENT_FILE}`);
-      }
-    }
+    integrity ??= await elementIntegrity(elementDir, elementVersion);
     const options = { version: elementVersion, integrity };
     await writeFile(file, html.replaceAll(SNIPPET_MARKER, () => `${EMAIL_OFF}${snippetHtml(options)}${EMAIL_ON}`));
+  }
+}
+
+/**
+ * The examples whose link is not on mainnet. The page says every file is read from the mainnet, so a
+ * testnet stand-in must never reach a deployable build: it would show a test pattern as a published
+ * example and break at the next testnet reset.
+ */
+export function nonMainnetExamples(examples) {
+  return examples.filter((example) => !/^xrpl-file:[/][/]mainnet[/]/.test(example.link));
+}
+
+/**
+ * Fills the examples page's cards, each with its embed code pinned to this build's element; a page in a
+ * language without example strings is refused.
+ */
+async function inlineExamples(outDir, elementDir, elementVersion) {
+  let integrity = null;
+  for (const file of await listFiles(outDir)) {
+    const relative_ = relative(outDir, file);
+    if (!file.endsWith('.html') || relative_.split(sep)[0] === 'element') continue;
+    const html = await readFile(file, 'utf8');
+    if (!html.includes(EXAMPLES_MARKER)) continue;
+    const tag = /<html\b[^>]*\blang="([^"]*)"/i.exec(html)?.[1];
+    const lang = langFromTag(tag);
+    if (lang === null || htmlLang(lang) !== tag || !EXAMPLE_STRINGS[lang]) {
+      throw new Error(`${relative_.split(sep).join('/')} uses the examples marker but its <html lang="${tag}"> has no example strings`);
+    }
+    integrity ??= await elementIntegrity(elementDir, elementVersion);
+    const cards = renderExamples(lang, { snippet: { version: elementVersion, integrity } });
+    await writeFile(file, html.replaceAll(EXAMPLES_MARKER, () => cards));
   }
 }
 
@@ -213,7 +254,16 @@ async function checkRewrites(outDir) {
 /**
  * @param {{ siteDir: string, webDistDir: string, outDir: string, elementVersion?: string, maxFileBytes?: number }} options
  */
-export async function build({ siteDir, webDistDir, outDir, elementVersion = ELEMENT_VERSION, maxFileBytes = MAX_FILE_BYTES }) {
+export async function build({
+  siteDir, webDistDir, outDir, elementVersion = ELEMENT_VERSION, maxFileBytes = MAX_FILE_BYTES,
+  allowTestnetExamples = false, examples = EXAMPLES,
+}) {
+  const strangers = nonMainnetExamples(examples);
+  if (strangers.length > 0 && !allowTestnetExamples) {
+    throw new Error(
+      `the examples page links to files that are not on mainnet: ${strangers.map((e) => e.key).join(', ')}. `
+      + 'Replace them in site/src/js/examples.mjs (tools/examples/README.md, step 7), or pass --allow-testnet-examples for a local preview.');
+  }
   const elementDir = join(webDistDir, elementVersion);
   if (!(await isDirectory(elementDir))) {
     throw new Error(`element build ${elementVersion} not found at ${elementDir}; run "node build.mjs" in web/ first`);
@@ -233,6 +283,7 @@ export async function build({ siteDir, webDistDir, outDir, elementVersion = ELEM
     await checkElementVersion(outDir, elementVersion);
     await inlineChrome(outDir);
     await inlineSnippet(outDir, elementDir, elementVersion);
+    await inlineExamples(outDir, elementDir, elementVersion);
     await cp(elementDir, join(outDir, 'element', elementVersion), { recursive: true });
     await mkdir(join(outDir, 'data'), { recursive: true });
     await cp(priceFile, join(outDir, 'data', 'price.json'));
@@ -250,7 +301,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const outDir = join(here, 'dist');
   try {
-    await build({ siteDir: here, webDistDir: join(here, '..', 'web', 'dist'), outDir });
+    await build({
+      siteDir: here, webDistDir: join(here, '..', 'web', 'dist'), outDir,
+      allowTestnetExamples: process.argv.includes('--allow-testnet-examples'),
+    });
     console.log(`site built into ${outDir}`);
   } catch (error) {
     console.error(error.message);

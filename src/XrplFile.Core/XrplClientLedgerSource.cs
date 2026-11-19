@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Xrpl.Client;
 using Xrpl.Client.Exceptions;
 using Xrpl.Client.Json;
@@ -28,17 +29,20 @@ namespace XrplFile;
 /// setting lets the collector reclaim it in gen0 (README, "Collector settings for hosts").
 /// </para>
 /// </remarks>
-public sealed class XrplClientLedgerSource : ILedgerSource
+public sealed partial class XrplClientLedgerSource : ILedgerSource
 {
     private readonly IXrplClient? _client;
     private readonly int _pageSize;
     private readonly Func<BaseRequest, CancellationToken, Task<NodeAnswer>> _request;
+    private readonly TimeProvider _time;
     private long _loadWarnings;
 
-    public XrplClientLedgerSource(IXrplClient client, int pageSize = 400)
+    /// <param name="time">The clock the rate-limit waits run on; tests pass a manual one.</param>
+    public XrplClientLedgerSource(IXrplClient client, int pageSize = 400, TimeProvider? time = null)
     {
         _client = client;
         _pageSize = pageSize;
+        _time = time ?? TimeProvider.System;
         _request = SendAsync;
     }
 
@@ -48,15 +52,16 @@ public sealed class XrplClientLedgerSource : ILedgerSource
     /// including one that fails the way a dropped connection does — can stand in for a whole
     /// <see cref="IXrplClient"/>.
     /// </summary>
-    internal XrplClientLedgerSource(Func<BaseRequest, CancellationToken, Task<JsonElement>> request, int pageSize = 400)
-        : this(async (sent, token) => new NodeAnswer(await request(sent, token).ConfigureAwait(false), null), pageSize)
+    internal XrplClientLedgerSource(Func<BaseRequest, CancellationToken, Task<JsonElement>> request, int pageSize = 400, TimeProvider? time = null)
+        : this(async (sent, token) => new NodeAnswer(await request(sent, token).ConfigureAwait(false), null), pageSize, time)
     {
     }
 
     /// <summary>The same seam, for a scripted node that also says what the envelope's <c>warning</c> was.</summary>
-    internal XrplClientLedgerSource(Func<BaseRequest, CancellationToken, Task<NodeAnswer>> request, int pageSize = 400)
+    internal XrplClientLedgerSource(Func<BaseRequest, CancellationToken, Task<NodeAnswer>> request, int pageSize = 400, TimeProvider? time = null)
     {
         _pageSize = pageSize;
+        _time = time ?? TimeProvider.System;
         _request = request;
     }
 
@@ -460,6 +465,101 @@ public sealed class XrplClientLedgerSource : ILedgerSource
         return long.TryParse(lowest.Trim(), out long result) ? result : null;
     }
 
+    private static readonly TimeSpan MinHintedWait = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan MaxHintedWait = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan FirstBackoff = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan RateLimitPatience = TimeSpan.FromMinutes(2);
+
+    [GeneratedRegex(@"retry in ~?(\d+)\s*ms", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex RetryHintPattern();
+
+    /// <summary>
+    /// Sends one request, and when the node answers that it is rate-limiting or overloaded
+    /// (<c>slowDown</c>, <c>tooBusy</c>) waits and asks the same request again. Public nodes meter
+    /// by units per 10 seconds, and a resume's reconciliation reads (account_tx pages of
+    /// 1,000-byte memos) exhaust the quota, so a read that stopped there would only be restarted
+    /// into the same burst; the wait has to happen inside the read. The node's own
+    /// "retry in ~N ms" is honoured (clamped to 1 s to 60 s), else the wait backs off 2 s, 4 s, 8 s
+    /// up to 30 s. After 2 minutes of waiting for one request the last answer or exception goes
+    /// on to the callers' ordinary handling, which reports it as NodeUnreachable. Every other
+    /// error passes through untouched.
+    /// </summary>
+    private async Task<NodeAnswer> RequestAsync(BaseRequest request, CancellationToken cancellationToken)
+    {
+        TimeSpan waited = TimeSpan.Zero;
+        int attempt = 0;
+
+        while (true)
+        {
+            string? message;
+            NodeAnswer raw;
+
+            try
+            {
+                raw = await _request(request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception e) when (e is not OperationCanceledException
+                && e is not XrplFileException
+                && IsRateLimit(e.Classify().RawError)
+                && NextWait(e.Message, attempt, waited) is not null)
+            {
+                TimeSpan pause = NextWait(e.Message, attempt, waited)!.Value;
+                attempt++;
+                waited += pause;
+                await Task.Delay(pause, _time, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            if (!IsRateLimitAnswer(raw.Result, out message)) return raw;
+
+            if (NextWait(message, attempt, waited) is not { } wait) return raw;
+
+            raw.Dispose();
+            attempt++;
+            waited += wait;
+            await Task.Delay(wait, _time, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    // Literals: the SDK release this library builds against has no constants for rippled's rate-limit codes.
+    private static bool IsRateLimit(string? code) =>
+        string.Equals(code, "slowDown", StringComparison.Ordinal)
+        || string.Equals(code, "tooBusy", StringComparison.Ordinal);
+
+    private static bool IsRateLimitAnswer(JsonElement result, out string? message)
+    {
+        message = null;
+
+        if (result.ValueKind != JsonValueKind.Object
+            || !result.TryGetProperty("error", out JsonElement error)
+            || error.ValueKind != JsonValueKind.String
+            || !IsRateLimit(error.GetString()))
+        {
+            return false;
+        }
+
+        message = Text(result, "error_message");
+        return true;
+    }
+
+    /// <summary>The next wait, or null once <see cref="RateLimitPatience"/> is used up.</summary>
+    private static TimeSpan? NextWait(string? message, int attempt, TimeSpan waited)
+    {
+        if (waited >= RateLimitPatience) return null;
+
+        if (message is not null
+            && RetryHintPattern().Match(message) is { Success: true } hint
+            && long.TryParse(hint.Groups[1].Value, out long milliseconds))
+        {
+            TimeSpan hinted = TimeSpan.FromMilliseconds(Math.Min(milliseconds, MaxHintedWait.TotalMilliseconds));
+            return hinted < MinHintedWait ? MinHintedWait : hinted;
+        }
+
+        double seconds = FirstBackoff.TotalSeconds * Math.Pow(2, Math.Min(attempt, 10));
+        return TimeSpan.FromSeconds(Math.Min(seconds, MaxBackoff.TotalSeconds));
+    }
+
     /// <summary>One request, with every way it can fail turned into NodeUnreachable.</summary>
     private async Task<JsonElement> AskAsync(BaseRequest request, string command, CancellationToken cancellationToken)
     {
@@ -467,7 +567,7 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
         try
         {
-            raw = await _request(request, cancellationToken).ConfigureAwait(false);
+            raw = await RequestAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception e) when (IsNodeFailure(e, cancellationToken))
         {
@@ -531,7 +631,7 @@ public sealed class XrplClientLedgerSource : ILedgerSource
 
         try
         {
-            raw = await _request(request, cancellationToken).ConfigureAwait(false);
+            raw = await RequestAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception e) when (e is not OperationCanceledException && IsAbsent(e.Classify().RawError, absentCodes))
         {

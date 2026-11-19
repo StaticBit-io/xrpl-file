@@ -959,8 +959,11 @@
   transition: opacity 250ms;
 }
 
-/* After `load` the file is verified, but the cubes may only just have appeared: the element stays out of
-   sight while they light up and settle. visibility keeps its box, so the canvas keeps its size. */
+/* The element stays out of sight while the cloud is the loader (is-reading, from mount): a video draws its
+   player shell on the first verified block, long before `load`. After `load` the cubes may only just have
+   appeared, so a file other than a video stays hidden while they settle (is-settling). visibility keeps
+   the box, so the canvas keeps its size. */
+.file__stage.is-reading xrpl-file,
 .file__stage.is-settling xrpl-file {
   visibility: hidden;
 }
@@ -1092,4 +1095,173 @@
 
 .notice-page h1 {
   font-size: var(--text-section);
+}
+
+/* Home: the link to the examples page under the hero's actions. */
+.hero__more {
+  font-size: var(--text-sm);
+}
+
+/* Examples page: a grid of figures. The box reserves a picture's or video's shape before the file loads;
+   columns are at least 20rem so one column fits a 375 px phone with no sideways scroll, and a box is
+   never taller than 80vh, so a portrait video does not run past the screen (the element letterboxes). */
+.examples {
+  padding-block: var(--space-7) var(--section-gap);
+}
+
+.examples__intro > * + * {
+  margin-top: var(--space-4);
+}
+
+.examples__intro {
+  max-width: var(--measure);
+  margin-bottom: var(--space-8);
+}
+
+.examples__share {
+  color: var(--ink-2);
+}
+
+.examples__grid {
+  display: grid;
+  gap: var(--space-7) var(--gap-columns);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+  align-items: start;
+}
+
+.example {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+}
+
+.example__box {
+  width: 100%;
+  max-height: 80vh;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.example__box > xrpl-file {
+  width: 100%;
+  height: 100%;
+}
+
+.example figcaption > * + * {
+  margin-top: var(--space-2);
+}
+
+.example h2 {
+  font-size: var(--text-lg);
+}
+
+.example figcaption p {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+/* A card's embed code: a small "</>" button laid over the top right of the preview opens a modal dialog
+   with the code and a copy button. The button is always visible, since a phone has no hover, and sits
+   on a dark translucent plate so it reads on a picture, a video and an empty box alike. */
+.example__media {
+  position: relative;
+  min-width: 0;
+}
+
+.code-button {
+  position: absolute;
+  z-index: 1;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 0.28);
+  border-radius: var(--radius-control);
+  background: rgb(10 12 14 / 0.62);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background-color var(--dur-micro) var(--ease-out);
+}
+
+/* A text file scrolls inside its box: the button keeps clear of that box's scroll bar. */
+.example--text .code-button {
+  right: calc(var(--space-2) + 0.875rem);
+}
+
+.code-button:hover {
+  background: rgb(10 12 14 / 0.85);
+}
+
+.code-button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.code-dialog {
+  width: min(44rem, calc(100vw - 2 * var(--space-4)));
+  max-height: calc(100dvh - 2 * var(--space-4));
+  padding: var(--space-5);
+  border: var(--rule-hair) solid var(--rule);
+  border-radius: var(--radius-control);
+  background: var(--paper-2);
+  color: var(--ink);
+  overflow: auto;
+}
+
+.code-dialog::backdrop {
+  background: rgb(0 0 0 / 0.6);
+}
+
+.code-dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.code-dialog__title {
+  font-size: var(--text-lg);
+}
+
+.code-dialog__close {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--target);
+  height: var(--target);
+  margin: calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.code-dialog__close:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* The code wraps instead of scrolling sideways: the copy button takes the text, not the layout. */
+.code-dialog pre {
+  padding: var(--space-4);
+  border: var(--rule-hair) solid var(--rule-2);
+  border-radius: var(--radius-control);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.code-dialog pre code {
+  font-size: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

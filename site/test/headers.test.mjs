@@ -22,3 +22,9 @@ test('a placeholder matches one segment and a splat matches the rest', () => {
   assert.deepEqual(headersFor('/a/z/y', custom), []);
   assert.deepEqual(headersFor('/c/z/y', custom), [['X-Two', '2']]);
 });
+
+test('the examples pages are revalidated like the other pages', () => {
+  for (const path of ['/examples', '/ru/examples', '/de/examples', '/es/examples', '/pt/examples', '/zh/examples']) {
+    assert.ok(headersFor(path, rules).some(([name, value]) => name === 'Cache-Control' && value === 'no-cache'), path);
+  }
+});

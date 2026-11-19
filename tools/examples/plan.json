@@ -1,0 +1,42 @@
+[
+  {
+    "key": "xrpl-file-en-cover",
+    "file": "xrpl-file-en-cover.webp",
+    "type": "image/webp",
+    "name": "xrpl-file-en-cover.webp",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "xrpl-file-en",
+    "file": "xrpl-file-en.mp4",
+    "type": "video/mp4",
+    "name": "xrpl-file-en.mp4",
+    "writer": "a",
+    "cover": "xrpl-file-en-cover"
+  },
+  {
+    "key": "forest-guardian",
+    "file": "forest-guardian.webp",
+    "type": "image/webp",
+    "name": "forest-guardian.webp",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "about",
+    "file": "about.txt",
+    "type": "text/plain",
+    "name": "about.txt",
+    "writer": "a",
+    "cover": null
+  },
+  {
+    "key": "chunks",
+    "file": "chunks.svg",
+    "type": "image/svg+xml",
+    "name": "chunks.svg",
+    "writer": "a",
+    "cover": null
+  }
+]
