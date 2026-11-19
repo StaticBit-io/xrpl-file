@@ -236,7 +236,7 @@ test('the examples pages carry the English page ids and their own <html lang>', 
     assert.match(examplePages[lang], /<meta name="description" content="[^"]{40,}">/, lang);
     for (const marker of ['head', 'header', 'footer']) assert.ok(examplePages[lang].includes(`<!--@chrome:${marker}-->`), `${lang} ${marker}`);
     assert.ok(examplePages[lang].includes('<!--@examples-->'), lang);
-    assert.ok(examplePages[lang].includes('src="/element/1.2.0/xrpl-file-element.js"'), lang);
+    assert.ok(examplePages[lang].includes('src="/element/1.2.1/xrpl-file-element.js"'), lang);
     assert.ok(!examplePages[lang].includes('\u2014'), `${lang} has no long dash`);
   }
 });
