@@ -110,6 +110,33 @@ public sealed class BusyRetryTests
     }
 
     [Fact]
+    public async Task SurvivesANodeOutageRaisedByTheGateInsideTheCatchPath()
+    {
+        // The gate rides out an unreachable node on its own fee read, so a publication that failed for the same
+        // reason is not ended by the gate's wait.
+        int fees = 0;
+        FeeGate gate = new(
+            _ => ++fees <= 2
+                ? throw new XrplFileException(XrplFileError.NodeUnreachable, "the node did not answer fee")
+                : Task.FromResult(new OpenLedgerFee(10, 10)),
+            (_, _) => Task.CompletedTask,
+            () => DateTimeOffset.UtcNow,
+            _ => { });
+        int attempts = 0;
+
+        string link = await BusyRetry.RunAsync(
+            "video",
+            _ => ++attempts == 1 ? throw Silent() : Task.FromResult("done"),
+            token => gate.WaitForFeeAsync("video", token),
+            (_, _) => Task.CompletedTask,
+            _ => { },
+            CancellationToken.None);
+
+        Assert.Equal("done", link);
+        Assert.Equal(2, attempts);
+    }
+
+    [Fact]
     public async Task RetriesTwentyFiveSuccessiveNodeOutages()
     {
         Harness h = new();

@@ -19,6 +19,8 @@ public sealed class FeeGateTests
 
         public int Reads { get; private set; }
 
+        public void Advance(TimeSpan span) => Now += span;
+
         public FeeGate Gate => new(
             _ =>
             {
@@ -109,6 +111,52 @@ public sealed class FeeGateTests
         await h.Gate.WaitForFeeAsync("plan", CancellationToken.None);
 
         Assert.Equal(1, h.Reads);
+    }
+
+    private static FeeGate GateOver(Func<int, OpenLedgerFee> read, Harness clock, Action<string> log)
+    {
+        int reads = 0;
+        return new FeeGate(
+            _ => Task.FromResult(read(++reads)),
+            (span, _) =>
+            {
+                clock.Delays.Add(span);
+                clock.Advance(span);
+                return Task.CompletedTask;
+            },
+            () => clock.Now,
+            log);
+    }
+
+    [Fact]
+    public async Task TreatsAnUnreachableNodeOnTheFeeReadAsNotYet()
+    {
+        Harness h = new();
+        FeeGate gate = GateOver(
+            n => n <= 2 ? throw new XrplFileException(XrplFileError.NodeUnreachable, "the node did not answer fee") : new OpenLedgerFee(10, 10),
+            h, h.Log.Add);
+
+        await gate.WaitForFeeAsync("cover", CancellationToken.None);
+
+        Assert.Equal([TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10)], h.Delays);
+        Assert.Contains("not answering", h.Log[0], StringComparison.Ordinal);
+        Assert.Contains("resuming", h.Log[^1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GivesUpAfterFifteenMinutesOfAnUnreachableNode()
+    {
+        Harness h = new();
+        FeeGate gate = GateOver(
+            _ => throw new XrplFileException(XrplFileError.NodeUnreachable, "the node did not answer fee"), h, h.Log.Add);
+
+        XrplFileException e = await Assert.ThrowsAsync<XrplFileException>(() => gate.WaitForFeeAsync("cover", CancellationToken.None));
+
+        Assert.Equal(XrplFileError.FeeTooHigh, e.Error);
+        Assert.Contains("node was not answering", e.Message, StringComparison.Ordinal);
+        Assert.Contains("15 minutes", e.Message, StringComparison.Ordinal);
+        Assert.Equal(TimeSpan.FromMinutes(15), h.Delays.Aggregate(TimeSpan.Zero, (sum, delay) => sum + delay));
+        Assert.Equal(1 + 15, h.Log.Count);
     }
 
     [Fact]

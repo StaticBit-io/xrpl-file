@@ -50,37 +50,58 @@ internal sealed class FeeGate
         string target = unitCeilingDrops is { } ceiling
             ? $"above {limit} or a fee unit above the approved {ceiling}"
             : $"above {limit}";
-        OpenLedgerFee fee = await _readFee(cancellationToken).ConfigureAwait(false);
-
-        if (IsWithin(fee, limit, unitCeilingDrops)) return;
-
         DateTimeOffset started = _now();
         DateTimeOffset lastReport = started;
-        _log($"  {key}: the open-ledger fee is {Drops(fee.OpenLedgerFeeDrops)} drops, {target}; waiting for it to fall");
+        OpenLedgerFee? fee = null;
+        string? silence = null;
+        bool waiting = false;
 
         while (true)
         {
-            if (_now() - started >= MaxWait)
+            // A node that does not answer the fee read is "not yet", like a high fee: the rate limit that stops a
+            // resume's reads also stops this one, and ending the run here would discard the typed seeds.
+            try
             {
-                throw new XrplFileException(XrplFileError.FeeTooHigh,
-                    $"the open-ledger fee is {fee.OpenLedgerFeeDrops} drops ({target}) and did not fall within "
-                    + $"{(int)MaxWait.TotalMinutes} minutes; run the same command again to resume");
+                fee = await _readFee(cancellationToken).ConfigureAwait(false);
+                silence = null;
+            }
+            catch (XrplFileException e) when (e.Error == XrplFileError.NodeUnreachable)
+            {
+                silence = e.Message;
             }
 
-            await _delay(PollInterval, cancellationToken).ConfigureAwait(false);
-            fee = await _readFee(cancellationToken).ConfigureAwait(false);
-
-            if (IsWithin(fee, limit, unitCeilingDrops))
+            if (fee is { } read && silence is null && IsWithin(read, limit, unitCeilingDrops))
             {
-                _log($"  {key}: the open-ledger fee is {Drops(fee.OpenLedgerFeeDrops)} drops; resuming after {(_now() - started).TotalSeconds:0} s");
+                if (waiting) _log($"  {key}: the open-ledger fee is {Drops(read.OpenLedgerFeeDrops)} drops; resuming after {(_now() - started).TotalSeconds:0} s");
                 return;
             }
 
-            if (_now() - lastReport >= ReportInterval)
+            if (!waiting)
+            {
+                waiting = true;
+                _log(silence is null
+                    ? $"  {key}: the open-ledger fee is {Drops(fee!.OpenLedgerFeeDrops)} drops, {target}; waiting for it to fall"
+                    : $"  {key}: the node is not answering the fee read ({silence}); waiting for it to answer");
+            }
+            else if (_now() - lastReport >= ReportInterval)
             {
                 lastReport = _now();
-                _log($"  {key}: the open-ledger fee is still {Drops(fee.OpenLedgerFeeDrops)} drops ({target}); waited {(lastReport - started).TotalSeconds:0} s");
+                _log(silence is null
+                    ? $"  {key}: the open-ledger fee is still {Drops(fee!.OpenLedgerFeeDrops)} drops ({target}); waited {(lastReport - started).TotalSeconds:0} s"
+                    : $"  {key}: the node is still not answering the fee read; waited {(lastReport - started).TotalSeconds:0} s");
             }
+
+            if (_now() - started >= MaxWait)
+            {
+                throw new XrplFileException(XrplFileError.FeeTooHigh,
+                    silence is null
+                        ? $"the open-ledger fee is {fee!.OpenLedgerFeeDrops} drops ({target}) and did not fall within "
+                            + $"{(int)MaxWait.TotalMinutes} minutes; run the same command again to resume"
+                        : $"the node was not answering the fee read for {(int)MaxWait.TotalMinutes} minutes ({silence}); "
+                            + "run the same command again to resume");
+            }
+
+            await _delay(PollInterval, cancellationToken).ConfigureAwait(false);
         }
     }
 
