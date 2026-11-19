@@ -8,9 +8,9 @@ import { HERO_LINK } from './config.mjs';
 
 /** @type {Example[]} */
 export const EXAMPLES = [
-  { key: 'forest-guardian', link: 'xrpl-file://testnet/D1E0AADD2B118CDBC43AA73DF1C696DA49A8E241752A1E753E617297BFD51348', kind: 'drawing', bytes: 127082, width: 960, height: 640 },
-  { key: 'xrpl-file-en', link: 'xrpl-file://testnet/D345607DBF512A442E99417FE32147F851DEF026388496F7378024C914B2BBB8', kind: 'video', bytes: 1880596, width: 1280, height: 720 },
-  { key: 'chunks', link: 'xrpl-file://testnet/ADAB5DD105663299DA3B98A94F2F3C88ABCE7E649C1CBCB10F6A7470E5439A9E', kind: 'svg', bytes: 1618 },
-  { key: 'about', link: 'xrpl-file://testnet/113A706B9AA28827FFB3291871A43B30208F8A8E9E8FDA8723F42CFB663FBEFB', kind: 'text', bytes: 2202 },
+  { key: 'forest-guardian', link: 'xrpl-file://mainnet/5B7B036AEEDCF8D9A3FD17CA829614EAB3CA9BF699C66F02DCF8D5D6CC27E13F', kind: 'drawing', bytes: 127082, width: 960, height: 640 },
+  { key: 'xrpl-file-en', link: 'xrpl-file://mainnet/EE2B3C105D17E3A1954696BD3BF0069DED00363839B12385AEBE5BFE4C0AB077', kind: 'video', bytes: 1880596, width: 1280, height: 720 },
+  { key: 'chunks', link: 'xrpl-file://mainnet/ADDD46866CC60F631D6829C1F6B7E4DED30B6DDA3B26116A556D8FC6C7FF58AB', kind: 'svg', bytes: 1618 },
+  { key: 'about', link: 'xrpl-file://mainnet/893484332BE9202205F38AD34EC1CB0610E4F2AF4187D31D187C10B14B0C0228', kind: 'text', bytes: 2202 },
   { key: 'logo', link: HERO_LINK, kind: 'logo', bytes: 122958, width: 1422, height: 1231 },
 ];

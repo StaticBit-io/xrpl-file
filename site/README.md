@@ -30,7 +30,7 @@ Requires Node 22 or newer. There are no npm dependencies.
 ```bash
 cd web && node build.mjs && cd ..   # builds web/dist/1.3.0 (the element and the reader)
 node site/build.mjs                  # writes site/dist
-node site/build.mjs --allow-testnet-examples   # local preview with the testnet stand-in examples
+node site/build.mjs --allow-testnet-examples   # local preview with testnet example links
 node site/serve.mjs                  # http://127.0.0.1:8791/ (next free port if taken)
 node --test site/test/*.test.mjs     # site tests
 ```
@@ -160,11 +160,10 @@ To add or replace an example:
 3. `node --test site/test/*.test.mjs`: the tests fail on a language without the key.
 
 **The build guard.** The page says every file is read from mainnet, so `node site/build.mjs` fails when any
-`EXAMPLES` link is not an `xrpl-file://mainnet/` link, and every deploy workflow runs it that way. The
-branch that adds the page carries testnet stand-ins, which therefore block the production build (and CI,
-which builds the site) until phase 2 swaps in the owner's mainnet links; that is intended. Pass
-`--allow-testnet-examples` (or `allowTestnetExamples: true` to `build()`) only for a local preview. The
-site tests that build pass it where they need the stand-ins.
+`EXAMPLES` link is not an `xrpl-file://mainnet/` link, and every deploy workflow runs it that way, so a
+testnet link put in for a rehearsal cannot reach the published site. Pass `--allow-testnet-examples` (or
+`allowTestnetExamples: true` to `build()`) only for a local preview. The site tests that build pass it
+where they need testnet links.
 
 How the owner's own files get onto mainnet and into this list: [`tools/examples/README.md`](../tools/examples/README.md).
 

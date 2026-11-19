@@ -1,7 +1,7 @@
 # Publishing the mainnet examples
 
 This guide takes the owner from their own files to the links on the [examples page](../../site/README.md#examples-page).
-It covers phase 2 of the work: preparing the files, rehearsing on testnet, publishing on mainnet and
+It covers preparing the files, rehearsing on testnet, publishing on mainnet and
 putting the links into the site.
 
 Three rules govern everything below:
