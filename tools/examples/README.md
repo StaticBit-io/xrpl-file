@@ -140,6 +140,10 @@ A run that stops (Ctrl+C, a lost connection, a rise in fees) is repeated with th
 same arguments. Files already in `links.json` are skipped, and an unfinished file is resumed from its
 state under `run/examples/state/<key>`.
 
+A short rise in fees does not stop the run: when the open-ledger fee is above 200 drops, the tool waits for
+it to fall, checking every 10 seconds and printing a line at least once a minute, for up to 15 minutes per wait,
+and then continues with the same file under the same printed cap. Only if the fee has not fallen by then does the tool stop; run the same command again to resume.
+
 A resumed run asks for both seeds and the confirmation phrase again, because it prices what is left and
 the owner must see that number. A file being resumed is printed with `resume: at most`: transactions
 already submitted are not repeated, so the work left costs no more than the printed figures and may cost

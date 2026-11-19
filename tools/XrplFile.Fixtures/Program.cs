@@ -316,6 +316,7 @@ internal sealed class FixtureRun : IAsyncDisposable
     private readonly XrplClient _client;
     private readonly XrplClientLedgerSink _sink;
     private readonly XrplClientLedgerSource _source;
+    private readonly FeeGate _feeGate;
     private readonly string _linksPath;
     private readonly Dictionary<string, string> _links;
 
@@ -335,6 +336,7 @@ internal sealed class FixtureRun : IAsyncDisposable
         _client = client;
         _sink = new XrplClientLedgerSink(client);
         _source = new XrplClientLedgerSource(client);
+        _feeGate = new FeeGate(_source.OpenLedgerFeeAsync);
         _linksPath = Path.Combine(options.OutDirectory, "links.json");
         _links = links;
     }
@@ -443,7 +445,10 @@ internal sealed class FixtureRun : IAsyncDisposable
                 continue;
             }
 
-            XrplFileLink link = await PublishAsync(entry, quote, cancellationToken);
+            XrplFileLink link = await FeeRetry.RunAsync(
+                token => PublishAsync(entry, quote, token),
+                token => _feeGate.WaitForFeeAsync(entry.Key, token),
+                cancellationToken);
 
             _links[entry.Key] = link.ToString();
             SaveLinks();
