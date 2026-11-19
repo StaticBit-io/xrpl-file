@@ -1191,3 +1191,24 @@ test('nodes that keep taking the walk from each other end it as unreachable inst
     client.close();
   });
 });
+
+test('an error answer to a page sent with another node\'s marker restarts the walk instead of ending it', async () => {
+  for (const refusal of ['actNotFound', 'invalidParams']) {
+    const own = pagedNode('last');
+    const issued = new Set();
+    // This node refuses a marker it did not issue, and answers a walk without one.
+    const refusesForeign = (command, frame) => {
+      if (frame.marker && !issued.has(JSON.stringify(frame.marker))) return { status: 'error', error: refusal };
+      const reply = own(command, frame);
+      if (reply.result?.marker) issued.add(JSON.stringify(reply.result.marker));
+      return reply;
+    };
+    const script = { 'wss://cluster.invalid': pagedNode('next', { busyOn: (call) => call >= 2 }), 'wss://s2.invalid': refusesForeign };
+    await withScript(script, async ({ timers }) => {
+      const client = new LedgerClient(['wss://cluster.invalid', 'wss://s2.invalid'], { ...timers, pageSize: 2 });
+
+      assert.deepEqual(await walkAll(client), ['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7'], refusal);
+      client.close();
+    });
+  }
+});

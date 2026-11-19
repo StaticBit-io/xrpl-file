@@ -42,7 +42,7 @@ test('an element error carries its own sentence', () => {
 
 test('the element sentences are fixed', () => {
   assert.equal(NO_NODE, 'This network has no built-in node. Set the node attribute.');
-  assert.equal(BAD_NODE, 'The node attribute must hold wss:// addresses, separated by spaces or commas.');
+  assert.equal(BAD_NODE, 'The node attribute must hold wss:// addresses, separated by spaces.');
   assert.equal(INSECURE, 'This page is not served over HTTPS, so the browser cannot check this file.');
   assert.equal(NO_LINK, 'There is no xrpl-file link in this element.');
 });

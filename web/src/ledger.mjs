@@ -399,12 +399,8 @@ export class LedgerClient {
       const { answer, endpoint } = await this.ask('account_tx', {
         account, ledger_index_min: low, ledger_index_max: high, forward, limit: this.pageSize, ...(marker ? { marker } : {}),
       });
-      // An account the node has never heard of has no transactions -- that is an answer, not a
-      // failure to read, exactly as txnNotFound is for tx above. The .NET source agrees, and the
-      // two have to: a mirror that turns absence into an unreachable node reports a file as
-      // missing on one side and the network as down on the other.
-      if (answer.error === 'actNotFound') return;
-      if (answer.error) throw new XrplFileError('NodeUnreachable', `${endpoint} answered ${answer.error} to account_tx`);
+      // Checked before the answer is read at all: a node handed a marker it did not issue may refuse
+      // it or say it knows no such account, and neither answer says anything about the walk.
       if (marker && endpoint !== markerFrom) {
         // Nodes taking turns while a single ledger holds more than a page would restart forever.
         if (++idleRestarts > MAX_IDLE_RESTARTS) {
@@ -418,6 +414,12 @@ export class LedgerClient {
         }
         continue;
       }
+      // An account the node has never heard of has no transactions -- that is an answer, not a
+      // failure to read, exactly as txnNotFound is for tx above. The .NET source agrees, and the
+      // two have to: a mirror that turns absence into an unreachable node reports a file as
+      // missing on one side and the network as down on the other.
+      if (answer.error === 'actNotFound') return;
+      if (answer.error) throw new XrplFileError('NodeUnreachable', `${endpoint} answered ${answer.error} to account_tx`);
       for (const record of answer.transactions ?? []) {
         const tx = parseRecord(record);
         if (tx.hash && tx.ledgerIndex === edgeLedger && yieldedAtEdge.has(tx.hash)) continue;

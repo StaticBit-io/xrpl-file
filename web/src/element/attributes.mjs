@@ -88,11 +88,20 @@ function nodeUrl(node) {
 
 /**
  * The nodes to read from: the `node` attribute when given -- one address or several, separated by
- * spaces or commas and tried in that order -- else the built-in endpoints of the link's network.
+ * white space and tried in that order -- else the built-in endpoints of the link's network. White
+ * space is the only separator because it is the one character a URL cannot hold; a comma can sit in
+ * a query. Two spellings of one node (case, a trailing slash, the default port) are asked once.
  */
 export function endpointsFor(link, node) {
-  const given = typeof node === 'string' ? node.split(/[\s,]+/).filter(Boolean) : [];
-  if (given.length > 0) return [...new Set(given.map(nodeUrl))];
+  const given = typeof node === 'string' ? node.split(/\s+/).filter(Boolean) : [];
+  if (given.length > 0) {
+    const nodes = new Map();
+    for (const address of given) {
+      const key = new URL(nodeUrl(address)).href;
+      if (!nodes.has(key)) nodes.set(key, address);
+    }
+    return [...nodes.values()];
+  }
   const builtIn = Object.hasOwn(ENDPOINTS, link.network) ? ENDPOINTS[link.network] : null;
   if (!builtIn) throw elementError('NodeUnreachable', NO_NODE);
   return [...builtIn];

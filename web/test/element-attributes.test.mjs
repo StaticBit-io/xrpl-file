@@ -55,14 +55,25 @@ test('a node attribute replaces the built-in endpoints', () => {
   assert.deepEqual(endpointsFor({ network: '21337' }, 'wss://node.example'), ['wss://node.example']);
 });
 
-test('a node attribute may list several nodes, tried in the order given', () => {
+test('a node attribute may list several nodes separated by white space, tried in the order given', () => {
   assert.deepEqual(
     endpointsFor({ network: 'mainnet' }, 'wss://one.example wss://two.example'),
     ['wss://one.example', 'wss://two.example'],
   );
   assert.deepEqual(
-    endpointsFor({ network: 'mainnet' }, ' wss://one.example,wss://two.example ,\n wss://three.example '),
+    endpointsFor({ network: 'mainnet' }, ' wss://one.example\n\twss://two.example   wss://three.example '),
     ['wss://one.example', 'wss://two.example', 'wss://three.example'],
+  );
+});
+
+test('a comma belongs to the address: a query with commas stays one node', () => {
+  assert.deepEqual(endpointsFor({ network: 'mainnet' }, 'wss://node.example/rpc?token=a,b'), ['wss://node.example/rpc?token=a,b']);
+});
+
+test('two spellings of one node are asked once, under the first spelling', () => {
+  assert.deepEqual(
+    endpointsFor({ network: 'mainnet' }, 'wss://n.example wss://N.example/ wss://n.example:443 wss://other.example'),
+    ['wss://n.example', 'wss://other.example'],
   );
 });
 
@@ -74,7 +85,7 @@ test('a node listed twice is asked once, at its first place', () => {
 });
 
 test('one bad address refuses the whole list rather than quietly dropping a node', () => {
-  for (const bad of ['wss://one.example ws://example.com', 'wss://one.example, http://x'])
+  for (const bad of ['wss://one.example ws://example.com', 'wss://one.example http://x'])
     assert.throws(() => endpointsFor({ network: 'mainnet' }, bad), (e) => e.sentence === BAD_NODE, bad);
 });
 
