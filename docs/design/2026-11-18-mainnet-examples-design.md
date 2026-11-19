@@ -50,8 +50,8 @@ described below, after reading its estimate.
 - Choosing a cover in the desktop app. A useful feature, but a project of its own, and it would
   touch files open in other work (PR #9, the in-app tutorial).
 - Any change to `web/src`. The element's bundle is pinned byte for byte by
-  `web/test/released-integrity.test.mjs`; the page uses the released element as it is (1.2.1, which
-  went out separately in PR #11).
+  `web/test/released-integrity.test.mjs`; the page uses the released element as it is (1.3.0, which
+  went out separately in its own PR).
 - Moving `web/demo/` to mainnet. The demo pages exercise edge cases (inert HTML and SVG, a broken
   cover, HEVC, a file larger than memory) that are test material, not a showcase. They stay on
   testnet and are left untouched.
@@ -263,7 +263,7 @@ drawing it, and the page's caption says why.
 The logo's entry is written from what `site/README.md` records about it: `image/png`, 1422 x 1231,
 122,958 bytes. Nothing is read from the ledger at build time.
 
-The element is loaded from the site's own copy (`/element/1.2.1/`), as on the home page, and follows
+The element is loaded from the site's own copy (`/element/1.3.0/`), as on the home page, and follows
 the site's theme the way the hero card does.
 
 **Order:** the owner's drawings, the video, the SVG, the text, the logo.
