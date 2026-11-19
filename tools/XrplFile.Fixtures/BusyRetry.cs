@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace XrplFile;
 
 /// <summary>
-/// Resumes a file whose Batch did not land while the network was busy. The Core stops a session after a memo misses
+/// Resumes a file whose Batch did not land while the network was busy, or whose node stopped answering. The Core stops a session after a memo misses
 /// its allowed candidates (spec B13), but those candidates are not on the ledger and were not charged, and running the
 /// same command again resumes the entry as a new session with fresh counts. This does that without sending the owner
 /// back to retype both seeds and the phrase.
@@ -63,6 +63,15 @@ internal static partial class BusyRetry
             {
                 await waitForFee(cancellationToken).ConfigureAwait(false);
             }
+            catch (XrplFileException e) when (e.Error == XrplFileError.NodeUnreachable)
+            {
+                // The Core already waited out a rate limit inside the read; what reaches here is a node that stayed
+                // silent or overloaded for minutes, or a dropped connection. Publishing again resumes from the ledger.
+                log($"  {key}: the node is not answering ({ShortReason(e.Message)}); "
+                    + $"pausing {(int)Pause.TotalSeconds} s, then resuming this file");
+                await delay(Pause, cancellationToken).ConfigureAwait(false);
+                await waitForFee(cancellationToken).ConfigureAwait(false);
+            }
             catch (XrplFileException e) when (IsNotLanded(e))
             {
                 Match tries = TriesPattern().Match(e.Message);
@@ -73,5 +82,13 @@ internal static partial class BusyRetry
                 await waitForFee(cancellationToken).ConfigureAwait(false);
             }
         }
+    }
+
+    /// <summary>The first line of the Core's message, cut to a length that keeps the log line readable.</summary>
+    private static string ShortReason(string message)
+    {
+        string line = message.Split('\n', 2)[0].Trim();
+        const int limit = 120;
+        return line.Length <= limit ? line : line[..limit] + "...";
     }
 }

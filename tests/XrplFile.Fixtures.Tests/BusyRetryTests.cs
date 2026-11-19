@@ -90,6 +90,48 @@ public sealed class BusyRetryTests
         Assert.Equal(25, h.Gates);
     }
 
+    private static XrplFileException Silent(string reason = "the node did not answer ledger_entry: slowDown - rate limit") =>
+        new(XrplFileError.NodeUnreachable, reason);
+
+    [Fact]
+    public async Task PausesAndPublishesAgainWhenTheNodeIsNotAnswering()
+    {
+        Harness h = new();
+
+        string link = await h.RunAsync(n => n == 1 ? throw Silent() : "xrpl-file://mainnet/abc");
+
+        Assert.Equal("xrpl-file://mainnet/abc", link);
+        Assert.Equal(2, h.Attempts);
+        Assert.Equal(1, h.Gates);
+        Assert.Equal([TimeSpan.FromSeconds(60)], h.Delays);
+        Assert.Equal(
+            ["  video: the node is not answering (the node did not answer ledger_entry: slowDown - rate limit); pausing 60 s, then resuming this file"],
+            h.Log);
+    }
+
+    [Fact]
+    public async Task RetriesTwentyFiveSuccessiveNodeOutages()
+    {
+        Harness h = new();
+
+        string link = await h.RunAsync(n => n <= 25 ? throw Silent() : "done");
+
+        Assert.Equal("done", link);
+        Assert.Equal(26, h.Attempts);
+        Assert.Equal(25, h.Delays.Count);
+        Assert.Equal(25, h.Gates);
+    }
+
+    [Fact]
+    public async Task ShortensALongNodeReasonToItsFirstLine()
+    {
+        Harness h = new();
+
+        await h.RunAsync(n => n == 1 ? throw Silent("first line\nsecond line") : "ok");
+
+        Assert.Contains("(first line);", h.Log[0], StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task PropagatesAMalformedRefusalAtOnce()
     {
