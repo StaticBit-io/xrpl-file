@@ -435,7 +435,10 @@ internal sealed class FixtureRun : IAsyncDisposable
     {
         Links.RequireNetwork(_links, _network, _linksPath);
 
-        PlanQuote? quote = _writerKey is null ? null : await QuoteAsync(cancellationToken);
+        // No approval exists while the plan is being priced, so a spike here is waited out against the start limit alone.
+        PlanQuote? quote = _writerKey is null
+            ? null
+            : await FeeRetry.RunAsync(QuoteAsync, token => _feeGate.WaitForFeeAsync("plan", token), cancellationToken);
 
         foreach (PlanEntry entry in _plan)
         {
@@ -447,7 +450,8 @@ internal sealed class FixtureRun : IAsyncDisposable
 
             XrplFileLink link = await FeeRetry.RunAsync(
                 token => PublishAsync(entry, quote, token),
-                token => _feeGate.WaitForFeeAsync(entry.Key, token),
+                token => _feeGate.WaitForFeeAsync(
+                    entry.Key, token, quote?.ApprovalFor(entry.Key, WriterAddress(entry), PayerAddress).FeeUnitCeilingDrops),
                 cancellationToken);
 
             _links[entry.Key] = link.ToString();

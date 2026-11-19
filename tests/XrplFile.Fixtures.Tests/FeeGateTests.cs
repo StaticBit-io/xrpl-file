@@ -89,6 +89,29 @@ public sealed class FeeGateTests
     }
 
     [Fact]
+    public async Task KeepsWaitingWhileTheUnitIsAboveTheApprovedCeiling()
+    {
+        // 150 drops is under the 200 start limit but gives a unit of 225; the approved ceiling is 100.
+        Harness h = new(150, 150, 60);
+
+        await h.Gate.WaitForFeeAsync("cover", CancellationToken.None, unitCeilingDrops: 100);
+
+        Assert.Equal(3, h.Reads);
+        Assert.Equal(2, h.Delays.Count);
+        Assert.Contains("approved 100", h.Log[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WithoutACeilingOnlyTheStartLimitApplies()
+    {
+        Harness h = new(150);
+
+        await h.Gate.WaitForFeeAsync("plan", CancellationToken.None);
+
+        Assert.Equal(1, h.Reads);
+    }
+
+    [Fact]
     public async Task HonoursCancellation()
     {
         Harness h = new(49080);
