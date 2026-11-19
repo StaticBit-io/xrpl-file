@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 
 using XrplFile.App.Core;
 using XrplFile.App.Core.Localization;
+using XrplFile.App.Core.Tutorial;
 using XrplFile.App.Platform;
 using XrplFile.Keys;
 
@@ -290,6 +291,7 @@ public static class MauiProgram
         // Which tab the shell shows (design 4.4) — a model rather than a private field of
         // Shell.razor, so something outside that markup (the publications list) can put a link on ReadModel and then switch the shell to the Read tab itself.
         services.AddSingleton<ShellModel>();
+        services.AddSingleton<ScreenNavigation>();
 
         // The Read tab (design 4.1/4.2). Both singletons for the same reason every model here is:
         // state survives switching tabs, and for ReadRun that is the whole of decision H6 -- a read
@@ -300,5 +302,23 @@ public static class MauiProgram
             provider.GetRequiredService<IFilePickerService>(),
             provider.GetRequiredService<IKeepAwake>(),
             line => StartupLog.Write(line)));
+
+        // The tutorial (design "The way in"). Facts are captured on demand from the live singletons,
+        // so the model never holds a stale copy of what the screens show.
+        services.AddSingleton<ITutorialSettingsStore>(new FileTutorialSettingsStore());
+        services.AddSingleton<ITutorialReadTab>(provider => new ReadTab(
+            provider.GetRequiredService<ReadModel>(),
+            provider.GetRequiredService<ReadRun>()));
+        services.AddSingleton(provider => new TutorialModel(
+            provider.GetRequiredService<ITutorialSettingsStore>(),
+            provider.GetRequiredService<ShellModel>(),
+            provider.GetRequiredService<ScreenNavigation>(),
+            provider.GetRequiredService<ITutorialReadTab>(),
+            () => TutorialFacts.Capture(
+                provider.GetRequiredService<IKeyVault>(),
+                provider.GetRequiredService<AccountsModel>(),
+                provider.GetRequiredService<RunModel>(),
+                provider.GetRequiredService<ReadModel>(),
+                provider.GetRequiredService<ReadRun>())));
     }
 }

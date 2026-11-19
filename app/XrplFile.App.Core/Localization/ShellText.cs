@@ -21,6 +21,7 @@ public static class ShellText
     public static readonly TextId TabRead = Id();
     public static readonly TextId TabHistory = Id();
     public static readonly TextId TabSettings = Id();
+    public static readonly TextId Learn = Id();
 
     private static TextId Id([CallerMemberName] string name = "") => TextId.Of("Shell", name);
 }

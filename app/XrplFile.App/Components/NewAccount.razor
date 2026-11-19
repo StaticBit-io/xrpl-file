@@ -21,17 +21,17 @@
 }
 
 <section class="xf-card">
-    <div class="mb-3">
+    <div class="mb-3" data-tour="@TutorialRegions.NewLabel">
         <label class="form-label">@T[CommonText.FieldLabel]</label>
         <input class="form-control" @bind="Model.Label" @bind:event="oninput" disabled="@_busy" />
     </div>
 
-    <div class="mb-3">
+    <div class="mb-3" data-tour="@TutorialRegions.NewNetwork">
         <label for="new-account-network" class="form-label">@T[CommonText.FieldNetwork]</label>
         <NetworkSelect Id="new-account-network" @bind-Value="Model.Network" Disabled="_busy" />
     </div>
 
-    <button type="button" class="btn btn-primary" disabled="@(!Model.CanCreate || _busy)" @onclick="CreateAsync">
+    <button type="button" class="btn btn-primary" disabled="@(!Model.CanCreate || _busy)" data-tour="@TutorialRegions.NewGenerate" @onclick="CreateAsync">
         @T[AccountsText.NewGenerateButton]
     </button>
 </section>

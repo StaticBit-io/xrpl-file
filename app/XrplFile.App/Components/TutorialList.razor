@@ -1,0 +1,153 @@
+@implements IDisposable
+@inject TutorialModel Tutorial
+
+@* The topic list, also the first-run offer. Which topics can start, and why one cannot, is the
+   model's answer (AvailabilityOf); this markup only draws it. Focus lands on the first topic that
+   can start, else on the closing button, so Escape and Tab work from the first keystroke. *@
+@{
+    bool offer = Tutorial.ListIsOffer;
+    IReadOnlyList<TutorialTopic> topics = TutorialScript.Topics;
+    Refresh();
+    TopicAvailability[] availability = _availability;
+    int firstUsable = _firstUsable;
+}
+<div class="xf-dialog-backdrop">
+    <div class="xf-dialog xf-tutorial-list" role="dialog" aria-modal="true" aria-labelledby="tutorial-list-title"
+         @onkeydown="OnKey">
+        <h2 id="tutorial-list-title">@T[offer ? TutorialText.ListOfferTitle : TutorialText.ListTitle]</h2>
+        @if (offer)
+        {
+            <p>@T[TutorialText.ListOfferIntro]</p>
+        }
+        <ul class="xf-tutorial-topics">
+            @for (int i = 0; i < topics.Count; i++)
+            {
+                TutorialTopic topic = topics[i];
+                TopicAvailability state = availability[i];
+                bool first = i == firstUsable;
+                string reasonId = $"tutorial-reason-{i}";
+                <li>
+                    @if (first)
+                    {
+                        <button type="button" class="xf-tutorial-topic" @ref="_firstTopic" @onclick="() => Begin(topic)">@T[TutorialScript.NameOf(topic)]</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="xf-tutorial-topic" disabled="@(!state.CanStart)"
+                                aria-describedby="@(state.Reason is null ? null : reasonId)"
+                                @onclick="() => Begin(topic)">@T[TutorialScript.NameOf(topic)]</button>
+                    }
+                    @if (!state.CanStart && state.Reason is { } reason)
+                    {
+                        <small id="@reasonId" class="xf-muted">@T[reason]</small>
+                    }
+                </li>
+            }
+        </ul>
+        @if (offer)
+        {
+            <p class="xf-muted"><small>@T[UiText.Of(TutorialText.ListNotNowHint, ("learn", ShellText.Learn))]</small></p>
+        }
+        <div class="xf-dialog-actions">
+            <button type="button" class="btn btn-outline-secondary" @ref="_close" @onclick="Close">
+                @T[offer ? TutorialText.ListNotNow : TutorialText.ListClose]
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    /// <summary>Raised when the list is dismissed without starting a topic, so the caller can return focus.</summary>
+    [Parameter]
+    public EventCallback OnDismissed { get; set; }
+
+    private static readonly TimeSpan RedrawInterval = TimeSpan.FromSeconds(1);
+
+    private Timer? _redrawTimer;
+    private ElementReference _firstTopic;
+    private ElementReference _close;
+    private bool _focusPending = true;
+    private bool _disposed;
+    private TopicAvailability[] _availability = [];
+    private int _firstUsable = -1;
+
+    protected override void OnInitialized()
+    {
+        Tutorial.Changed += OnChanged;
+
+        // A publication or a read that ends while the list is open changes which lines can start,
+        // and neither raises the tutorial's Changed.
+        _redrawTimer = new Timer(OnRedrawTick, state: null, RedrawInterval, RedrawInterval);
+    }
+
+    private void OnRedrawTick(object? state) => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
+    });
+
+    /// <summary>One snapshot per render; the focus target below is picked from the same one.</summary>
+    private void Refresh()
+    {
+        _availability = Tutorial.AvailabilityOfAll().ToArray();
+        _firstUsable = Array.FindIndex(_availability, a => a.CanStart);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusPending)
+        {
+            return;
+        }
+
+        _focusPending = false;
+        try
+        {
+            // The first topic is only rendered with a ref when one can start.
+            if (_firstUsable >= 0)
+            {
+                await _firstTopic.FocusAsync();
+            }
+            else
+            {
+                await _close.FocusAsync();
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private void OnChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
+    });
+
+    private void Begin(TutorialTopic topic) => Tutorial.Start(topic);
+
+    private async Task Close()
+    {
+        Tutorial.CloseList();
+        await OnDismissed.InvokeAsync();
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            await Close();
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Tutorial.Changed -= OnChanged;
+        _redrawTimer?.Dispose();
+    }
+}

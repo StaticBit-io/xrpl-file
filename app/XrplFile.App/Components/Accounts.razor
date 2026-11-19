@@ -2,6 +2,8 @@
 @inject AccountsModel Model
 @inject VaultListModel VaultList
 @inject DeleteKeyModel DeleteModel
+@inject ScreenNavigation Nav
+@inject TutorialModel Tutorial
 
 @* Design 4.1 and 6: every account the vault holds, in two sections -- the throwaway accounts this
    application generated, and the keys the person imported -- and the screens each row opens into.
@@ -37,17 +39,17 @@
    that arrived stayed invisible. The interval is five seconds rather than one because a countdown
    in minutes gains nothing from a faster redraw. *@
 
-<div class="xf-page @(_view == SubView.List ? "xf-page-wide" : null)">
-    @switch (_view)
+<div class="xf-page @(Nav.AccountsView == AccountsView.List ? "xf-page-wide" : null)">
+    @switch (Nav.AccountsView)
     {
-        case SubView.List:
+        case AccountsView.List:
             <div class="xf-page-head">
                 <h1 class="xf-title">@T[AccountsText.Title]</h1>
                 <div class="xf-page-actions">
-                    <button type="button" class="btn btn-outline-secondary" @onclick="() => _view = SubView.AddKey">
+                    <button type="button" class="btn btn-outline-secondary" data-tour="@TutorialRegions.AccountsImport" @onclick="() => Nav.OpenAccounts(AccountsView.AddKey)">
                         @T[AccountsText.ImportKeyButton]
                     </button>
-                    <button type="button" class="btn btn-primary" @onclick="() => _view = SubView.New">
+                    <button type="button" class="btn btn-primary" data-tour="@TutorialRegions.AccountsNew" @onclick="() => Nav.OpenAccounts(AccountsView.New)">
                         @T[AccountsText.NewAccountButton]
                     </button>
                 </div>
@@ -63,12 +65,12 @@
                 <Damage OnChanged="StateHasChanged" />
             }
 
-            @Section(AccountsText.PublishingTitle,
+            @Section(TutorialRegions.AccountsPublishing, AccountsText.PublishingTitle,
                 AccountsText.PublishingDescription,
                 AccountsText.PublishingEmpty,
                 Model.ThrowawayRows)
 
-            @Section(AccountsText.KeysTitle,
+            @Section(TutorialRegions.AccountsKeys, AccountsText.KeysTitle,
                 AccountsText.KeysDescription,
                 AccountsText.KeysEmpty,
                 Model.ImportedRows)
@@ -116,51 +118,40 @@
             }
             break;
 
-        case SubView.New:
+        case AccountsView.New:
             <NewAccount OnDone="ReturnToListAsync" />
             break;
 
-        case SubView.AddKey:
+        case AccountsView.AddKey:
             <AddKey OnDone="ReturnToListAsync" />
             break;
 
-        case SubView.Export:
-            <ExportKey Reference="@(_activeReference!)" OnBack="ReturnToListAsync" />
+        case AccountsView.Export:
+            <ExportKey Reference="@(Nav.ActiveReference!)" OnBack="ReturnToListAsync" />
             break;
 
-        case SubView.Reveal:
-            <RevealSeed Reference="@(_activeReference!)" OnBack="ReturnToListAsync" />
+        case AccountsView.Reveal:
+            <RevealSeed Reference="@(Nav.ActiveReference!)" OnBack="ReturnToListAsync" />
             break;
 
-        case SubView.Funding:
-            <Funding Reference="@(_activeReference!)" OnBack="ReturnToListAsync" />
+        case AccountsView.Funding:
+            <Funding Reference="@(Nav.ActiveReference!)" OnBack="ReturnToListAsync" />
             break;
 
-        case SubView.Close:
-            <CloseAccount Reference="@(_activeReference!)" OnBack="ReturnToListAsync" />
+        case AccountsView.Close:
+            <CloseAccount Reference="@(Nav.ActiveReference!)" OnBack="ReturnToListAsync" />
             break;
     }
 </div>
 
 @code {
-    private enum SubView
-    {
-        List,
-        New,
-        AddKey,
-        Export,
-        Reveal,
-        Funding,
-        Close,
-    }
-
     /// <summary>
     /// One section of the list: a heading, one line saying what its accounts are, then the rows or
     /// its own empty-state line. Both sections go through here so they cannot drift apart in columns
     /// or actions; their differences are the text passed in and the rows the model sorted into them.
     /// </summary>
-    private RenderFragment Section(TextId title, TextId description, TextId emptyText, IReadOnlyList<AccountRow> rows) =>
-        @<section class="xf-section" aria-label="@T[title]">
+    private RenderFragment Section(string region, TextId title, TextId description, TextId emptyText, IReadOnlyList<AccountRow> rows) =>
+        @<section class="xf-section" data-tour="@region" aria-label="@T[title]">
             <div class="xf-section-head">
                 <h2>@T[title]</h2>
                 <p>@T[description]</p>
@@ -183,15 +174,20 @@
                             <span>@T[AccountsText.ColumnBalance]</span>
                             <span>@T[AccountsText.ColumnStatus]</span>
                         </li>
+                        @{
+                            // The tutorial lights one row; which one is the model's answer, not this markup's.
+                            string? markedRow = Tutorial.MarkedRow;
+                            string? fundRow = Tutorial.MarkedFundRow;
+                        }
                         @foreach (AccountRow row in rows)
                         {
-                            <li class="xf-account">
+                            <li class="xf-account" data-tour="@(row.Reference == markedRow ? TutorialRegions.AccountsRow : null)">
                                 <div class="xf-account-id">
                                     <div class="xf-account-name">
                                         <span>@row.Label</span>
                                         @if (row.NeedsExporting)
                                         {
-                                            <span class="xf-tag xf-tag-danger" title="@T[AccountsText.NotExportedHint]">
+                                            <span class="xf-tag xf-tag-danger" data-tour="@(row.Reference == markedRow ? TutorialRegions.AccountsNotExported : null)" title="@T[AccountsText.NotExportedHint]">
                                                 @T[AccountsText.NotExportedTag]
                                             </span>
                                         }
@@ -218,7 +214,7 @@
                                 <div class="xf-account-actions">
                                     @if (row.HasActions)
                                     {
-                                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" data-tour="@(row.Reference == fundRow ? TutorialRegions.AccountsFund : null)"
                                                 @onclick="() => OpenFunding(row.Reference)">
                                             @T[AccountsText.FundButton]
                                         </button>
@@ -267,12 +263,12 @@
     private RenderFragment RowMenu(AccountRow row) =>
         @<div class="xf-menu" @onkeydown="OnMenuKey">
             <button type="button" class="xf-icon-btn" aria-haspopup="menu"
-                    aria-expanded="@(_menuFor == row.Reference ? "true" : "false")"
+                    aria-expanded="@(Nav.MenuFor == row.Reference ? "true" : "false")"
                     aria-label="@(T[UiText.Of(AccountsText.MoreActionsFor, ("label", row.Label))])"
                     @onclick="() => ToggleMenu(row.Reference)">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
             </button>
-            @if (_menuFor == row.Reference)
+            @if (Nav.MenuFor == row.Reference)
             {
                 <div class="xf-menu-backdrop" @onclick="CloseMenu"></div>
                 <div class="xf-menu-list" role="menu" tabindex="-1" @ref="_menuFirst" aria-label="@(T[UiText.Of(AccountsText.ActionsFor, ("label", row.Label))])">
@@ -288,7 +284,7 @@
                             @onclick="() => FromMenu(() => OpenReveal(row.Reference))">
                         @T[AccountsText.MenuRevealSecret]
                     </button>
-                    <button type="button" role="menuitem" class="xf-menu-item"
+                    <button type="button" role="menuitem" class="xf-menu-item" data-tour="@TutorialRegions.AccountsMenuExport"
                             disabled="@VaultList.WritesAreRefused"
                             @onclick="() => FromMenu(() => OpenExport(row.Reference))">
                         @T[AccountsText.MenuExportKey]
@@ -312,7 +308,6 @@
             }
         </div>;
 
-    private string? _menuFor;
     private ElementReference _menuFirst;
     private ElementReference _dialogCancel;
     private bool _focusMenu;
@@ -320,15 +315,15 @@
 
     private void ToggleMenu(string reference)
     {
-        _menuFor = _menuFor == reference ? null : reference;
-        _focusMenu = _menuFor is not null;
+        Nav.ToggleMenu(reference);
+        _focusMenu = Nav.MenuFor is not null;
     }
 
-    private void CloseMenu() => _menuFor = null;
+    private void CloseMenu() => Nav.CloseMenu();
 
     private void OnMenuKey(KeyboardEventArgs e)
     {
-        if (e.Key == "Escape") _menuFor = null;
+        if (e.Key == "Escape") Nav.CloseMenu();
     }
 
     private void OnDialogKey(KeyboardEventArgs e)
@@ -338,14 +333,14 @@
 
     private async Task FromMenu(Action action)
     {
-        _menuFor = null;
+        Nav.CloseMenu();
         action();
         await Task.CompletedTask;
     }
 
     private async Task FromMenu(Func<Task> action)
     {
-        _menuFor = null;
+        Nav.CloseMenu();
         await action();
     }
 
@@ -353,7 +348,7 @@
     {
         // Focus moves into what just opened, so a keyboard user lands in the menu or on the dialog's
         // safe button instead of behind the backdrop.
-        if (_focusMenu && _menuFor is not null)
+        if (_focusMenu && Nav.MenuFor is not null)
         {
             _focusMenu = false;
             try { await _menuFirst.FocusAsync(); } catch (InvalidOperationException) { }
@@ -373,15 +368,26 @@
     private readonly ScreenLifetime _lifetime = new();
     private Timer? _pollTimer;
     private bool _disposed;
-    private SubView _view = SubView.List;
-    private string? _activeReference;
     private AccountRow? _pendingDeleteRow;
     private DeleteWarning? _deleteWarning;
     private UiText? _deleteProblem;
     private bool _busy;
 
+    /// <summary>
+    /// Redraws when something outside this component moves a sub-screen (a tab change, the tutorial).
+    /// Through InvokeAsync and behind the _disposed check for the reason Shell.razor's OnTabChanged gives.
+    /// </summary>
+    private void OnNavChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
+    });
+
     protected override async Task OnInitializedAsync()
     {
+        Nav.Changed += OnNavChanged;
         await RefreshVaultAsync();
 
         // The refresh swallows a vault failure rather than honouring the token, so a screen left
@@ -431,26 +437,22 @@
 
     private void OpenReveal(string reference)
     {
-        _activeReference = reference;
-        _view = SubView.Reveal;
+        Nav.OpenAccounts(AccountsView.Reveal, reference);
     }
 
     private void OpenExport(string reference)
     {
-        _activeReference = reference;
-        _view = SubView.Export;
+        Nav.OpenAccounts(AccountsView.Export, reference);
     }
 
     private void OpenFunding(string reference)
     {
-        _activeReference = reference;
-        _view = SubView.Funding;
+        Nav.OpenAccounts(AccountsView.Funding, reference);
     }
 
     private void OpenClose(string reference)
     {
-        _activeReference = reference;
-        _view = SubView.Close;
+        Nav.OpenAccounts(AccountsView.Close, reference);
     }
 
     private async Task CheckAsync(string reference)
@@ -467,8 +469,7 @@
 
     private async Task ReturnToListAsync()
     {
-        _activeReference = null;
-        _view = SubView.List;
+        Nav.OpenAccounts(AccountsView.List);
         await RefreshVaultAsync();
 
         // What a funding or a closing changed shows in the balances; a row a read is still busy
@@ -555,6 +556,7 @@
     {
         // Set before the timer is disposed, for the reason Shell.razor's own Dispose explains.
         _disposed = true;
+        Nav.Changed -= OnNavChanged;
         _pollTimer?.Dispose();
         _lifetime.End();
     }
