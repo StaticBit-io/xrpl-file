@@ -757,7 +757,7 @@ test('the file and 404 pages are chrome pages with one URL for both languages', 
 
 test('the file page loads the element from its own build, before its own script', async () => {
   const html = await page('file.html');
-  const element = html.indexOf('<script src="/element/1.2.0/xrpl-file-element.js" defer></script>');
+  const element = html.indexOf('<script src="/element/1.2.1/xrpl-file-element.js" defer></script>');
   const own = html.indexOf('<script type="module" src="/js/file-page.mjs"></script>');
   assert.ok(element > 0 && own > element);
   assert.match(html, /<button id="file-download"[^>]*\bdisabled\b/);

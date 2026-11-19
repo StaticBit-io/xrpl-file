@@ -31,7 +31,7 @@ const MAX_DPR = 1.5;
 const FRAME_MS = 33;
 const FAILED_ALPHA = 0.6;
 const SWEEP_REACH = 0.05;
-const ELEMENT_SCRIPT = '/element/1.2.0/xrpl-file-element.js';
+const ELEMENT_SCRIPT = '/element/1.2.1/xrpl-file-element.js';
 
 const FALLBACK_COLOURS = {
   paper: [10, 14, 20],
