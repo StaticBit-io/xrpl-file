@@ -9,6 +9,7 @@ const { ACTIVE_LANGS: LANGS, homePath, htmlLang, localeOf } = await import('../s
 const strings = await import('../src/js/strings.mjs');
 const { startElementRead } = await import('../src/js/element-read.mjs');
 const { fileCloudStrings } = await import('../src/js/home-strings.mjs');
+const { HERO_LINK } = await import('../src/js/config.mjs');
 
 const HASH = '32D96008F01F85480F7566BFDFB636990FA45A1082139F78FE7BBF993EB6EE59';
 const LINK = `xrpl-file://testnet/${HASH}`;
@@ -805,7 +806,7 @@ test('the file page loads the element from its own build, before its own script'
 
 test('the file page has the cloud stage: canvas under the element, caption and note after it', async () => {
   const html = await page('file.html');
-  assert.match(html, /<div id="file-view"[^>]*>\s*<div class="file__stage">\s*<canvas id="file-cloud" class="cloud file__cloud"[^>]*><\/canvas>\s*<\/div>/);
+  assert.match(html, /<div id="file-view"[^>]*>\s*<div class="file__stage">\s*<canvas id="file-cloud" class="cloud file__cloud"[^>]*><\/canvas>\s*<button id="file-embed-open" class="code-button"[^>]*>[\s\S]*?<\/button>\s*<\/div>/);
   assert.match(html, /<p id="file-cloud-caption" class="cloud-caption"><\/p>/);
   assert.match(html, /<p id="file-cloud-note" class="cloud-note" hidden><\/p>/);
   assert.ok(html.indexOf('id="file-cloud-caption"') > html.indexOf('class="file__stage"'));
@@ -852,4 +853,43 @@ test('sizes take their separators from the language locale', () => {
     const decimal = new Intl.NumberFormat(localeOf(lang), { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(4.2);
     assert.equal(formatSize(4200, lang), t('sizeKB', lang, { value: decimal }), lang);
   }
+});
+
+test('the file page has the embed code button over the preview and its dialog with the snippet marker', async () => {
+  const html = await page('file.html');
+  assert.match(html, /<button id="file-embed-open" class="code-button" type="button" aria-haspopup="dialog" aria-controls="file-embed"/);
+  assert.match(html, /<dialog id="file-embed" class="code-dialog" aria-labelledby="file-embed-title">/);
+  assert.ok(html.includes('<code id="file-embed-code"><!--@element-snippet--></code>'));
+  assert.ok(html.includes('class="button code-dialog__copy"'));
+  assert.ok(html.includes('class="code-dialog__close"'));
+});
+
+/** The embed dialog's parts behind the calls initCodeDialog makes. */
+function withEmbed(doc) {
+  const opener = new FakeNode('file-embed-open');
+  const code = new FakeNode('file-embed-code');
+  code.textContent = `<script src="x"></script>\n<xrpl-file src="${HERO_LINK}"></xrpl-file>`;
+  const dialog = new FakeNode('file-embed');
+  dialog.opened = 0;
+  dialog.showModal = () => { dialog.opened += 1; };
+  dialog.close = () => {};
+  dialog.querySelector = (selector) => (selector === 'code' ? code : null);
+  Object.assign(doc.nodes, { 'file-embed-open': opener, 'file-embed': dialog, 'file-embed-code': code });
+  return { opener, dialog, code };
+}
+
+test('the embed code names this page\'s file, and the button opens the dialog', () => {
+  const doc = fakeDocument();
+  const { opener, dialog, code } = withEmbed(doc);
+  open(CANONICAL, { doc });
+
+  assert.ok(code.textContent.includes(`<xrpl-file src="${LINK}"></xrpl-file>`));
+  assert.ok(!code.textContent.includes(HERO_LINK));
+  opener.click();
+  assert.equal(dialog.opened, 1);
+});
+
+test('a page without the embed dialog still opens', () => {
+  const { doc } = open(CANONICAL);
+  assert.equal(doc.nodes['file-page'].hidden, false);
 });

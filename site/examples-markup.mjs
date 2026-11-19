@@ -25,7 +25,7 @@ const CLOSE_ICON =
 /** The "</>" button laid over the preview; examples-page.mjs opens the card's dialog from it. */
 function codeButton(id, title, code) {
   const name = escapeHtml(code.show(title));
-  return `<button class="example__code-button" type="button" aria-haspopup="dialog" aria-controls="${id}" aria-label="${name}" title="${name}">${CODE_ICON}</button>`;
+  return `<button class="code-button" type="button" aria-haspopup="dialog" aria-controls="${id}" aria-label="${name}" title="${name}">${CODE_ICON}</button>`;
 }
 
 /** The card's embed code in a modal dialog: the pinned script and this example's element, ready to copy. */
@@ -38,7 +38,7 @@ function codeDialog(example, id, title, code, snippet) {
     '    </div>',
     `    <pre tabindex="0"><code>${EMAIL_OFF}${snippetHtml({ ...snippet, link: example.link })}${EMAIL_ON}</code></pre>`,
     '    <div class="snippet__bar">',
-    `      <button class="button example__copy" type="button" aria-label="${escapeHtml(code.copyLabel(title))}">${escapeHtml(code.copy)}</button>`,
+    `      <button class="button code-dialog__copy" type="button" aria-label="${escapeHtml(code.copyLabel(title))}">${escapeHtml(code.copy)}</button>`,
     '      <span class="snippet__status" role="status"></span>',
     '    </div>',
     '  </dialog>',

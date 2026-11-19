@@ -4,6 +4,8 @@
 // come from the element's `load` event and `save()`, never from a second read of the ledger.
 import { initCheckLink } from './check-link.mjs';
 import { mountCloud as mountPointCloud } from './cloud.mjs';
+import { initCodeDialog } from './code-dialog.mjs';
+import { HERO_LINK } from './config.mjs';
 import { initCopyButton } from './copy-button.mjs';
 import { startElementRead } from './element-read.mjs';
 import { fileCloudStrings } from './home-strings.mjs';
@@ -52,7 +54,28 @@ function normalise(lang) {
 function localizeStatic(doc, lang) {
   for (const node of doc.querySelectorAll('[data-s]')) node.textContent = t(node.dataset.s, lang);
   for (const node of doc.querySelectorAll('[data-s-label]')) node.setAttribute('aria-label', t(node.dataset.sLabel, lang));
+  for (const node of doc.querySelectorAll('[data-s-title]')) node.setAttribute('title', t(node.dataset.sTitle, lang));
   for (const node of doc.querySelectorAll('[data-home]')) node.setAttribute('href', homePath(lang));
+}
+
+/**
+ * The embed code dialog: the build writes the home page's snippet into it, pinned to this site's element,
+ * and the hero's link in it is swapped for this page's link.
+ */
+function initEmbedCode(doc, link, getCurrentLang) {
+  const opener = doc.getElementById('file-embed-open');
+  const dialog = doc.getElementById('file-embed');
+  const code = doc.getElementById('file-embed-code');
+  if (!opener || !dialog || !code) return;
+  code.textContent = code.textContent.replace(HERO_LINK, link);
+  initCodeDialog({
+    opener,
+    dialog,
+    strings: {
+      get copied() { return t('copied', getCurrentLang()); },
+      get failed() { return t('copyFailed', getCurrentLang()); },
+    },
+  });
 }
 
 /** The "Check a link" field, in the language the page has now. */
@@ -238,6 +261,7 @@ export function initFilePage(doc, location, {
       get failed() { return t('copyFailed', lang); },
     },
   });
+  initEmbedCode(doc, route.link, () => lang);
 
   const renderStatus = () => {
     const key = result?.key ?? null;

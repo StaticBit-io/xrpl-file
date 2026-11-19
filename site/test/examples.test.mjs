@@ -183,7 +183,7 @@ test('everyCardOffersItsEmbedCodeInADialog', () => {
   EXAMPLES.forEach((example, i) => {
     const card = cards[i];
     const id = `code-${example.key}`;
-    assert.ok(card.includes(`<button class="example__code-button" type="button" aria-haspopup="dialog" aria-controls="${id}"`), example.key);
+    assert.ok(card.includes(`<button class="code-button" type="button" aria-haspopup="dialog" aria-controls="${id}"`), example.key);
     assert.ok(card.includes(`<dialog class="code-dialog" id="${id}" aria-labelledby="${id}-title">`), example.key);
     assert.ok(card.includes(`&lt;xrpl-file src="${example.link}"&gt;&lt;/xrpl-file&gt;`), example.key);
     assert.ok(card.includes('&lt;script src="https://cdn.jsdelivr.net/npm/'), example.key);
@@ -191,7 +191,7 @@ test('everyCardOffersItsEmbedCodeInADialog', () => {
     assert.ok(card.includes('integrity="sha384-TEST"'), example.key);
     // Cloudflare rewrites "package@version/file" as an e-mail address outside these comments.
     assert.match(card, /<code><!--email_off-->&lt;script[\s\S]*<!--\/email_off--><\/code>/, example.key);
-    assert.ok(card.includes('<button class="button example__copy" type="button"'), example.key);
+    assert.ok(card.includes('<button class="button code-dialog__copy" type="button"'), example.key);
     assert.ok(card.includes('<button class="code-dialog__close" type="button"'), example.key);
     assert.ok(card.includes('role="status"'), example.key);
   });
@@ -201,7 +201,7 @@ test('theCodeButtonSitsOverThePreview', () => {
   for (const card of cardsOf(renderExamples('en', { snippet: SNIPPET }))) {
     const media = card.indexOf('<div class="example__media">');
     assert.ok(media >= 0 && media < card.indexOf('<xrpl-file '), 'the preview is inside the media wrapper');
-    assert.ok(card.indexOf('example__code-button') < card.indexOf('<figcaption>'), 'the button is in the media wrapper');
+    assert.ok(card.indexOf('code-button') < card.indexOf('<figcaption>'), 'the button is in the media wrapper');
   }
 });
 
@@ -226,6 +226,6 @@ test('everyActiveLanguageHasTheEmbedCodeWords', () => {
 
 test('withoutASnippetTheCardsHaveNoCodeButton', () => {
   const html = renderExamples('en');
-  assert.ok(!html.includes('example__code-button'));
+  assert.ok(!html.includes('code-button'));
   assert.ok(!html.includes('<dialog'));
 });

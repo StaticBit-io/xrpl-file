@@ -1169,7 +1169,7 @@
   min-width: 0;
 }
 
-.example__code-button {
+.code-button {
   position: absolute;
   z-index: 1;
   top: var(--space-2);
@@ -1189,15 +1189,15 @@
 }
 
 /* A text file scrolls inside its box: the button keeps clear of that box's scroll bar. */
-.example--text .example__code-button {
+.example--text .code-button {
   right: calc(var(--space-2) + 0.875rem);
 }
 
-.example__code-button:hover {
+.code-button:hover {
   background: rgb(10 12 14 / 0.85);
 }
 
-.example__code-button:focus-visible {
+.code-button:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 2px;
 }
