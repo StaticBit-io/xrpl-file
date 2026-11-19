@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build, checkElementVersion, elementVersionsIn, ELEMENT_VERSION, MAX_FILE_BYTES } from '../build.mjs';
 import { ELEMENT_PACKAGE, SITE_ORIGIN } from '../src/js/config.mjs';
+import { EXAMPLES } from '../src/js/examples.mjs';
 import { ICON_LINKS } from '../chrome-markup.mjs';
 import { ACTIVE_LANGS, LANGS, htmlLang } from '../src/js/languages.mjs';
 import { builtSite } from './support/built-site.mjs';
@@ -439,7 +440,7 @@ test('the built examples pages have cards, a canonical link, six alternates and 
     }
     assert.ok(html.includes(`hreflang="x-default" href="${SITE_ORIGIN}/examples"`), lang);
     assert.ok(!html.includes('<!--@'), `${lang} has no marker left`);
-    assert.equal((html.match(/<figure /g) ?? []).length, 6, lang);
+    assert.equal((html.match(/<figure /g) ?? []).length, EXAMPLES.length, lang);
     assert.ok(html.includes(`<a href="${path}">`), `${lang} footer link`);
   }
 });

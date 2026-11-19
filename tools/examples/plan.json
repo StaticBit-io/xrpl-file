@@ -1,33 +1,25 @@
 [
   {
-    "key": "stand-in-clip-cover",
-    "file": "stand-in-clip-cover.webp",
+    "key": "xrpl-file-en-cover",
+    "file": "xrpl-file-en-cover.webp",
     "type": "image/webp",
-    "name": "stand-in-clip-cover.webp",
+    "name": "xrpl-file-en-cover.webp",
     "writer": "a",
     "cover": null
   },
   {
-    "key": "stand-in-clip",
-    "file": "stand-in-clip.mp4",
+    "key": "xrpl-file-en",
+    "file": "xrpl-file-en.mp4",
     "type": "video/mp4",
-    "name": "stand-in-clip.mp4",
+    "name": "xrpl-file-en.mp4",
     "writer": "a",
-    "cover": "stand-in-clip-cover"
+    "cover": "xrpl-file-en-cover"
   },
   {
-    "key": "stand-in-drawing-large",
-    "file": "stand-in-drawing-large.webp",
+    "key": "forest-guardian",
+    "file": "forest-guardian.webp",
     "type": "image/webp",
-    "name": "stand-in-drawing-large.webp",
-    "writer": "a",
-    "cover": null
-  },
-  {
-    "key": "stand-in-drawing-small",
-    "file": "stand-in-drawing-small.png",
-    "type": "image/png",
-    "name": "stand-in-drawing-small.png",
+    "name": "forest-guardian.webp",
     "writer": "a",
     "cover": null
   },

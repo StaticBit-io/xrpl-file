@@ -28,7 +28,7 @@ test('everyActiveLanguageHasEveryExample', () => {
 });
 
 test('anExampleMissingFromALanguageFails', () => {
-  assert.throws(() => renderExamples('en', { strings: { 'stand-in-clip': { title: 'a', line: 'b' } } }), /no strings for example/);
+  assert.throws(() => renderExamples('en', { strings: { 'xrpl-file-en': { title: 'a', line: 'b' } } }), /no strings for example/);
 });
 
 test('cardsAreStaticHtml', () => {
@@ -149,8 +149,8 @@ test('onlyNonMainnetLinksAreStrangers', () => {
 test('buildRefusesATestnetExampleUnlessAllowed', async () => {
   const f = await pageWithMarker('en');
   try {
-    const examples = [{ key: 'stand-in-clip', link: TESTNET_LINK, kind: 'drawing', bytes: 1 }];
-    await assert.rejects(build({ ...f, examples }), /not on mainnet: stand-in-clip.*--allow-testnet-examples/s);
+    const examples = [{ key: 'xrpl-file-en', link: TESTNET_LINK, kind: 'drawing', bytes: 1 }];
+    await assert.rejects(build({ ...f, examples }), /not on mainnet: xrpl-file-en.*--allow-testnet-examples/s);
     await assert.rejects(access(f.outDir), 'a refused build must leave no output');
     await build({ ...f, examples, allowTestnetExamples: true });
     await access(f.outDir);

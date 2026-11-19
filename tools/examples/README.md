@@ -21,11 +21,11 @@ Three rules govern everything below:
 | `scan-metadata.mjs` | Names the EXIF, GPS, XMP and text-chunk metadata a still carries; `prepare.sh` calls it for its warnings. |
 | `test-prepare.sh` | Tests `prepare.sh` against generated inputs (needs `ffmpeg`). |
 | `make-plan.mjs` | Turns `prepared.json` into `plan.json` and copies `about.txt` and `chunks.svg` next to the prepared files. |
-| `plan.json` | The publication plan read by `tools/XrplFile.Fixtures`. The committed one lists stand-in files. |
+| `plan.json` | The publication plan read by `tools/XrplFile.Fixtures`. The committed one lists the owner's files. |
 | `make-stand-ins.sh` | Generates stand-in files from ffmpeg test patterns, used before the owner's files exist. |
 | `media/about.txt`, `media/chunks.svg` | The text and the SVG written for the page; their bytes on the ledger are the bytes in git. |
 
-Requirements: Bash for `prepare.sh` and the testnet rehearsal, `ffmpeg` and `ffprobe`, Node.js, and the .NET SDK.
+Requirements: Git Bash for `prepare.sh`, `make-plan.mjs` and the testnet rehearsal, `ffmpeg` and `ffprobe`, Node.js, and the .NET SDK.
 The mainnet command is the exception to Bash: run it from PowerShell, cmd or Windows Terminal (step 4). The owner's raw and prepared
 files live under `run/examples/`, which git ignores.
 
@@ -60,7 +60,8 @@ files live under `run/examples/`, which git ignores.
 ## 2. Regenerate the plan
 
 1. Write the plan from `prepared.json`. The script also copies `about.txt` and `chunks.svg` into
-   `run/examples/media`:
+   `run/examples/media`. Run it in Git Bash: the `>` redirect of Windows PowerShell 5.1 writes UTF-16 and
+   would corrupt `plan.json`:
 
    ```bash
    node tools/examples/make-plan.mjs run/examples/media/prepared.json > tools/examples/plan.json
@@ -105,9 +106,8 @@ both. Nothing is created or deleted on the accounts, and the run spends only fee
    redirected input, so there the run stops at the first prompt. The tool also stops when the node does
    not serve mainnet.
 
-   ```bash
-   dotnet run --project tools/XrplFile.Fixtures -- --network mainnet --writer <rAddress> --payer <rAddress> \
-     tools/examples/plan.json run/examples/media run/examples
+   ```powershell
+   dotnet run --project tools/XrplFile.Fixtures -- --network mainnet --writer <rAddress> --payer <rAddress> tools/examples/plan.json run/examples/media run/examples
    ```
 
    The node defaults to `wss://xrplcluster.com`; `--node <wss-url>` overrides it.
@@ -164,9 +164,9 @@ with different arguments. Delete that state folder only when the owner means to 
 1. Hand `run/examples/links.json` to Claude, or edit `site/src/js/examples.mjs` directly: in `EXAMPLES`,
    replace each testnet `link` with the mainnet one and set `bytes`, `width` and `height` from
    `prepared.json` (a picture or a video needs the dimensions; `svg` and `text` do not).
-2. Rename the `stand-in-*` keys. The key is the file's base name as the plan writes it. Rename it in
-   `EXAMPLES` and, to the same value, in `EXAMPLE_STRINGS` in `site/src/js/examples-strings.mjs` for all
-   six languages (`en`, `ru`, `de`, `es`, `pt`, `zh`). Drop the stand-in wording from captions.
+2. Keep the keys equal to the plan's: the key is the file's base name as the plan writes it. It is the same in
+   `EXAMPLES` and in `EXAMPLE_STRINGS` in `site/src/js/examples-strings.mjs` for all
+   six languages (`en`, `ru`, `de`, `es`, `pt`, `zh`). Rename a key in both files together.
 3. Run the checks; the tests fail on a language that lacks a key:
 
    ```bash
