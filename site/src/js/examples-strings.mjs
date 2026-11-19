@@ -66,3 +66,14 @@ export const EXAMPLE_FILE_LINK = {
   pt: 'Abrir a página do arquivo',
   zh: '打开文件页面',
 };
+
+// The embed code under each card: the summary that opens it, the copy button, and the names that tell a
+// screen reader whose code it is. The words follow the home page's snippet in each language.
+export const EXAMPLE_CODE = {
+  en: { summary: 'Embed code', copy: 'Copy', code: (title) => `Embed code: ${title}`, copyLabel: (title) => `Copy the embed code: ${title}` },
+  ru: { summary: 'Код для вставки', copy: 'Копировать', code: (title) => `Код для вставки: ${title}`, copyLabel: (title) => `Копировать код для вставки: ${title}` },
+  de: { summary: 'Code zum Einbetten', copy: 'Kopieren', code: (title) => `Code zum Einbetten: ${title}`, copyLabel: (title) => `Code zum Einbetten kopieren: ${title}` },
+  es: { summary: 'Código para incrustar', copy: 'Copiar', code: (title) => `Código para incrustar: ${title}`, copyLabel: (title) => `Copiar el código para incrustar: ${title}` },
+  pt: { summary: 'Código para incorporar', copy: 'Copiar', code: (title) => `Código para incorporar: ${title}`, copyLabel: (title) => `Copiar o código para incorporar: ${title}` },
+  zh: { summary: '嵌入代码', copy: '复制', code: (title) => `嵌入代码：${title}`, copyLabel: (title) => `复制嵌入代码：${title}` },
+};

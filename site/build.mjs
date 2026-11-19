@@ -128,6 +128,16 @@ const SNIPPET_MARKER = '<!--@element-snippet-->';
 const EMAIL_OFF = '<!--email_off-->';
 const EMAIL_ON = '<!--/email_off-->';
 
+/** The element script's sha384 integrity value from the build's integrity.json. */
+async function elementIntegrity(elementDir, elementVersion) {
+  const values = JSON.parse(await readFile(join(elementDir, 'integrity.json'), 'utf8'));
+  const integrity = values[ELEMENT_FILE];
+  if (typeof integrity !== 'string' || !integrity.startsWith('sha384-')) {
+    throw new Error(`integrity.json of element ${elementVersion} has no sha384 value for ${ELEMENT_FILE}`);
+  }
+  return integrity;
+}
+
 /**
  * Fills the embed snippet of a page: the marker gets the escaped snippet with the element's integrity
  * from integrity.json, fenced off from Cloudflare's email obfuscation.
@@ -139,13 +149,7 @@ async function inlineSnippet(outDir, elementDir, elementVersion) {
     if (!file.endsWith('.html') || relative_.split(sep)[0] === 'element') continue;
     const html = await readFile(file, 'utf8');
     if (!html.includes(SNIPPET_MARKER)) continue;
-    if (integrity === null) {
-      const values = JSON.parse(await readFile(join(elementDir, 'integrity.json'), 'utf8'));
-      integrity = values[ELEMENT_FILE];
-      if (typeof integrity !== 'string' || !integrity.startsWith('sha384-')) {
-        throw new Error(`integrity.json of element ${elementVersion} has no sha384 value for ${ELEMENT_FILE}`);
-      }
-    }
+    integrity ??= await elementIntegrity(elementDir, elementVersion);
     const options = { version: elementVersion, integrity };
     await writeFile(file, html.replaceAll(SNIPPET_MARKER, () => `${EMAIL_OFF}${snippetHtml(options)}${EMAIL_ON}`));
   }
@@ -160,8 +164,12 @@ export function nonMainnetExamples(examples) {
   return examples.filter((example) => !/^xrpl-file:[/][/]mainnet[/]/.test(example.link));
 }
 
-/** Fills the examples page's cards; a page in a language without example strings is refused. */
-async function inlineExamples(outDir) {
+/**
+ * Fills the examples page's cards, each with its embed code pinned to this build's element; a page in a
+ * language without example strings is refused.
+ */
+async function inlineExamples(outDir, elementDir, elementVersion) {
+  let integrity = null;
   for (const file of await listFiles(outDir)) {
     const relative_ = relative(outDir, file);
     if (!file.endsWith('.html') || relative_.split(sep)[0] === 'element') continue;
@@ -172,7 +180,8 @@ async function inlineExamples(outDir) {
     if (lang === null || htmlLang(lang) !== tag || !EXAMPLE_STRINGS[lang]) {
       throw new Error(`${relative_.split(sep).join('/')} uses the examples marker but its <html lang="${tag}"> has no example strings`);
     }
-    const cards = renderExamples(lang);
+    integrity ??= await elementIntegrity(elementDir, elementVersion);
+    const cards = renderExamples(lang, { snippet: { version: elementVersion, integrity } });
     await writeFile(file, html.replaceAll(EXAMPLES_MARKER, () => cards));
   }
 }
@@ -274,7 +283,7 @@ export async function build({
     await checkElementVersion(outDir, elementVersion);
     await inlineChrome(outDir);
     await inlineSnippet(outDir, elementDir, elementVersion);
-    await inlineExamples(outDir);
+    await inlineExamples(outDir, elementDir, elementVersion);
     await cp(elementDir, join(outDir, 'element', elementVersion), { recursive: true });
     await mkdir(join(outDir, 'data'), { recursive: true });
     await cp(priceFile, join(outDir, 'data', 'price.json'));

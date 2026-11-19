@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { access } from 'node:fs/promises';
 import { EXAMPLES } from '../src/js/examples.mjs';
-import { EXAMPLE_FILE_LINK, EXAMPLE_STRINGS } from '../src/js/examples-strings.mjs';
+import { EXAMPLE_CODE, EXAMPLE_FILE_LINK, EXAMPLE_STRINGS } from '../src/js/examples-strings.mjs';
 import { HERO_LINK } from '../src/js/config.mjs';
 import { ACTIVE_LANGS } from '../src/js/languages.mjs';
 import { renderExamples } from '../examples-markup.mjs';
@@ -115,6 +115,9 @@ test('buildFillsTheMarker', async () => {
     const page = await readFile(join(f.outDir, 'examples.html'), 'utf8');
     assert.ok(!page.includes('<!--@examples-->'));
     for (const example of EXAMPLES) assert.ok(page.includes(example.link), example.key);
+    for (const example of EXAMPLES) assert.ok(page.includes(`&lt;xrpl-file src="${example.link}"&gt;&lt;/xrpl-file&gt;`), example.key);
+    assert.equal(page.split('integrity="sha384-X"').length - 1, EXAMPLES.length);
+    assert.equal(page.split(`@${ELEMENT_VERSION}/xrpl-file-element.js`).length - 1, EXAMPLES.length);
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
@@ -167,4 +170,45 @@ test('buildAcceptsMainnetExamplesWithoutTheOption', async () => {
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }
+});
+
+const SNIPPET = { version: '9.8.7', integrity: 'sha384-TEST' };
+
+test('everyCardOffersItsEmbedCode', () => {
+  const html = renderExamples('en', { snippet: SNIPPET });
+  const blocks = html.split('<details class="example__code">').slice(1);
+  assert.equal(blocks.length, EXAMPLES.length);
+  EXAMPLES.forEach((example, i) => {
+    const block = blocks[i];
+    assert.ok(block.includes(`&lt;xrpl-file src="${example.link}"&gt;&lt;/xrpl-file&gt;`), example.key);
+    assert.ok(block.includes('&lt;script src="https://cdn.jsdelivr.net/npm/'), example.key);
+    assert.ok(block.includes('@9.8.7/xrpl-file-element.js"'), example.key);
+    assert.ok(block.includes('integrity="sha384-TEST"'), example.key);
+    // Cloudflare rewrites "package@version/file" as an e-mail address outside these comments.
+    assert.match(block, /<code><!--email_off-->&lt;script[\s\S]*<!--\/email_off--><\/code>/, example.key);
+    assert.ok(block.includes('<button class="button button--quiet example__copy" type="button"'), example.key);
+    assert.ok(block.includes('role="status"'), example.key);
+  });
+});
+
+test('embedCodeNamesItsExampleForScreenReaders', () => {
+  const html = renderExamples('ru', { snippet: SNIPPET });
+  const title = EXAMPLE_STRINGS.ru['xrpl-file-en'].title;
+  assert.ok(html.includes(`aria-label="${EXAMPLE_CODE.ru.code(title)}"`));
+  assert.ok(html.includes(`aria-label="${EXAMPLE_CODE.ru.copyLabel(title)}"`));
+  assert.ok(html.includes(`<summary>${EXAMPLE_CODE.ru.summary}</summary>`));
+});
+
+test('everyActiveLanguageHasTheEmbedCodeWords', () => {
+  for (const lang of ACTIVE_LANGS) {
+    const words = EXAMPLE_CODE[lang];
+    assert.ok(words, lang);
+    for (const key of ['summary', 'copy']) assert.ok(typeof words[key] === 'string' && words[key].length > 0, `${lang} ${key}`);
+    for (const key of ['code', 'copyLabel']) assert.ok(words[key]('X').includes('X'), `${lang} ${key}`);
+    for (const text of [words.summary, words.copy, words.code('X'), words.copyLabel('X')]) assert.ok(!text.includes('—'), `${lang}: ${text}`);
+  }
+});
+
+test('withoutASnippetTheCardsHaveNoCodeBlock', () => {
+  assert.ok(!renderExamples('en').includes('example__code'));
 });

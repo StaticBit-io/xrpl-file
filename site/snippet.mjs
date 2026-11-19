@@ -15,16 +15,16 @@ function escapeHtml(text) {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function snippetOf(url, integrity) {
+function snippetOf(url, integrity, link) {
   return [
     `<script src="${url}"`,
     `        integrity="${integrity}"`,
     '        crossorigin="anonymous" defer></script>',
-    `<xrpl-file src="${HERO_LINK}"></xrpl-file>`,
+    `<xrpl-file src="${link}"></xrpl-file>`,
   ].join('\n');
 }
 
-/** The snippet, escaped for the inside of a <code> element. */
-export function snippetHtml({ version, integrity }) {
-  return escapeHtml(snippetOf(npmUrl(version), integrity));
+/** The snippet for one link (the hero's unless given), escaped for the inside of a <code> element. */
+export function snippetHtml({ version, integrity, link = HERO_LINK }) {
+  return escapeHtml(snippetOf(npmUrl(version), integrity, link));
 }
