@@ -448,10 +448,13 @@ internal sealed class FixtureRun : IAsyncDisposable
                 continue;
             }
 
-            XrplFileLink link = await FeeRetry.RunAsync(
+            XrplFileLink link = await BusyRetry.RunAsync(
+                entry.Key,
                 token => PublishAsync(entry, quote, token),
                 token => _feeGate.WaitForFeeAsync(
                     entry.Key, token, quote?.ApprovalFor(entry.Key, WriterAddress(entry), PayerAddress).FeeUnitCeilingDrops),
+                Task.Delay,
+                Console.WriteLine,
                 cancellationToken);
 
             _links[entry.Key] = link.ToString();

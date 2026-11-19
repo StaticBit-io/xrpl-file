@@ -144,6 +144,8 @@ A short rise in fees does not stop the run: when the open-ledger fee is above 20
 it to fall, checking every 10 seconds and printing a line at least once a minute, for up to 15 minutes per wait,
 and then continues with the same file once the fee is back within what was approved for it (the printed cap does not change). The same wait covers pricing the plan. Only if the fee has not fallen by then does the tool stop; run the same command again to resume.
 
+A batch that does not land during a busy spell is retried automatically: after the Core gives up on it (three candidates per memo), the tool pauses 60 seconds, waits for the fee as above and resumes the same file as a new session, as many times as needed. The candidates that did not land are not on the ledger and cost nothing. Any other refusal, such as a malformed transaction, still stops the run.
+
 A resumed run asks for both seeds and the confirmation phrase again, because it prices what is left and
 the owner must see that number. A file being resumed is printed with `resume: at most`: transactions
 already submitted are not repeated, so the work left costs no more than the printed figures and may cost
