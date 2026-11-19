@@ -11,8 +11,27 @@ export const ENDPOINTS = {
 };
 
 // Inactivity, not a per-request budget: one page of account_tx is ~1.2 MB, so on a slow link
-// several concurrent pages legitimately take longer than this each. See LedgerClient.rearm.
+// several concurrent pages legitimately take longer than this each. See Connection.rearm.
 const REQUEST_TIMEOUT_MS = 20000;
+
+// Public nodes meter requests by units per window and answer tooBusy or slowDown once it is spent.
+// Another endpoint is usually free, so a busy answer moves the request on instead of failing it.
+const BUSY_ERRORS = new Set(['tooBusy', 'slowDown']);
+const MIN_BUSY_WAIT_MS = 1000;
+// Above the longest hint seen from a public node (~66-81 s), so the second pass lands after its window.
+const MAX_BUSY_WAIT_MS = 120000;
+// s2.ripple.com says slowDown with no hint; 5 s proved too short for it to recover.
+const DEFAULT_BUSY_WAIT_MS = 20000;
+
+/**
+ * Milliseconds a node said to wait ("retry in ~66-81 s", "retry in ~19353ms"), the high end of a
+ * range so the retry lands after the window; null when it said none.
+ */
+function busyHintMs(answer) {
+  const match = /retry in ~?\s*(\d+)(?:\s*-\s*(\d+))?\s*(ms|s)\b/i.exec(JSON.stringify(answer));
+  if (!match) return null;
+  return Number(match[2] ?? match[1]) * (match[3].toLowerCase() === 'ms' ? 1 : 1000);
+}
 
 const text = (o, k) => (o && typeof o === 'object' && typeof o[k] === 'string' ? o[k] : null);
 const number = (o, k) => (o && typeof o === 'object' && Number.isInteger(o[k]) ? o[k] : null);
@@ -43,25 +62,21 @@ export function earliestAvailableLedger(result) {
   return Number.isInteger(lowest) ? lowest : null;
 }
 
-export class LedgerClient {
-  /** @param {string[]} endpoints tried in order; each operation moves on when a node fails */
-  constructor(endpoints, { pageSize = 400, requestTimeoutMs = REQUEST_TIMEOUT_MS } = {}) {
-    if (!endpoints?.length) throw new Error('at least one endpoint is required');
-    this.endpoints = endpoints;
-    this.pageSize = pageSize;
+/** One socket to one node: its shared handshake, its requests in flight and their inactivity clock. */
+class Connection {
+  constructor(url, requestTimeoutMs) {
+    this.url = url;
     this.requestTimeoutMs = requestTimeoutMs;
-    this.index = 0;
     this.socket = null;
     this.pendingSocket = null;
     this.pendingReject = null;
     this.connecting = null;
-    this.failures = 0;
+    // Bumped by every teardown: a request that saw an older socket fail must not close a newer one.
+    this.generation = 0;
     this.nextId = 1;
     this.pending = new Map();
     this.closed = false;
   }
-
-  get endpoint() { return this.endpoints[this.index]; }
 
   close() {
     this.closed = true;
@@ -69,6 +84,7 @@ export class LedgerClient {
   }
 
   disconnect() {
+    this.generation++;
     if (this.socket) {
       this.socket.onclose = null;
       this.socket.onmessage = null;
@@ -98,12 +114,12 @@ export class LedgerClient {
       this.pendingReject = null;
       reject(new XrplFileError('NodeUnreachable', this.closed
         ? 'this client has been closed'
-        : `connection to ${this.endpoint} closed while it was still connecting`));
+        : `connection to ${this.url} closed while it was still connecting`));
     }
 
     for (const { reject, timer } of this.pending.values()) {
       clearTimeout(timer);
-      reject(new XrplFileError('NodeUnreachable', `connection to ${this.endpoint} closed while a request was in flight`));
+      reject(new XrplFileError('NodeUnreachable', `connection to ${this.url} closed while a request was in flight`));
     }
     this.pending.clear();
   }
@@ -125,7 +141,7 @@ export class LedgerClient {
 
   handshake() {
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(this.endpoint);
+      const socket = new WebSocket(this.url);
       this.pendingSocket = socket;
       this.pendingReject = reject;
       const settle = (fn, value) => {
@@ -144,10 +160,10 @@ export class LedgerClient {
         this.socket = socket;
         settle(resolve);
       };
-      socket.onerror = () => settle(reject, new XrplFileError('NodeUnreachable', `cannot reach ${this.endpoint}`));
+      socket.onerror = () => settle(reject, new XrplFileError('NodeUnreachable', `cannot reach ${this.url}`));
       socket.onclose = () => {
         if (this.socket === socket) this.disconnect();
-        settle(reject, new XrplFileError('NodeUnreachable', `${this.endpoint} closed the connection`));
+        settle(reject, new XrplFileError('NodeUnreachable', `${this.url} closed the connection`));
       };
       socket.onmessage = (event) => {
         // A frame that does not parse is ignored, not thrown out of the socket handler where
@@ -175,7 +191,7 @@ export class LedgerClient {
       const waiting = this.pending.get(id);
       if (!waiting) return;
       this.pending.delete(id);
-      waiting.reject(new XrplFileError('NodeUnreachable', `${this.endpoint} sent nothing for ${this.requestTimeoutMs} ms while ${command} was pending`));
+      waiting.reject(new XrplFileError('NodeUnreachable', `${this.url} sent nothing for ${this.requestTimeoutMs} ms while ${command} was pending`));
     }, this.requestTimeoutMs);
   }
 
@@ -186,29 +202,6 @@ export class LedgerClient {
     clearTimeout(waiting.timer);
     if (message.status === 'error') waiting.resolve({ error: message.error, ...message });
     else waiting.resolve(message.result);
-  }
-
-  /** One request, tried on each endpoint in turn; the answer is the node's result object. */
-  async request(command, params) {
-    let lastError = null;
-    for (let attempt = 0; attempt < this.endpoints.length; attempt++) {
-      const failures = this.failures;
-      try {
-        await this.connect();
-        return await this.send(command, params);
-      } catch (e) {
-        if (this.closed || e.code !== 'NodeUnreachable') throw e;
-        lastError = e;
-        // Requests sharing one connection all see its failure; only the first may tear down and
-        // move to the next endpoint, or the rest would skip nodes and kill the retry's handshake.
-        if (this.failures === failures) {
-          this.failures++;
-          this.disconnect();
-          this.index = (this.index + 1) % this.endpoints.length;
-        }
-      }
-    }
-    throw lastError;
   }
 
   send(command, params) {
@@ -227,29 +220,170 @@ export class LedgerClient {
       // that hung up in between, or a close() from the page. Rejecting here is what lets
       // request() move on to the next endpoint instead of raising whatever send() throws.
       if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-        fail(`the connection to ${this.endpoint} was gone before ${command} could be sent`);
+        fail(`the connection to ${this.url} was gone before ${command} could be sent`);
         return;
       }
 
       try {
         this.socket.send(JSON.stringify({ id, command, api_version: 2, ...params }));
       } catch (e) {
-        fail(`${this.endpoint} refused ${command}: ${e.message}`);
+        fail(`${this.url} refused ${command}: ${e.message}`);
       }
+    });
+  }
+}
+
+export class LedgerClient {
+  /**
+   * @param {string[]} endpoints tried in order; a request moves on when a node fails or is busy
+   * @param {object} [options] now, setTimer and clearTimer let tests run the waits on a fake clock
+   */
+  constructor(endpoints, {
+    pageSize = 400,
+    requestTimeoutMs = REQUEST_TIMEOUT_MS,
+    setTimer = (fn, ms) => setTimeout(fn, ms),
+    clearTimer = (handle) => clearTimeout(handle),
+    now = () => Date.now(),
+  } = {}) {
+    if (!endpoints?.length) throw new Error('at least one endpoint is required');
+    this.endpoints = endpoints;
+    this.pageSize = pageSize;
+    this.setTimer = setTimer;
+    this.clearTimer = clearTimer;
+    this.now = now;
+    // One connection per node, opened on first use: a busy answer or a dead socket on one node
+    // must not cost the requests in flight on another.
+    this.connections = endpoints.map((url) => new Connection(url, requestTimeoutMs));
+    // Nodes meter the client, not one request, so a busy answer holds the node off for everyone.
+    this.busy = endpoints.map(() => ({ until: 0, error: null }));
+    this.preferred = 0;
+    this.waits = new Set();
+    this.closed = false;
+  }
+
+  /** The node the client asks first: the one that last served a request. */
+  get endpoint() { return this.endpoints[this.preferred]; }
+
+  close() {
+    this.closed = true;
+    for (const connection of this.connections) connection.close();
+    for (const wait of [...this.waits]) wait.cancel();
+  }
+
+  /** One request; the answer is the node's result object, or its error answer when not busy. */
+  async request(command, params) {
+    return (await this.ask(command, params)).answer;
+  }
+
+  /**
+   * Each node is asked at most twice: every node busy or failed for this request means one wait
+   * until the earliest busy node is free again, then a second round over the nodes free by then.
+   */
+  async ask(command, params) {
+    const count = this.endpoints.length;
+    const failed = new Set();
+    const refused = new Set();
+    const said = new Map();
+    let due = null;
+    let lastError = null;
+    for (;;) {
+      const index = this.pick(failed, refused, said, due);
+      if (index === null) {
+        if (refused.size === 0) throw lastError;
+        if (due) throw this.rateLimited(command, said);
+        const until = Math.min(...[...refused].map((i) => this.busy[i].until));
+        // The nodes waited for are asked even if another answer marked them again meanwhile:
+        // that answer may have left the node before the wait began.
+        due = new Set([...refused].filter((i) => this.busy[i].until <= until));
+        await this.waitMs(Math.max(0, until - this.now()));
+        refused.clear();
+        continue;
+      }
+
+      const connection = this.connections[index];
+      const generation = connection.generation;
+      try {
+        await connection.connect();
+        const answer = await connection.send(command, params);
+        if (!BUSY_ERRORS.has(answer.error)) {
+          this.preferred = index;
+          return { answer, endpoint: connection.url };
+        }
+        this.markBusy(index, answer);
+        refused.add(index);
+        said.set(index, answer.error);
+      } catch (e) {
+        if (this.closed || e.code !== 'NodeUnreachable') throw e;
+        // Every request on the socket sees its failure; only the first closes it, or a later one
+        // would close the reconnect already made.
+        if (connection.generation === generation) connection.disconnect();
+        if (this.preferred === index) this.preferred = (index + 1) % count;
+        failed.add(index);
+        lastError = e;
+      }
+    }
+  }
+
+  /** The first node from the preferred one that this request may ask now, or null. */
+  pick(failed, refused, said, due) {
+    const now = this.now();
+    for (let step = 0; step < this.endpoints.length; step++) {
+      const index = (this.preferred + step) % this.endpoints.length;
+      if (failed.has(index) || refused.has(index)) continue;
+      if (due?.has(index) || this.busy[index].until <= now) return index;
+      refused.add(index);
+      said.set(index, this.busy[index].error);
+    }
+    return null;
+  }
+
+  markBusy(index, answer) {
+    const hint = busyHintMs(answer) ?? DEFAULT_BUSY_WAIT_MS;
+    this.busy[index] = {
+      until: this.now() + Math.min(MAX_BUSY_WAIT_MS, Math.max(MIN_BUSY_WAIT_MS, hint)),
+      error: answer.error,
+    };
+  }
+
+  rateLimited(command, said) {
+    const answers = [...said].map(([index, error]) => `${this.endpoints[index]} answered ${error}`);
+    return new XrplFileError('NodeUnreachable', `${answers.join(', ')} to ${command}: the node is rate limiting this client`);
+  }
+
+  /** A pause that close() ends early. */
+  waitMs(ms) {
+    return new Promise((resolve, reject) => {
+      if (this.closed) {
+        reject(new XrplFileError('NodeUnreachable', 'this client has been closed'));
+        return;
+      }
+      const wait = {
+        handle: null,
+        cancel: () => {
+          this.clearTimer(wait.handle);
+          this.waits.delete(wait);
+          reject(new XrplFileError('NodeUnreachable', 'this client has been closed'));
+        },
+      };
+      wait.handle = this.setTimer(() => {
+        this.waits.delete(wait);
+        resolve();
+      }, ms);
+      this.waits.add(wait);
     });
   }
 
   async transaction(hash) {
-    const answer = await this.request('tx', { transaction: hash });
+    const { answer, endpoint } = await this.ask('tx', { transaction: hash });
     if (answer.error === 'txnNotFound') return null;
-    if (answer.error) throw new XrplFileError('NodeUnreachable', `${this.endpoint} answered ${answer.error} to tx`);
+    if (answer.error) throw new XrplFileError('NodeUnreachable', `${endpoint} answered ${answer.error} to tx`);
     return parseRecord(answer);
   }
 
   async *accountTransactions(account, fromLedger, toLedger, forward) {
     let marker;
     for (;;) {
-      const answer = await this.request('account_tx', {
+      const { answer, endpoint } = await this.ask('account_tx', {
         account, ledger_index_min: fromLedger, ledger_index_max: toLedger, forward, limit: this.pageSize, ...(marker ? { marker } : {}),
       });
       // An account the node has never heard of has no transactions -- that is an answer, not a
@@ -257,7 +391,7 @@ export class LedgerClient {
       // two have to: a mirror that turns absence into an unreachable node reports a file as
       // missing on one side and the network as down on the other.
       if (answer.error === 'actNotFound') return;
-      if (answer.error) throw new XrplFileError('NodeUnreachable', `${this.endpoint} answered ${answer.error} to account_tx`);
+      if (answer.error) throw new XrplFileError('NodeUnreachable', `${endpoint} answered ${answer.error} to account_tx`);
       for (const record of answer.transactions ?? []) yield parseRecord(record);
       marker = answer.marker;
       if (!marker) return;
@@ -265,10 +399,10 @@ export class LedgerClient {
   }
 
   async earliestLedger() {
-    const answer = await this.request('server_info', {});
+    const { answer, endpoint } = await this.ask('server_info', {});
     // A node that answered an error said nothing about its history; reading that as "does not
     // say" would turn an unreachable node into a history verdict. The .NET source agrees.
-    if (answer.error) throw new XrplFileError('NodeUnreachable', `${this.endpoint} answered ${answer.error} to server_info`);
+    if (answer.error) throw new XrplFileError('NodeUnreachable', `${endpoint} answered ${answer.error} to server_info`);
     return earliestAvailableLedger(answer);
   }
 }
