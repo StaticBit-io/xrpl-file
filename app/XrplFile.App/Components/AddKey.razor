@@ -1,5 +1,6 @@
 @implements IDisposable
 @inject AddKeyModel Model
+@inject ScreenNavigation Nav
 @inject IFilePickerService FilePicker
 @inject NetworkChoices Choices
 
@@ -26,10 +27,10 @@ else
 
     <ul class="nav nav-tabs mb-3">
         <li class="nav-item">
-            <button type="button" class="nav-link @(_mode == Mode.Import ? "active" : "")" @onclick="() => SwitchMode(Mode.Import)">@T[KeysText.TabSeed]</button>
+            <button type="button" class="nav-link @(Nav.ImportTab == ImportTab.Seed ? "active" : "")" @onclick="() => SwitchMode(ImportTab.Seed)">@T[KeysText.TabSeed]</button>
         </li>
         <li class="nav-item">
-            <button type="button" class="nav-link @(_mode == Mode.Container ? "active" : "")" @onclick="() => SwitchMode(Mode.Container)">@T[KeysText.TabBackup]</button>
+            <button type="button" data-tour="@TutorialRegions.ImportBackupTab" class="nav-link @(Nav.ImportTab == ImportTab.Backup ? "active" : "")" @onclick="() => SwitchMode(ImportTab.Backup)">@T[KeysText.TabBackup]</button>
         </li>
     </ul>
 
@@ -38,10 +39,10 @@ else
         <div class="alert alert-danger">@T[problem]</div>
     }
 
-    <section class="xf-card">
-        @switch (_mode)
+    <section class="xf-card" data-tour="@TutorialRegions.ImportBackup">
+        @switch (Nav.ImportTab)
         {
-            case Mode.Import:
+            case ImportTab.Seed:
                 <div class="mb-3">
                     <label for="add-import-label" class="form-label">@T[CommonText.FieldLabel]</label>
                     <input id="add-import-label" class="form-control" @bind="_label" @bind:event="oninput" disabled="@_busy" />
@@ -50,14 +51,14 @@ else
                     <label for="add-import-network" class="form-label">@T[CommonText.FieldNetwork]</label>
                     <NetworkSelect Id="add-import-network" @bind-Value="_network" Disabled="_busy" />
                 </div>
-                <div class="mb-3">
+                <div class="mb-3" data-tour="@TutorialRegions.ImportSeed">
                     <label for="add-import-seed" class="form-label">@T[KeysText.SeedLabel]</label>
                     <input id="add-import-seed" type="password" class="form-control" @bind="_seed" @bind:event="oninput" disabled="@_busy" />
                 </div>
-                <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="DoImport">@T[KeysText.PreviewButton]</button>
+                <button type="button" class="btn btn-primary" disabled="@_busy" data-tour="@TutorialRegions.ImportPreview" @onclick="DoImport">@T[KeysText.PreviewButton]</button>
                 break;
 
-            case Mode.Container:
+            case ImportTab.Backup:
                 @if (Model.ContainerKeys.Count == 0)
                 {
                     <div class="mb-3">
@@ -145,14 +146,8 @@ else
     [Parameter]
     public EventCallback OnDone { get; set; }
 
-    private enum Mode
-    {
-        Import,
-        Container,
-    }
-
     private readonly ScreenLifetime _lifetime = new();
-    private Mode _mode = Mode.Import;
+    private bool _disposed;
 
     private string _label = string.Empty;
     private string _network = string.Empty;
@@ -167,16 +162,32 @@ else
     private string? _stored;
     private bool _busy;
 
-    protected override void OnInitialized() => Choices.Refresh();
-
-    private void SwitchMode(Mode mode)
+    protected override void OnInitialized()
     {
-        if (_mode == mode)
+        Nav.Changed += OnNavChanged;
+        Choices.Refresh();
+    }
+
+    /// <summary>
+    /// Redraws when something outside this component moves the import tab. Through InvokeAsync and
+    /// behind the _disposed check for the reason Shell.razor's OnTabChanged gives.
+    /// </summary>
+    private void OnNavChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
+    });
+
+    private void SwitchMode(ImportTab tab)
+    {
+        if (Nav.ImportTab == tab)
         {
             return;
         }
 
-        _mode = mode;
+        Nav.ShowImportTab(tab);
 
         // A Preview left over from the tab just left belongs to input this screen is no longer
         // showing; clearing it here is what keeps the address in "Add to vault" always matching the
@@ -296,6 +307,8 @@ else
 
     public void Dispose()
     {
+        _disposed = true;
+        Nav.Changed -= OnNavChanged;
         // Design's own rule for this screen (task-12 brief): a multi-key backup's decrypted seeds,
         // and whatever SelectContainerKey most recently prepared from them, must not simply wait on
         // the garbage collector once the add-key screen is dismissed -- whichever way it is dismissed,

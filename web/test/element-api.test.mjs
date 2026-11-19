@@ -438,7 +438,7 @@ test('an error the element raises itself is English in the event and worded in t
   element.connectedCallback();
   const { type, event } = await outcome;
   assert.equal(type, 'error');
-  assert.deepEqual(event.detail, { name: 'NodeUnreachable', message: 'The node attribute must be a wss:// address.' });
+  assert.deepEqual(event.detail, { name: 'NodeUnreachable', message: 'The node attribute must hold wss:// addresses, separated by spaces.' });
   assert.equal(part(element, 'msgFull').textContent, DE.badNode);
   assert.equal(part(element, 'msgShort').textContent, DE.shortBadNode);
 });

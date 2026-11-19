@@ -2,14 +2,15 @@
 @implements IDisposable
 @inject PublishModel Model
 @inject RunModel Run
+@inject ScreenNavigation Nav
 
 @* Design 4.1 and F13: the Publish tab renders one of three stops -- the running publication alone
    while one is under way (RunModel.IsRunning), the estimate once one has been taken, or the picker
    below -- and every fact on screen is read straight off PublishModel or RunModel. A finished run's
    outcome (RunModel.IsFinished) sits above the picker rather than in its place: the next publication
-   starts from there without anything being put away first. The only thing this component decides
-   for itself is which stop is on screen, which is navigation, not a fact about the publication;
-   Accounts.razor's own remarks make the same distinction for its own sub-screens.
+   starts from there without anything being put away first. Whether the estimate stop is
+   on screen is navigation, not a fact about the publication, so it lives in ScreenNavigation.Estimate
+   and this component only reads it; Accounts.razor does the same for its own sub-screens.
 
    The one-second timer exists only to make PublicationRun's own background progress visible: its
    Snapshot changes on a task this screen never awaits, and without a poll forcing a render, <Run />
@@ -22,9 +23,9 @@
 {
     <Run />
 }
-else if (_estimated)
+else if (Nav.Estimate is { } estimate)
 {
-    <Estimate Request="_request!" OnBack="() => _estimated = false" OnStarted="Started" />
+    <Estimate Request="estimate" OnBack="Nav.CloseEstimate" OnStarted="Started" />
 }
 else
 {
@@ -36,7 +37,7 @@ else
             <Run />
         }
 
-        <section class="xf-card">
+        <section class="xf-card" data-tour="@TutorialRegions.PublishFile">
             <h2 class="xf-section-title">@T[PublishText.FileTitle]</h2>
             <div class="xf-file-pick">
                 <button type="button" class="btn btn-outline-secondary" @onclick="PickAsync">
@@ -57,32 +58,35 @@ else
         </section>
 
         <section class="xf-card">
-            <h2 class="xf-section-title" id="xf-publish-account">@T[PublishText.AccountTitle]</h2>
-            @if (Model.Keys.Count == 0)
-            {
-                <p class="xf-muted mb-0">@T[PublishText.NoAccounts]</p>
-            }
-            else
-            {
-                <div class="xf-choice-list" role="radiogroup" aria-labelledby="xf-publish-account">
-                    @foreach (VaultEntryInfo key in Model.Keys)
-                    {
-                        <button type="button" role="radio" aria-checked="@(Model.IsSelected(key) ? "true" : "false")"
-                                class="xf-choice @(Model.IsSelected(key) ? "is-selected" : null)"
-                                @onclick="() => SelectKeyAsync(key.Reference)">
-                            <span class="xf-choice-mark" aria-hidden="true"></span>
-                            <span class="xf-choice-body">
-                                <span class="xf-choice-title">@key.Label</span>
-                                <span class="xf-mono xf-choice-sub">@key.Address</span>
-                            </span>
-                            <span class="xf-net @(key.Network == "mainnet" ? "is-mainnet" : null)">@key.Network</span>
-                        </button>
-                    }
-                </div>
-            }
+            <div data-tour="@TutorialRegions.PublishFrom">
+                <h2 class="xf-section-title" id="xf-publish-account">@T[PublishText.AccountTitle]</h2>
+                @if (Model.Keys.Count == 0)
+                {
+                    <p class="xf-muted mb-0">@T[PublishText.NoAccounts]</p>
+                }
+                else
+                {
+                    <div class="xf-choice-list" role="radiogroup" aria-labelledby="xf-publish-account">
+                        @foreach (VaultEntryInfo key in Model.Keys)
+                        {
+                            <button type="button" role="radio" aria-checked="@(Model.IsSelected(key) ? "true" : "false")"
+                                    class="xf-choice @(Model.IsSelected(key) ? "is-selected" : null)"
+                                    @onclick="() => SelectKeyAsync(key.Reference)">
+                                <span class="xf-choice-mark" aria-hidden="true"></span>
+                                <span class="xf-choice-body">
+                                    <span class="xf-choice-title">@key.Label</span>
+                                    <span class="xf-mono xf-choice-sub">@key.Address</span>
+                                </span>
+                                <span class="xf-net @(key.Network == "mainnet" ? "is-mainnet" : null)">@key.Network</span>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
 
             @if (Model.SelectedKey is not null)
             {
+                <div data-tour="@TutorialRegions.PublishPayer">
                 <label class="form-label mt-3" for="xf-payer">@T[PublishText.PaidByLabel]</label>
                 <select id="xf-payer" class="form-select" disabled="@Model.PayerLocked"
                         value="@(Model.SelectedPayer?.Reference ?? string.Empty)" @onchange="OnPayerChanged">
@@ -96,6 +100,7 @@ else
                 {
                     <p class="form-text xf-muted mt-2 mb-0">@T[note]</p>
                 }
+                </div>
             }
         </section>
 
@@ -105,7 +110,7 @@ else
         }
 
         <div class="xf-actionbar">
-            <button type="button" class="btn btn-primary" disabled="@(!Model.CanEstimate)" @onclick="EstimateAsync">
+            <button type="button" class="btn btn-primary" disabled="@(!Model.CanEstimate)" data-tour="@TutorialRegions.PublishEstimate" @onclick="EstimateAsync">
                 @T[PublishText.EstimateButton]
             </button>
         </div>
@@ -124,11 +129,21 @@ else
     private readonly ScreenLifetime _lifetime = new();
     private Timer? _pollTimer;
     private bool _disposed;
-    private bool _estimated;
-    private PublishRequest? _request;
+    /// <summary>
+    /// Redraws when something outside this component moves a sub-screen (a tab change, the tutorial).
+    /// Through InvokeAsync and behind the _disposed check for the reason Shell.razor's OnTabChanged gives.
+    /// </summary>
+    private void OnNavChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
+    });
 
     protected override async Task OnInitializedAsync()
     {
+        Nav.Changed += OnNavChanged;
         await Model.RefreshKeysAsync(_lifetime.Token);
         await Model.RefreshPayerAsync(_lifetime.Token);
 
@@ -182,8 +197,7 @@ else
             return;
         }
 
-        _request = request;
-        _estimated = true;
+        Nav.ShowEstimate(request);
     }
 
     /// <summary>
@@ -194,13 +208,14 @@ else
     /// </summary>
     private void Started()
     {
-        _estimated = false;
+        Nav.CloseEstimate();
     }
 
     public void Dispose()
     {
         // Set before the timer is disposed, for the reason Shell.razor's own Dispose explains.
         _disposed = true;
+        Nav.Changed -= OnNavChanged;
         _pollTimer?.Dispose();
         _lifetime.End();
     }

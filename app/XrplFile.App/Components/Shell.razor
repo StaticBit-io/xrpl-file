@@ -2,7 +2,9 @@
 @using XrplFile.App
 @inject UnlockModel Model
 @inject ShellModel Tabs
+@inject ScreenNavigation Nav
 @inject CloseAccountModel Closing
+@inject TutorialModel Tutorial
 @inject IJSRuntime JS
 @inject Localizer Localizer
 
@@ -60,12 +62,15 @@ else if (_ready)
                     <span class="xf-rail-mark" aria-hidden="true">@Mark</span>
                     @foreach (AppTab tab in RailTabs)
                     {
-                        <button type="button" class="xf-rail-item" aria-current="@(Tabs.Tab == tab ? "page" : null)"
+                        <button type="button" class="xf-rail-item" data-tour="@(tab == AppTab.History ? TutorialRegions.TabHistory : null)" aria-current="@(Tabs.Tab == tab ? "page" : null)"
                                 disabled="@Closing.IsClosing" @onclick="() => ShowTab(tab)">
                             @Icon(tab)<span>@T[ShellModel.NameOf(tab)]</span>
                         </button>
                     }
                     <span class="xf-rail-spacer"></span>
+                    <button type="button" class="xf-rail-item" @ref="_learnButton" disabled="@Closing.IsClosing" @onclick="OpenTutorials">
+                        @LearnIcon<span>@T[ShellText.Learn]</span>
+                    </button>
                     <button type="button" class="xf-rail-item" aria-label="@T[ShellText.LockVault]" disabled="@Closing.IsClosing" @onclick="LockAsync">
                         @LockIcon<span aria-hidden="true">@T[ShellText.Lock]</span>
                     </button>
@@ -108,7 +113,7 @@ else if (_ready)
                 <nav class="xf-tabbar" aria-label="@T[ShellText.MainNavigation]">
                     @foreach (AppTab tab in TabbarTabs)
                     {
-                        <button type="button" class="xf-tab" aria-current="@(Tabs.Tab == tab ? "page" : null)"
+                        <button type="button" class="xf-tab" data-tour="@(tab == AppTab.History ? TutorialRegions.TabHistory : null)" aria-current="@(Tabs.Tab == tab ? "page" : null)"
                                 disabled="@Closing.IsClosing" @onclick="() => ShowTab(tab)">
                             @Icon(tab)<span>@T[ShellModel.NameOf(tab)]</span>
                         </button>
@@ -126,10 +131,23 @@ else if (_ready)
                             <button type="button" class="xf-more-item" @ref="_firstMoreItem"
                                     aria-current="@(Tabs.Tab == AppTab.Settings ? "page" : null)"
                                     @onclick="() => ChooseFromMore(AppTab.Settings)">@T[ShellModel.NameOf(AppTab.Settings)]</button>
+                            <button type="button" class="xf-more-item" @onclick="OpenTutorials">@T[ShellText.Learn]</button>
                         </div>
                     }
                 </nav>
+
+                @if (Tutorial.ListOpen)
+                {
+                    <TutorialList OnDismissed="ReturnFocusFromTutorials" />
+                }
             </div>
+
+            @* A sibling of .xf-shell, not a child: tour.js makes everything outside the lit controls
+               inert, and an inert .xf-shell must not take the bubble with it. *@
+            @if (Tutorial.IsActive)
+            {
+                <TutorialOverlay />
+            }
             break;
     }
 }
@@ -173,6 +191,9 @@ else
     private bool _focusFirstMoreItem;
     private bool _focusMoreButton;
     private bool _focusContent;
+    private bool _focusLearn;
+    private bool _tutorialWasActive;
+    private ElementReference _learnButton;
     private bool _watchingWidth;
     private DotNetObjectReference<Shell>? _self;
     private string? _documentLanguage;
@@ -182,6 +203,9 @@ else
 
     private static readonly RenderFragment LockIcon =
         @<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>;
+
+    private static readonly RenderFragment LearnIcon =
+        @<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1.9-1.1 1.8"/><path d="M12 17h.01"/></svg>;
 
     private static readonly RenderFragment MoreIcon =
         @<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>;
@@ -210,6 +234,44 @@ else
             _watchingWidth = true;
             _self = DotNetObjectReference.Create(this);
             await JS.InvokeVoidAsync("xfShell.watchWidth", _self);
+        }
+
+        if (_ready)
+        {
+            // The model offers the tutorial only on entering the unlocked stage, not on every render.
+            Tutorial.NoticeStage(Model.Stage);
+        }
+
+        // The bubble held focus; once the topic is over it is handed to the screen that was left
+        // showing instead of falling to the page body.
+        bool tutorialActive = Tutorial.IsActive;
+        if (_tutorialWasActive && !tutorialActive && _ready && Model.Stage == UnlockStage.Unlocked && !Tutorial.ListOpen)
+        {
+            try
+            {
+                await _content.FocusAsync();
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        _tutorialWasActive = tutorialActive;
+
+        if (_focusLearn)
+        {
+            _focusLearn = false;
+            try
+            {
+                // The rail item is hidden on the phone layout; the script falls back to More.
+                await JS.InvokeVoidAsync("xfShell.focusVisible", _learnButton, _moreButton);
+            }
+            catch (JSException)
+            {
+            }
+            catch (JSDisconnectedException)
+            {
+            }
         }
 
         if (_focusFirstMoreItem)
@@ -243,13 +305,24 @@ else
 
     /// <summary>
     /// Choosing a tab, even the one already open, is also how a screen that failed inside the
-    /// boundary is left: the boundary drops its error before the chosen screen is drawn.
+    /// boundary is left: the boundary drops its error before the chosen screen is drawn. The
+    /// sub-screen state outlives the screens (ScreenNavigation is a singleton), so a failed
+    /// sub-screen is also put back on its main screen, or it would be drawn and fail again.
     /// </summary>
     private void ShowTab(AppTab tab)
     {
+        if (_boundary?.HasFailed == true)
+        {
+            Nav.ResetToMain();
+        }
+
         _boundary?.Recover();
         Tabs.Show(tab);
     }
+
+    private void OpenTutorials() => Tutorial.OpenList();
+
+    private void ReturnFocusFromTutorials() => _focusLearn = true;
 
     /// <summary>Called by shell.js when the window widens past the phone layout, where More has no place.</summary>
     [JSInvokable]
@@ -281,6 +354,7 @@ else
     {
         Localizer.Changed += OnLanguageChanged;
         Tabs.Changed += OnTabChanged;
+        Tutorial.Changed += OnTutorialChanged;
         Closing.ClosingChanged += OnClosingChanged;
     }
 
@@ -322,6 +396,18 @@ else
         }
     });
 
+    /// <summary>Same shape as OnTabChanged: the model may raise this from a worker thread.</summary>
+    private void OnTutorialChanged() => _ = InvokeAsync(() =>
+    {
+        if (!_disposed)
+        {
+            // Starting or leaving a topic on the tab already showing raises no tab change, so a failed
+            // screen would stay replaced by its error; the model has already reset the sub-screens.
+            _boundary?.Recover();
+            StateHasChanged();
+        }
+    });
+
     protected override async Task OnInitializedAsync()
     {
         StartupLog.Write("Shell: OnInitializedAsync entered");
@@ -357,6 +443,8 @@ else
                 return;
             }
 
+            Nav.ResetToMain();
+            Tutorial.End();
             Tabs.Show(AppTab.Accounts);
 
             // One file read, here, rather than one per tick: NoticeLock deliberately leaves
@@ -389,6 +477,8 @@ else
     private async Task LockAsync()
     {
         await Model.LockAsync();
+        Nav.ResetToMain();
+        Tutorial.End();
         Tabs.Show(AppTab.Accounts);
         StateHasChanged();
     }
@@ -399,6 +489,7 @@ else
         _disposed = true;
         Localizer.Changed -= OnLanguageChanged;
         Tabs.Changed -= OnTabChanged;
+        Tutorial.Changed -= OnTutorialChanged;
         Closing.ClosingChanged -= OnClosingChanged;
         _self?.Dispose();
         _lockPollTimer?.Dispose();

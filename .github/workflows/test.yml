@@ -18,7 +18,7 @@ jobs:
           node-version: 24
       - run: dotnet build XrplFile.Libraries.slnf --configuration Release
       # Every test project in this repository is run by a job: XrplFile.Core.Tests,
-      # XrplFile.Keys.Tests, XrplFile.App.Core.Tests and XrplFile.SitePrice.Tests here, the Core
+      # XrplFile.Keys.Tests, XrplFile.App.Core.Tests, XrplFile.SitePrice.Tests and XrplFile.Fixtures.Tests here, the Core
       # suite's Integration-trait half in the "integration" job below, and web/test/*.test.mjs and
       # site/test/*.test.mjs by the node steps. A project the solution filter merely builds proves
       # nothing: XrplFile.Keys.Tests was built and never run from the day it was created, so the
@@ -30,11 +30,14 @@ jobs:
       - run: dotnet run --project tests/XrplFile.Keys.Tests --configuration Release --no-build -- -trait- "Category=Integration" -trait- "Category=Slow"
       - run: dotnet run --project tests/XrplFile.App.Core.Tests --configuration Release --no-build -- -trait- "Category=Integration" -trait- "Category=Slow"
       - run: dotnet run --project tests/XrplFile.SitePrice.Tests --configuration Release --no-build
+      - run: dotnet run --project tests/XrplFile.Fixtures.Tests --configuration Release --no-build
       - run: node --test test/*.test.mjs
         working-directory: web
       # The site tests run from the repository root. They build their fixtures themselves; the
       # build step then proves the site assembles from the element that web/ just produced.
       - run: node --test site/test/*.test.mjs
+      # The examples tooling needs nothing but Node; test-prepare.sh needs ffmpeg and is run by hand.
+      - run: node --test tools/examples/*.test.mjs
       - run: node web/build.mjs
       - run: node site/build.mjs
       # The link-card function is otherwise first bundled by "pages deploy" on main: an import that

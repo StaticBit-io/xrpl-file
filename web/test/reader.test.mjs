@@ -310,9 +310,10 @@ test('close() during a pending handshake leaves no socket behind and rejects the
     client.close();
 
     await assert.rejects(pending, (e) => e.code === 'NodeUnreachable');
-    assert.equal(client.socket, null);
-    assert.equal(client.pendingSocket, null);
-    assert.equal(client.pending.size, 0);
+    const [connection] = client.connections;
+    assert.equal(connection.socket, null);
+    assert.equal(connection.pendingSocket, null);
+    assert.equal(connection.pending.size, 0);
     assert.equal(created.length, 1);
     assert.equal(created[0].closeCalls, 1);
   } finally {

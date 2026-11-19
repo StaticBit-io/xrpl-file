@@ -332,7 +332,7 @@ test('the bundle names no host but the built-in nodes', async () => {
   const urls = code.match(/\b(?:https?|wss?):\/\/[^\s'"`)]+/g) ?? [];
   // MANIFEST_FORMAT is text a writer puts into a manifest for people to read; nothing fetches it.
   const allowed = new Set([...Object.values(ENDPOINTS).flat(), 'http://www.w3.org/2000/svg', MANIFEST_FORMAT]);
-  // The node-attribute sentence names the scheme in words ("must be a wss:// address"), and in some languages
+  // The node-attribute sentence names the scheme in words ("must hold wss:// addresses"), and in some languages
   // punctuation follows it directly ("wss://."): a scheme with no host after it names nothing to fetch.
   const bareScheme = /^wss?:\/\/(?!\w)/;
   assert.deepEqual(urls.filter((url) => !allowed.has(url) && !bareScheme.test(url)), []);
@@ -340,12 +340,12 @@ test('the bundle names no host but the built-in nodes', async () => {
 
 test('build emits xrpl-file-reader.mjs with its integrity and the version banner', async () => {
   const out = await tempDir();
-  const { integrity } = await build({ webDir, outDir: out, version: '1.2.0' });
+  const { integrity } = await build({ webDir, outDir: out, version: '1.3.0' });
   const file = join(out, 'xrpl-file-reader.mjs');
   const bytes = await readFile(file);
   const code = bytes.toString('utf8');
 
-  assert.ok(code.startsWith('/*! xrpl-file reader 1.2.0 | MIT */\n'));
+  assert.ok(code.startsWith('/*! xrpl-file reader 1.3.0 | MIT */\n'));
   assert.equal(integrity['xrpl-file-reader.mjs'], `sha384-${createHash('sha384').update(bytes).digest('base64')}`);
   assert.deepEqual(JSON.parse(await readFile(join(out, 'integrity.json'), 'utf8')), integrity);
   assert.ok(bytes.every((byte) => byte < 0x80), 'plain ASCII, like the element');

@@ -1,0 +1,17 @@
+English
+xrpl-file keeps a file in the XRP Ledger. The file is cut into chunks, and each chunk is written in its own transaction. A link points at the manifest, which holds one fingerprint of all the chunks. A browser reads the chunks back and checks them against that fingerprint. Our server takes no part in reading.
+
+Русский
+xrpl-file хранит файл в XRP Ledger. Файл режется на фрагменты, и каждый фрагмент записывается в свою транзакцию. Ссылка указывает на манифест, в котором хранится один отпечаток всех фрагментов. Браузер читает фрагменты обратно и сверяет их с этим отпечатком. Наш сервер в чтении не участвует.
+
+Deutsch
+xrpl-file legt eine Datei im XRP Ledger ab. Die Datei wird in Chunks zerlegt, und jeder Chunk wird in eine eigene Transaktion geschrieben. Ein Link verweist auf das Manifest, das einen Fingerabdruck aller Chunks enthält. Ein Browser liest die Chunks zurück und prüft sie anhand dieses Fingerabdrucks. Unser Server ist am Lesen nicht beteiligt.
+
+Español
+xrpl-file guarda un archivo en el XRP Ledger. El archivo se divide en fragmentos y cada fragmento se escribe en su propia transacción. Un enlace apunta al manifiesto, que contiene una huella digital de todos los fragmentos. Un navegador vuelve a leer los fragmentos y los comprueba con esa huella digital. Nuestro servidor no interviene en la lectura.
+
+Português
+O xrpl-file guarda um arquivo no XRP Ledger. O arquivo é dividido em fragmentos e cada fragmento é gravado em uma transação própria. Um link aponta para o manifesto, que guarda uma impressão digital de todos os fragmentos. Um navegador lê os fragmentos de volta e os confere com essa impressão digital. O nosso servidor não participa da leitura.
+
+中文
+xrpl-file 把文件保存在 XRP Ledger 中。文件被切成分片，每个分片写入各自的交易。链接指向清单，清单中保存所有分片的指纹。浏览器把分片读回来，按这个指纹校验。我们的服务器不参与读取。

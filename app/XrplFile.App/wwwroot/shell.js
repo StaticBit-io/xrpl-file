@@ -69,3 +69,14 @@ window.xfShell = {
         }
     }
 };
+
+// Focus goes to the first of the given elements that is actually laid out: the rail item is
+// display:none on the phone layout, where the More button is the way back to the same place.
+window.xfShell.focusVisible = function () {
+    for (const element of arguments) {
+        if (element && element.getClientRects().length > 0) {
+            element.focus();
+            return;
+        }
+    }
+};

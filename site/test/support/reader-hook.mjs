@@ -1,7 +1,7 @@
 // Resolve hook for site tests. Site modules reach the reader through one specifier that only exists
-// inside the built site (/js/xrpl.mjs -> /element/1.2.0/xrpl-file-reader.mjs); tests answer it with the
+// inside the built site (/js/xrpl.mjs -> /element/1.3.0/xrpl-file-reader.mjs); tests answer it with the
 // web/src modules, so the site never carries a second copy of the reader code.
-const BUNDLE_SPECIFIER = '../element/1.2.0/xrpl-file-reader.mjs';
+const BUNDLE_SPECIFIER = '../element/1.3.0/xrpl-file-reader.mjs';
 
 let shimUrl = null;
 
