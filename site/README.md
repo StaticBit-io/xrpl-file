@@ -28,16 +28,16 @@ site/
 Requires Node 22 or newer. There are no npm dependencies.
 
 ```bash
-cd web && node build.mjs && cd ..   # builds web/dist/1.2.1 (the element and the reader)
+cd web && node build.mjs && cd ..   # builds web/dist/1.3.0 (the element and the reader)
 node site/build.mjs                  # writes site/dist
 node site/serve.mjs                  # http://127.0.0.1:8791/ (next free port if taken)
 node --test site/test/*.test.mjs     # site tests
 ```
 
-`build.mjs` copies `site/src/**` to `dist/`, `web/dist/1.2.1/*` to `dist/element/1.2.1/` and
+`build.mjs` copies `site/src/**` to `dist/`, `web/dist/1.3.0/*` to `dist/element/1.3.0/` and
 `site/data/price.json` to `dist/data/`. It fails, and removes `dist/`, when
 
-- `web/dist/1.2.1` does not exist,
+- `web/dist/1.3.0` does not exist,
 - any file is larger than 25 MiB (the Cloudflare Pages per-file limit), or
 - a static file would be shadowed by a `_redirects` rule (next section).
 
@@ -46,7 +46,7 @@ busy; it never touches a process it did not start. It applies `_redirects` with 
 the build check uses.
 
 The site reaches the reader through one module, `src/js/xrpl.mjs`, which re-exports from
-`/element/1.2.1/xrpl-file-reader.mjs`: the site and the embeddable element share one build. In
+`/element/1.3.0/xrpl-file-reader.mjs`: the site and the embeddable element share one build. In
 tests that specifier is redirected to `web/src` by a resolve hook
 (`test/support/reader-hook.mjs`); a test imports `./support/register-reader.mjs` first and loads
 site modules with a dynamic `import()` afterwards. When the element version changes, update the
@@ -526,10 +526,10 @@ transaction count by a fee: the file's own fee column is what is shown.
 - `PUBLISHER_URL`: the publisher's GitHub Releases URL. While it is `null` the "Download the
   publisher" button is disabled and marked "soon"; set the URL and the button becomes a link.
 - `ELEMENT_PACKAGE`: the npm package name in the embed snippet
-  (`cdn.jsdelivr.net/npm/<package>@1.2.1/...`). `build.mjs` reads the constant, so the snippet follows
+  (`cdn.jsdelivr.net/npm/<package>@1.3.0/...`). `build.mjs` reads the constant, so the snippet follows
   it. The site serves its own copy under `/element/` for its pages, but does not offer it in the
   snippet: a CDN outlives this site.
 
 The embed snippet is inserted at build time: `<!--@element-snippet-->` in a page becomes the escaped
-snippet, with the `integrity` value from `web/dist/1.2.1/integrity.json`. It loads a classic script (never `type="module"`: the element looks
+snippet, with the `integrity` value from `web/dist/1.3.0/integrity.json`. It loads a classic script (never `type="module"`: the element looks
 for `mp4box.min.js` beside `document.currentScript`).

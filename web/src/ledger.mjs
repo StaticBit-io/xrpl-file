@@ -36,6 +36,9 @@ function busyHintMs(answer) {
 const text = (o, k) => (o && typeof o === 'object' && typeof o[k] === 'string' ? o[k] : null);
 const number = (o, k) => (o && typeof o === 'object' && Number.isInteger(o[k]) ? o[k] : null);
 
+/** Restarts of one walk in a row that yielded nothing new, before it gives up. */
+const MAX_IDLE_RESTARTS = 8;
+
 /** One transaction as a node describes it — an account_tx record or a tx answer; api_version 1 and 2 shapes. */
 export function parseRecord(record) {
   const tx = record.tx_json ?? record.tx ?? record;
@@ -381,19 +384,55 @@ export class LedgerClient {
   }
 
   async *accountTransactions(account, fromLedger, toLedger, forward) {
+    // A marker means something only to the node that issued it: xrplcluster.com's names the next
+    // transaction to return, s2.ripple.com's the last one returned, so one sent to the other node
+    // skips or repeats a transaction. A page answered by another node is dropped and the walk
+    // restarts without a marker at the ledger it had reached, skipping what it already yielded there.
     let marker;
+    let markerFrom = null;
+    let low = fromLedger;
+    let high = toLedger;
+    let edgeLedger = null;
+    let yieldedAtEdge = new Set();
+    let idleRestarts = 0;
     for (;;) {
       const { answer, endpoint } = await this.ask('account_tx', {
-        account, ledger_index_min: fromLedger, ledger_index_max: toLedger, forward, limit: this.pageSize, ...(marker ? { marker } : {}),
+        account, ledger_index_min: low, ledger_index_max: high, forward, limit: this.pageSize, ...(marker ? { marker } : {}),
       });
+      // Checked before the answer is read at all: a node handed a marker it did not issue may refuse
+      // it or say it knows no such account, and neither answer says anything about the walk.
+      if (marker && endpoint !== markerFrom) {
+        // Nodes taking turns while a single ledger holds more than a page would restart forever.
+        if (++idleRestarts > MAX_IDLE_RESTARTS) {
+          throw new XrplFileError('NodeUnreachable', `account_tx pages kept moving between nodes before reaching past ledger ${edgeLedger ?? low}`);
+        }
+        marker = undefined;
+        markerFrom = null;
+        if (edgeLedger !== null) {
+          if (forward) low = edgeLedger;
+          else high = edgeLedger;
+        }
+        continue;
+      }
       // An account the node has never heard of has no transactions -- that is an answer, not a
       // failure to read, exactly as txnNotFound is for tx above. The .NET source agrees, and the
       // two have to: a mirror that turns absence into an unreachable node reports a file as
       // missing on one side and the network as down on the other.
       if (answer.error === 'actNotFound') return;
       if (answer.error) throw new XrplFileError('NodeUnreachable', `${endpoint} answered ${answer.error} to account_tx`);
-      for (const record of answer.transactions ?? []) yield parseRecord(record);
+      for (const record of answer.transactions ?? []) {
+        const tx = parseRecord(record);
+        if (tx.hash && tx.ledgerIndex === edgeLedger && yieldedAtEdge.has(tx.hash)) continue;
+        if (tx.ledgerIndex !== edgeLedger) {
+          edgeLedger = tx.ledgerIndex;
+          yieldedAtEdge = new Set();
+        }
+        if (tx.hash) yieldedAtEdge.add(tx.hash);
+        idleRestarts = 0;
+        yield tx;
+      }
       marker = answer.marker;
+      markerFrom = endpoint;
       if (!marker) return;
     }
   }

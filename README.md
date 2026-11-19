@@ -64,7 +64,7 @@ The `<xrpl-file>` element shows a file from the ledger on any web page: an image
 verified download for anything else. Build it, put the files of one version on a host, and add two lines:
 
 ```html
-<script src="https://<host>/1.2.1/xrpl-file-element.js" integrity="sha384-7u0P0CMMQlxzqLZIR9C+16IpgrIjCg/ywLIfg9ghauELKtWu/G60Z+pf4PpVIl7j" crossorigin="anonymous" defer></script>
+<script src="https://<host>/1.3.0/xrpl-file-element.js" integrity="sha384-rkqVS+xxcPaXLPs80QfknL/83q/92O8X0XAInDCax9F7eEUzopzCiHPpK3smE9kB" crossorigin="anonymous" defer></script>
 <xrpl-file src="xrpl-file://testnet/…"></xrpl-file>
 ```
 
@@ -77,7 +77,7 @@ element), `mp4box.min.js` (loaded beside it only when a plain MP4 is played), `m
 `xrpl-file-reader.mjs` (the reader the element uses, as one ES module, for a page that reads files
 itself) and `integrity.json` with the SHA-384 value of each script. The `integrity` attribute takes the
 value for `xrpl-file-element.js` from the `integrity.json` of the same version. The version is in the
-path, so a page that embeds `1.2.1` never changes under itself. The host serves both scripts with
+path, so a page that embeds `1.3.0` never changes under itself. The host serves both scripts with
 `Access-Control-Allow-Origin`: Subresource Integrity on a script from another origin fails without it.
 
 | Attribute | Values | Meaning |
@@ -86,7 +86,7 @@ path, so a page that embeds `1.2.1` never changes under itself. The host serves 
 | `width`, `height` | a number (pixels, as on `<img>`) or a CSS length such as `100%`, `50vh`, `auto` | presentational defaults that the site's own CSS overrides; the element reserves 16:9 until it knows the real proportions |
 | `loading` | `lazy` (default), `eager`, `click` | `lazy` starts one viewport height before the element is visible, `eager` at once, `click` reads only the manifest and cover and loads the content on a click |
 | `loader` | `true` (default), `false` | `false` keeps the reserved space empty until the content is ready, for sites that draw their own placeholder |
-| `node` | a `wss://` URL | read from this node instead of the built-in ones; `ws://` is accepted only for `localhost` and `127.0.0.1`. A numeric network ID has no built-in node and needs this attribute |
+| `node` | one or more `wss://` URLs, separated by spaces | read from these nodes instead of the built-in ones, in the order given: a request moves to the next node when one fails or answers that it is busy. `ws://` is accepted only for `localhost` and `127.0.0.1`. A numeric network ID has no built-in node and needs this attribute |
 | `theme` | `dark` (default), `light`, `auto` | the colour palette; `auto` follows the visitor's `prefers-color-scheme`, any other value is `dark` |
 | `background` | `transparent` | `transparent` drops the box behind the file and the dark theme's shading of an empty box, so a picture with transparent parts sits on the page itself; it wins over `--xrpl-file-background`. A text file, the bars around a video, the backing of a cover, the overlay and the caption keep theirs. Text colours still follow `theme`: pick the theme that matches your page. Any other value, or none, keeps the box |
 | `caption` | `off` | `off` removes the caption that appears on hover, with its copy button, for a page that shows the name, the link and a download control of its own; any other value, or none, keeps it |
@@ -205,7 +205,7 @@ The browser hashes the file only in a secure context, so the page must be served
 
 - `script-src` for the origin that serves the scripts;
 - `connect-src` for the node URLs: `wss://xrplcluster.com wss://s2.ripple.com` on mainnet,
-  `wss://s.altnet.rippletest.net:51233` on testnet, or the URL given in `node`;
+  `wss://s.altnet.rippletest.net:51233` on testnet, or every URL given in `node`;
 - `img-src blob:` and `media-src blob:`.
 
 The element styles itself with constructable stylesheets, so the policy does not need
